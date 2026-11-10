@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { followRecapSortKey } from '@/lib/annual-recap-identity';
 import { followReviewSortKey } from '@/lib/follow-review-identity';
 import type { UserMessage } from '@/lib/message-types';
 import { parseReplyMessageId } from '@/lib/review-reply-storage';
@@ -14,6 +15,7 @@ export interface MessageCursor {
 }
 
 export function messageSortKey(message: UserMessage): string {
+  if (message.type === 'follow-recap') return followRecapSortKey(message.id);
   if (message.type === 'new-follower' || message.type === 'review-like')
     return socialNotificationSortKey(message.type, message.id);
   return message.type === 'tracking-update'
@@ -46,7 +48,8 @@ export function decodeCursor(cursor?: string | null): MessageCursor | null {
     if (
       parsed.version !== 2 &&
       typeof parsed.key === 'string' &&
-      parsed.key.startsWith('follow-review:')
+      (parsed.key.startsWith('follow-review:') ||
+        parsed.key.startsWith('follow-recap:'))
     ) {
       throw new ReviewValidationError('消息分页已更新，请重新打开消息列表');
     }

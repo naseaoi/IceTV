@@ -70,3 +70,43 @@ export function useSourceInsights(
 
   return insights;
 }
+
+export const SOURCE_USAGE_DAYS = 30;
+
+export interface SourceUsageItem {
+  source: string;
+  sourceName: string;
+  watchSeconds: number;
+  userCount: number;
+  workCount: number;
+}
+
+// 全站观看汇总按天变化，进入页面读一次即可，不随配置保存重新读取
+export function useSourceUsage(enabled = true): Map<string, SourceUsageItem> {
+  const [usage, setUsage] = useState<Map<string, SourceUsageItem>>(
+    () => new Map(),
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    adminGet<{ items: SourceUsageItem[] }>(
+      `/api/admin/source-usage?days=${SOURCE_USAGE_DAYS}`,
+      '读取源使用统计失败',
+    )
+      .then((payload) => {
+        if (cancelled) return;
+        setUsage(
+          new Map((payload.items || []).map((item) => [item.source, item])),
+        );
+      })
+      .catch((error) => {
+        console.warn('读取源使用统计失败:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+
+  return usage;
+}

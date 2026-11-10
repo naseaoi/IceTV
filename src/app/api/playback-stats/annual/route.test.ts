@@ -8,12 +8,16 @@ const mockGuard = jest.fn();
 const mockData = jest.fn();
 const mockReviews = jest.fn();
 const mockRetention = jest.fn();
+const mockRecap = jest.fn();
+const mockSaveRecap = jest.fn();
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: (...args: unknown[]) => mockGuard(...args),
   isGuardFailure: (result: object) => 'response' in result,
 }));
 jest.mock('@/lib/db', () => ({
   db: {
+    getAnnualRecap: (...args: unknown[]) => mockRecap(...args),
+    saveAnnualRecap: (...args: unknown[]) => mockSaveRecap(...args),
     getPlaybackAnnualData: (...args: unknown[]) => mockData(...args),
     getAllVideoReviews: (...args: unknown[]) => mockReviews(...args),
   },
@@ -38,6 +42,7 @@ beforeEach(() => {
   });
   mockReviews.mockResolvedValue([]);
   mockRetention.mockReturnValue(0);
+  mockRecap.mockResolvedValue(null);
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -147,4 +152,19 @@ it('filters unreleased years while retaining historical access after the window 
   expect(result.availableYears).toEqual([2025]);
   jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-06-01T00:00:00Z'));
   expect((await GET(request('?year=2025'))).status).toBe(200);
+});
+
+it('refreshes an existing released snapshot with its privacy and identity guard', async () => {
+  mockRecap.mockResolvedValue({
+    hideRhythm: true,
+    publishedAt: 100,
+    updatedAt: 200,
+  });
+  expect((await GET(request('?year=2025'))).status).toBe(200);
+  expect(mockSaveRecap).toHaveBeenCalledWith(
+    'demo',
+    expect.objectContaining({ rhythmHidden: true, latestNight: null }),
+    expect.any(Number),
+    { publishedAt: 100, updatedAt: 200 },
+  );
 });

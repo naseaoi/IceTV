@@ -58,25 +58,26 @@ describe('useContinueWatchingItems loading geometry', () => {
     log.mockRestore();
   });
 
-  it('requests only updated records and keeps the page count cookie untouched', async () => {
-    const record = { title: 'show', save_time: 1 } as PlayRecord;
-    (getPlayRecordPage as jest.Mock).mockResolvedValue({
-      items: { 'source+id': record },
-      total: 1,
-      nextCursor: null,
-    });
-    const { result } = renderHook(() =>
-      useContinueWatchingItems({ filter: 'updated' }),
-    );
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(getPlayRecordPage).toHaveBeenCalledWith(
-      CONTINUE_WATCHING_PAGE_SIZE,
-      null,
-      { filter: 'updated' },
-    );
-    expect(result.current.counts.updated).toBe(1);
-    expect(writeContinueWatchingPageCount).not.toHaveBeenCalled();
-  });
+  it.each(['updated', 'shelved'] as const)(
+    'requests only %s records and keeps the page count cookie untouched',
+    async (filter) => {
+      const record = { title: 'show', save_time: 1 } as PlayRecord;
+      (getPlayRecordPage as jest.Mock).mockResolvedValue({
+        items: { 'source+id': record },
+        total: 1,
+        nextCursor: null,
+      });
+      const { result } = renderHook(() => useContinueWatchingItems({ filter }));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(getPlayRecordPage).toHaveBeenCalledWith(
+        CONTINUE_WATCHING_PAGE_SIZE,
+        null,
+        { filter },
+      );
+      expect(result.current.counts[filter]).toBe(1);
+      expect(writeContinueWatchingPageCount).not.toHaveBeenCalled();
+    },
+  );
 
   it('clears everything in one request only when every record is selected', async () => {
     const records = {

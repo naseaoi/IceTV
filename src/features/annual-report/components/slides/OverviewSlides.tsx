@@ -17,6 +17,10 @@ import {
   Rise,
   SlideBody,
 } from '@/features/annual-report/components/RecapPrimitives';
+import type {
+  RecapAudience,
+  RecapReport,
+} from '@/features/annual-report/lib/audience';
 import {
   durationParts,
   formatDuration,
@@ -25,17 +29,16 @@ import {
   peakIndex,
   watchComparison,
 } from '@/features/annual-report/lib/format';
-import type { AnnualReport } from '@/features/playback-stats/types';
 
 export type SlideProps = {
-  report: AnnualReport;
-  nickname: string;
+  report: RecapReport;
+  audience: RecapAudience;
   onRestart: () => void;
 };
 
 const INTRO_COVER_LIMIT = 5;
 
-export function IntroSlide({ report, nickname }: SlideProps) {
+export function IntroSlide({ report, audience }: SlideProps) {
   const covers = report.topWorks.slice(0, INTRO_COVER_LIMIT);
   return (
     <>
@@ -51,12 +54,12 @@ export function IntroSlide({ report, nickname }: SlideProps) {
           </Rise>
           <Rise d={2} className={`mt-8 border-t pt-6 ${RECAP_RULE}`}>
             <div className='text-[22px] font-medium tracking-tight'>
-              {nickname}的观影年鉴
+              {audience.nickname}的观影年鉴
             </div>
             <div className={`mt-2 text-[15px] ${RECAP_TEXT.secondary}`}>
               {report.inProgress
                 ? `截至 ${formatInstantDate(report.generatedAt, report.timeZone)}`
-                : '那些陪你度过的故事'}
+                : `那些陪${audience.you}度过的故事`}
             </div>
           </Rise>
         </div>
@@ -91,7 +94,7 @@ export function IntroSlide({ report, nickname }: SlideProps) {
   );
 }
 
-export function TimeSlide({ report }: SlideProps) {
+export function TimeSlide({ report, audience }: SlideProps) {
   const { totals } = report;
   const { hours, minutes } = durationParts(totals.watchSeconds);
   const comparison = watchComparison(totals.watchSeconds);
@@ -106,7 +109,8 @@ export function TimeSlide({ report }: SlideProps) {
       <SlideBody center>
         <Kicker>Watch Time</Kicker>
         <Lead d={1} className='mt-6'>
-          这一年，你在 IceTV {totals.estimatedWatchSeconds > 0 ? '大约' : ''}
+          这一年，{audience.you}在 IceTV{' '}
+          {totals.estimatedWatchSeconds > 0 ? '大约' : ''}
           看了
         </Lead>
         <Rise d={2} className='mt-4 flex flex-wrap items-baseline gap-x-4'>
@@ -150,7 +154,7 @@ export function TimeSlide({ report }: SlideProps) {
   );
 }
 
-export function MonthsSlide({ report }: SlideProps) {
+export function MonthsSlide({ report, audience }: SlideProps) {
   const peak = peakIndex(report.months);
   const max = Math.max(...report.months, 1);
   return (
@@ -159,7 +163,7 @@ export function MonthsSlide({ report }: SlideProps) {
       <SlideBody center>
         <Kicker>Monthly</Kicker>
         <Headline d={1} className='mt-6'>
-          {peak + 1} 月，是你看得最多的一个月
+          {peak + 1} 月，是{audience.you}看得最多的一个月
         </Headline>
         <Lead d={2} className='mt-2'>
           这个月一共看了 {formatDuration(report.months[peak])}
@@ -219,10 +223,7 @@ export function MonthsSlide({ report }: SlideProps) {
   );
 }
 
-export function EmptySlide({ report }: SlideProps) {
-  const otherYears = report.availableYears.filter(
-    (year) => year !== report.year,
-  );
+export function EmptySlide({ report, audience }: SlideProps) {
   return (
     <>
       <RecapBackdrop tint='ice' />
@@ -238,17 +239,17 @@ export function EmptySlide({ report }: SlideProps) {
           这一年还没有观看记录
         </Rise>
         <Rise d={3} className='mt-10 flex flex-wrap gap-2.5'>
-          {otherYears.map((year) => (
+          {audience.otherYears.map((year) => (
             <Link
               key={year}
-              href={`/recap/${year}`}
+              href={audience.yearHref(year)}
               className={RECAP_BUTTON.secondary}
             >
               看看 {year}
             </Link>
           ))}
-          <Link href='/me' className={RECAP_BUTTON.secondary}>
-            返回我的
+          <Link href={audience.exitHref} className={RECAP_BUTTON.secondary}>
+            {audience.exitLabel}
           </Link>
         </Rise>
       </SlideBody>

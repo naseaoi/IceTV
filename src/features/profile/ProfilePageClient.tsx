@@ -18,6 +18,7 @@ import PublicReviewContent, {
 import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
+import { RecapEntryLink } from '@/features/annual-report/components/RecapEntryLink';
 import {
   FavoriteGrid,
   ReadOnlyFavoriteGridSkeleton,
@@ -464,6 +465,13 @@ export default function ProfilePageClient({
                           {label}
                         </button>
                       ))}
+                      {profile.recap && (
+                        <RecapEntryLink
+                          href={`/u/${encodeURIComponent(profileId)}/recap/${profile.recap.year}`}
+                          year={profile.recap.year}
+                          className='-my-1'
+                        />
+                      )}
                     </div>
                   </div>
                   <div className='flex items-center gap-2'>

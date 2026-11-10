@@ -161,7 +161,7 @@ export async function getRecentPlayRecords(
 export async function getPlayRecordPage(
   limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   cursor?: string | null,
-  options?: { filter?: 'updated' },
+  options?: { filter?: 'updated' | 'shelved' },
 ): Promise<PlayRecordPage> {
   const normalizedLimit = normalizePlayRecordLimit(limit);
   const params = new URLSearchParams({
@@ -172,8 +172,8 @@ export async function getPlayRecordPage(
     params.set('cursor', cursor);
   }
 
-  if (options?.filter === 'updated') {
-    params.set('filter', 'updated');
+  if (options?.filter) {
+    params.set('filter', options.filter);
   }
 
   const page = await fetchFromApi<PlayRecordPage>(

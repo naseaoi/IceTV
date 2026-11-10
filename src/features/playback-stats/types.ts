@@ -49,6 +49,7 @@ export type PlaybackTopWork = {
   videoId: string;
   watchSeconds: number;
   sessionCount: number;
+  episodeCount: number;
   lastWatchedAt: number;
 };
 
@@ -62,6 +63,8 @@ export type PlaybackPeriodStats = {
   watchSeconds: number;
   activeDays: number;
   lifetimeWatchSeconds: number;
+  hours: number[];
+  currentStreak: number;
   buckets: PlaybackPeriodBucket[];
   topWorks: PlaybackTopWork[];
 };
@@ -151,4 +154,21 @@ export type AnnualReport = {
       rating: number;
     } | null;
   };
+};
+
+export type AnnualRecapShareState = {
+  year: number;
+  published: boolean;
+  hideRhythm: boolean;
+  publishedAt: number | null;
+  updatedAt: number | null;
+};
+export type PublicAnnualReport = Omit<AnnualReport, 'availableYears'> & {
+  rhythmHidden: boolean;
+};
+export type PublicAnnualRecapResponse = {
+  owner: import('@/lib/types').PublicUserRef;
+  isSelf: boolean;
+  report: PublicAnnualReport;
+  years: number[];
 };

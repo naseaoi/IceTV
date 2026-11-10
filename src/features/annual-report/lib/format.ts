@@ -1,4 +1,4 @@
-import type { AnnualReport } from '@/features/playback-stats/types';
+import type { RecapReport } from '@/features/annual-report/lib/audience';
 
 export function durationParts(seconds: number): {
   hours: number;
@@ -161,15 +161,19 @@ export type SlideKey =
   | 'summary'
   | 'empty';
 
-export function buildSlides(report: AnnualReport): SlideKey[] {
+export function buildSlides(report: RecapReport): SlideKey[] {
   if (report.totals.watchSeconds <= 0) {
     return report.reviews.count > 0 ? ['intro', 'reviews', 'empty'] : ['empty'];
   }
   const slides: SlideKey[] = ['intro', 'time'];
   if (report.months.filter((value) => value > 0).length >= 2)
     slides.push('months');
-  slides.push('hours');
-  if (report.latestNight && isLateNight(report.latestNight.localTime)) {
+  if (!report.rhythmHidden) slides.push('hours');
+  if (
+    !report.rhythmHidden &&
+    report.latestNight &&
+    isLateNight(report.latestNight.localTime)
+  ) {
     slides.push('night');
   }
   if (report.peakDay && report.totals.activeDays >= 2) slides.push('peak');

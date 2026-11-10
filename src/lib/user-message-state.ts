@@ -1,4 +1,5 @@
 import { parseAnnouncementMessageId } from '@/lib/announcement-identity';
+import { parseFollowRecapMessageId } from '@/lib/annual-recap-identity';
 import { parseFollowReviewMessageId } from '@/lib/follow-review-identity';
 import { parseReplyMessageId } from '@/lib/review-reply-storage';
 import { parseSocialNotificationId } from '@/lib/social-notification-identity';
@@ -52,20 +53,7 @@ export function mergeUserMessageState(
   if (watermark > previousWatermark) {
     // 新水位之后已单独读过的动态仍需保留；旧格式无法解析的标识随全部已读清除。
     ids = ids.filter((id) => {
-      try {
-        const value: unknown = JSON.parse(
-          Buffer.from(id.slice('follow-review:'.length), 'base64url').toString(
-            'utf8',
-          ),
-        );
-        return (
-          Array.isArray(value) &&
-          typeof value[3] === 'number' &&
-          value[3] > watermark
-        );
-      } catch {
-        return false;
-      }
+      return followMessageTime(id) > watermark;
     });
   }
   if (
@@ -75,15 +63,10 @@ export function mergeUserMessageState(
   )
     ids.push(update.followReview.id);
   if (ids.length > 200) {
-    const times = ids
-      .map((id) => parseFollowReviewMessageId(id)?.[3] ?? 0)
-      .sort((a, b) => a - b);
+    const times = ids.map((id) => followMessageTime(id)).sort((a, b) => a - b);
     // 有界已读集压缩为时间水位；同毫秒的整批一并确认，旧已读项不会复活。
     next.followReviewReadAt = Math.max(watermark, times[times.length - 201]);
-    ids = ids.filter(
-      (id) =>
-        (parseFollowReviewMessageId(id)?.[3] ?? 0) > next.followReviewReadAt!,
-    );
+    ids = ids.filter((id) => followMessageTime(id) > next.followReviewReadAt!);
   }
   if (update.followReview || update.followReviewReadAt !== undefined)
     next.followReviewReadIds = ids;
@@ -148,4 +131,12 @@ export function mergeUserMessageState(
     }
   }
   return next;
+}
+
+function followMessageTime(id: string): number {
+  return (
+    parseFollowRecapMessageId(id)?.[2] ??
+    parseFollowReviewMessageId(id)?.[3] ??
+    0
+  );
 }

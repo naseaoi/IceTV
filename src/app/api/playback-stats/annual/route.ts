@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { aggregateAnnualReport } from '@/features/playback-stats/lib/annual-report';
+import { publicAnnualReport } from '@/features/playback-stats/lib/annual-share';
 import {
   buildPlaybackPeriod,
   PlaybackPeriodValidationError,
@@ -52,18 +53,26 @@ export async function GET(request: NextRequest) {
       db.getPlaybackAnnualData(guard.username, period.start, period.end),
       db.getAllVideoReviews(guard.username),
     ]);
-    return NextResponse.json(
-      aggregateAnnualReport({
-        year,
-        includeUnreleased: preview,
-        timeZone: period.timeZone,
-        now,
-        data,
-        reviews,
-        retentionDays: readPlaybackStatsRetentionDays(),
-      }),
-      { headers: NO_STORE_HEADERS },
-    );
+    const report = aggregateAnnualReport({
+      year,
+      includeUnreleased: preview,
+      timeZone: period.timeZone,
+      now,
+      data,
+      reviews,
+      retentionDays: readPlaybackStatsRetentionDays(),
+    });
+    if (isAnnualReportReleased(year, current.date)) {
+      const recap = await db.getAnnualRecap(guard.username, year);
+      if (recap && recap.publishedAt !== null && recap.updatedAt !== null)
+        await db.saveAnnualRecap(
+          guard.username,
+          publicAnnualReport(report, reviews, recap.hideRhythm),
+          now,
+          { publishedAt: recap.publishedAt, updatedAt: recap.updatedAt },
+        );
+    }
+    return NextResponse.json(report, { headers: NO_STORE_HEADERS });
   } catch (error) {
     if (error instanceof PlaybackPeriodValidationError) {
       return NextResponse.json(

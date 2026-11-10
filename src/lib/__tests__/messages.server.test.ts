@@ -7,6 +7,8 @@ const mockGetSocialNotifications = jest.fn();
 const mockGetSocialNotificationCount = jest.fn();
 const mockGetReviewReplyMessages = jest.fn();
 const mockGetReviewReplyMessageCount = jest.fn();
+const mockGetFollowRecapMessages = jest.fn();
+const mockGetFollowRecapMessageCount = jest.fn();
 const mockGetFollowReviewMessages = jest.fn();
 const mockGetFollowReviewMessageCount = jest.fn();
 const mockGetPublishedAnnouncements = jest.fn();
@@ -21,6 +23,10 @@ const mockSavePlayRecordsByKey = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getFollowRecapMessages: (...args: unknown[]) =>
+      mockGetFollowRecapMessages(...args),
+    getFollowRecapMessageCount: (...args: unknown[]) =>
+      mockGetFollowRecapMessageCount(...args),
     hasPlaybackAnnualActivity: (...args: unknown[]) =>
       mockHasPlaybackAnnualActivity(...args),
     getPublishedAnnouncements: (...args: unknown[]) =>
@@ -103,6 +109,72 @@ function usePersistedUserMessageState(): void {
 }
 
 describe('messages server', () => {
+  it('merges recap notifications into follow counts, revision and the shared read state', async () => {
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+    const recap = {
+      id: 'follow-recap:AbCdEf012345:2025:1000',
+      type: 'follow-recap',
+      author: { profileId: 'AbCdEf012345', nickname: '作者', avatarSeed: null },
+      year: 2025,
+      at: 1000,
+      createdAt: 1000,
+    };
+    mockGetFollowRecapMessages.mockResolvedValue([recap]);
+    mockGetFollowRecapMessageCount.mockResolvedValue(1);
+    const summary = await getUserMessageSummary('reader');
+    expect(summary.followReviewUnreadCount).toBe(1);
+    expect(summary.unreadCount).toBe(1);
+    expect((await getUserMessagePage('reader', 20)).items).toEqual([recap]);
+    expect(await readUserMessage('reader', recap.id)).toEqual({
+      message: recap,
+    });
+    expect(mockUpdateUserMessageState).toHaveBeenCalledWith('reader', {
+      followReview: { id: recap.id, createdAt: 1000 },
+    });
+    mockGetFollowRecapMessages.mockResolvedValue([
+      { ...recap, id: 'follow-recap:AbCdEf012345:2025:2000' },
+    ]);
+    expect((await getUserMessageSummary('reader')).revision).not.toBe(
+      summary.revision,
+    );
+    mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: ['follow-review'],
+    });
+    expect(
+      (await getUserMessageSummary('reader')).followReviewUnreadCount,
+    ).toBe(0);
+    expect(await readUserMessage('reader', recap.id)).toBeNull();
+  });
+  it('preserves concurrent recap reads and compresses mixed follow IDs', () => {
+    const id = 'follow-recap:AbCdEf012345:2025:300';
+    const state = mergeUserMessageState(
+      { followReviewReadIds: [id] },
+      { followReviewReadAt: 200 },
+    );
+    expect(state.followReviewReadIds).toEqual([id]);
+    const compressed = mergeUserMessageState({}, { followReviewReadAt: 400 });
+    expect(
+      mergeUserMessageState(compressed, {
+        followReview: { id, createdAt: 300 },
+      }).followReviewReadIds,
+    ).toEqual([]);
+    let many: UserMessageState = {};
+    for (let at = 1; at <= 201; at++)
+      many = mergeUserMessageState(many, {
+        followReview: {
+          id: `follow-recap:AbCdEf012345:2025:${at}`,
+          createdAt: at,
+        },
+      });
+    expect(many.followReviewReadAt).toBe(1);
+    expect(many.followReviewReadIds).toHaveLength(200);
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockHasPlaybackAnnualActivity.mockResolvedValue(false);
@@ -110,6 +182,8 @@ describe('messages server', () => {
     mockGetSocialNotificationCount.mockResolvedValue(0);
     mockGetReviewReplyMessages.mockResolvedValue([]);
     mockGetReviewReplyMessageCount.mockResolvedValue(0);
+    mockGetFollowRecapMessages.mockResolvedValue([]);
+    mockGetFollowRecapMessageCount.mockResolvedValue(0);
     mockGetFollowReviewMessages.mockResolvedValue([]);
     mockGetFollowReviewMessageCount.mockResolvedValue(0);
     mockGetPublishedAnnouncements.mockResolvedValue([announcementRow]);
@@ -667,6 +741,8 @@ describe('annual report messages', () => {
     usePersistedUserMessageState();
     mockHasPlaybackAnnualActivity.mockResolvedValue(true);
     mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetFollowRecapMessages.mockResolvedValue([]);
+    mockGetFollowRecapMessageCount.mockResolvedValue(0);
     mockGetFollowReviewMessages.mockResolvedValue([]);
     mockGetFollowReviewMessageCount.mockResolvedValue(0);
     mockGetReviewReplyMessages.mockResolvedValue([]);

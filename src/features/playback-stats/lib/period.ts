@@ -3,8 +3,10 @@ import type {
   PlaybackTopWork,
 } from '@/features/playback-stats/types';
 import { PLAYBACK_TOP_WORKS_LIMIT } from '@/features/playback-stats/types';
-import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
-import type { PlaybackPeriodSession } from '@/lib/types';
+import type { PlaybackAnnualData, PlaybackPeriodSession } from '@/lib/types';
+
+import { visitWatchIntervals } from './watch-intervals';
+import { playbackWorkIdentity } from './work-identity';
 
 const DAY_MS = 86_400_000;
 
@@ -110,6 +112,8 @@ export function buildPlaybackPeriod(
     end: buckets[buckets.length - 1].end,
     watchSeconds: 0,
     activeDays: 0,
+    hours: Array<number>(24).fill(0),
+    currentStreak: 0,
     lifetimeWatchSeconds: 0,
     buckets,
     topWorks: [],
@@ -130,6 +134,7 @@ export function aggregatePlaybackPeriod(
   const activeDays = new Set<string>();
   const works = new Map<string, PlaybackTopWork>();
   let watchSeconds = 0;
+  const episodes = new Map<string, Set<number>>();
 
   for (const session of sessions) {
     // 与历史记录一致：未产生观看时长的会话不参与统计。
@@ -148,10 +153,10 @@ export function aggregatePlaybackPeriod(
     watchSeconds += session.watch_seconds;
     activeDays.add(day);
 
-    const key = JSON.stringify([
-      normalizeWorkTitle(session.title),
-      normalizeWorkYear(session.year),
-    ]);
+    const key = playbackWorkIdentity(session);
+    const watched = episodes.get(key) ?? new Set<number>();
+    watched.add(session.episode_index);
+    episodes.set(key, watched);
     const lastWatchedAt = Math.max(session.started_at, session.ended_at);
     const existing = works.get(key);
     const representative = {
@@ -167,10 +172,12 @@ export function aggregatePlaybackPeriod(
         ...representative,
         watchSeconds: session.watch_seconds,
         sessionCount: 1,
+        episodeCount: watched.size,
       });
     } else {
       existing.watchSeconds += session.watch_seconds;
       existing.sessionCount += 1;
+      existing.episodeCount = watched.size;
       if (lastWatchedAt > existing.lastWatchedAt)
         Object.assign(existing, representative);
     }
@@ -188,4 +195,47 @@ export function aggregatePlaybackPeriod(
       )
       .slice(0, PLAYBACK_TOP_WORKS_LIMIT),
   };
+}
+
+export function playbackStreakRange(timeZone: string, now = Date.now()) {
+  const formatter = dateFormatter(timeZone);
+  const today = calendarDate(localDate(formatter, now));
+  const start = new Date(today);
+  start.setUTCDate(start.getUTCDate() - 366);
+  return { start: localMidnight(start, formatter), end: now + 1 };
+}
+
+export function aggregatePlaybackRhythm(
+  data: PlaybackAnnualData,
+  period: Pick<PlaybackPeriodStats, 'start' | 'end' | 'timeZone'>,
+): { hours: number[]; days: Set<string> } {
+  const hours = Array<number>(24).fill(0);
+  const days = new Set<string>();
+  const formatter = dateFormatter(period.timeZone);
+  const hourFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: period.timeZone,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  });
+  visitWatchIntervals(data, period.start, period.end, (_session, at, ms) => {
+    hours[Number(hourFormatter.format(at))] += ms;
+    days.add(localDate(formatter, at));
+  });
+  return { hours: hours.map((ms) => Math.floor(ms / 1000)), days };
+}
+
+export function currentPlaybackStreak(
+  days: Set<string>,
+  timeZone: string,
+  now = Date.now(),
+): number {
+  const cursor = calendarDate(localDate(dateFormatter(timeZone), now));
+  if (!days.has(cursor.toISOString().slice(0, 10)))
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  let streak = 0;
+  while (streak < 366 && days.has(cursor.toISOString().slice(0, 10))) {
+    streak++;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return streak;
 }

@@ -25,7 +25,7 @@ import {
 
 const COVER_SHADOW = 'shadow-[0_24px_48px_-24px_rgba(15,23,42,0.5)]';
 
-export function TopWorkSlide({ report }: SlideProps) {
+export function TopWorkSlide({ report, audience }: SlideProps) {
   const work = report.topWorks[0];
   return (
     <>
@@ -42,7 +42,7 @@ export function TopWorkSlide({ report }: SlideProps) {
           />
         </Rise>
         <Lead d={2} className='mt-8'>
-          你的年度最爱
+          {audience.you}的年度最爱
         </Lead>
         <Rise
           d={2}
@@ -65,7 +65,7 @@ export function TopWorkSlide({ report }: SlideProps) {
 
 const RANKING_LIMIT = 5;
 
-export function RankingSlide({ report }: SlideProps) {
+export function RankingSlide({ report, audience }: SlideProps) {
   const works = report.topWorks.slice(0, RANKING_LIMIT);
   const max = works[0]?.watchSeconds || 1;
   return (
@@ -74,7 +74,7 @@ export function RankingSlide({ report }: SlideProps) {
       <SlideBody center>
         <Kicker>Top {works.length}</Kicker>
         <Headline d={1} className='mt-6'>
-          这些作品，占据了你最多的时间
+          这些作品，占据了{audience.you}最多的时间
         </Headline>
         <ol className='mt-8'>
           {works.map((work, index) => (
@@ -132,19 +132,21 @@ export function RankingSlide({ report }: SlideProps) {
   );
 }
 
-export function JourneySlide({ report }: SlideProps) {
+export function JourneySlide({ report, audience }: SlideProps) {
   const first = report.firstWork!;
   const last = report.lastWork!;
   const moments = [
     {
       work: first,
       date: formatInstantDate(first.at, report.timeZone),
-      label: `你用这部作品开启了 ${report.year}`,
+      label: `${audience.you}用这部作品开启了 ${report.year}`,
     },
     {
       work: last,
       date: formatInstantDate(last.at, report.timeZone),
-      label: report.inProgress ? '你最近在看' : '你用它为这一年收尾',
+      label: report.inProgress
+        ? `${audience.you}最近在看`
+        : `${audience.you}用它为这一年收尾`,
     },
   ];
   return (
@@ -195,7 +197,7 @@ export function JourneySlide({ report }: SlideProps) {
   );
 }
 
-export function SourcesSlide({ report }: SlideProps) {
+export function SourcesSlide({ report, audience }: SlideProps) {
   const sources = report.topSources;
   const top = sources[0];
   return (
@@ -204,7 +206,7 @@ export function SourcesSlide({ report }: SlideProps) {
       <SlideBody center>
         <Kicker>Sources</Kicker>
         <Headline d={1} className='mt-6'>
-          {top.sourceName} 是你最常用的片源
+          {top.sourceName} 是{audience.you}最常用的片源
         </Headline>
         <Lead d={2} className='mt-2'>
           占全年观看的 {share(top.watchSeconds, report.totals.watchSeconds)}%
@@ -240,7 +242,7 @@ export function SourcesSlide({ report }: SlideProps) {
             d={8}
             className={`mt-8 border-t pt-5 text-[13px] ${RECAP_RULE} ${RECAP_TEXT.muted}`}
           >
-            这一年你一共用过 {report.totals.sourceCount} 个片源
+            这一年{audience.you}一共用过 {report.totals.sourceCount} 个片源
           </Rise>
         )}
       </SlideBody>
@@ -248,7 +250,7 @@ export function SourcesSlide({ report }: SlideProps) {
   );
 }
 
-export function ReviewsSlide({ report }: SlideProps) {
+export function ReviewsSlide({ report, audience }: SlideProps) {
   const { reviews } = report;
   const multiple = reviews.ratedCount > 1;
   return (
@@ -257,7 +259,7 @@ export function ReviewsSlide({ report }: SlideProps) {
       <SlideBody center>
         <Kicker>Reviews</Kicker>
         <Lead d={1} className='mt-6'>
-          这一年，你写下了
+          这一年，{audience.you}写下了
         </Lead>
         <Rise d={2} className='mt-3'>
           <Figure value={reviews.count} unit='条评价' />
@@ -280,7 +282,7 @@ export function ReviewsSlide({ report }: SlideProps) {
             />
             <div className='min-w-0'>
               <div className={`text-xs ${RECAP_TEXT.muted}`}>
-                {multiple ? '全年最高分' : '你的评分'}
+                {multiple ? '全年最高分' : `${audience.you}的评分`}
               </div>
               <div className='mt-1 line-clamp-2 text-[17px] font-medium leading-snug'>
                 {reviews.topRated.title}

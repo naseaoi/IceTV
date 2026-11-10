@@ -3,9 +3,7 @@ import type {
   AnnualReportWork,
   AnnualReportWorkMoment,
 } from '@/features/playback-stats/types';
-import { PLAYBACK_BUCKET_MS } from '@/features/playback-stats/types';
 import { isAnnualReportReleased } from '@/lib/annual-report-window';
-import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type {
   PlaybackAnnualData,
   PlaybackAnnualSession,
@@ -13,6 +11,8 @@ import type {
 } from '@/lib/types';
 
 import { buildPlaybackPeriod, localDate } from './period';
+import { visitWatchIntervals } from './watch-intervals';
+import { playbackWorkIdentity } from './work-identity';
 
 const DAY_MS = 86_400_000;
 const seconds = (ms: number) => Math.floor(ms / 1000);
@@ -23,13 +23,6 @@ type Work = {
   episodes: Set<number>;
 };
 type Day = { ms: number; last: number; works: Map<string, Work> };
-
-function identity(session: PlaybackAnnualSession): string {
-  return JSON.stringify([
-    normalizeWorkTitle(session.title),
-    normalizeWorkYear(session.year),
-  ]);
-}
 
 function moment(
   session: PlaybackAnnualSession,
@@ -160,7 +153,7 @@ export function aggregateAnnualReport(input: {
     last: number,
   ) => {
     if (!(ms > 0) || start < period.start || start >= period.end) return;
-    const key = identity(session);
+    const key = playbackWorkIdentity(session);
     const date = localDate(formatter, start);
     const { hour } = clock(start);
     const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
@@ -203,52 +196,12 @@ export function aggregateAnnualReport(input: {
   const sessions = new Map(
     data.sessions.filter((s) => s.watch_seconds > 0).map((s) => [s.id, s]),
   );
-  const contributing = new Set<string>();
-  for (const bucket of data.buckets) {
-    const session = sessions.get(bucket.session_id);
-    if (
-      !session ||
-      session.measurement_version !== 2 ||
-      bucket.watch_ms <= 0 ||
-      bucket.bucket_start < period.start ||
-      bucket.bucket_start >= period.end
-    )
-      continue;
-    // 桶内未记录播放片段的精确位置，作品时刻取桶范围与会话范围的交集。
-    const first = Math.max(bucket.bucket_start, session.started_at);
-    const last = Math.max(
-      first,
-      Math.min(
-        bucket.bucket_start + PLAYBACK_BUCKET_MS,
-        session.ended_at,
-        period.end,
-      ),
-    );
-    addBucket(session, bucket.bucket_start, bucket.watch_ms, first, last);
-    contributing.add(session.id);
-  }
-  for (const session of sessions.values()) {
-    if (session.measurement_version !== 1) continue;
-    const first = Math.max(session.started_at, period.start);
-    const end = Math.min(
-      session.started_at + session.watch_seconds * 1000,
-      period.end,
-    );
-    for (let cursor = first; cursor < end; ) {
-      const bucketStart =
-        Math.floor(cursor / PLAYBACK_BUCKET_MS) * PLAYBACK_BUCKET_MS;
-      const next = Math.min(bucketStart + PLAYBACK_BUCKET_MS, end);
-      addBucket(
-        session,
-        Math.max(bucketStart, period.start),
-        next - cursor,
-        cursor,
-        next,
-      );
-      contributing.add(session.id);
-      cursor = next;
-    }
-  }
+  const contributing = visitWatchIntervals(
+    data,
+    period.start,
+    period.end,
+    addBucket,
+  );
   for (const session of sessions.values()) {
     if (
       !contributing.has(session.id) ||

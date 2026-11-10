@@ -16,9 +16,10 @@ export default async function ContinueWatchingPage({
   ]);
 
   const filter = parseContinueWatchingFilter(params.filter);
+  const filterCount = filter === 'all' ? null : data.counts[filter];
   const skeletonCount =
-    filter === 'updated' && data.counts.updated !== null
-      ? Math.min(data.counts.updated, CONTINUE_WATCHING_PAGE_SIZE)
+    filterCount !== null
+      ? Math.min(filterCount, CONTINUE_WATCHING_PAGE_SIZE)
       : data.skeletonCount;
 
   return (

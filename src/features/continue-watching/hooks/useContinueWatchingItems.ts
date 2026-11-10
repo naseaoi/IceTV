@@ -14,7 +14,11 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { writeContinueWatchingPageCount } from '@/lib/local-preferences';
-import { hasPlayRecordUpdate, selectPlayRecordPage } from '@/lib/play-records';
+import {
+  hasPlayRecordUpdate,
+  isPlayRecordShelved,
+  selectPlayRecordPage,
+} from '@/lib/play-records';
 import type { PlayRecord, PlayRecordPage } from '@/lib/types';
 
 export type ContinueWatchingItem = PlayRecord & { key: string };
@@ -22,6 +26,7 @@ export type ContinueWatchingItem = PlayRecord & { key: string };
 export interface ContinueWatchingCounts {
   all: number | null;
   updated: number | null;
+  shelved: number | null;
 }
 
 function toItems(records: Record<string, PlayRecord>): ContinueWatchingItem[] {
@@ -35,9 +40,9 @@ function countUpdated(records: Record<string, PlayRecord>): number {
 }
 
 function fetchFirstPage(filter: ContinueWatchingFilter) {
-  return filter === 'updated'
+  return filter !== 'all'
     ? getPlayRecordPage(CONTINUE_WATCHING_PAGE_SIZE, null, {
-        filter: 'updated',
+        filter,
       })
     : getPlayRecordPage(CONTINUE_WATCHING_PAGE_SIZE);
 }
@@ -54,7 +59,7 @@ export function useContinueWatchingItems({
   const [items, setItems] = useState<ContinueWatchingItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [counts, setCounts] = useState<ContinueWatchingCounts>(
-    initialCounts ?? { all: null, updated: null },
+    initialCounts ?? { all: null, updated: null, shelved: null },
   );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -85,7 +90,7 @@ export function useContinueWatchingItems({
     [],
   );
 
-  // 本地快照是全量播放记录，两种筛选的计数都可以直接算出
+  // 本地快照是全量播放记录，所有筛选的计数都可以直接算出
   const applySnapshot = useCallback(
     (
       records: Record<string, PlayRecord>,
@@ -96,12 +101,15 @@ export function useContinueWatchingItems({
         records,
         limit,
         null,
-        activeFilter === 'updated' ? { filter: 'updated' } : undefined,
+        activeFilter !== 'all' ? { filter: activeFilter } : undefined,
       );
       applyPage(page, activeFilter);
       setCounts({
         all: Object.keys(records).length,
         updated: countUpdated(records),
+        shelved: Object.values(records).filter((record) =>
+          isPlayRecordShelved(record),
+        ).length,
       });
     },
     [applyPage],
@@ -184,7 +192,7 @@ export function useContinueWatchingItems({
       const page = await getPlayRecordPage(
         CONTINUE_WATCHING_PAGE_SIZE,
         nextCursor,
-        filter === 'updated' ? { filter: 'updated' } : undefined,
+        filter !== 'all' ? { filter } : undefined,
       );
       if (generation !== generationRef.current) return;
       setItems((current) => {
@@ -209,8 +217,15 @@ export function useContinueWatchingItems({
     const removed = itemsRef.current.filter((item) => keys.has(item.key));
     if (removed.length === 0) return;
     const removedUpdated = removed.filter(hasPlayRecordUpdate).length;
+    const removedShelved = removed.filter((record) =>
+      isPlayRecordShelved(record),
+    ).length;
     setItems((current) => current.filter((item) => !keys.has(item.key)));
     setCounts((counts) => ({
+      shelved:
+        counts.shelved === null
+          ? null
+          : Math.max(0, counts.shelved - removedShelved),
       all:
         counts.all === null ? null : Math.max(0, counts.all - removed.length),
       updated:
@@ -230,7 +245,7 @@ export function useContinueWatchingItems({
         await clearAllPlayRecords();
         setItems([]);
         setNextCursor(null);
-        setCounts({ all: 0, updated: 0 });
+        setCounts({ all: 0, updated: 0, shelved: 0 });
         setSkeletonCount(0);
         return;
       }

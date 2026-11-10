@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
 import {
   assertBatchDeletePlayRecords,
   assertUpdatedPlayRecordPage,
@@ -2189,7 +2190,7 @@ function createFakePool() {
 
     if (
       normalized ===
-        'SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0' ||
+        'SELECT source, video_id, episode_index, title, cover, year, started_at, ended_at, watch_seconds FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0' ||
       normalized ===
         'SELECT 1 FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0 LIMIT 1'
     ) {
@@ -3462,6 +3463,12 @@ describe('mysql storage contract', () => {
 
   it('历史与桶统计双后端契约', async () => {
     await assertWatchHistoryContract(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+
+  it('公开年度报告存储契约', async () => {
+    await assertAnnualRecapStorage(
       new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
     );
   });

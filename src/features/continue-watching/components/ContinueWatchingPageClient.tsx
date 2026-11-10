@@ -1,6 +1,6 @@
 'use client';
 
-import { BellOff, History } from 'lucide-react';
+import { Archive, BellOff, History } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -73,6 +73,8 @@ export function ContinueWatchingPageClient({
   // 消息通知静音时追更未读数被置零，计数以筛选接口的结果为准
   const updatedCount = counts.updated;
   const showUpdatedChip = filter === 'updated' || (updatedCount ?? 0) > 0;
+  const shelvedCount = counts.shelved;
+  const showShelvedChip = filter === 'shelved' || (shelvedCount ?? 0) > 0;
   const allSelected = items.length > 0 && selectedKeys.size === items.length;
   // 删除完成后选中会被清空，弹窗退场期间仍显示删除前的条数
   const confirmCount = useRetainedValue(
@@ -187,6 +189,15 @@ export function ContinueWatchingPageClient({
             onClick={() => changeFilter('updated')}
           />
         )}
+        {showShelvedChip && (
+          <LibraryFilterChip
+            label='搁置中'
+            count={shelvedCount ?? 0}
+            loading={shelvedCount === null}
+            active={filter === 'shelved'}
+            onClick={() => changeFilter('shelved')}
+          />
+        )}
       </div>
       {items.length > 0 && (
         <button
@@ -209,6 +220,20 @@ export function ContinueWatchingPageClient({
         <LibraryEmptyState
           icon={BellOff}
           title='追更的剧集暂无更新'
+          action={
+            <button
+              type='button'
+              onClick={() => changeFilter('all')}
+              className={LIBRARY_PILL_BUTTON_CLASS}
+            >
+              查看全部
+            </button>
+          }
+        />
+      ) : filter === 'shelved' ? (
+        <LibraryEmptyState
+          icon={Archive}
+          title='没有搁置中的内容'
           action={
             <button
               type='button'

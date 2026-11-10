@@ -38,6 +38,12 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type PlaybackSourceUsage,
+  type PlaybackSourceUsageRow,
+  aggregateSourceUsage,
+  sourceUsageSql,
+} from '@/features/playback-stats/lib/source-usage';
+import {
   type AnnouncementRow,
   ANNOUNCEMENT_INSERT_SQL,
   ANNOUNCEMENT_LIST_SQL,
@@ -67,6 +73,7 @@ import {
   oauthIdentityParams,
   readOAuthIdentity,
 } from '@/lib/oauth-identity';
+import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
 import { ReviewSocialStorage, socialSchema } from '@/lib/review-social-storage';
 import {
   canManageUserAccess,
@@ -104,7 +111,11 @@ import {
   normalizePlaybackSearchKeyword,
 } from './playback-query';
 import { getMySqlConnectionUrl } from './storage-type';
-import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
+import {
+  buildShelvedPlayRecordWhere,
+  buildTrackingSql,
+  MYSQL_TRACKING_DIALECT,
+} from './tracking-sql';
 import {
   AdminVideoReviewPage,
   Favorite,
@@ -1003,7 +1014,7 @@ export class MySqlStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
-    filter?: 'updated',
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
@@ -1011,7 +1022,15 @@ export class MySqlStorage implements IStorage {
       "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED)";
     const hasCursor = cursorTime !== undefined && !!cursorKey;
     const updatedWhere =
-      filter === 'updated' ? ` AND ${MYSQL_UNREAD_TRACKING_WHERE}` : '';
+      filter === 'updated'
+        ? ` AND ${MYSQL_UNREAD_TRACKING_WHERE}`
+        : filter === 'shelved'
+          ? ` AND ${buildShelvedPlayRecordWhere(MYSQL_TRACKING_DIALECT)}`
+          : '';
+    const params =
+      filter === 'shelved'
+        ? [username, Date.now() - SHELVED_PLAY_RECORD_AGE_MS]
+        : [username];
     const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT record_key, record_json
@@ -1027,14 +1046,14 @@ export class MySqlStorage implements IStorage {
            ORDER BY ${saveTimeExpression} DESC, record_key DESC
            LIMIT ?`,
       hasCursor
-        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
-        : [username, limit + 1],
+        ? [...params, cursorTime, cursorTime, cursorKey, limit + 1]
+        : [...params, limit + 1],
     );
     const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
     >(
       `SELECT COUNT(*) AS count FROM play_records WHERE username = ?${updatedWhere}`,
-      [username],
+      params,
     );
     const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildPlayRecordPage(rows, countRows[0]?.count || 0, limit);
@@ -1423,6 +1442,42 @@ export class MySqlStorage implements IStorage {
     return this.socialFor().isNicknameAvailable(...args);
   }
 
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    await this.ensureInitialized();
+    return this.socialFor().getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    await this.ensureInitialized();
+    return this.socialFor().getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    await this.ensureInitialized();
+    return this.socialFor().saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    await this.ensureInitialized();
+    return this.socialFor().deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    await this.ensureInitialized();
+    return this.socialFor().getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    await this.ensureInitialized();
+    return this.socialFor().getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -2134,6 +2189,10 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM playback_sessions WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_annual_recaps WHERE username = ?',
         [username],
       );
       await connection.execute(
@@ -3086,6 +3145,24 @@ export class MySqlStorage implements IStorage {
     };
   }
 
+  async getPlaybackSourceUsage(
+    start: number,
+    end: number,
+    userName?: string,
+  ): Promise<PlaybackSourceUsage[]> {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return [];
+    const personal = userName !== undefined;
+    const params = personal
+      ? [normalizeUsername(userName), start, end]
+      : [start, end];
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & PlaybackSourceUsageRow)[]
+    >(sourceUsageSql(personal), params);
+    return aggregateSourceUsage(rows);
+  }
+
   async getPlaybackPeriodSessions(
     userName: string,
     start: number,
@@ -3096,12 +3173,13 @@ export class MySqlStorage implements IStorage {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
       return [];
     const [rows] = await this.pool.query<JsonRow[]>(
-      `SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds
+      `SELECT source, video_id, episode_index, title, cover, year, started_at, ended_at, watch_seconds
         FROM playback_sessions
         WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0`,
       [username, start, end],
     );
     return rows.map((row) => ({
+      episode_index: Number(row.episode_index),
       source: row.source || '',
       video_id: row.video_id || '',
       title: row.title || '',

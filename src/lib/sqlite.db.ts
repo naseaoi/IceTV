@@ -33,6 +33,12 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type PlaybackSourceUsage,
+  type PlaybackSourceUsageRow,
+  aggregateSourceUsage,
+  sourceUsageSql,
+} from '@/features/playback-stats/lib/source-usage';
+import {
   type AnnouncementRow,
   ANNOUNCEMENT_INSERT_SQL,
   ANNOUNCEMENT_LIST_SQL,
@@ -57,6 +63,7 @@ import {
   oauthIdentityParams,
   readOAuthIdentity,
 } from '@/lib/oauth-identity';
+import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
 import {
   newProfileId,
   NicknameTakenError,
@@ -103,7 +110,11 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
-import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
+import {
+  buildShelvedPlayRecordWhere,
+  buildTrackingSql,
+  SQLITE_TRACKING_DIALECT,
+} from './tracking-sql';
 import {
   AdminVideoReviewPage,
   Favorite,
@@ -1496,6 +1507,17 @@ export class LocalSqliteStorage implements IStorage {
         this.mergeSocialUsername(legacy, canonical);
         this.db
           .prepare(
+            `INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at)
+          SELECT ?, year, time_zone, hide_rhythm, report_json, published_at, updated_at FROM user_annual_recaps WHERE username = ?
+          ON CONFLICT(username, year) DO UPDATE SET time_zone = excluded.time_zone, hide_rhythm = excluded.hide_rhythm, report_json = excluded.report_json, published_at = excluded.published_at, updated_at = excluded.updated_at
+          WHERE excluded.updated_at > user_annual_recaps.updated_at`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
             'UPDATE OR IGNORE oauth_identities SET username = ? WHERE username = ?',
           )
           .run(canonical, legacy);
@@ -1658,6 +1680,7 @@ export class LocalSqliteStorage implements IStorage {
       'watch_history',
       'playback_watch_buckets',
       'user_message_state',
+      'user_annual_recaps',
       'user_danmaku_settings',
     ];
     const usernames = new Set<string>();
@@ -1900,9 +1923,32 @@ export class LocalSqliteStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
-    filter?: 'updated',
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage> {
     const username = normalizeUsername(userName);
+    if (filter === 'shelved') {
+      const where = buildShelvedPlayRecordWhere(SQLITE_TRACKING_DIALECT);
+      const cutoff = Date.now() - SHELVED_PLAY_RECORD_AGE_MS;
+      const saveTime = SQLITE_TRACKING_DIALECT.jsonTimestamp('save_time');
+      const hasCursor = cursorTime !== undefined && !!cursorKey;
+      const rows = this.db
+        .prepare(
+          `SELECT record_key, record_json FROM play_records
+        WHERE username = ? AND ${where}${hasCursor ? ` AND (${saveTime} < ? OR (${saveTime} = ? AND record_key < ?))` : ''}
+        ORDER BY ${saveTime} DESC, record_key DESC LIMIT ?`,
+        )
+        .all(
+          ...(hasCursor
+            ? [username, cutoff, cursorTime, cursorTime, cursorKey, limit + 1]
+            : [username, cutoff, limit + 1]),
+        ) as { record_key: string; record_json: string }[];
+      const count = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM play_records WHERE username = ? AND ${where}`,
+        )
+        .get(username, cutoff) as { count: number };
+      return buildPlayRecordPage(rows, count.count, limit);
+    }
     const pageStatement =
       filter === 'updated'
         ? this.stmts.getUpdatedPlayRecordPage
@@ -2196,6 +2242,36 @@ export class LocalSqliteStorage implements IStorage {
     return this.social.isNicknameAvailable(...args);
   }
 
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    return this.social.getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    return this.social.getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    return this.social.saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    return this.social.deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    return this.social.getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    return this.social.getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -2839,6 +2915,9 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
+        .run(targetUser);
       this.stmts.deleteLoginActivityByUser.run(targetUser);
       this.db
         .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
@@ -3595,6 +3674,23 @@ export class LocalSqliteStorage implements IStorage {
     };
   }
 
+  async getPlaybackSourceUsage(
+    start: number,
+    end: number,
+    userName?: string,
+  ): Promise<PlaybackSourceUsage[]> {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return [];
+    const personal = userName !== undefined;
+    const params = personal
+      ? [normalizeUsername(userName), start, end]
+      : [start, end];
+    const rows = this.db
+      .prepare(sourceUsageSql(personal))
+      .all(...params) as PlaybackSourceUsageRow[];
+    return aggregateSourceUsage(rows);
+  }
+
   async getPlaybackPeriodSessions(
     userName: string,
     start: number,
@@ -3605,7 +3701,7 @@ export class LocalSqliteStorage implements IStorage {
       return [];
     return this.db
       .prepare(
-        `SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds
+        `SELECT source, video_id, episode_index, title, cover, year, started_at, ended_at, watch_seconds
         FROM playback_sessions
         WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0`,
       )

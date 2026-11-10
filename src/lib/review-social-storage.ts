@@ -2,6 +2,10 @@ import { randomInt } from 'crypto';
 
 import { profileFavoriteOriginSql } from '@/features/favorites/lib/library-storage';
 import {
+  annualRecapSchema,
+  AnnualRecapStorage,
+} from '@/lib/annual-recap-storage';
+import {
   type FollowReviewQuery,
   followReviewMessageId,
   parseFollowReviewMessageId,
@@ -64,6 +68,7 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
     dialect === 'mysql' ? ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin' : '';
   return [
     ...replySchema(dialect),
+    annualRecapSchema(dialect),
     `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_follows (follower ${text} NOT NULL, followee ${text} NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (follower, followee)${dialect === 'mysql' ? ', KEY idx_user_follows_followee (followee)' : ''})${suffix}`,
     ...['likes', 'reports'].map((kind) => {
@@ -259,6 +264,36 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     }
     return (await this.getUserProfile(username))!;
   }
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    return new AnnualRecapStorage(this.sql).getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    return new AnnualRecapStorage(this.sql).getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    return new AnnualRecapStorage(this.sql).saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    return new AnnualRecapStorage(this.sql).deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    return new AnnualRecapStorage(this.sql).getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    return new AnnualRecapStorage(this.sql).getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     username: string,
     viewer: string,
@@ -292,7 +327,9 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         ...(favoritesVisible ? [username] : []),
       ],
     );
+    const year = (await this.getAnnualRecapYears(username))[0];
     return {
+      recap: year ? { year } : null,
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,

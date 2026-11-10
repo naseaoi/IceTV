@@ -56,6 +56,7 @@ const profile: UserProfileView = {
   publicReviewCount: 0,
   favoriteCount: 0,
   libraryVisibility: 0,
+  recap: null,
 };
 beforeEach(() => {
   jest.clearAllMocks();

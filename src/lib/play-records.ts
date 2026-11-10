@@ -62,12 +62,13 @@ export function selectPlayRecordPage(
   records: Record<string, PlayRecord>,
   limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   cursor?: string | null,
-  options?: { filter?: 'updated' },
+  options?: { filter?: 'updated' | 'shelved' },
 ): PlayRecordPage {
   const normalizedLimit = normalizePlayRecordLimit(limit);
-  const entries = sortPlayRecordEntries(records).filter(
-    ([, record]) =>
-      options?.filter !== 'updated' || hasPlayRecordUpdate(record),
+  const entries = sortPlayRecordEntries(records).filter(([, record]) =>
+    options?.filter === 'shelved'
+      ? isPlayRecordShelved(record)
+      : options?.filter !== 'updated' || hasPlayRecordUpdate(record),
   );
   let startIndex = 0;
 
@@ -256,4 +257,19 @@ export function mergePlayRecordUpdateBaseline(
       ? { update_baseline_group_total: Math.max(0, baseline) }
       : { update_baseline_episodes: Math.max(0, baseline) }),
   };
+}
+
+export const SHELVED_PLAY_RECORD_AGE_MS = 30 * 86_400_000;
+
+export function isPlayRecordShelved(
+  record: PlayRecord,
+  now = Date.now(),
+): boolean {
+  const { currentEpisode, totalEpisodes } = getPlayRecordEpisodeDisplay(record);
+  const finished =
+    totalEpisodes > 0 &&
+    currentEpisode >= totalEpisodes &&
+    record.total_time > 0 &&
+    record.play_time >= record.total_time * 0.9;
+  return record.save_time < now - SHELVED_PLAY_RECORD_AGE_MS && !finished;
 }

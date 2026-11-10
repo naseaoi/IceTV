@@ -14,7 +14,7 @@ import {
 
 const KIND_LABELS: Record<MessageNotificationKind, string> = {
   'tracking-update': '追更更新',
-  'follow-review': '关注的人发布评价',
+  'follow-review': '关注的人发布评价或年度报告',
   'review-reply': '回复和 @ 我',
   'new-follower': '新粉丝',
   'review-like': '评价被点赞',

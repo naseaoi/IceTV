@@ -43,6 +43,7 @@ import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOp
 import {
   SOURCE_INSIGHT_DAYS,
   useSourceInsights,
+  useSourceUsage,
 } from '@/features/admin/hooks/useSourceInsights';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
 import {
@@ -108,6 +109,7 @@ const VideoSourceConfig = ({
     config,
     Boolean(config?.SourceConfig),
   );
+  const sourceUsage = useSourceUsage(Boolean(config?.SourceConfig));
   const sourceRouteStats = useMemo(
     () => buildSourceRouteStats(routeStats),
     [routeStats],
@@ -586,6 +588,7 @@ const VideoSourceConfig = ({
                   sourceRouteStats={sourceRouteStats[source.key] || null}
                   sourceHealth={sourceHealth.get(source.key) || null}
                   healthDays={SOURCE_INSIGHT_DAYS}
+                  sourceUsage={sourceUsage.get(source.key) || null}
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                   isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                   isAdminOnlyLoading={isLoading(`adminOnly_${source.key}`)}

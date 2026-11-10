@@ -12,18 +12,20 @@ import {
   Rise,
   SlideBody,
 } from '@/features/annual-report/components/RecapPrimitives';
+import { RecapShareButton } from '@/features/annual-report/components/RecapShareButton';
 import type { SlideProps } from '@/features/annual-report/components/slides/OverviewSlides';
+import { isRecapReleasedLocally } from '@/features/annual-report/lib/client';
 import {
   dominantDaypart,
   durationParts,
   peakIndex,
 } from '@/features/annual-report/lib/format';
 
-export function SummarySlide({ report, nickname, onRestart }: SlideProps) {
+export function SummarySlide({ report, audience, onRestart }: SlideProps) {
   const { totals } = report;
   const { hours, minutes } = durationParts(totals.watchSeconds);
-  const daypart = dominantDaypart(report.hours);
-  const peakHour = peakIndex(report.hours);
+  const daypart = report.rhythmHidden ? null : dominantDaypart(report.hours);
+  const peakHour = report.rhythmHidden ? -1 : peakIndex(report.hours);
   const stats = [
     { label: '活跃天数', value: `${totals.activeDays}`, unit: '天' },
     { label: '看过作品', value: `${totals.workCount}`, unit: '部' },
@@ -32,15 +34,17 @@ export function SummarySlide({ report, nickname, onRestart }: SlideProps) {
       value: `${report.longestStreak?.days ?? 1}`,
       unit: '天',
     },
-    {
-      label: '最常看的时刻',
-      value: peakHour >= 0 ? `${String(peakHour).padStart(2, '0')}:00` : '—',
-      unit: '',
-    },
+    report.rhythmHidden
+      ? { label: '看过集数', value: `${totals.episodeCount}`, unit: '集' }
+      : {
+          label: '最常看的时刻',
+          value:
+            peakHour >= 0 ? `${String(peakHour).padStart(2, '0')}:00` : '—',
+          unit: '',
+        },
   ];
-  const otherYears = report.availableYears.filter(
-    (year) => year !== report.year,
-  );
+  const canShare =
+    audience.kind === 'self' && isRecapReleasedLocally(report.year);
 
   return (
     <>
@@ -55,7 +59,9 @@ export function SummarySlide({ report, nickname, onRestart }: SlideProps) {
           </div>
 
           <div className='mt-6 flex items-center gap-2.5'>
-            <span className='truncate text-lg font-medium'>{nickname}</span>
+            <span className='truncate text-lg font-medium'>
+              {audience.nickname}
+            </span>
             {daypart && (
               <span className='shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700 dark:bg-brand-950 dark:text-brand-200'>
                 {daypart.persona}
@@ -150,17 +156,18 @@ export function SummarySlide({ report, nickname, onRestart }: SlideProps) {
             <RotateCcw className='h-4 w-4' />
             再看一遍
           </button>
-          {otherYears.slice(0, 2).map((year) => (
+          {canShare && <RecapShareButton year={report.year} />}
+          {audience.otherYears.slice(0, canShare ? 1 : 2).map((year) => (
             <Link
               key={year}
-              href={`/recap/${year}`}
+              href={audience.yearHref(year)}
               className={RECAP_BUTTON.secondary}
             >
               {year}
             </Link>
           ))}
-          <Link href='/me' className={RECAP_BUTTON.secondary}>
-            返回我的
+          <Link href={audience.exitHref} className={RECAP_BUTTON.secondary}>
+            {audience.exitLabel}
           </Link>
         </Rise>
       </SlideBody>

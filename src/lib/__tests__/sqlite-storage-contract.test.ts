@@ -1,11 +1,16 @@
 /** @jest-environment node */
 
 import {
+  assertAnnualRecapMessages,
+  assertAnnualRecapStorage,
+} from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import {
   assertBatchDeletePlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
@@ -23,6 +28,12 @@ import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+it('公开年度报告存储与关注消息契约', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  await assertAnnualRecapStorage(storage);
+  await assertAnnualRecapMessages(storage);
+});
 
 describe('SQLite 邀请码批量事务契约', () => {
   inviteCodeBatchContract(() => new LocalSqliteStorage(':memory:'));
@@ -885,6 +896,7 @@ describe('sqlite storage contract', () => {
   it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await assertPlaybackPeriodRange(storage);
+    await assertStatsReuse(storage);
     await assertPlaybackAnnualData(storage);
   });
 
@@ -1143,4 +1155,34 @@ describe('SQLite OAuth 身份契约', () => {
 
 describe('SQLite announcements', () => {
   announcementContract(() => new LocalSqliteStorage(':memory:'));
+});
+
+it('merges annual recap username casing and retains the latest snapshot', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const internal = storage as unknown as {
+    db: import('better-sqlite3').Database;
+    migrateLegacyUsernameCasing(): void;
+  };
+  try {
+    const insert = internal.db.prepare(
+      'INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    insert.run('Alice', 2025, 'UTC', 1, '{}', 100, 300);
+    insert.run('alice', 2025, 'UTC', 0, '{}', 50, 200);
+    insert.run('OnlyRecap', 2024, 'UTC', 1, '{}', 100, 300);
+    internal.migrateLegacyUsernameCasing();
+    expect(await storage.getAnnualRecap('alice', 2025)).toMatchObject({
+      hideRhythm: true,
+      publishedAt: 100,
+      updatedAt: 300,
+    });
+    expect(await storage.getAnnualRecapYears('onlyrecap')).toEqual([2024]);
+    expect(
+      internal.db
+        .prepare('SELECT username FROM user_annual_recaps ORDER BY username')
+        .all(),
+    ).toEqual([{ username: 'alice' }, { username: 'onlyrecap' }]);
+  } finally {
+    internal.db.close();
+  }
 });

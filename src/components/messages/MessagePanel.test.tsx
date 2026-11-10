@@ -485,3 +485,29 @@ it('opens an annual report link and marks its system message read', () => {
   expect(onRead).toHaveBeenCalledWith(message);
   expect(onClose).toHaveBeenCalled();
 });
+
+it('opens a followed annual recap through its opaque profile link and marks it read', () => {
+  const message: UserMessage = {
+    type: 'follow-recap',
+    id: 'follow-recap:AbCdEf012345:2025:1000',
+    author: {
+      profileId: 'AbCdEf012345',
+      nickname: '报告作者',
+      avatarSeed: null,
+    },
+    year: 2025,
+    at: 1000,
+    createdAt: 1000,
+  };
+  const onRead = jest.fn().mockResolvedValue(undefined);
+  renderPanel({
+    page: { items: [message], total: 1, nextCursor: null },
+    onRead,
+  });
+  const link = screen.getByRole('link', {
+    name: /报告作者.*公开了 2025 年度报告/,
+  });
+  expect(link).toHaveAttribute('href', '/u/AbCdEf012345/recap/2025');
+  fireEvent.click(link);
+  expect(onRead).toHaveBeenCalledWith(message);
+});

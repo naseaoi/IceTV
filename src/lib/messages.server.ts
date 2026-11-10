@@ -179,6 +179,8 @@ async function getVisibleMessageSources(
     tracking,
     followed,
     followCount,
+    recaps,
+    recapCount,
     replies,
     replyCount,
     followers,
@@ -204,6 +206,12 @@ async function getVisibleMessageSources(
     muted.has('follow-review')
       ? 0
       : db.getFollowReviewMessageCount(...followArgs),
+    muted.has('follow-review')
+      ? []
+      : db.getFollowRecapMessages(...followArgs, query),
+    muted.has('follow-review')
+      ? 0
+      : db.getFollowRecapMessageCount(...followArgs),
     muted.has('review-reply')
       ? []
       : db.getReviewReplyMessages(...replyArgs, query),
@@ -219,8 +227,8 @@ async function getVisibleMessageSources(
   ]);
   return {
     tracking,
-    followed,
-    followCount,
+    followed: [...followed, ...recaps],
+    followCount: followCount + recapCount,
     replies,
     replyCount,
     followers,
@@ -375,7 +383,9 @@ export async function readUserMessage(
 
   const messageKind = messageId.startsWith('tracking:')
     ? 'tracking-update'
-    : messageId.split(':')[0];
+    : messageId.startsWith('follow-recap:')
+      ? 'follow-review'
+      : messageId.split(':')[0];
   if (state.mutedKinds?.some((kind) => kind === messageKind)) return null;
   for (const [kind, field] of [
     ['new-follower', 'newFollower'],
@@ -414,8 +424,14 @@ export async function readUserMessage(
     return { message };
   }
 
-  if (messageId.startsWith('follow-review:')) {
-    const messages = await db.getFollowReviewMessages(
+  if (
+    messageId.startsWith('follow-review:') ||
+    messageId.startsWith('follow-recap:')
+  ) {
+    const getMessages = messageId.startsWith('follow-recap:')
+      ? db.getFollowRecapMessages.bind(db)
+      : db.getFollowReviewMessages.bind(db);
+    const messages = await getMessages(
       userName,
       state.followReviewReadAt ?? 0,
       state.followReviewReadIds ?? [],

@@ -92,6 +92,36 @@ class DbManager {
     return (await this.getStorage()).isNicknameAvailable(...args);
   }
 
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    return (await this.getStorage()).getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    return (await this.getStorage()).getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    return (await this.getStorage()).saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    return (await this.getStorage()).deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    return (await this.getStorage()).getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    return (await this.getStorage()).getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -386,7 +416,7 @@ class DbManager {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
-    filter?: 'updated',
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage> {
     const storage = await this.getStorage();
     return storage.getPlayRecordPage(
@@ -921,6 +951,12 @@ class DbManager {
   ): Promise<PlaybackWatchTotals> {
     const storage = await this.getStorage();
     return storage.getPlaybackWatchTotals(userName, since);
+  }
+
+  async getPlaybackSourceUsage(
+    ...args: Parameters<IStorage['getPlaybackSourceUsage']>
+  ): ReturnType<IStorage['getPlaybackSourceUsage']> {
+    return (await this.getStorage()).getPlaybackSourceUsage(...args);
   }
 
   async getPlaybackPeriodSessions(

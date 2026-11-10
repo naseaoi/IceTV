@@ -9,6 +9,7 @@ installWebPolyfills();
 const mockGuard = jest.fn();
 const mockSessions = jest.fn();
 const mockTotals = jest.fn();
+const mockAnnual = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: (...args: unknown[]) => mockGuard(...args),
@@ -16,6 +17,7 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/lib/db', () => ({
   db: {
+    getPlaybackAnnualData: (...args: unknown[]) => mockAnnual(...args),
     getPlaybackPeriodSessions: (...args: unknown[]) => mockSessions(...args),
     getPlaybackWatchTotals: (...args: unknown[]) => mockTotals(...args),
   },
@@ -35,6 +37,11 @@ beforeEach(() => {
     isOwner: false,
   });
   mockSessions.mockResolvedValue([]);
+  mockAnnual.mockResolvedValue({
+    sessions: [],
+    buckets: [],
+    earliestStartedAt: null,
+  });
   mockTotals.mockResolvedValue({
     totalWatchSeconds: 120,
     periodWatchSeconds: 60,
@@ -70,6 +77,7 @@ it('returns the calendar period contract and reads the exact storage range', asy
     {
       source: 'a',
       video_id: 'one',
+      episode_index: 1,
       title: 'Show',
       cover: '',
       year: '2026',
@@ -108,6 +116,7 @@ it('returns the calendar period contract and reads the exact storage range', asy
       year: '2026',
       watchSeconds: 60,
       sessionCount: 1,
+      episodeCount: 1,
       lastWatchedAt: Date.parse('2026-11-02T18:00:00Z'),
     },
   ]);

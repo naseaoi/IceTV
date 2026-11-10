@@ -29,14 +29,21 @@ export async function getContinueWatchingSkeletonCount({
 
 export interface ContinueWatchingPageData {
   skeletonCount: number;
-  counts: { all: number | null; updated: number | null };
+  counts: {
+    all: number | null;
+    updated: number | null;
+    shelved: number | null;
+  };
 }
 
-// 继续观看页首屏：骨架条数取计数 cookie，筛选胶囊的两个计数查库
+// 继续观看页首屏：骨架条数取计数 cookie，筛选胶囊的计数查库
 export async function getContinueWatchingPageData(
   skeletonLimit: number,
 ): Promise<ContinueWatchingPageData> {
-  const empty = { skeletonCount: 0, counts: { all: null, updated: null } };
+  const empty = {
+    skeletonCount: 0,
+    counts: { all: null, updated: null, shelved: null },
+  };
   const cookieStore = await cookies();
   const authCookie = cookieStore.get('auth')?.value;
   if (!authCookie) return empty;
@@ -49,17 +56,31 @@ export async function getContinueWatchingPageData(
     skeletonLimit,
   );
   try {
-    const [page, trackingPage] = await Promise.all([
+    const [page, trackingPage, shelvedPage] = await Promise.all([
       db.getPlayRecordPage(session.username, 1),
       db.getUnreadTrackingPlayRecordPage(session.username, 1),
+      db.getPlayRecordPage(
+        session.username,
+        1,
+        undefined,
+        undefined,
+        'shelved',
+      ),
     ]);
     return {
       skeletonCount,
-      counts: { all: page.total, updated: trackingPage.total },
+      counts: {
+        all: page.total,
+        updated: trackingPage.total,
+        shelved: shelvedPage.total,
+      },
     };
   } catch (error) {
     console.error('获取继续观看计数失败:', error);
-    return { skeletonCount, counts: { all: null, updated: null } };
+    return {
+      skeletonCount,
+      counts: { all: null, updated: null, shelved: null },
+    };
   }
 }
 

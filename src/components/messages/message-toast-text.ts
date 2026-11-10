@@ -3,6 +3,8 @@ import { UserMessage, UserMessageSummary } from '@/lib/message-types';
 export type RefreshMode = 'mount' | 'poll' | 'external' | 'local';
 
 function describeMessage(message: UserMessage): string {
+  if (message.type === 'follow-recap')
+    return `${message.author.nickname ?? '未设置昵称'}公开了 ${message.year} 年度报告`;
   if (message.type === 'annual-report')
     return `你的 ${message.year} 年度观影报告已生成`;
   return message.type === 'announcement'
@@ -29,7 +31,7 @@ export function buildToastText(
     if (summary.newFollowerUnreadCount > 0) return '有新的关注者';
     if (summary.reviewLikeUnreadCount > 0) return '你的评价收到了新的赞';
     if (summary.reviewReplyUnreadCount > 0) return '收到新的评价回复';
-    if (summary.followReviewUnreadCount > 0) return '关注的人发布了新评价';
+    if (summary.followReviewUnreadCount > 0) return '关注的人发布了新动态';
     const single =
       summary.announcement ?? summary.annualReport ?? summary.latestTracking;
     return single ? describeMessage(single) : '有未读消息';
@@ -41,7 +43,7 @@ export function buildToastText(
   if (
     summary.followReviewUnreadCount > (previous?.followReviewUnreadCount ?? 0)
   )
-    return '关注的人发布了新评价';
+    return '关注的人发布了新动态';
 
   if (summary.reviewReplyUnreadCount > (previous?.reviewReplyUnreadCount ?? 0))
     return '收到新的评价回复';

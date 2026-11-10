@@ -102,6 +102,7 @@ export interface PublicUserRef {
 }
 
 export interface UserProfileView extends PublicUserRef {
+  recap: { year: number } | null;
   isSelf: boolean;
   isFollowing: boolean;
   followerCount: number;
@@ -328,6 +329,7 @@ export interface PlaybackWatchBucket {
 
 export type PlaybackPeriodSession = Pick<
   PlaybackSession,
+  | 'episode_index'
   | 'source'
   | 'video_id'
   | 'title'
@@ -488,6 +490,12 @@ export interface SiteAnnouncement {
 
 // 存储接口
 export interface IStorage {
+  getAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecap'];
+  getAnnualRecapYears: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecapYears'];
+  saveAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['saveAnnualRecap'];
+  deleteAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['deleteAnnualRecap'];
+  getFollowRecapMessages: import('@/lib/annual-recap-storage').AnnualRecapStorage['getFollowRecapMessages'];
+  getFollowRecapMessageCount: import('@/lib/annual-recap-storage').AnnualRecapStorage['getFollowRecapMessageCount'];
   listAnnouncements(limit: number): Promise<SiteAnnouncement[]>;
   countAnnouncements(): Promise<number>;
   getPublishedAnnouncements(options: {
@@ -538,7 +546,7 @@ export interface IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
-    filter?: 'updated',
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage>;
   getUnreadTrackingPlayRecordPage(
     userName: string,
@@ -914,6 +922,13 @@ export interface IStorage {
     userName: string,
     since: number,
   ): Promise<PlaybackWatchTotals>;
+  getPlaybackSourceUsage(
+    start: number,
+    end: number,
+    userName?: string,
+  ): Promise<
+    import('@/features/playback-stats/lib/source-usage').PlaybackSourceUsage[]
+  >;
   getPlaybackPeriodSessions(
     userName: string,
     start: number,

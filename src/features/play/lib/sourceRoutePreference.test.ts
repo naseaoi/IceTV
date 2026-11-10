@@ -206,3 +206,44 @@ describe('client route preference', () => {
     },
   );
 });
+
+it('uses personal duration only as the final neutral, same-health and same-route tie breaker', () => {
+  const personal = {
+    ...context,
+    watchSeconds: { browser: 20, auto: 100, poor: 9999, relay: 99999 },
+  };
+  expect(
+    preferDirectRouteSources(
+      ['browser', 'auto', 'relay', 'poor'].map(source),
+      personal,
+      stats,
+    ).map((item) => item.source),
+  ).toEqual(['auto', 'browser', 'relay', 'poor']);
+  const trusted = {
+    startupMs: 100,
+    successes: 5,
+    failures: 0,
+    manualSelections: 0,
+    lastUsedAt: now,
+  };
+  expect(
+    compareSourceRoutePreference(
+      source('browser'),
+      source('auto'),
+      personal,
+      new Map([
+        ['browser', trusted],
+        ['auto', trusted],
+      ]),
+      now,
+    ),
+  ).toBe(0);
+  expect(
+    compareSourceRoutePreference(
+      source('browser'),
+      source('auto'),
+      { ...personal, healthTiers: {} },
+      stats,
+    ),
+  ).toBe(0);
+});

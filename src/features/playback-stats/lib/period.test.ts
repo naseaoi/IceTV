@@ -2,14 +2,18 @@ import type { PlaybackPeriodSession } from '@/lib/types';
 
 import {
   aggregatePlaybackPeriod,
+  aggregatePlaybackRhythm,
   buildPlaybackPeriod,
+  currentPlaybackStreak,
   PlaybackPeriodValidationError,
+  playbackStreakRange,
 } from './period';
 
 const instant = (value: string) => Date.parse(value);
 const session = (
   overrides: Partial<PlaybackPeriodSession> = {},
 ): PlaybackPeriodSession => ({
+  episode_index: 1,
   source: 'a',
   video_id: 'one',
   title: 'Show A',
@@ -203,12 +207,14 @@ describe('period aggregation', () => {
       cover: 'new',
       watchSeconds: 120,
       sessionCount: 2,
+      episodeCount: 1,
       lastWatchedAt: latest.ended_at,
     });
     expect(result.topWorks[1]).toMatchObject({
       title: 'Other',
       watchSeconds: 120,
       sessionCount: 2,
+      episodeCount: 1,
     });
   });
 
@@ -243,4 +249,82 @@ describe('period aggregation', () => {
     expect(result.buckets[0].watchSeconds).toBe(60);
     expect(result.buckets[11].watchSeconds).toBe(0);
   });
+});
+
+it('counts distinct episode indices across sources while preserving session totals', () => {
+  const period = buildPlaybackPeriod({ date: '2026-11-03' });
+  const result = aggregatePlaybackPeriod(
+    period,
+    [
+      session(),
+      session({ source: 'b', episode_index: 1 }),
+      session({ episode_index: 2 }),
+    ],
+    0,
+  );
+  expect(result.topWorks[0]).toMatchObject({
+    episodeCount: 2,
+    sessionCount: 3,
+    watchSeconds: 180,
+  });
+});
+
+it('uses actual v2 buckets and continuous v1 estimates for local hours and days', () => {
+  const period = buildPlaybackPeriod({
+    date: '2026-11-03',
+    timeZone: 'Asia/Shanghai',
+  });
+  const start = instant('2026-11-02T15:45:00Z');
+  const result = aggregatePlaybackRhythm(
+    {
+      earliestStartedAt: start,
+      sessions: [
+        {
+          ...session(),
+          id: 'legacy',
+          source_name: 'A',
+          measurement_version: 1,
+          started_at: start,
+          watch_seconds: 1800,
+        },
+        {
+          ...session(),
+          id: 'actual',
+          source_name: 'A',
+          measurement_version: 2,
+          watch_seconds: 60,
+        },
+      ],
+      buckets: [
+        {
+          session_id: 'actual',
+          bucket_start: instant('2026-11-03T02:00:00Z'),
+          watch_ms: 60_000,
+        },
+      ],
+    },
+    period,
+  );
+  expect(result.hours[23]).toBe(900);
+  expect(result.hours[0]).toBe(900);
+  expect(result.hours[10]).toBe(60);
+  expect([...result.days]).toEqual(
+    expect.arrayContaining(['2026-11-02', '2026-11-03']),
+  );
+});
+
+it('continues yesterday streak, resets after a gap, and caps at 366 local dates', () => {
+  const now = instant('2026-11-03T12:00:00Z');
+  const days = new Set(['2026-11-01', '2026-11-02']);
+  expect(currentPlaybackStreak(days, 'UTC', now)).toBe(2);
+  expect(currentPlaybackStreak(new Set(['2026-11-01']), 'UTC', now)).toBe(0);
+  days.add('2026-11-03');
+  expect(currentPlaybackStreak(days, 'UTC', now)).toBe(3);
+  const many = new Set(
+    Array.from({ length: 400 }, (_, i) =>
+      new Date(now - i * 86400000).toISOString().slice(0, 10),
+    ),
+  );
+  expect(currentPlaybackStreak(many, 'UTC', now)).toBe(366);
+  expect(playbackStreakRange('America/New_York', now).end).toBe(now + 1);
 });

@@ -196,7 +196,7 @@ describe('playrecords route', () => {
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
-  it.each(['updated', 'unknown'])(
+  it.each(['updated', 'shelved', 'unknown'])(
     '分页传递筛选 %s 并保留游标',
     async (filter) => {
       const response = await GET(
@@ -210,7 +210,7 @@ describe('playrecords route', () => {
         2,
         200,
         'source+middle',
-        filter === 'updated' ? 'updated' : undefined,
+        filter === 'updated' || filter === 'shelved' ? filter : undefined,
       );
       expect(await response.json()).toEqual(
         await mockGetPlayRecordPage.mock.results[0].value,

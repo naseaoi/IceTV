@@ -10,6 +10,7 @@ import {
 export interface SourceSelectionContext {
   proxyModes: Readonly<Record<string, string>>;
   healthTiers: Readonly<Record<string, SourceHealthTier>>;
+  watchSeconds?: Readonly<Record<string, number>>;
 }
 
 export const EMPTY_SOURCE_SELECTION_CONTEXT: SourceSelectionContext = {
@@ -50,10 +51,14 @@ export function compareSourceRoutePreference(
     if (healthDifference) return healthDifference;
   }
 
-  return (
+  const routeDifference =
     Number(context.proxyModes[a.source] === 'server') -
-    Number(context.proxyModes[b.source] === 'server')
-  );
+    Number(context.proxyModes[b.source] === 'server');
+  if (routeDifference) return routeDifference;
+  return aTier === 1
+    ? (context.watchSeconds?.[b.source] ?? 0) -
+        (context.watchSeconds?.[a.source] ?? 0)
+    : 0;
 }
 
 export function preferDirectRouteSources<T extends { source: string }>(

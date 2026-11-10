@@ -18,30 +18,34 @@ import {
   RecapStageFrame,
 } from '@/features/annual-report/components/RecapStage';
 import {
+  type RecapAudience,
+  type RecapReport,
+  selfAudience,
+  visitorAudience,
+} from '@/features/annual-report/lib/audience';
+import {
   AnnualReportError,
   fetchAnnualReport,
+  fetchPublicRecap,
 } from '@/features/annual-report/lib/client';
-import type { AnnualReport } from '@/features/playback-stats/types';
+
+type Loaded = { report: RecapReport; audience: RecapAudience };
 
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string; retryable: boolean }
-  | { status: 'ready'; report: AnnualReport };
+  | ({ status: 'ready' } & Loaded);
 
-export function AnnualReportClient({ year }: { year: number }) {
-  const { session } = useAuthSession();
-  const nickname =
-    session.status === 'authenticated'
-      ? (session.nickname ?? session.username)
-      : '';
+// load 需由调用方 useCallback 固定，身份变化即重新加载
+function useRecapLoader(load: (signal: AbortSignal) => Promise<Loaded>) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: 'loading' });
-    fetchAnnualReport(year, controller.signal)
-      .then((report) => setState({ status: 'ready', report }))
+    load(controller.signal)
+      .then((loaded) => setState({ status: 'ready', ...loaded }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setState({
@@ -54,25 +58,42 @@ export function AnnualReportClient({ year }: { year: number }) {
         });
       });
     return () => controller.abort();
-  }, [year, attempt]);
+  }, [load, attempt]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
+  return { state, retry };
+}
 
+function RecapLoadView({
+  year,
+  state,
+  retry,
+  exitHref,
+  exitLabel,
+}: {
+  year: number;
+  state: LoadState;
+  retry: () => void;
+  exitHref: string;
+  exitLabel: string;
+}) {
   if (state.status === 'ready') {
-    return <RecapStage key={year} report={state.report} nickname={nickname} />;
+    return (
+      <RecapStage key={year} report={state.report} audience={state.audience} />
+    );
   }
 
   return (
     <RecapShell>
       <RecapStageFrame>
         <RecapBackdrop tint='ice' />
-        <RecapHeader year={year} />
+        <RecapHeader year={year} exitHref={exitHref} />
         <div className='relative flex h-full flex-col items-center justify-center px-8 text-center'>
           {state.status === 'loading' ? (
             <>
-              <Spinner className='h-7 w-7' label='正在生成年度报告' />
+              <Spinner className='h-7 w-7' label='正在载入年度报告' />
               <div className={`mt-4 text-sm ${RECAP_TEXT.secondary}`}>
-                正在生成 {year} 年度报告
+                正在载入 {year} 年度报告
               </div>
             </>
           ) : (
@@ -91,8 +112,8 @@ export function AnnualReportClient({ year }: { year: number }) {
                     重试
                   </button>
                 )}
-                <Link href='/me' className={RECAP_BUTTON.secondary}>
-                  返回我的
+                <Link href={exitHref} className={RECAP_BUTTON.secondary}>
+                  {exitLabel}
                 </Link>
               </div>
             </>
@@ -100,5 +121,69 @@ export function AnnualReportClient({ year }: { year: number }) {
         </div>
       </RecapStageFrame>
     </RecapShell>
+  );
+}
+
+export function AnnualReportClient({ year }: { year: number }) {
+  const { session } = useAuthSession();
+  const nickname =
+    session.status === 'authenticated'
+      ? (session.nickname ?? session.username)
+      : '';
+  const load = useCallback(
+    async (signal: AbortSignal) => {
+      const report = await fetchAnnualReport(year, signal);
+      return { report, audience: selfAudience(report, nickname) };
+    },
+    [year, nickname],
+  );
+  const { state, retry } = useRecapLoader(load);
+  return (
+    <RecapLoadView
+      year={year}
+      state={state}
+      retry={retry}
+      exitHref='/me'
+      exitLabel='返回我的'
+    />
+  );
+}
+
+export function PublicRecapClient({
+  profileId,
+  year,
+}: {
+  profileId: string;
+  year: number;
+}) {
+  const load = useCallback(
+    async (signal: AbortSignal) => {
+      const { owner, isSelf, report, years } = await fetchPublicRecap(
+        profileId,
+        year,
+        signal,
+      );
+      const audience = visitorAudience({
+        profileId: owner.profileId,
+        nickname: owner.nickname ?? '',
+        year,
+        years,
+      });
+      return {
+        report,
+        audience: isSelf ? { ...audience, you: '你' } : audience,
+      };
+    },
+    [profileId, year],
+  );
+  const { state, retry } = useRecapLoader(load);
+  return (
+    <RecapLoadView
+      year={year}
+      state={state}
+      retry={retry}
+      exitHref={`/u/${encodeURIComponent(profileId)}`}
+      exitLabel='返回主页'
+    />
   );
 }

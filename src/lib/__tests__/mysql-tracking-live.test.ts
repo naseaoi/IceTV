@@ -1,6 +1,10 @@
 /** @jest-environment node */
 
 import {
+  assertAnnualRecapMessages,
+  assertAnnualRecapStorage,
+} from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import {
   assertBatchDeletePlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
@@ -8,6 +12,7 @@ import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
+import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 
 import { MySqlStorage } from '../mysql.db';
@@ -699,7 +704,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
   it('reads period sessions with real SQL range and user predicates', async () => {
     await assertPlaybackPeriodRange(storage);
+    await assertStatsReuse(storage);
     await assertPlaybackAnnualData(storage);
+    await assertAnnualRecapStorage(storage);
+    await assertAnnualRecapMessages(storage);
   });
 
   it('serializes concurrent message-state updates on a missing row', async () => {

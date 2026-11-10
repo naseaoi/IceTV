@@ -38,7 +38,7 @@ const DAYPART_TINT: Record<DaypartKey, RecapTint> = {
   night: 'night',
 };
 
-export function HoursSlide({ report }: SlideProps) {
+export function HoursSlide({ report, audience }: SlideProps) {
   const daypart = dominantDaypart(report.hours);
   const peakHour = peakIndex(report.hours);
   const daypartSeconds = daypart
@@ -62,7 +62,7 @@ export function HoursSlide({ report }: SlideProps) {
       <SlideBody center>
         <Kicker>Hours</Kicker>
         <Headline d={1} className='mt-6'>
-          你是「{daypart?.persona ?? '黄金档主角'}」
+          {audience.you}是「{daypart?.persona ?? '黄金档主角'}」
         </Headline>
         {daypart && (
           <Lead d={2} className='mt-2'>
@@ -105,7 +105,7 @@ export function HoursSlide({ report }: SlideProps) {
   );
 }
 
-export function NightSlide({ report }: SlideProps) {
+export function NightSlide({ report, audience }: SlideProps) {
   const night = report.latestNight!;
   return (
     <>
@@ -116,7 +116,7 @@ export function NightSlide({ report }: SlideProps) {
           {formatInstantDate(night.at, report.timeZone)}
         </Lead>
         <Headline d={2} className='mt-1'>
-          {formatClock(night.localTime)}，你还在看
+          {formatClock(night.localTime)}，{audience.you}还在看
         </Headline>
         <Rise d={3} className='mt-10 flex items-end gap-5'>
           <RecapCover
@@ -143,7 +143,7 @@ export function NightSlide({ report }: SlideProps) {
   );
 }
 
-export function PeakSlide({ report }: SlideProps) {
+export function PeakSlide({ report, audience }: SlideProps) {
   const peak = report.peakDay!;
   return (
     <>
@@ -157,7 +157,7 @@ export function PeakSlide({ report }: SlideProps) {
           {formatDate(peak.date)}
         </Rise>
         <Lead d={2} className='mt-4'>
-          这一天，你看了
+          这一天，{audience.you}看了
           <span className={`mx-1 ${RECAP_TEXT.accent}`}>
             {formatDuration(peak.watchSeconds)}
           </span>

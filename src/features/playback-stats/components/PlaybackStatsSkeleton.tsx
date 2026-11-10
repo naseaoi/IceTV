@@ -17,6 +17,20 @@ export const STATS_COLUMN_CLASS = 'flex min-w-0 flex-col';
 export const STATS_CARD_CLASS =
   'mt-2 flex flex-col rounded-2xl bg-white p-4 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10 sm:p-5 md:mb-6 md:flex-1';
 
+// 周柱状图：每天一条满宽底槽，时长从底部按比例填充；骨架与真实组件共用
+export const WEEK_CHART_CLASS =
+  'mt-5 grid min-h-0 flex-1 grid-cols-7 gap-2 sm:gap-2.5';
+export const WEEK_DAY_CLASS = 'flex min-w-0 flex-col items-stretch gap-2';
+export const WEEK_TRACK_CLASS =
+  'relative flex h-20 w-full items-end overflow-hidden rounded-lg md:h-auto md:min-h-20 md:flex-1';
+export const WEEK_LABEL_CLASS = 'flex h-4 items-center justify-center text-xs';
+
+// 时段条：24 格热度 + 刻度行，骨架与真实组件共用
+export const HOUR_STRIP_CLASS = 'mt-4 shrink-0';
+export const HOUR_STRIP_CELLS_CLASS = 'flex h-3 gap-[2px]';
+export const HOUR_STRIP_AXIS_CLASS =
+  'relative mt-1.5 h-[15px] text-[10px] leading-[15px] tabular-nums';
+
 export function StatsHeading({
   title,
   children,
@@ -74,20 +88,19 @@ export function PlaybackStatsSkeleton() {
             <MetricSkeleton />
             <MetricSkeleton />
           </div>
-          <div className='mt-5 grid flex-1 grid-cols-7 gap-1.5'>
+          <div className={WEEK_CHART_CLASS}>
             {Array.from({ length: 7 }, (_, index) => (
-              <div key={index} className='flex flex-col items-center gap-2'>
-                <div className='flex h-20 w-full items-end justify-center md:h-auto md:min-h-20 md:flex-1'>
-                  <div
-                    className={`w-full max-w-[28px] rounded-md ${BLOCK_CLASS}`}
-                    style={{ height: 12 + ((index * 11) % 44) }}
-                  />
-                </div>
-                <div className='flex h-4 items-center'>
+              <div key={index} className={WEEK_DAY_CLASS}>
+                <div className={`${WEEK_TRACK_CLASS} skeleton`} />
+                <div className={WEEK_LABEL_CLASS}>
                   <div className={`h-3 w-4 ${BLOCK_CLASS}`} />
                 </div>
               </div>
             ))}
+          </div>
+          <div className={HOUR_STRIP_CLASS}>
+            <div className={`${HOUR_STRIP_CELLS_CLASS} ${BLOCK_CLASS}`} />
+            <div className={HOUR_STRIP_AXIS_CLASS} />
           </div>
         </div>
       </section>

@@ -13,6 +13,50 @@ export function executeSocial(
   params: unknown[],
   state: SocialFakeState,
 ): number | undefined {
+  if (sql.startsWith('INSERT INTO user_annual_recaps')) {
+    const rows = (state.social.user_annual_recaps ??= []);
+    const existing = rows.find(
+      (row) => row.username === params[0] && row.year === params[1],
+    );
+    const row = {
+      username: params[0],
+      year: params[1],
+      time_zone: params[2],
+      hide_rhythm: params[3],
+      report_json: params[4],
+      published_at: existing?.published_at ?? params[5],
+      updated_at: params[6],
+    };
+    if (existing) Object.assign(existing, row);
+    else rows.push(row);
+    return 1;
+  }
+  if (sql.startsWith('UPDATE user_annual_recaps')) {
+    const row = (state.social.user_annual_recaps ?? []).find(
+      (row) =>
+        row.username === params[4] &&
+        row.year === params[5] &&
+        row.published_at === params[6] &&
+        row.updated_at === params[7],
+    );
+    if (!row) return 0;
+    Object.assign(row, {
+      time_zone: params[0],
+      hide_rhythm: params[1],
+      report_json: params[2],
+      updated_at: params[3],
+    });
+    return 1;
+  }
+  if (sql.startsWith('DELETE FROM user_annual_recaps')) {
+    const rows = state.social.user_annual_recaps ?? [];
+    state.social.user_annual_recaps = rows.filter(
+      (row) =>
+        row.username !== params[0] ||
+        (params.length > 1 && row.year !== params[1]),
+    );
+    return rows.length - state.social.user_annual_recaps.length;
+  }
   const table =
     /(?:INTO|UPDATE|FROM) (user_profiles|user_follows|video_review_likes|video_review_reports|video_review_replies|video_review_reply_reports)\b/.exec(
       sql,
@@ -160,6 +204,15 @@ export function querySocial(
   params: unknown[],
   state: SocialFakeState,
 ): Row[] | undefined {
+  if (sql.includes('FROM user_annual_recaps WHERE')) {
+    return (state.social.user_annual_recaps ?? [])
+      .filter(
+        (row) =>
+          row.username === params[0] &&
+          (params.length === 1 || row.year === params[1]),
+      )
+      .sort((a, b) => b.year - a.year);
+  }
   if (
     sql.startsWith('SHOW INDEX FROM user_follows') ||
     sql.startsWith('SHOW INDEX FROM video_review_likes')

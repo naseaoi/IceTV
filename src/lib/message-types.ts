@@ -42,6 +42,15 @@ export interface TrackingUpdateUserMessage {
   createdAt: number;
 }
 
+export interface FollowRecapUserMessage {
+  id: string;
+  type: 'follow-recap';
+  author: import('./types').PublicUserRef;
+  year: number;
+  at: number;
+  createdAt: number;
+}
+
 export interface FollowReviewUserMessage {
   id: string;
   type: 'follow-review';
@@ -88,6 +97,7 @@ export type UserMessage =
   | AnnualReportUserMessage
   | AnnouncementUserMessage
   | TrackingUpdateUserMessage
+  | FollowRecapUserMessage
   | FollowReviewUserMessage
   | ReviewReplyUserMessage
   | NewFollowerUserMessage

@@ -15,6 +15,10 @@ import {
   SOURCE_HEALTH_SCORE_CLASS,
   SOURCE_HEALTH_TIER_LABEL,
 } from '@/features/admin/components/tabs/video-source/sourceHealthView';
+import {
+  type SourceUsageItem,
+  SOURCE_USAGE_DAYS,
+} from '@/features/admin/hooks/useSourceInsights';
 import { checkboxStyles } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
 import {
@@ -59,6 +63,7 @@ interface SortableSourceRowProps {
   sourceRouteStats: SourceRouteStatsView | null;
   sourceHealth: SourceHealthReportItem | null;
   healthDays: number;
+  sourceUsage?: SourceUsageItem | null;
   isProxyModeLoading: boolean;
   isSortingDisabled?: boolean;
   isToggleLoading: boolean;
@@ -81,6 +86,7 @@ export function SortableSourceRow({
   sourceRouteStats,
   sourceHealth,
   healthDays,
+  sourceUsage = null,
   isProxyModeLoading,
   isSortingDisabled = false,
   isToggleLoading,
@@ -115,6 +121,13 @@ export function SortableSourceRow({
       return `${mode === 'browser' ? '直连' : '代理'} ${stats ? `${stats.successCount}/${stats.totalCount}` : '—'}`;
     })
     .join(' · ');
+  const usageHours = sourceUsage ? sourceUsage.watchSeconds / 3600 : 0;
+  const usageSummary = sourceUsage
+    ? `观看 ${usageHours >= 10 ? Math.round(usageHours) : usageHours.toFixed(1)}h · ${sourceUsage.userCount} 人`
+    : '观看 —';
+  const usageTitle = sourceUsage
+    ? `${SOURCE_USAGE_DAYS}天观看 ${usageHours.toFixed(1)} 小时 · ${sourceUsage.userCount} 位用户 · ${sourceUsage.workCount} 部作品`
+    : `${SOURCE_USAGE_DAYS}天内无人观看`;
   const description = [source.api, source.detail].filter(Boolean).join(' · ');
   const healthChipClass = sourceHealth
     ? SOURCE_HEALTH_CHIP_CLASS[sourceHealth.tier]
@@ -214,6 +227,12 @@ export function SortableSourceRow({
           >
             {sourceHealth?.score ?? '—'}
           </span>
+        </span>
+        <span
+          className='hidden whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400 xl:inline'
+          title={usageTitle}
+        >
+          {usageSummary}
         </span>
         <span
           className='hidden whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400 lg:inline'

@@ -29,7 +29,11 @@ export async function GET(request: NextRequest) {
         normalizePlayRecordLimit(searchParams.get('limit')),
         cursor?.time,
         cursor?.key,
-        searchParams.get('filter') === 'updated' ? 'updated' : undefined,
+        searchParams.get('filter') === 'shelved'
+          ? 'shelved'
+          : searchParams.get('filter') === 'updated'
+            ? 'updated'
+            : undefined,
       );
       return NextResponse.json(page, {
         status: 200,

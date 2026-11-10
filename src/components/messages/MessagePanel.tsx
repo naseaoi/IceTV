@@ -129,6 +129,20 @@ function MessageBody({ message }: { message: UserMessage }) {
       </>
     );
 
+  if (message.type === 'follow-recap')
+    return (
+      <>
+        <ProfileAvatar user={message.author} className={MESSAGE_LEAD_CLASS} />
+        <div className='min-w-0 flex-1 pt-0.5'>
+          <SocialLine
+            name={message.author.nickname ?? '未设置昵称'}
+            action={`公开了 ${message.year} 年度报告`}
+          />
+          <p className={MESSAGE_META_CLASS}>{formatRelativeTime(message.at)}</p>
+        </div>
+      </>
+    );
+
   if (message.type === 'new-follower' || message.type === 'review-like') {
     const user =
       message.type === 'new-follower' ? message.follower : message.latestLiker;
@@ -222,7 +236,10 @@ function MessageRow({
   onOpenReview: (message: ReviewMessage) => void;
 }) {
   const bodyClass = 'flex min-w-0 flex-1 gap-3 text-left';
-  const clickable = isReviewMessage(message) || message.type === 'new-follower';
+  const clickable =
+    isReviewMessage(message) ||
+    message.type === 'new-follower' ||
+    message.type === 'follow-recap';
 
   return (
     <div
@@ -246,6 +263,17 @@ function MessageRow({
       ) : message.type === 'annual-report' ? (
         <Link
           href={`/recap/${message.year}`}
+          onClick={() => {
+            void onRead(message);
+            onNavigate();
+          }}
+          className={bodyClass}
+        >
+          <MessageBody message={message} />
+        </Link>
+      ) : message.type === 'follow-recap' ? (
+        <Link
+          href={`/u/${message.author.profileId}/recap/${message.year}`}
           onClick={() => {
             void onRead(message);
             onNavigate();

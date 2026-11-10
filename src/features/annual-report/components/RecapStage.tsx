@@ -15,6 +15,7 @@ import {
   useState,
 } from 'react';
 
+import { hasOpenModalShell } from '@/components/modals/ModalShell';
 import { RECAP_TEXT } from '@/features/annual-report/components/RecapPrimitives';
 import {
   type SlideProps,
@@ -37,11 +38,14 @@ import {
   SourcesSlide,
   TopWorkSlide,
 } from '@/features/annual-report/components/slides/WorkSlides';
+import type {
+  RecapAudience,
+  RecapReport,
+} from '@/features/annual-report/lib/audience';
 import {
   type SlideKey,
   buildSlides,
 } from '@/features/annual-report/lib/format';
-import type { AnnualReport } from '@/features/playback-stats/types';
 
 const SLIDES: Record<SlideKey, ComponentType<SlideProps>> = {
   intro: IntroSlide,
@@ -94,7 +98,13 @@ export function RecapStageFrame({ children }: { children: ReactNode }) {
   );
 }
 
-export function RecapHeader({ year }: { year: number }) {
+export function RecapHeader({
+  year,
+  exitHref = '/me',
+}: {
+  year: number;
+  exitHref?: string;
+}) {
   return (
     <div className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between px-5 pt-[calc(env(safe-area-inset-top)+1rem)]'>
       <div
@@ -103,7 +113,7 @@ export function RecapHeader({ year }: { year: number }) {
         IceTV · {year}
       </div>
       <Link
-        href='/me'
+        href={exitHref}
         aria-label='关闭年度报告'
         className='pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
       >
@@ -127,12 +137,17 @@ function scrollEdges(target: EventTarget | null): {
   };
 }
 
+// 弹窗经 portal 挂在 body 上，React 事件仍会冒泡到舞台，不能当作翻页手势
+function fromStage(event: { currentTarget: Element; target: EventTarget }) {
+  return event.currentTarget.contains(event.target as Node);
+}
+
 export function RecapStage({
   report,
-  nickname,
+  audience,
 }: {
-  report: AnnualReport;
-  nickname: string;
+  report: RecapReport;
+  audience: RecapAudience;
 }) {
   const [slides] = useState(() => buildSlides(report));
   const [coarsePointer] = useState(
@@ -183,7 +198,8 @@ export function RecapStage({
         event.defaultPrevented ||
         event.altKey ||
         event.metaKey ||
-        event.ctrlKey
+        event.ctrlKey ||
+        hasOpenModalShell()
       ) {
         return;
       }
@@ -206,6 +222,10 @@ export function RecapStage({
   }, [next, previous]);
 
   const handleTouchStart = (event: TouchEvent<HTMLElement>) => {
+    if (!fromStage(event)) {
+      touchRef.current = null;
+      return;
+    }
     const touch = event.touches[0];
     if (event.touches.length !== 1 || !touch) {
       touchRef.current = null;
@@ -233,12 +253,14 @@ export function RecapStage({
   };
 
   const handleClick = (event: MouseEvent<HTMLElement>) => {
+    if (!fromStage(event)) return;
     if ((event.target as HTMLElement).closest('a, button')) return;
     if (Date.now() - lastSwipeAtRef.current < SWIPE_CLICK_GUARD_MS) return;
     next();
   };
 
   const handleWheel = (event: WheelEvent<HTMLElement>) => {
+    if (!fromStage(event)) return;
     const wheel = wheelRef.current;
     const now = event.timeStamp;
     const gap = now - wheel.lastAt;
@@ -273,7 +295,7 @@ export function RecapStage({
         className={`absolute inset-0 ${className}`}
         style={{ '--dir': dir } as CSSProperties}
       >
-        <Slide report={report} nickname={nickname} onRestart={restart} />
+        <Slide report={report} audience={audience} onRestart={restart} />
       </div>
     );
   };
@@ -302,7 +324,7 @@ export function RecapStage({
           )}
         </div>
 
-        <RecapHeader year={report.year} />
+        <RecapHeader year={report.year} exitHref={audience.exitHref} />
 
         {!isLast && (
           <button

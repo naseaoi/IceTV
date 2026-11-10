@@ -124,7 +124,7 @@ it('关注评价新增时提示关注动态而非旧追更', () => {
     followReviewUnreadCount: 1,
   });
   expect(buildToastText(summary, previous, 'poll')).toBe(
-    '关注的人发布了新评价',
+    '关注的人发布了新动态',
   );
 });
 
