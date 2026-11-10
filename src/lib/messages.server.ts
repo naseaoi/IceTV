@@ -2,7 +2,10 @@ import 'server-only';
 
 import { createHash } from 'crypto';
 
-import { getConfigForRead } from '@/lib/config';
+import {
+  buildAnnouncementMessageId,
+  parseAnnouncementMessageId,
+} from '@/lib/announcement-identity';
 import { db } from '@/lib/db';
 import {
   decodeCursor,
@@ -11,6 +14,7 @@ import {
   messageSortKey,
 } from '@/lib/message-cursor.server';
 import {
+  AnnouncementHistoryPage,
   AnnouncementUserMessage,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
@@ -25,31 +29,29 @@ import {
   hasPlayRecordUpdate,
   markPlayRecordUpdateRead,
 } from '@/lib/play-records';
-import { PlayRecord, UserMessageState } from '@/lib/types';
+import { PlayRecord, SiteAnnouncement, UserMessageState } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
+import { ReviewValidationError } from '@/lib/video-reviews';
 
 const READ_ALL_BATCH_SIZE = 200;
+// 与社交通知一致只回看最近 30 天：新注册用户不会收到全部历史公告
+const ANNOUNCEMENT_UNREAD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const ANNOUNCEMENT_UNREAD_LIMIT = 50;
+const ANNOUNCEMENT_HISTORY_LIMIT = 20;
 
 function hashValue(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 20);
 }
 
-function buildAnnouncementMessage(
-  announcement: string,
-  version?: string,
-  publishedAt?: number,
+function toAnnouncementMessage(
+  row: SiteAnnouncement,
 ): AnnouncementUserMessage | null {
-  const content = announcement.trim();
-  if (!content) return null;
-
+  if (row.publishedAt === null) return null;
   return {
-    id: `announcement:${version || hashValue(content)}`,
+    id: buildAnnouncementMessageId(row.id, row.publishedAt),
     type: 'announcement',
-    content,
-    createdAt:
-      typeof publishedAt === 'number' && Number.isFinite(publishedAt)
-        ? publishedAt
-        : 0,
+    content: row.content,
+    createdAt: row.publishedAt,
   };
 }
 
@@ -86,24 +88,25 @@ function buildTrackingMessage(
 }
 
 async function getAnnouncementContext(userName: string): Promise<{
-  announcement: AnnouncementUserMessage | null;
+  announcements: AnnouncementUserMessage[];
   state: UserMessageState;
 }> {
-  const [config, state] = await Promise.all([
-    getConfigForRead(),
+  const [rows, state] = await Promise.all([
+    db.getPublishedAnnouncements({
+      since: Date.now() - ANNOUNCEMENT_UNREAD_WINDOW_MS,
+      limit: ANNOUNCEMENT_UNREAD_LIMIT,
+    }),
     db.getUserMessageState(userName),
   ]);
-  const siteConfig = config.SiteConfig;
-  const currentAnnouncement = buildAnnouncementMessage(
-    siteConfig.Announcement,
-    siteConfig.AnnouncementVersion,
-    siteConfig.AnnouncementPublishedAt,
-  );
-  const announcement =
-    currentAnnouncement?.id === state.readAnnouncementId
-      ? null
-      : currentAnnouncement;
-  return { announcement, state };
+  const readAt = state.announcementReadAt ?? 0;
+  const readIds = new Set(state.announcementReadIds ?? []);
+  const announcements = rows.flatMap((row) => {
+    const message = toAnnouncementMessage(row);
+    return message && message.createdAt > readAt && !readIds.has(message.id)
+      ? [message]
+      : [];
+  });
+  return { announcements, state };
 }
 
 function buildTrackingMessages(
@@ -232,15 +235,15 @@ export async function getUserMessagePage(
   cursor?: string | null,
 ): Promise<UserMessagePage> {
   const before = decodeCursor(cursor);
-  const { announcement, state } = await getAnnouncementContext(userName);
+  const { announcements, state } = await getAnnouncementContext(userName);
   const sources = await getVisibleMessageSources(
     userName,
     state,
     limit + 1,
     before,
   );
-  const includeAnnouncement = !before && !!announcement;
-  const pageLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
+  const pinned = before ? [] : announcements;
+  const pageLimit = Math.max(0, limit - pinned.length);
   const merged: UserMessage[] = [
     ...buildTrackingMessages(sources.tracking.items),
     ...sources.followed,
@@ -264,17 +267,14 @@ export async function getUserMessagePage(
   const hasMore =
     remaining.length > page.length || !!sources.tracking.nextCursor;
   return {
-    items: [
-      ...(includeAnnouncement && announcement ? [announcement] : []),
-      ...page,
-    ],
+    items: [...pinned, ...page],
     total:
       sources.tracking.total +
       sources.followCount +
       sources.replyCount +
       sources.followerCount +
       sources.likeCount +
-      (announcement ? 1 : 0),
+      announcements.length,
     nextCursor: hasMore
       ? page.length
         ? encodeCursor(page[page.length - 1])
@@ -286,7 +286,7 @@ export async function getUserMessagePage(
 export async function getUserMessageSummary(
   userName: string,
 ): Promise<UserMessageSummary> {
-  const { announcement, state } = await getAnnouncementContext(userName);
+  const { announcements, state } = await getAnnouncementContext(userName);
   const sources = await getVisibleMessageSources(userName, state, 1);
   const latestTracking =
     buildTrackingMessages(sources.tracking.items)[0] ?? null;
@@ -296,7 +296,7 @@ export async function getUserMessageSummary(
     sources.replyCount +
     sources.followerCount +
     sources.likeCount +
-    (announcement ? 1 : 0);
+    announcements.length;
   const latest = [
     ...sources.followed,
     ...sources.replies,
@@ -318,7 +318,7 @@ export async function getUserMessageSummary(
         sources.replyCount,
         sources.followerCount,
         sources.likeCount,
-        announcement?.id ?? '',
+        ...announcements.map((message) => message.id),
         latestTracking?.id ?? '',
         ...latest.map(
           (message) =>
@@ -326,7 +326,7 @@ export async function getUserMessageSummary(
         ),
       ].join('|'),
     ),
-    announcement,
+    announcement: announcements[0] ?? null,
     latestTracking,
   };
 }
@@ -335,16 +335,18 @@ export async function readUserMessage(
   userName: string,
   messageId: string,
 ): Promise<ReadUserMessageResult | null> {
-  const { announcement, state } = await getAnnouncementContext(userName);
-  if (announcement?.id === messageId) {
+  if (messageId.startsWith('announcement:')) {
+    const parsed = parseAnnouncementMessageId(messageId);
+    const row = parsed ? await db.getAnnouncement(parsed.rowId) : null;
+    const message = row ? toAnnouncementMessage(row) : null;
+    if (!message || message.id !== messageId) return null;
     await db.updateUserMessageState(userName, {
-      announcement: {
-        id: announcement.id,
-        previousId: state.readAnnouncementId,
-      },
+      announcement: { id: message.id, createdAt: message.createdAt },
     });
-    return { message: announcement };
+    return { message };
   }
+
+  const state = await db.getUserMessageState(userName);
 
   const messageKind = messageId.startsWith('tracking:')
     ? 'tracking-update'
@@ -445,16 +447,9 @@ export async function readUserMessage(
 export async function readAllUserMessages(
   userName: string,
 ): Promise<ReadAllUserMessagesResult> {
-  const { announcement, state } = await getAnnouncementContext(userName);
+  const state = await db.getUserMessageState(userName);
   await db.updateUserMessageState(userName, {
-    ...(announcement
-      ? {
-          announcement: {
-            id: announcement.id,
-            previousId: state.readAnnouncementId,
-          },
-        }
-      : {}),
+    announcementReadAt: Date.now(),
     followReviewReadAt: Date.now(),
     reviewReplyReadAt: Date.now(),
     newFollowerReadAt: Date.now(),
@@ -479,4 +474,37 @@ export async function readAllUserMessages(
   }
 
   return { updatedRecords };
+}
+
+export async function getAnnouncementHistory(
+  cursor?: string | null,
+): Promise<AnnouncementHistoryPage> {
+  const before = decodeAnnouncementCursor(cursor);
+  const rows = await db.getPublishedAnnouncements({
+    ...(before ? { before } : {}),
+    limit: ANNOUNCEMENT_HISTORY_LIMIT + 1,
+  });
+  const page = rows.slice(0, ANNOUNCEMENT_HISTORY_LIMIT);
+  const last = page[page.length - 1];
+  return {
+    items: page.flatMap((row) => {
+      const message = toAnnouncementMessage(row);
+      return message ? [message] : [];
+    }),
+    nextCursor:
+      rows.length > page.length && last?.publishedAt != null
+        ? `${last.publishedAt}:${last.id}`
+        : null,
+  };
+}
+
+function decodeAnnouncementCursor(
+  cursor?: string | null,
+): { publishedAt: number; id: string } | null {
+  if (!cursor) return null;
+  const match = /^(\d+):(.+)$/.exec(cursor);
+  const publishedAt = Number(match?.[1]);
+  if (!match || !Number.isSafeInteger(publishedAt) || match[2].length > 64)
+    throw new ReviewValidationError('公告列表已更新，请重新打开');
+  return { publishedAt, id: match[2] };
 }

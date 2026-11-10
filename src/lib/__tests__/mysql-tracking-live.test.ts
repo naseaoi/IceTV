@@ -6,6 +6,7 @@ import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-n
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
+import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { resetMysqlTestData } from './__fixtures__/mysql-test-data';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
@@ -54,6 +55,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     await (
       storage as unknown as { pool: { end: () => Promise<void> } }
     ).pool.end();
+  });
+
+  describe('announcements', () => {
+    announcementContract(() => storage);
   });
 
   it('新粉丝与点赞通知双后端契约', async () => {
@@ -572,7 +577,8 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       ).toHaveLength(12);
       await storage.updateUserMessageState(username, {
         followReviewReadAt: 100,
-        announcement: { id: 'new' },
+        announcement: { id: 'announcement:200:new', createdAt: 200 },
+        announcementReadAt: 100,
       });
       await Promise.all([
         storage.updateUserMessageState(username, {
@@ -580,13 +586,22 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         }),
         storage.updateUserMessageState(username, {
           followReviewReadAt: 50,
-          announcement: { id: 'old' },
+          announcement: { id: 'announcement:50:old', createdAt: 50 },
+          announcementReadAt: 50,
         }),
       ]);
       expect(await storage.getUserMessageState(username)).toEqual({
         followReviewReadAt: 100,
         followReviewReadIds: [],
-        readAnnouncementId: 'new',
+        announcementReadAt: 100,
+        announcementReadIds: ['announcement:200:new'],
+      });
+      await storage.updateUserMessageState(username, {
+        announcementReadAt: 200,
+      });
+      expect(await storage.getUserMessageState(username)).toMatchObject({
+        announcementReadAt: 200,
+        announcementReadIds: [],
       });
     } finally {
       await storage.deleteUser(username);

@@ -4,6 +4,7 @@ import { applyPlayRecordStateUpdates } from '@/lib/db.client';
 import { fetchWithAuth } from '@/lib/db.client.internal';
 import { DEFAULT_MESSAGE_PAGE_LIMIT } from '@/lib/message-page';
 import {
+  AnnouncementHistoryPage,
   MessageNotificationKind,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
@@ -29,6 +30,16 @@ export async function getMessagePage(
     cache: 'no-store',
   });
   return response.json() as Promise<UserMessagePage>;
+}
+
+export async function getAnnouncementHistoryPage(
+  cursor?: string | null,
+): Promise<AnnouncementHistoryPage> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const response = await fetchWithAuth(`/api/messages/announcements${query}`, {
+    cache: 'no-store',
+  });
+  return response.json() as Promise<AnnouncementHistoryPage>;
 }
 
 export async function readMessage(

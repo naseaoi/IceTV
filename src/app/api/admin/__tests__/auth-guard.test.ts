@@ -89,6 +89,7 @@ jest.mock('@/lib/db', () => ({
       ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
     }),
     getLiveSourceChannelCounts: jest.fn().mockResolvedValue({}),
+    countAnnouncements: jest.fn().mockResolvedValue(0),
     getUserAccess: jest.fn(),
     getAdminUserPage: jest.fn(),
     countInviteCodes: jest.fn().mockResolvedValue(0),

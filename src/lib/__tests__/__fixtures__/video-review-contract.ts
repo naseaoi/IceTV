@@ -444,16 +444,19 @@ export function videoReviewContract(createStorage: () => IStorage) {
       (await storage.getUserMessageState('reader')).followReviewReadIds,
     ).toHaveLength(3);
     await storage.updateUserMessageState('reader', {
-      announcement: { id: 'announcement:new' },
+      announcement: { id: 'announcement:200:new', createdAt: 200 },
+      announcementReadAt: 100,
       followReviewReadAt: 100,
     });
     await storage.updateUserMessageState('reader', {
-      announcement: { id: 'announcement:old' },
+      announcement: { id: 'announcement:50:old', createdAt: 50 },
+      announcementReadAt: 50,
       followReview: { id: id(2), createdAt: 2 },
       followReviewReadAt: 50,
     });
     expect(await storage.getUserMessageState('reader')).toMatchObject({
-      readAnnouncementId: 'announcement:new',
+      announcementReadAt: 100,
+      announcementReadIds: ['announcement:200:new'],
       followReviewReadAt: 100,
       followReviewReadIds: [],
     });
@@ -465,11 +468,12 @@ export function videoReviewContract(createStorage: () => IStorage) {
       (await storage.getUserMessageState('reader')).followReviewReadIds,
     ).toEqual([id(300)]);
     await storage.updateUserMessageState('reader', {
-      announcement: { id: 'announcement:next', previousId: 'announcement:new' },
+      announcement: { id: 'announcement:300:next', createdAt: 300 },
+      announcementReadAt: 200,
     });
     expect(
-      (await storage.getUserMessageState('reader')).readAnnouncementId,
-    ).toBe('announcement:next');
+      (await storage.getUserMessageState('reader')).announcementReadIds,
+    ).toEqual(['announcement:300:next']);
     for (let time = 301; time <= 502; time++)
       await storage.updateUserMessageState('reader', {
         followReview: { id: id(time), createdAt: time },

@@ -50,6 +50,10 @@ const UserConfig = dynamic(
     ),
   { loading: () => <AdminContentSkeleton /> },
 );
+const AnnouncementsTab = dynamic(
+  () => import('@/features/admin/components/tabs/AnnouncementsTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
 const UserDanmakuTab = dynamic(
   () => import('@/features/admin/components/tabs/UserDanmakuTab'),
   { loading: () => <AdminContentSkeleton /> },
@@ -119,6 +123,8 @@ const AdminTabBody = ({
           onDirtyChange={onSiteConfigDirtyChange}
         />
       );
+    case 'announcements':
+      return <AnnouncementsTab config={config} refreshConfig={refreshConfig} />;
     case 'user':
       return (
         <UserConfig config={config} role={role} refreshConfig={refreshConfig} />

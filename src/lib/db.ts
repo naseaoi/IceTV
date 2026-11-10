@@ -688,6 +688,46 @@ class DbManager {
     return storage.getAllUserLastLogins();
   }
 
+  async listAnnouncements(
+    ...args: Parameters<IStorage['listAnnouncements']>
+  ): ReturnType<IStorage['listAnnouncements']> {
+    return (await this.getStorage()).listAnnouncements(...args);
+  }
+
+  async countAnnouncements(): ReturnType<IStorage['countAnnouncements']> {
+    return (await this.getStorage()).countAnnouncements();
+  }
+
+  async getPublishedAnnouncements(
+    ...args: Parameters<IStorage['getPublishedAnnouncements']>
+  ): ReturnType<IStorage['getPublishedAnnouncements']> {
+    return (await this.getStorage()).getPublishedAnnouncements(...args);
+  }
+
+  async getAnnouncement(
+    ...args: Parameters<IStorage['getAnnouncement']>
+  ): ReturnType<IStorage['getAnnouncement']> {
+    return (await this.getStorage()).getAnnouncement(...args);
+  }
+
+  async createAnnouncement(
+    ...args: Parameters<IStorage['createAnnouncement']>
+  ): ReturnType<IStorage['createAnnouncement']> {
+    return (await this.getStorage()).createAnnouncement(...args);
+  }
+
+  async updateAnnouncement(
+    ...args: Parameters<IStorage['updateAnnouncement']>
+  ): ReturnType<IStorage['updateAnnouncement']> {
+    return (await this.getStorage()).updateAnnouncement(...args);
+  }
+
+  async deleteAnnouncement(
+    ...args: Parameters<IStorage['deleteAnnouncement']>
+  ): ReturnType<IStorage['deleteAnnouncement']> {
+    return (await this.getStorage()).deleteAnnouncement(...args);
+  }
+
   async getAllInviteCodes(): ReturnType<IStorage['getAllInviteCodes']> {
     return (await this.getStorage()).getAllInviteCodes();
   }

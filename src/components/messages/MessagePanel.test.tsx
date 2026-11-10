@@ -10,6 +10,7 @@ import MessagePanel from '@/components/messages/MessagePanel';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
 import {
   fetchMessageSettings,
+  getAnnouncementHistoryPage,
   saveMessageSettings,
 } from '@/lib/messages.client';
 import { fetchPublicReview } from '@/lib/video-reviews.client';
@@ -51,7 +52,11 @@ jest.mock('@/lib/video-reviews.client', () => ({
 }));
 jest.mock('@/lib/messages.client', () => ({
   fetchMessageSettings: jest.fn(),
+  getAnnouncementHistoryPage: jest.fn(),
   saveMessageSettings: jest.fn(),
+}));
+jest.mock('@/components/SiteProvider', () => ({
+  useSite: () => ({ announcement: '本站仅提供信息检索' }),
 }));
 
 const messagePage: UserMessagePage = {
@@ -416,4 +421,44 @@ it('同一批次内连续切换多个开关时按最新状态提交', async () =
     'aria-checked',
     'false',
   );
+});
+
+it('公告视图显示站点须知与历史公告，可加载更多', async () => {
+  const history = jest.mocked(getAnnouncementHistoryPage);
+  history
+    .mockResolvedValueOnce({
+      items: [
+        {
+          id: 'announcement:2000:b',
+          type: 'announcement',
+          content: '新增弹幕功能',
+          createdAt: 2_000,
+        },
+      ],
+      nextCursor: '2000:b',
+    })
+    .mockResolvedValueOnce({
+      items: [
+        {
+          id: 'announcement:1000:a',
+          type: 'announcement',
+          content: '首次上线',
+          createdAt: 1_000,
+        },
+      ],
+      nextCursor: null,
+    });
+  renderPanel();
+
+  fireEvent.click(screen.getByRole('button', { name: '查看公告' }));
+  expect(screen.getByRole('heading', { name: '公告' })).toBeInTheDocument();
+  expect(screen.getByText('本站仅提供信息检索')).toBeInTheDocument();
+  expect(await screen.findByText('新增弹幕功能')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+  expect(await screen.findByText('首次上线')).toBeInTheDocument();
+  expect(history).toHaveBeenLastCalledWith('2000:b');
+  expect(
+    screen.queryByRole('button', { name: '加载更多' }),
+  ).not.toBeInTheDocument();
 });

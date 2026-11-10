@@ -11,8 +11,6 @@ export interface AdminConfig {
     SiteName: string;
     SiteIcon: string;
     Announcement: string;
-    AnnouncementVersion?: string;
-    AnnouncementPublishedAt?: number;
     FooterText: string;
     EnableLiveEntry: boolean;
     LiveAccess?: 'all' | 'groups';
@@ -47,6 +45,8 @@ export interface AdminConfig {
     UpstreamProxyPoolSegments?: boolean;
     // 仅后台响应：服务端是否配置了 UPSTREAM_PROXY_POOL
     UpstreamProxyPoolConfigured?: boolean;
+    // 仅后台响应：公告条数，供骨架按实际行数占位
+    AnnouncementCount?: number;
   };
   UserConfig: {
     TotalUsers?: number;

@@ -2,8 +2,6 @@ export interface SiteConfig {
   SiteName: string;
   SiteIcon: string; // 站点图标 URL（外部链接或 /api/admin/site-icon 本地路径）
   Announcement: string;
-  AnnouncementVersion?: string;
-  AnnouncementPublishedAt?: number;
   FooterText: string;
   EnableLiveEntry: boolean;
   LiveAccess: 'all' | 'groups';

@@ -392,7 +392,8 @@ export interface UserMessageStateUpdate {
   newFollowerReadAt?: number;
   reviewLike?: { id: string; createdAt: number };
   reviewLikeReadAt?: number;
-  announcement?: { id: string; previousId?: string };
+  announcement?: { id: string; createdAt: number };
+  announcementReadAt?: number;
   followReview?: { id: string; createdAt: number };
   reviewReply?: { id: string; createdAt: number };
   reviewReplyReadAt?: number;
@@ -405,7 +406,8 @@ export interface UserMessageState {
   newFollowerReadIds?: string[];
   reviewLikeReadAt?: number;
   reviewLikeReadIds?: string[];
-  readAnnouncementId?: string;
+  announcementReadAt?: number;
+  announcementReadIds?: string[];
   reviewReplyReadAt?: number;
   reviewReplyReadIds?: string[];
   // 关注动态已读水位，之前的视为已读；水位之后单独已读的消息 id 记在列表里
@@ -420,8 +422,30 @@ export interface SharedCacheRecord {
   leaseUntil: number;
 }
 
+export interface SiteAnnouncement {
+  id: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+  publishedAt: number | null;
+}
+
 // 存储接口
 export interface IStorage {
+  listAnnouncements(limit: number): Promise<SiteAnnouncement[]>;
+  countAnnouncements(): Promise<number>;
+  getPublishedAnnouncements(options: {
+    since?: number;
+    before?: { publishedAt: number; id: string };
+    limit: number;
+  }): Promise<SiteAnnouncement[]>;
+  getAnnouncement(id: string): Promise<SiteAnnouncement | null>;
+  createAnnouncement(announcement: SiteAnnouncement): Promise<void>;
+  updateAnnouncement(
+    id: string,
+    patch: { content?: string; publishedAt?: number | null; updatedAt: number },
+  ): Promise<SiteAnnouncement | null>;
+  deleteAnnouncement(id: string): Promise<boolean>;
   addUserDanmaku(item: StoredUserDanmaku): Promise<void>;
   getUserDanmaku(
     episodeKey: string,

@@ -6,6 +6,7 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { normalizeMessageLimit } from '@/lib/message-page';
 import {
+  getAnnouncementHistory,
   getUserMessagePage,
   getUserMessageSummary,
   readAllUserMessages,
@@ -33,6 +34,22 @@ export async function handleGetMessages(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     console.error('获取用户消息失败', error);
     return NextResponse.json({ error: '获取消息失败' }, { status: 500 });
+  }
+}
+
+export async function handleGetAnnouncementHistory(request: NextRequest) {
+  try {
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
+    const cursor = new URL(request.url).searchParams.get('cursor');
+    return NextResponse.json(await getAnnouncementHistory(cursor), {
+      headers: NO_STORE_HEADERS,
+    });
+  } catch (error) {
+    if (error instanceof ReviewValidationError)
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    console.error('获取公告失败', error);
+    return NextResponse.json({ error: '获取公告失败' }, { status: 500 });
   }
 }
 

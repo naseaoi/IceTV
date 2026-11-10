@@ -534,8 +534,6 @@ describe('config cache persistence', () => {
   it('preserves all supported site settings during config self check', async () => {
     const { configSelfCheck } = await loadConfigModule(jest.fn());
     const config = cloneBaseConfig();
-    config.SiteConfig.AnnouncementVersion = 'announcement-version';
-    config.SiteConfig.AnnouncementPublishedAt = 123;
     config.SiteConfig.DisableYellowFilter = true;
     const originalSiteConfig = { ...config.SiteConfig };
 

@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-import type { AdminConfig } from '@/types/admin';
+import type { SiteAnnouncement } from '@/lib/types';
 
 const mockGetSocialNotifications = jest.fn();
 const mockGetSocialNotificationCount = jest.fn();
@@ -8,7 +8,8 @@ const mockGetReviewReplyMessages = jest.fn();
 const mockGetReviewReplyMessageCount = jest.fn();
 const mockGetFollowReviewMessages = jest.fn();
 const mockGetFollowReviewMessageCount = jest.fn();
-const mockGetConfigForRead = jest.fn();
+const mockGetPublishedAnnouncements = jest.fn();
+const mockGetAnnouncement = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetUnreadTrackingPlayRecordPage = jest.fn();
 const mockGetUserMessageState = jest.fn();
@@ -17,12 +18,11 @@ const mockGetPlayRecord = jest.fn();
 const mockSavePlayRecord = jest.fn();
 const mockSavePlayRecordsByKey = jest.fn();
 
-jest.mock('@/lib/config', () => ({
-  getConfigForRead: (...args: unknown[]) => mockGetConfigForRead(...args),
-}));
-
 jest.mock('@/lib/db', () => ({
   db: {
+    getPublishedAnnouncements: (...args: unknown[]) =>
+      mockGetPublishedAnnouncements(...args),
+    getAnnouncement: (...args: unknown[]) => mockGetAnnouncement(...args),
     getSocialNotifications: (...args: unknown[]) =>
       mockGetSocialNotifications(...args),
     getSocialNotificationCount: (...args: unknown[]) =>
@@ -50,6 +50,7 @@ jest.mock('@/lib/db', () => ({
 }));
 
 import {
+  getAnnouncementHistory,
   getUserMessagePage,
   getUserMessageSummary,
   readAllUserMessages,
@@ -62,13 +63,14 @@ import type {
 } from '@/lib/types';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 
-const config = {
-  SiteConfig: {
-    Announcement: '维护完成，欢迎回来。',
-    AnnouncementVersion: 'v2',
-    AnnouncementPublishedAt: 5_000,
-  },
-} as AdminConfig;
+const announcementRow: SiteAnnouncement = {
+  id: 'a2',
+  content: '维护完成，欢迎回来。',
+  createdAt: 1_000,
+  updatedAt: 1_000,
+  publishedAt: 5_000,
+};
+const ANNOUNCEMENT_ID = 'announcement:5000:a2';
 
 const updatedRecord: PlayRecord = {
   title: '示例剧集',
@@ -106,7 +108,8 @@ describe('messages server', () => {
     mockGetReviewReplyMessageCount.mockResolvedValue(0);
     mockGetFollowReviewMessages.mockResolvedValue([]);
     mockGetFollowReviewMessageCount.mockResolvedValue(0);
-    mockGetConfigForRead.mockResolvedValue(config);
+    mockGetPublishedAnnouncements.mockResolvedValue([announcementRow]);
+    mockGetAnnouncement.mockResolvedValue(announcementRow);
     mockGetAllPlayRecords.mockResolvedValue({
       'source-a+video-1': updatedRecord,
       'source-b+video-2': {
@@ -335,9 +338,7 @@ describe('messages server', () => {
   });
 
   it('continues tracking after a follow cursor even when newer tracking fills the query limit', async () => {
-    mockGetConfigForRead.mockResolvedValue({
-      SiteConfig: { Announcement: '' },
-    });
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
     const followed = {
       id: 'follow-review:cursor',
       type: 'follow-review',
@@ -449,7 +450,7 @@ describe('messages server', () => {
       'tracking-update',
     ]);
     expect(page.items[0]).toMatchObject({
-      id: 'announcement:v2',
+      id: ANNOUNCEMENT_ID,
       content: '维护完成，欢迎回来。',
     });
     expect(page.items[1]).toMatchObject({
@@ -461,7 +462,7 @@ describe('messages server', () => {
 
   it('does not return an announcement after that version is read', async () => {
     mockGetUserMessageState.mockResolvedValue({
-      readAnnouncementId: 'announcement:v2',
+      announcementReadIds: [ANNOUNCEMENT_ID],
     });
 
     const summary = await getUserMessageSummary('demo');
@@ -483,7 +484,7 @@ describe('messages server', () => {
 
     expect(summary.unreadCount).toBe(2);
     expect(summary.trackingUnreadCount).toBe(1);
-    expect(summary.announcement?.id).toBe('announcement:v2');
+    expect(summary.announcement?.id).toBe(ANNOUNCEMENT_ID);
     expect(summary.latestTracking).toMatchObject({
       title: '示例剧集',
       toEpisodes: 12,
@@ -507,9 +508,9 @@ describe('messages server', () => {
   it('reflects a read announcement in the next summary', async () => {
     usePersistedUserMessageState();
     const before = await getUserMessageSummary('demo');
-    expect(before.announcement?.id).toBe('announcement:v2');
+    expect(before.announcement?.id).toBe(ANNOUNCEMENT_ID);
 
-    await readUserMessage('demo', 'announcement:v2');
+    await readUserMessage('demo', ANNOUNCEMENT_ID);
     const after = await getUserMessageSummary('demo');
 
     expect(after.announcement).toBeNull();
@@ -517,12 +518,92 @@ describe('messages server', () => {
   });
 
   it('marks an announcement version as read', async () => {
-    const result = await readUserMessage('demo', 'announcement:v2');
+    const result = await readUserMessage('demo', ANNOUNCEMENT_ID);
 
     expect(result?.message.type).toBe('announcement');
     expect(mockUpdateUserMessageState).toHaveBeenCalledWith('demo', {
-      announcement: { id: 'announcement:v2', previousId: undefined },
+      announcement: { id: ANNOUNCEMENT_ID, createdAt: 5_000 },
     });
+  });
+
+  it('pins every unread announcement, newest first, and counts each one', async () => {
+    mockGetPublishedAnnouncements.mockResolvedValue([
+      { ...announcementRow, id: 'a3', publishedAt: 6_000 },
+      announcementRow,
+    ]);
+    mockGetUserMessageState.mockResolvedValue({ announcementReadAt: 5_000 });
+    const hidden = await getUserMessagePage('demo', 20);
+    expect(hidden.items.map((message) => message.id)).toEqual([
+      'announcement:6000:a3',
+      expect.stringMatching(/^tracking:/),
+    ]);
+
+    mockGetUserMessageState.mockResolvedValue({});
+    const page = await getUserMessagePage('demo', 20);
+    expect(page.total).toBe(3);
+    expect(page.items.slice(0, 2).map((message) => message.id)).toEqual([
+      'announcement:6000:a3',
+      ANNOUNCEMENT_ID,
+    ]);
+    expect(mockGetPublishedAnnouncements).toHaveBeenLastCalledWith({
+      since: expect.any(Number),
+      limit: expect.any(Number),
+    });
+  });
+
+  it('rejects reading a withdrawn or re-pushed announcement', async () => {
+    mockGetAnnouncement.mockResolvedValue({
+      ...announcementRow,
+      publishedAt: null,
+    });
+    await expect(readUserMessage('demo', ANNOUNCEMENT_ID)).resolves.toBeNull();
+    mockGetAnnouncement.mockResolvedValue({
+      ...announcementRow,
+      publishedAt: 9_000,
+    });
+    await expect(readUserMessage('demo', ANNOUNCEMENT_ID)).resolves.toBeNull();
+    expect(mockUpdateUserMessageState).not.toHaveBeenCalled();
+  });
+
+  it('read-all advances the announcement watermark', async () => {
+    usePersistedUserMessageState();
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+    await readAllUserMessages('demo');
+    const summary = await getUserMessageSummary('demo');
+    expect(summary.announcement).toBeNull();
+  });
+
+  it('pages announcement history with a published-at cursor', async () => {
+    const rows = Array.from({ length: 21 }, (_, index) => ({
+      ...announcementRow,
+      id: `h${index}`,
+      publishedAt: 10_000 - index,
+    }));
+    mockGetPublishedAnnouncements.mockResolvedValueOnce(rows);
+    const first = await getAnnouncementHistory();
+    expect(first.items).toHaveLength(20);
+    expect(first.nextCursor).toBe('9981:h19');
+    expect(mockGetPublishedAnnouncements).toHaveBeenLastCalledWith({
+      limit: 21,
+    });
+
+    mockGetPublishedAnnouncements.mockResolvedValueOnce(rows.slice(20));
+    const second = await getAnnouncementHistory(first.nextCursor);
+    expect(second).toEqual({
+      items: [expect.objectContaining({ id: 'announcement:9980:h20' })],
+      nextCursor: null,
+    });
+    expect(mockGetPublishedAnnouncements).toHaveBeenLastCalledWith({
+      before: { publishedAt: 9981, id: 'h19' },
+      limit: 21,
+    });
+    await expect(getAnnouncementHistory('bad')).rejects.toThrow(
+      '公告列表已更新',
+    );
   });
 
   it('reads only through the episode represented by the message', async () => {

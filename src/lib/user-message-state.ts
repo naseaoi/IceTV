@@ -1,3 +1,4 @@
+import { parseAnnouncementMessageId } from '@/lib/announcement-identity';
 import { parseFollowReviewMessageId } from '@/lib/follow-review-identity';
 import { parseReplyMessageId } from '@/lib/review-reply-storage';
 import { parseSocialNotificationId } from '@/lib/social-notification-identity';
@@ -38,13 +39,6 @@ export function mergeUserMessageState(
   const next = { ...current };
   if (update.notificationSettings)
     next.mutedKinds = [...update.notificationSettings.mutedKinds];
-  // 公告版本不具备时间顺序，按调用方读到的旧标识做 CAS，避免迟到请求覆盖新版本。
-  if (
-    update.announcement &&
-    current.readAnnouncementId === update.announcement.previousId
-  ) {
-    next.readAnnouncementId = update.announcement.id;
-  }
   const previousWatermark = current.followReviewReadAt ?? 0;
   const watermark = Math.max(previousWatermark, update.followReviewReadAt ?? 0);
   if (update.followReviewReadAt !== undefined)
@@ -115,15 +109,23 @@ export function mergeUserMessageState(
     next.reviewReplyReadAt = replyWatermark;
     next.reviewReplyReadIds = replyIds;
   }
-  for (const [kind, field] of [
-    ['new-follower', 'newFollower'],
-    ['review-like', 'reviewLike'],
+  for (const [field, timestamp] of [
+    [
+      'newFollower',
+      (id: string) => parseSocialNotificationId('new-follower', id)?.[3] ?? 0,
+    ],
+    [
+      'reviewLike',
+      (id: string) => parseSocialNotificationId('review-like', id)?.[3] ?? 0,
+    ],
+    [
+      'announcement',
+      (id: string) => parseAnnouncementMessageId(id)?.publishedAt ?? 0,
+    ],
   ] as const) {
     const timeKey = `${field}ReadAt` as const;
     const idsKey = `${field}ReadIds` as const;
     let mark = Math.max(current[timeKey] ?? 0, update[timeKey] ?? 0);
-    const timestamp = (id: string) =>
-      parseSocialNotificationId(kind, id)?.[3] ?? 0;
     let readIds = [...new Set(current[idsKey] ?? [])].filter(
       (id) => timestamp(id) > mark,
     );

@@ -470,9 +470,8 @@ const SiteConfigComponent = ({
           </div>
         </AdminSettingRow>
         <AdminSettingRow
-          label='站点公告'
+          label='站点须知'
           htmlFor='site-announcement'
-          description='修改后会重新推送给用户'
           layout='stacked'
         >
           <textarea
@@ -485,7 +484,7 @@ const SiteConfigComponent = ({
                 Announcement: e.target.value,
               }))
             }
-            rows={3}
+            rows={1}
             className={`${inputStyles.withFocus} block w-full resize-y`}
           />
         </AdminSettingRow>
@@ -505,7 +504,7 @@ const SiteConfigComponent = ({
                 FooterText: e.target.value,
               }))
             }
-            rows={3}
+            rows={1}
             className={`${inputStyles.withFocus} block w-full resize-y`}
           />
         </AdminSettingRow>

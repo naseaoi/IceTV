@@ -577,8 +577,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     SiteName: site.SiteName,
     SiteIcon: site.SiteIcon,
     Announcement: site.Announcement,
-    AnnouncementVersion: site.AnnouncementVersion,
-    AnnouncementPublishedAt: site.AnnouncementPublishedAt,
     FooterText: site.FooterText,
     EnableLiveEntry: site.EnableLiveEntry,
     LiveAccess: site.LiveAccess,

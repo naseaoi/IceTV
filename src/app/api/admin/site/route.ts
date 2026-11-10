@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
@@ -147,8 +146,6 @@ export async function POST(request: NextRequest) {
 
     invalidateConfigCache();
     const adminConfig = await getConfig();
-    const announcementChanged =
-      adminConfig.SiteConfig.Announcement !== Announcement;
 
     // 更新缓存中的站点设置
     adminConfig.SiteConfig = {
@@ -159,12 +156,6 @@ export async function POST(request: NextRequest) {
           ? SiteIcon
           : adminConfig.SiteConfig.SiteIcon || '',
       Announcement,
-      AnnouncementVersion: announcementChanged
-        ? randomUUID()
-        : adminConfig.SiteConfig.AnnouncementVersion,
-      AnnouncementPublishedAt: announcementChanged
-        ? Date.now()
-        : adminConfig.SiteConfig.AnnouncementPublishedAt,
       FooterText,
       EnableLiveEntry,
       LiveAccess: LiveAccess ?? adminConfig.SiteConfig.LiveAccess,

@@ -45,7 +45,7 @@ export default function AnnouncementModal({
             <SiteIcon />
           </span>
           <h3 className='mt-4 text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100'>
-            站点公告
+            站点须知
           </h3>
         </div>
 

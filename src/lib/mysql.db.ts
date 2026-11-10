@@ -37,6 +37,14 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type AnnouncementRow,
+  ANNOUNCEMENT_INSERT_SQL,
+  ANNOUNCEMENT_LIST_SQL,
+  announcementUpdateQuery,
+  publishedAnnouncementQuery,
+  readAnnouncement,
+} from '@/lib/announcement-storage';
+import {
   type ConfigStateUpdate,
   type ConfigSubscription,
   sameSubscription,
@@ -103,6 +111,7 @@ import {
   PlayRecord,
   PlayRecordPage,
   SharedCacheRecord,
+  SiteAnnouncement,
   SkipConfig,
   SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
@@ -506,6 +515,14 @@ export class MySqlStorage implements IStorage {
       `CREATE TABLE IF NOT EXISTS live_source_state (
         source_key VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
         channel_number BIGINT NOT NULL, updated_at BIGINT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS announcements (
+        id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        published_at BIGINT NULL,
+        KEY idx_announcements_published (published_at, id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS invite_codes (
         code VARCHAR(191) NOT NULL PRIMARY KEY,
@@ -2111,6 +2128,78 @@ export class MySqlStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async listAnnouncements(limit: number): Promise<SiteAnnouncement[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
+      ANNOUNCEMENT_LIST_SQL,
+      [limit],
+    );
+    return rows.map(readAnnouncement);
+  }
+
+  async countAnnouncements(): Promise<number> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & { total: number | string })[]
+    >('SELECT COUNT(*) AS total FROM announcements');
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  async getPublishedAnnouncements(
+    options: Parameters<IStorage['getPublishedAnnouncements']>[0],
+  ): Promise<SiteAnnouncement[]> {
+    await this.ensureInitialized();
+    const { sql, params } = publishedAnnouncementQuery(options);
+    const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
+      sql,
+      params,
+    );
+    return rows.map(readAnnouncement);
+  }
+
+  async getAnnouncement(id: string): Promise<SiteAnnouncement | null> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
+      'SELECT * FROM announcements WHERE id = ?',
+      [id],
+    );
+    return rows[0] ? readAnnouncement(rows[0]) : null;
+  }
+
+  async createAnnouncement(announcement: SiteAnnouncement): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(ANNOUNCEMENT_INSERT_SQL, [
+      announcement.id,
+      announcement.content,
+      announcement.createdAt,
+      announcement.updatedAt,
+      announcement.publishedAt,
+    ]);
+  }
+
+  async updateAnnouncement(
+    id: string,
+    patch: Parameters<IStorage['updateAnnouncement']>[1],
+  ): Promise<SiteAnnouncement | null> {
+    const { sql, params } = announcementUpdateQuery(id, patch);
+    return this.withTransaction(async (connection) => {
+      await connection.execute(sql, params);
+      const [rows] = await connection.query<
+        (RowDataPacket & AnnouncementRow)[]
+      >('SELECT * FROM announcements WHERE id = ?', [id]);
+      return rows[0] ? readAnnouncement(rows[0]) : null;
+    });
+  }
+
+  async deleteAnnouncement(id: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      'DELETE FROM announcements WHERE id = ?',
+      [id],
+    );
+    return result.affectedRows > 0;
   }
 
   private get invites() {

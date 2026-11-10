@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
         SiteConfig: {
           ...config.SiteConfig,
           UpstreamProxyPoolConfigured: isUpstreamProxyPoolConfigured(),
+          AnnouncementCount: await db.countAnnouncements(),
         },
         LiveConfig: (config.LiveConfig || []).map((source) => ({
           ...source,

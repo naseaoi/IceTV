@@ -1,9 +1,11 @@
 /** @jest-environment node */
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import type { AnnouncementRow } from '@/lib/announcement-storage';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
+import { announcementContract } from './__fixtures__/announcement-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
@@ -43,6 +45,7 @@ type HealthPlayRow = {
 };
 
 type FakeState = {
+  announcements: Map<string, AnnouncementRow>;
   healthSearch: HealthSearchRow[];
   healthPlay: HealthPlayRow[];
   subscription: Record<string, unknown> | null;
@@ -76,6 +79,9 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    announcements: new Map(
+      [...state.announcements].map(([id, row]) => [id, { ...row }]),
+    ),
     healthSearch: state.healthSearch.map((row) => ({ ...row })),
     healthPlay: state.healthPlay.map((row) => ({ ...row })),
     subscription: state.subscription ? { ...state.subscription } : null,
@@ -120,6 +126,7 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    announcements: new Map(),
     healthSearch: [],
     healthPlay: [],
     subscription: null,
@@ -333,6 +340,50 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.startsWith('INSERT INTO announcements ')) {
+      const [id, content, created_at, updated_at, published_at] = params as [
+        string,
+        string,
+        number,
+        number,
+        number | null,
+      ];
+      if (currentState.announcements.has(id))
+        throw new Error('Duplicate announcement');
+      currentState.announcements.set(id, {
+        id,
+        content,
+        created_at,
+        updated_at,
+        published_at,
+      });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('UPDATE announcements SET ')) {
+      const row = currentState.announcements.get(
+        String(params[params.length - 1]),
+      );
+      if (!row) return [{ affectedRows: 0 }, []];
+      const fields = normalized
+        .slice('UPDATE announcements SET '.length)
+        .split(' WHERE ')[0]
+        .split(', ');
+      fields.forEach((field, index) => {
+        Object.assign(row, { [field.split(' = ')[0]]: params[index] });
+      });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM announcements WHERE id = ?') {
+      return [
+        {
+          affectedRows: currentState.announcements.delete(String(params[0]))
+            ? 1
+            : 0,
+        },
+        [],
+      ];
+    }
+
     if (normalized.startsWith('INSERT INTO user_danmaku (')) {
       const [id, episodeKey, username, timeMs, text, mode, color, createdAt] =
         params;
@@ -1155,6 +1206,50 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized === 'SELECT COUNT(*) AS total FROM announcements')
+      return [[{ total: currentState.announcements.size }], []];
+    if (normalized.startsWith('SELECT * FROM announcements')) {
+      if (normalized === 'SELECT * FROM announcements WHERE id = ?') {
+        const row = currentState.announcements.get(String(params[0]));
+        return [row ? [{ ...row }] : [], []];
+      }
+      let rows = [...currentState.announcements.values()];
+      let index = 0;
+      if (normalized.includes('WHERE published_at IS NOT NULL')) {
+        rows = rows.filter((row) => row.published_at !== null);
+        if (normalized.includes('published_at > ?')) {
+          const since = Number(params[index++]);
+          rows = rows.filter((row) => Number(row.published_at) > since);
+        }
+        if (normalized.includes('published_at < ?')) {
+          const time = Number(params[index++]);
+          const equalTime = Number(params[index++]);
+          const id = String(params[index++]);
+          rows = rows.filter(
+            (row) =>
+              Number(row.published_at) < time ||
+              (Number(row.published_at) === equalTime && row.id < id),
+          );
+        }
+      }
+      rows.sort((a, b) => {
+        const draftOrder =
+          Number(b.published_at === null) - Number(a.published_at === null);
+        const timeOrder =
+          Number(b.published_at ?? b.created_at) -
+          Number(a.published_at ?? a.created_at);
+        return (
+          draftOrder || timeOrder || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+        );
+      });
+      if (!normalized.endsWith('LIMIT ?'))
+        throw new Error('Expected SQL limit');
+      return [
+        rows.slice(0, Number(params[index])).map((row) => ({ ...row })),
+        [],
+      ];
+    }
+
     if (
       normalized.includes('FROM user_danmaku ') &&
       !normalized.includes('FROM user_danmaku_')
@@ -2580,7 +2675,7 @@ describe('mysql storage contract', () => {
     await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
     await storage.setUserMessageState('demo-user', {
-      readAnnouncementId: 'announcement:v1',
+      announcementReadIds: ['announcement:5000:v1'],
     });
     await storage.setDanmakuEnabledPreference('demo-user', true);
     await storage.recordUserLogin('demo-user', 1700000000000);
@@ -2605,7 +2700,14 @@ describe('mysql storage contract', () => {
       'second',
     ]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
-      readAnnouncementId: 'announcement:v1',
+      announcementReadIds: ['announcement:5000:v1'],
+    });
+    await storage.updateUserMessageState('demo-user', {
+      announcementReadAt: 5000,
+    });
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      announcementReadAt: 5000,
+      announcementReadIds: [],
     });
     await expect(
       storage.getDanmakuEnabledPreference('demo-user'),
@@ -3261,5 +3363,11 @@ describe('mysql user danmaku contract', () => {
 describe('MySQL OAuth 身份契约（fake pool）', () => {
   oauthIdentityContract(
     () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+  );
+});
+
+describe('MySQL announcements (fake pool)', () => {
+  announcementContract(
+    () => new MySqlStorage('mysql://root:password@localhost:3306/icetv'),
   );
 });

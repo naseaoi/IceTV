@@ -86,6 +86,25 @@ export async function adminPost<T = Record<string, unknown>>(
   return (payload ?? ({} as T)) as T;
 }
 
+export async function adminPatch<T = Record<string, unknown>>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  fallbackPrefix = '操作失败',
+): Promise<T> {
+  const response = await fetch(endpoint, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(await resolveErrorMessage(response, fallbackPrefix));
+  }
+
+  const payload = await parseJsonSafely<T>(response);
+  return (payload ?? ({} as T)) as T;
+}
+
 export function getAdminReviewReports(cursor?: string | null) {
   return adminGet<AdminReviewReportPage>(
     `/api/admin/reviews/reports${cursor ? `?${new URLSearchParams({ cursor })}` : ''}`,

@@ -12,6 +12,7 @@ import type {
   SkipConfig,
   SourceRouteStatsItem,
 } from '../types';
+import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
@@ -261,7 +262,7 @@ describe('sqlite storage contract', () => {
     await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
     await storage.setUserMessageState('demo-user', {
-      readAnnouncementId: 'announcement:v1',
+      announcementReadIds: ['announcement:5000:v1'],
     });
     await storage.setDanmakuEnabledPreference('demo-user', true);
     await storage.recordUserLogin('demo-user', 1700000000000);
@@ -286,7 +287,14 @@ describe('sqlite storage contract', () => {
       'second',
     ]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
-      readAnnouncementId: 'announcement:v1',
+      announcementReadIds: ['announcement:5000:v1'],
+    });
+    await storage.updateUserMessageState('demo-user', {
+      announcementReadAt: 5000,
+    });
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      announcementReadAt: 5000,
+      announcementReadIds: [],
     });
     await expect(
       storage.getDanmakuEnabledPreference('demo-user'),
@@ -1131,4 +1139,8 @@ test('normalizes legacy danmaku usernames even without a users row', async () =>
 
 describe('SQLite OAuth 身份契约', () => {
   oauthIdentityContract(() => new LocalSqliteStorage(':memory:'));
+});
+
+describe('SQLite announcements', () => {
+  announcementContract(() => new LocalSqliteStorage(':memory:'));
 });

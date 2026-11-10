@@ -2,6 +2,7 @@
 
 import {
   Check,
+  CheckCheck,
   ChevronLeft,
   Inbox,
   Megaphone,
@@ -17,11 +18,16 @@ import { createPortal } from 'react-dom';
 
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
+import MessageAnnouncements from '@/components/messages/MessageAnnouncements';
 import MessageReviewDetail, {
   type ReviewMessage,
   isReviewMessage,
 } from '@/components/messages/MessageReviewDetail';
 import MessageSettings from '@/components/messages/MessageSettings';
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import { hasOpenModalShell } from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingBadge from '@/components/RatingBadge';
@@ -50,6 +56,7 @@ interface MessagePanelProps {
 type PanelView =
   | { kind: 'list' }
   | { kind: 'settings' }
+  | { kind: 'announcements' }
   | { kind: 'review'; message: ReviewMessage };
 
 const MESSAGE_PRIMARY_CLASS =
@@ -456,48 +463,63 @@ export default function MessagePanel({
         data-open={presence.visible}
         className='motion-dialog relative z-10 flex h-[min(40rem,calc(100dvh-2rem))] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08] sm:h-[min(40rem,calc(100dvh-3rem))]'
       >
-        <div className='flex shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 py-3.5 dark:border-gray-700/80 sm:px-6 sm:py-4'>
-          {view.kind === 'list' ? (
-            <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
-              <Inbox className='h-5 w-5' />
-            </div>
-          ) : (
+        <div
+          className={`flex shrink-0 items-center gap-1 border-b border-gray-200/70 py-3 pr-3 dark:border-white/[0.06] ${
+            view.kind === 'list' ? 'pl-5' : 'pl-3'
+          }`}
+        >
+          {view.kind !== 'list' && (
             <button
               type='button'
               aria-label='返回消息列表'
               title='返回'
-              className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
+              className={MODAL_CLOSE_BUTTON_CLASS}
               onClick={() => setView({ kind: 'list' })}
             >
-              <ChevronLeft className='h-5 w-5' />
+              <ChevronLeft className='h-4 w-4' />
             </button>
           )}
-          <div className='min-w-0 flex-1'>
-            <h2
-              id={titleId}
-              className='text-base font-semibold text-gray-900 dark:text-gray-100'
-            >
+          <div className='flex min-w-0 flex-1 items-center gap-2'>
+            <h2 id={titleId} className={`${MODAL_TITLE_CLASS} truncate`}>
               {view.kind === 'settings'
                 ? '通知设置'
-                : view.kind === 'review'
-                  ? '评价详情'
-                  : '我的消息'}
+                : view.kind === 'announcements'
+                  ? '公告'
+                  : view.kind === 'review'
+                    ? '评价详情'
+                    : '我的消息'}
             </h2>
             {view.kind === 'list' && page.total > 0 && (
-              <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
-                {page.total} 条未读消息
-              </p>
+              <span className='inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1.5 text-xs font-medium tabular-nums text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
+                {page.total > 99 ? '99+' : page.total}
+                <span className='sr-only'> 条未读消息</span>
+              </span>
             )}
           </div>
           {view.kind === 'list' && page.total > 0 && (
             <button
               type='button'
               disabled={readingAll}
-              className='inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50 dark:hover:text-brand-300'
+              className='inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
               onClick={() => void onReadAll()}
             >
-              {readingAll && <Spinner className='h-3.5 w-3.5' />}
+              {readingAll ? (
+                <Spinner className='h-3.5 w-3.5' />
+              ) : (
+                <CheckCheck className='h-3.5 w-3.5' />
+              )}
               全部已读
+            </button>
+          )}
+          {view.kind === 'list' && (
+            <button
+              type='button'
+              aria-label='查看公告'
+              title='公告'
+              className={MODAL_CLOSE_BUTTON_CLASS}
+              onClick={() => showView({ kind: 'announcements' })}
+            >
+              <Megaphone className='h-4 w-4' />
             </button>
           )}
           {view.kind === 'list' && (
@@ -505,29 +527,31 @@ export default function MessagePanel({
               type='button'
               aria-label='通知设置'
               title='通知设置'
-              className='flex h-9 w-9 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+              className={MODAL_CLOSE_BUTTON_CLASS}
               onClick={() => showView({ kind: 'settings' })}
             >
-              <Settings className='h-[18px] w-[18px]' />
+              <Settings className='h-4 w-4' />
             </button>
           )}
           <button
             type='button'
             aria-label='关闭'
             title='关闭'
-            className='flex h-9 w-9 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+            className={MODAL_CLOSE_BUTTON_CLASS}
             onClick={onClose}
           >
-            <X className='h-5 w-5' />
+            <X className='h-4 w-4' />
           </button>
         </div>
 
         <div
           ref={scrollRef}
-          className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5'
+          className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4'
         >
           {view.kind === 'settings' ? (
             <MessageSettings onSaved={onSettingsSaved} />
+          ) : view.kind === 'announcements' ? (
+            <MessageAnnouncements />
           ) : view.kind === 'review' ? (
             <MessageReviewDetail
               key={view.message.id}

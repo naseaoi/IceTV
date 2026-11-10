@@ -91,6 +91,11 @@ export interface UserMessagePage {
   nextCursor: string | null;
 }
 
+export interface AnnouncementHistoryPage {
+  items: AnnouncementUserMessage[];
+  nextCursor: string | null;
+}
+
 export interface UserMessageSummary {
   unreadCount: number;
   trackingUnreadCount: number;

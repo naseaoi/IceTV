@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   FileText,
   FolderOpen,
+  Megaphone,
   MessageSquare,
   MessageSquareText,
   Settings,
@@ -14,6 +15,7 @@ import {
 export type AdminTabId =
   | 'config-file'
   | 'site'
+  | 'announcements'
   | 'runtime'
   | 'user'
   | 'reviews'
@@ -51,6 +53,13 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     id: 'site',
     label: '站点设置',
     icon: Settings,
+    group: 'site',
+    ownerOnly: false,
+  },
+  {
+    id: 'announcements',
+    label: '公告',
+    icon: Megaphone,
     group: 'site',
     ownerOnly: false,
   },

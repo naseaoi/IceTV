@@ -32,6 +32,14 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type AnnouncementRow,
+  ANNOUNCEMENT_INSERT_SQL,
+  ANNOUNCEMENT_LIST_SQL,
+  announcementUpdateQuery,
+  publishedAnnouncementQuery,
+  readAnnouncement,
+} from '@/lib/announcement-storage';
+import {
   type ConfigStateUpdate,
   type ConfigSubscription,
   sameSubscription,
@@ -102,6 +110,7 @@ import {
   PlayRecord,
   PlayRecordPage,
   SharedCacheRecord,
+  SiteAnnouncement,
   SkipConfig,
   SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
@@ -819,6 +828,15 @@ export class LocalSqliteStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS live_source_state (
         source_key TEXT PRIMARY KEY, channel_number INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS announcements (
+        id TEXT PRIMARY KEY COLLATE BINARY,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        published_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_announcements_published ON announcements(published_at, id);
+
       CREATE TABLE IF NOT EXISTS invite_codes (
         code TEXT PRIMARY KEY COLLATE BINARY,
         created_at INTEGER NOT NULL,
@@ -2766,6 +2784,65 @@ export class LocalSqliteStorage implements IStorage {
       result[row.username] = Number(row.last_login_at);
     }
     return result;
+  }
+
+  async listAnnouncements(limit: number): Promise<SiteAnnouncement[]> {
+    const rows = this.db
+      .prepare(ANNOUNCEMENT_LIST_SQL)
+      .all(limit) as AnnouncementRow[];
+    return rows.map(readAnnouncement);
+  }
+
+  async countAnnouncements(): Promise<number> {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS total FROM announcements')
+      .get() as { total: number };
+    return row.total;
+  }
+
+  async getPublishedAnnouncements(
+    options: Parameters<IStorage['getPublishedAnnouncements']>[0],
+  ): Promise<SiteAnnouncement[]> {
+    const { sql, params } = publishedAnnouncementQuery(options);
+    const rows = this.db.prepare(sql).all(...params) as AnnouncementRow[];
+    return rows.map(readAnnouncement);
+  }
+
+  async getAnnouncement(id: string): Promise<SiteAnnouncement | null> {
+    const row = this.db
+      .prepare('SELECT * FROM announcements WHERE id = ?')
+      .get(id) as AnnouncementRow | undefined;
+    return row ? readAnnouncement(row) : null;
+  }
+
+  async createAnnouncement(announcement: SiteAnnouncement): Promise<void> {
+    this.db
+      .prepare(ANNOUNCEMENT_INSERT_SQL)
+      .run(
+        announcement.id,
+        announcement.content,
+        announcement.createdAt,
+        announcement.updatedAt,
+        announcement.publishedAt,
+      );
+  }
+
+  async updateAnnouncement(
+    id: string,
+    patch: Parameters<IStorage['updateAnnouncement']>[1],
+  ): Promise<SiteAnnouncement | null> {
+    const { sql, params } = announcementUpdateQuery(id, patch);
+    const row = this.db.prepare(`${sql} RETURNING *`).get(...params) as
+      | AnnouncementRow
+      | undefined;
+    return row ? readAnnouncement(row) : null;
+  }
+
+  async deleteAnnouncement(id: string): Promise<boolean> {
+    return (
+      this.db.prepare('DELETE FROM announcements WHERE id = ?').run(id)
+        .changes > 0
+    );
   }
 
   private get invites() {

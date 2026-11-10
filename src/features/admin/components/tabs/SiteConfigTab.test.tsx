@@ -39,7 +39,7 @@ it('使用四个设置分组，保留字段标签并由外层提供保存按钮'
   expect(
     screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent),
   ).toEqual(['基本信息', '数据与图片代理', '功能', '本地设置默认值']);
-  for (const name of ['站点名称', '站点图标', '站点公告', '底部声明']) {
+  for (const name of ['站点名称', '站点图标', '站点须知', '底部声明']) {
     expect(screen.getByRole('textbox', { name })).toBeInTheDocument();
   }
   expect(screen.getAllByRole('switch')).toHaveLength(switchNames.length);
