@@ -60,6 +60,14 @@ const SHARED_SEARCH_PAGES = createSharedServerCache<{
   freshMs: 60_000,
   staleMs: 0,
 });
+// 特殊源失败与无结果都返回空数组，空结果不缓存，避免一次失败在各实例间扩散
+const SPECIAL_SOURCE_SEARCHES = createSharedServerCache<SearchResult[]>({
+  name: 'special-search-v1',
+  ...getServerCacheBudget('search-pages'),
+  freshMs: SEARCH_CACHE_TTL_MS,
+  staleMs: SEARCH_CACHE_STALE_MS,
+  shouldCache: (results) => results.length > 0,
+});
 const SEARCH_AGGREGATE_LOAD_INFLIGHT: Map<
   string,
   Promise<SearchResult[]>
@@ -184,6 +192,17 @@ export function dedupeSearchLoad(
   return p;
 }
 
+export function loadSpecialSourceSearch(
+  sourceKey: string,
+  query: string,
+  loader: () => Promise<SearchResult[]>,
+): Promise<SearchResult[]> {
+  return SPECIAL_SOURCE_SEARCHES.getOrLoad(
+    makeSearchCacheKey(sourceKey, query, 1),
+    loader,
+  );
+}
+
 export function getCachedSearchPage(
   sourceKey: string,
   query: string,
@@ -221,6 +240,7 @@ export function getSearchCacheStats() {
     pages: SEARCH_CACHE.stats(),
     emptyPages: SEARCH_EMPTY_CACHE.stats(),
     aggregates: SEARCH_AGGREGATE_CACHE.stats(),
+    specialSources: SPECIAL_SOURCE_SEARCHES.stats(),
   };
 }
 
@@ -229,6 +249,7 @@ export function clearSearchCachesForTests(): void {
   SEARCH_EMPTY_CACHE.clear();
   SEARCH_AGGREGATE_CACHE.clear();
   SHARED_SEARCH_PAGES.clear();
+  SPECIAL_SOURCE_SEARCHES.clear();
   SEARCH_INFLIGHT.clear();
   SEARCH_AGGREGATE_REFRESH_INFLIGHT.clear();
   SEARCH_AGGREGATE_LOAD_INFLIGHT.clear();

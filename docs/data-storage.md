@@ -13,7 +13,7 @@
 
 - 直播权限由 `SiteConfig.EnableLiveEntry` 与 `SiteConfig.LiveAccess` 共同决定；`LiveAccess` 为 `groups` 时仅站长、管理员及任一 `allowLive: true` 用户组成员可观看。直播 API、直播代理、直播页面及 layout / server-config 的逐用户 `ENABLE_LIVE_ENTRY` 统一经 `canUserWatchLive()` 判定。
 
-- 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移，用户组定义 `Tags` 留在配置。
+- 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移，用户组定义 `Tags` 留在配置。普通用户的 Guard 每请求读取一次权限与有序组成员（两后端共用 LEFT JOIN 语义），通过 `ActiveUserInfo.userAccess` 将本次快照传给 `getAvailableApiSites()` 第三参；快照仅在当前请求内复用，其他请求重新读取角色、封禁与账号存在性。站长鉴权由环境账号决定，源过滤仍从存储读取其个人源与组权限。
 - `enabledApis` 为空数组时存为 `NULL`，含义是**不限制**而非禁止全部；没有有效个人源或组源列表时返回全部启用源。删除用户最后一个授权源会让其回落为全部可用。
 - 视频源 `adminOnly` 存在配置 JSON 的 `SourceConfig` 里，由 `getAvailableApiSites()` 统一过滤：普通用户和没有 `user_access` 行的用户名看不到，管理员与站长不受影响，再与 `enabledApis` / 用户组取交集。个人 `enabledApis` 非空时整体覆盖用户组（不与组取交集），多个组取并集；该优先级只在 `resolveSourceAccessRule()`（`src/lib/source-access.ts`）实现，后台用户列表的生效源数量同用此函数。不传用户名的内部调用（定时任务）返回全部启用源。用户侧读取源列表一律经该函数，不直接遍历 `SourceConfig`。
 - 新用户默认用户组 `UserConfig.DefaultUserGroup` 存在配置 JSON；`configSelfCheck()` 在其不对应任何 `Tags` 时清除，删组无需另行处理。注册与后台添加用户经 `registerUser()` 的 `userGroups` 参数在建号事务内写入组成员。
@@ -43,6 +43,8 @@
 `deleteUser` 与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。表内有多个用户名列时（如 `user_follows`）每一列都要覆盖。
 
 随用户数据增长的列表在 SQL 层按游标分页（排序键 + 唯一键打破平局），不要全量查询后在内存切页。
+
+播放记录定向读取在服务端经 `DbManager` / `IStorage.getPlayRecordsByKeys(userName, keys)` 完成，两后端按当前用户与去重键集合执行单条参数化 `IN` 查询，空集合直接返回空对象，缺失键省略。接口保留每请求 50 键及键长度校验，结果仍是以完整存储键索引的记录对象。
 
 播放记录批量删除每个请求最多接收 200 个键，校验后去重并以一条 SQL 删除当前用户的记录；空键数组为空操作，只有无请求体的删除请求执行全部清空。客户端对任意数量的键一次乐观更新并分批提交；批次之间独立提交，后续失败时已完成批次保留，只恢复失败批次的条目，提示写明成功与失败数量。
 
@@ -94,4 +96,10 @@
 
 `src/lib/shared-server-cache.ts` 的 `invalidate()` / `clear()` 只清本实例内存，不删除数据库里的共享条目，下次加载可能读回旧值。业务失效依赖缓存键（源配置、策略版本等）变化，不依赖这两个方法。`shared_cache` 是可丢弃数据。加载前占租约会插入空占位行（空值、有效期为 0），释放租约时按持有 token 删除仍为空的占位行；改租约或写入逻辑时保留这一条件，否则失败与不缓存的加载会留下绕过清理预算的空行。
 
-`getOrLoad()` 在本地或数据库命中最长保留期内的旧值时立即返回，持租约者后台刷新并在结束时释放租约；后台失败保留旧值原有的绝对过期时间。只有没有可用值的请求等待回源。显式 `refresh()` 等待在途刷新完成；租约续期、持有 token 校验及空占位行释放规则同样适用于后台刷新。
+`getOrLoad()` 在本地或数据库命中最长保留期内的旧值时立即返回，持租约者后台刷新；后台失败保留旧值原有的绝对过期时间。只有没有可用值的请求等待回源及共享写入。显式 `refresh()` 等待在途刷新完成。`setSharedCache()` 按 token 写入成功时同条语句清空租约，调用方依据返回值跳过重复释放；失败、不缓存或超过大小上限时仍按 token 释放，保留空占位行清理。租约续期、持有 token 校验及失效代次规则同样适用于后台刷新。
+
+共享存储读取返回原始到期字段，消费侧 `readRecord()` 按绝对 `staleUntil` 判定可用性；过期清理仅回收空间，调度与 serverless 边界见[部署指南](deployment.md#多实例与缓存)。
+
+## 多维连接租约
+
+`SharedResourceStore.acquireLeases()` 在同一事务检查全部维度，通过后才写入同一 token 的全部租约；拒绝返回调用方顺序中首个超限资源键及其最早到期等待时间。MySQL 多行写入和行锁按资源键升序获取，SQLite 使用即时写事务；锁顺序独立于业务拒绝优先级。新增维度复用该批量入口，保持固定锁顺序。批量续租任一资源键缺失或过期时整批回滚并返回失败，调用方中止上游；释放仅删除指定资源列表中匹配 token 的租约。

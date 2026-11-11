@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   try {
     const config = await getConfigForRead();
     const [sites, tiers] = await Promise.all([
-      getAvailableApiSites(guard.username, config),
+      getAvailableApiSites(guard.username, config, guard.userAccess),
       getSourceHealthTiers(),
     ]);
     return NextResponse.json(

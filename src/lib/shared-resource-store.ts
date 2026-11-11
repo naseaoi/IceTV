@@ -18,6 +18,15 @@ export interface ResourceAdmission {
   retryAfterMs: number;
 }
 
+export interface ResourceLeaseLimit {
+  key: string;
+  limit: number;
+}
+
+export type ResourceLeaseAdmission =
+  | { allowed: true }
+  | { allowed: false; rejectedKey: string; retryAfterMs: number };
+
 export interface SharedResourceStore {
   getCooldown(key: string): Promise<number>;
   extendCooldown(key: string, until: number): Promise<number>;
@@ -28,19 +37,18 @@ export interface SharedResourceStore {
     windowMs: number,
     now: number,
   ): Promise<ResourceAdmission>;
-  acquire(
-    key: string,
+  acquireLeases(
+    resources: readonly ResourceLeaseLimit[],
     token: string,
-    limit: number,
     now: number,
     until: number,
-  ): Promise<ResourceAdmission>;
-  renew(
-    key: string,
+  ): Promise<ResourceLeaseAdmission>;
+  renewLeases(
+    keys: readonly string[],
     token: string,
     now: number,
     until: number,
   ): Promise<boolean>;
-  release(key: string, token: string): Promise<void>;
+  releaseLeases(keys: readonly string[], token: string): Promise<void>;
   prune(now: number): Promise<void>;
 }

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
 
+import { createThrottledMaintenance } from '@/lib/concurrency';
 import { db } from '@/lib/db';
 import {
   type SwrCacheOptions,
@@ -21,7 +22,7 @@ export interface SharedServerCacheOptions<T> extends SwrCacheOptions<T> {
 }
 
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
-let lastPruneAt = 0;
+const schedulePrune = createThrottledMaintenance(60_000);
 
 export function createSharedServerCache<T>(
   options: SharedServerCacheOptions<T>,
@@ -65,6 +66,7 @@ export function createSharedServerCache<T>(
     expectedGeneration: number,
   ): Promise<T> {
     let ownsLease = true;
+    let persisted = false;
     let renewing = false;
     const heartbeat = setInterval(
       async () => {
@@ -101,7 +103,7 @@ export function createSharedServerCache<T>(
         return value;
       const now = Date.now();
       const ttl = resolveCacheEntryTtl(options, value);
-      await db.setSharedCache(
+      persisted = await db.setSharedCache(
         sharedKey,
         token,
         serialized,
@@ -109,14 +111,12 @@ export function createSharedServerCache<T>(
         now + ttl.freshMs + ttl.staleMs,
         now,
       );
-      if (now - lastPruneAt >= 60_000) {
-        lastPruneAt = now;
-        await db.pruneSharedCache(now, 100);
-      }
+      schedulePrune(() => db.pruneSharedCache(Date.now(), 100));
       return value;
     } finally {
       clearInterval(heartbeat);
-      await db.releaseSharedCacheLease(sharedKey, token).catch(() => {});
+      if (!persisted)
+        await db.releaseSharedCacheLease(sharedKey, token).catch(() => {});
     }
   }
 

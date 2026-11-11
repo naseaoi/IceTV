@@ -528,6 +528,10 @@ export interface IStorage {
   readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
+  getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>>;
   setPlayRecord(
     userName: string,
     key: string,

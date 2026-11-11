@@ -986,6 +986,25 @@ export class MySqlStorage implements IStorage {
     return parseJsonValue<PlayRecord>(rows[0]?.record_json);
   }
 
+  async getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>> {
+    const uniqueKeys = [...new Set(keys)];
+    if (!uniqueKeys.length) return {};
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      [normalizeUsername(userName), ...uniqueKeys],
+    );
+    const result: Record<string, PlayRecord> = {};
+    for (const row of rows) {
+      const record = parseJsonValue<PlayRecord>(row.record_json);
+      if (record && row.record_key) result[row.record_key] = record;
+    }
+    return result;
+  }
+
   async setPlayRecord(
     userName: string,
     key: string,

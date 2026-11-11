@@ -22,25 +22,23 @@ export class SqliteUserAccessStore {
 
   get(username: string): UserAccess | null {
     username = normalizeUsername(username);
-    const row = this.db
+    const rows = this.db
       .prepare(
-        'SELECT username, role, banned, enabled_apis FROM user_access WHERE username = ? AND (username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = user_access.username))',
+        'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a LEFT JOIN user_group_members m ON m.username = a.username WHERE a.username = ? AND (a.username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = a.username)) ORDER BY m.position, m.group_name',
       )
-      .get(username, normalizeUsername(getOwnerUsername() || '')) as
-      | Parameters<typeof userAccessFromRow>[0]
-      | undefined;
-    if (!row)
+      .all(
+        username,
+        normalizeUsername(getOwnerUsername() || ''),
+      ) as (Parameters<typeof userAccessFromRow>[0] & {
+      group_name: string | null;
+    })[];
+    if (!rows[0])
       return username === normalizeUsername(getOwnerUsername() || '')
         ? effectiveUserAccess({ username, role: 'user' })
         : null;
-    const tags = this.db
-      .prepare(
-        'SELECT group_name FROM user_group_members WHERE username = ? ORDER BY position, group_name',
-      )
-      .all(username) as { group_name: string }[];
     return userAccessFromRow(
-      row,
-      tags.map((row) => row.group_name),
+      rows[0],
+      rows.flatMap((row) => (row.group_name === null ? [] : [row.group_name])),
     );
   }
 

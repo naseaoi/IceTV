@@ -29,6 +29,7 @@ import {
   DEFAULT_SOURCE_COVER_PROXY_MODE,
   normalizeSourceCoverProxyMode,
 } from '@/lib/source-cover-proxy';
+import type { UserAccess } from '@/lib/user-access';
 import { normalizeUsername } from '@/lib/username';
 import { AdminConfig } from '@/types/admin';
 
@@ -725,6 +726,7 @@ export function getCacheTime(
 export async function getAvailableApiSites(
   user?: string,
   config?: Readonly<AdminConfig>,
+  userAccess?: Readonly<UserAccess>,
 ): Promise<ApiSite[]> {
   const currentConfig = config || (await getConfigForRead());
   const enabledSources = currentConfig.SourceConfig.filter((s) => !s.disabled);
@@ -734,7 +736,10 @@ export async function getAvailableApiSites(
   }
 
   const lookupUsername = normalizeUsername(user);
-  const userConfig = await db.getUserAccess(lookupUsername);
+  const userConfig =
+    userAccess && normalizeUsername(userAccess.username) === lookupUsername
+      ? userAccess
+      : await db.getUserAccess(lookupUsername);
   const isStaff =
     lookupUsername === normalizeUsername(getOwnerUsername()) ||
     userConfig?.role === 'admin' ||

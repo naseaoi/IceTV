@@ -26,7 +26,11 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
-  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const apiSites = await getAvailableApiSites(
+    guardResult.username,
+    config,
+    guardResult.userAccess,
+  );
   const maxSearchPages = normalizeRuntimeParams(
     config.SiteConfig,
   ).SearchDownstreamMaxPage;

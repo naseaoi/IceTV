@@ -14,6 +14,10 @@ import { readTextLimited } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
+import {
+  hasSignedUrlParams,
+  SIGNED_URL_PARAM_RE,
+} from '@/lib/signed-url-params';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 type M3U8CacheEntry = {
@@ -37,8 +41,6 @@ export type M3U8ProxyRequestContext = {
   userInitiated: boolean;
 };
 
-const SIGNED_URL_PARAM_RE =
-  /[?&](sign|signature|auth_key|auth|token|expires?|expire|hmac|x-amz-signature|security_token|oss_expires|wssecret|wstime|ccode|ksign)=/i;
 const M3U8_TTL = { freshMs: 60_000, staleMs: 60_000 };
 // 详情缓存最长 30 分钟，剧集地址的有效期只按这个量级假设；路径里带令牌的分片地址无法识别，不能缓存更久
 const ENDED_MEDIA_M3U8_TTL = {
@@ -72,11 +74,7 @@ async function getProxyRequestTimeoutMs(
   );
 }
 
-export function isSignedM3U8Url(rawUrl: string): boolean {
-  if (!rawUrl) return false;
-  if (!rawUrl.includes('?')) return false;
-  return SIGNED_URL_PARAM_RE.test(rawUrl);
-}
+export const isSignedM3U8Url = hasSignedUrlParams;
 
 // 完结的媒体清单内容不再变化，但内嵌的签名分片或密钥地址会过期，只有不含签名参数时才长缓存
 function getM3U8CacheTtl(entry: M3U8CacheEntry) {

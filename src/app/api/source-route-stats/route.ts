@@ -62,9 +62,13 @@ export async function POST(request: NextRequest) {
 
     const config = await getConfigForRead();
     const availableSources = new Set(
-      (await getAvailableApiSites(guardResult.username, config)).map(
-        (source) => source.key,
-      ),
+      (
+        await getAvailableApiSites(
+          guardResult.username,
+          config,
+          guardResult.userAccess,
+        )
+      ).map((source) => source.key),
     );
     if (
       (stat && !availableSources.has(stat.source)) ||

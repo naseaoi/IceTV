@@ -364,6 +364,13 @@ class DbManager {
     return storage.getPlayRecord(userName, key);
   }
 
+  async getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>> {
+    return (await this.getStorage()).getPlayRecordsByKeys(userName, keys);
+  }
+
   async savePlayRecord(
     userName: string,
     source: string,

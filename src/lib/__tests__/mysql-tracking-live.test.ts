@@ -6,6 +6,7 @@ import {
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
 import {
   assertBatchDeletePlayRecords,
+  assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
@@ -67,6 +68,43 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     await (
       storage as unknown as { pool: { end: () => Promise<void> } }
     ).pool.end();
+  });
+
+  it('单次 JOIN 保留多组顺序、无组用户及删号边界', async () => {
+    await storage.registerUser('access-reader', 'password');
+    await storage.updateUserAccess(['access-reader'], {
+      role: 'admin',
+      tags: ['second', 'first'],
+      enabledApis: ['source'],
+    });
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    const query = jest.spyOn(pool, 'query');
+    expect(await storage.getUserAccess('ACCESS-READER')).toMatchObject({
+      role: 'admin',
+      tags: ['second', 'first'],
+      enabledApis: ['source'],
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    query.mockRestore();
+    await storage.updateUserAccess(['access-reader'], {
+      tags: [],
+      enabledApis: [],
+      banned: true,
+    });
+    expect(await storage.getUserAccess('access-reader')).toMatchObject({
+      banned: true,
+      tags: undefined,
+      enabledApis: undefined,
+    });
+    await pool.execute('DELETE FROM users WHERE username = ?', [
+      'access-reader',
+    ]);
+    expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('批量读取隔离用户并省略缺失键', async () => {
+    await assertBatchReadPlayRecords(storage);
   });
 
   describe('管理通知契约', () => {

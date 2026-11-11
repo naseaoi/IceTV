@@ -17,9 +17,13 @@ export async function GET(request: NextRequest) {
 
     const config = await getConfigForRead();
     const availableSources = new Set(
-      (await getAvailableApiSites(guardResult.username, config)).map(
-        (source) => source.key,
-      ),
+      (
+        await getAvailableApiSites(
+          guardResult.username,
+          config,
+          guardResult.userAccess,
+        )
+      ).map((source) => source.key),
     );
     // 中转暂停时自动源不再回落服务器；仅限中转的源保持原样，由播放失败触发自动换源
     const relayPaused = await isServerRelayPaused();

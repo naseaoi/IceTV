@@ -8,6 +8,7 @@ import {
 import { db } from './db';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';
+import type { UserAccess } from './user-access';
 import { touchUserActivity } from './user-activity.server';
 import { normalizeUsername } from './username';
 
@@ -23,7 +24,8 @@ type GuardFailure = {
   response: NextResponse;
 };
 
-type ActiveUserInfo = {
+export type ActiveUserInfo = {
+  userAccess?: Readonly<UserAccess>;
   username: string;
   isOwner: boolean;
   role: 'owner' | 'admin' | 'user';
@@ -165,6 +167,7 @@ export async function requireActiveUserFromAuthInfo(
     username,
     isOwner,
     role: user.role === 'admin' ? 'admin' : 'user',
+    userAccess: user,
   };
 }
 
@@ -195,8 +198,7 @@ export async function requireAdmin(
 
   if (guardResult.role === 'owner') {
     return {
-      username: guardResult.username,
-      isOwner: true,
+      ...guardResult,
       isAdmin: true,
       role: 'owner',
     };
@@ -212,8 +214,7 @@ export async function requireAdmin(
   }
 
   return {
-    username: guardResult.username,
-    isOwner: false,
+    ...guardResult,
     isAdmin: true,
     role: 'admin',
   };

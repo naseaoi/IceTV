@@ -52,6 +52,27 @@ function contract(
     });
   });
 
+  it('successful persistence clears the lease without a separate release', async () => {
+    const key = randomUUID();
+    expect(
+      await storage.acquireSharedCacheLease(key, 'writer', 1000, 30_000),
+    ).toBe(true);
+    expect(
+      await storage.setSharedCache(key, 'writer', 'value', 2000, 3000, 1100),
+    ).toBe(true);
+    expect(
+      await storage.renewSharedCacheLease(key, 'writer', 1200, 40_000),
+    ).toBe(false);
+    expect(
+      await storage.acquireSharedCacheLease(key, 'next', 1200, 40_000),
+    ).toBe(true);
+    expect(
+      await storage.setSharedCache(key, 'writer', 'late', 4000, 5000, 1300),
+    ).toBe(false);
+    expect((await storage.getSharedCache(key))?.value).toBe('value');
+    await storage.releaseSharedCacheLease(key, 'next');
+  });
+
   it("deletes only the releasing owner's empty placeholder", async () => {
     const key = randomUUID();
     await storage.acquireSharedCacheLease(key, 'old', 1000, 2000);

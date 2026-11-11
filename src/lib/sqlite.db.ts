@@ -1900,6 +1900,28 @@ export class LocalSqliteStorage implements IStorage {
     return parseJsonValue<PlayRecord>(row?.record_json);
   }
 
+  async getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>> {
+    const uniqueKeys = [...new Set(keys)];
+    if (!uniqueKeys.length) return {};
+    const rows = this.db
+      .prepare(
+        `SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      )
+      .all(normalizeUsername(userName), ...uniqueKeys) as {
+      record_key: string;
+      record_json: string;
+    }[];
+    const result: Record<string, PlayRecord> = {};
+    for (const row of rows) {
+      const record = parseJsonValue<PlayRecord>(row.record_json);
+      if (record) result[row.record_key] = record;
+    }
+    return result;
+  }
+
   async setPlayRecord(
     userName: string,
     key: string,

@@ -2,6 +2,7 @@
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
 import {
   assertBatchDeletePlayRecords,
+  assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
@@ -1809,6 +1810,30 @@ function createFakePool() {
       return [[], []];
     if (
       normalized.startsWith(
+        'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a',
+      )
+    ) {
+      const username = String(params[0]);
+      const row = currentState.userAccess.get(username);
+      if (!row || (username !== params[1] && !currentState.users.has(username)))
+        return [[], []];
+      const groups = currentState.userGroups
+        .filter((group) => group.username === username)
+        .sort(
+          (a, b) =>
+            a.position - b.position ||
+            String(a.group_name).localeCompare(String(b.group_name)),
+        );
+      return [
+        (groups.length ? groups : [{ group_name: null }]).map((group) => ({
+          ...row,
+          group_name: group.group_name,
+        })),
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
         'SELECT username, role, banned, enabled_apis FROM user_access',
       )
     ) {
@@ -2115,6 +2140,23 @@ function createFakePool() {
       const [username, key] = params as [string, string];
       return [
         [{ record_json: currentState.playRecords.get(username)?.get(key) }],
+        [],
+      ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key IN (',
+      )
+    ) {
+      const [username, ...keys] = params as string[];
+      return [
+        getJsonRows(
+          currentState.playRecords,
+          username,
+          'record_key',
+          'record_json',
+        ).filter((row) => keys.includes(row.record_key)),
         [],
       ];
     }
@@ -3253,6 +3295,22 @@ describe('mysql storage contract', () => {
     await assertUpdatedPlayRecordPage(
       new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
     );
+  });
+
+  it('批量读取一次查询并隔离用户与缺失键', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await assertBatchReadPlayRecords(storage);
+    const query = jest.spyOn(fakePool, 'query');
+    await storage.getPlayRecordsByKeys('read-user', [
+      'source+0+part',
+      'source+1+part',
+    ]);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('record_key IN (?, ?)'),
+      ['read-user', 'source+0+part', 'source+1+part'],
+    );
+    query.mockRestore();
   });
 
   it('批量删除隔离用户并同步影响追更计数', async () => {

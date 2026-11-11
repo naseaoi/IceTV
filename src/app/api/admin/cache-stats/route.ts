@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
     withHitRate('search-pages', searchStats.pages),
     withHitRate('search-empty-pages', searchStats.emptyPages),
     withHitRate('search-aggregates', searchStats.aggregates),
+    withHitRate('special-source-search', searchStats.specialSources),
     withHitRate('detail', getDetailCacheStats()),
     withHitRate('cover-image-resize', getResizedCoverCacheStats()),
     withHitRate('proxy-m3u8', getM3U8CacheStats()),

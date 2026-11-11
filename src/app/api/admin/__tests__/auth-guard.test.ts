@@ -199,6 +199,48 @@ describe('admin api auth guard regression', () => {
     LiveConfig: [],
   };
 
+  it('每次鉴权读取当前权限并带出同一快照，拒绝封禁与删号', async () => {
+    const { requireActiveUserFromAuthInfo, isGuardFailure } =
+      await import('@/lib/api-auth');
+    const auth = {
+      username: 'normal-1',
+      sessionType: 'account' as const,
+      expiresAt: Date.now() + 60_000,
+      signature: 'valid',
+    };
+    const snapshot = {
+      username: 'normal-1',
+      role: 'admin' as const,
+      tags: ['vip'],
+      enabledApis: ['a'],
+    };
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce(snapshot);
+    const first = await requireActiveUserFromAuthInfo(auth);
+    expect(first).toMatchObject({ role: 'admin', userAccess: snapshot });
+    if (!isGuardFailure(first)) expect(first.userAccess).toBe(snapshot);
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce({
+      ...snapshot,
+      role: 'user',
+    });
+    expect(await requireActiveUserFromAuthInfo(auth)).toMatchObject({
+      role: 'user',
+    });
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce({
+      ...snapshot,
+      banned: true,
+    });
+    const banned = await requireActiveUserFromAuthInfo(auth);
+    expect(
+      isGuardFailure(banned) && (await banned.response.json()),
+    ).toMatchObject({ code: 'USER_BANNED' });
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce(null);
+    const deleted = await requireActiveUserFromAuthInfo(auth);
+    expect(
+      isGuardFailure(deleted) && (await deleted.response.json()),
+    ).toMatchObject({ code: 'USER_NOT_FOUND' });
+    expect(db.getUserAccess).toHaveBeenCalledTimes(4);
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.NEXT_PUBLIC_STORAGE_TYPE = 'localdb';

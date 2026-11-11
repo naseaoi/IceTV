@@ -26,6 +26,8 @@
 
 ## 探测
 
+详情与逐集解析的 HTTP 入口经 `withAuthenticatedSourceProbeBudget()` 鉴权后，将可信 `ActiveUserInfo` 作为函数参数传给未导出的内部 handler；测速包装复用这次鉴权，不从请求头读取权限上下文。测速额外的资源租约与普通回源预算同时生效，内部请求携带包装层的取消信号；共享加载只取消当前消费者等待。
+
 由 cron `metadata`、`all`、`source-health` 执行（调度见 [部署](deployment.md#定时维护与源站探测)）。只请求启用普通源的搜索第一页，跳过搜索缓存读取，沿用真实搜索的样本分类与回源资源额度，结束后刷新样本缓冲；giri、xgcartoon 跳过，关键词按 UTC 日期轮换。
 
 ## 逐集解析型源站
@@ -37,3 +39,8 @@
 3. `src/app/api/episode-url/route.ts`：在 `matchesLazyKind` 和 `resolveEpisodeUrl` 接上新 kind
 
 不要在详情阶段全量抓播放页，不要绕过 `/api/episode-url` 在客户端直接解析源站地址。
+
+解析结果与特殊源搜索跨实例共享，均按源配置（`getSourceCacheKey()`）分区：
+
+- `src/app/api/episode-url/cache.ts`：不带签名参数（`src/lib/signed-url-params.ts`）的播放地址进共享缓存 `episode-url-v1`，30 分钟新鲜、2 小时陈旧；带签名参数的地址可能绑定出口或短期过期，只留在本实例。解析逻辑改变结果格式或有效期时升级缓存名版本，否则各实例继续命中旧结果。新增解析源若依赖 Cookie、会话或出口 IP，结果不能进共享缓存。
+- giri / xgcartoon 搜索经 `loadSpecialSourceSearch()`（`src/lib/search-cache.ts`）共享非空结果 10 分钟。它们把失败与无结果都返回空数组，空结果因此不缓存。

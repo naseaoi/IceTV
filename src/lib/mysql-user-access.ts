@@ -31,20 +31,18 @@ export class MysqlUserAccessStore {
   async get(username: string): Promise<UserAccess | null> {
     username = normalizeUsername(username);
     const [rows] = await this.db.query<RowDataPacket[]>(
-      `SELECT username, role, banned, enabled_apis FROM user_access WHERE username = ? AND (username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = user_access.username))${this.lock ? ' FOR UPDATE' : ''}`,
+      `SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a LEFT JOIN user_group_members m ON m.username = a.username WHERE a.username = ? AND (a.username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = a.username)) ORDER BY m.position, m.group_name${this.lock ? ' FOR UPDATE' : ''}`,
       [username, normalizeUsername(getOwnerUsername() || '')],
     );
     if (!rows[0])
       return username === normalizeUsername(getOwnerUsername() || '')
         ? effectiveUserAccess({ username, role: 'user' })
         : null;
-    const [tags] = await this.db.query<RowDataPacket[]>(
-      'SELECT group_name FROM user_group_members WHERE username = ? ORDER BY position, group_name',
-      [username],
-    );
     return userAccessFromRow(
       rows[0] as Parameters<typeof userAccessFromRow>[0],
-      tags.map((row) => String(row.group_name)),
+      rows.flatMap((row) =>
+        row.group_name == null ? [] : [String(row.group_name)],
+      ),
     );
   }
 

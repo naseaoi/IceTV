@@ -90,6 +90,41 @@ export async function assertUpdatedPlayRecordPage(
   ).toEqual({ items: {}, total: 0, nextCursor: null });
 }
 
+export async function assertBatchReadPlayRecords(
+  storage: IStorage,
+): Promise<void> {
+  const record: PlayRecord = {
+    title: '剧集',
+    source_name: '源',
+    cover: '',
+    year: '2026',
+    index: 1,
+    total_episodes: 12,
+    play_time: 0,
+    total_time: 0,
+    save_time: 100,
+  };
+  const keys = Array.from({ length: 50 }, (_, index) => `source+${index}+part`);
+  const records = Object.fromEntries(keys.map((key) => [key, record]));
+  await storage.setPlayRecords('read-user', records);
+  await storage.setPlayRecord('other-user', keys[0], { ...record, index: 2 });
+  await storage.setPlayRecord('other-user', 'source+private', record);
+  expect(await storage.getPlayRecordsByKeys('READ-USER', [])).toEqual({});
+  expect(await storage.getPlayRecordsByKeys('READ-USER', keys)).toEqual(
+    records,
+  );
+  expect(
+    await storage.getPlayRecordsByKeys('READ-USER', [
+      keys[0],
+      keys[0],
+      'source+missing',
+      'source+private',
+      'SOURCE+0+part',
+    ]),
+  ).toEqual({ [keys[0]]: record });
+  expect(await storage.getPlayRecordsByKeys('absent-user', keys)).toEqual({});
+}
+
 export async function assertBatchDeletePlayRecords(
   storage: IStorage,
 ): Promise<void> {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { withAuthenticatedSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
+import type { ActiveUserInfo } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getCachedDetail } from '@/lib/detail-cache';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
@@ -9,13 +9,10 @@ import { resourceLimitResponse } from '@/lib/server-resource-errors';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  return withSourceProbeBudget(request, handleGet);
+  return withAuthenticatedSourceProbeBudget(request, handleGet);
 }
 
-async function handleGet(request: NextRequest) {
-  const guardResult = await requireActiveUser(request);
-  if (isGuardFailure(guardResult)) return guardResult.response;
-
+async function handleGet(request: NextRequest, guardResult: ActiveUserInfo) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
   const sourceCode = searchParams.get('source');
@@ -30,14 +27,18 @@ async function handleGet(request: NextRequest) {
 
   try {
     const config = await getConfigForRead();
-    const apiSites = await getAvailableApiSites(guardResult.username, config);
+    const apiSites = await getAvailableApiSites(
+      guardResult.username,
+      config,
+      guardResult.userAccess,
+    );
     const apiSite = apiSites.find((site) => site.key === sourceCode);
 
     if (!apiSite) {
       return NextResponse.json({ error: '无效的API来源' }, { status: 400 });
     }
 
-    const result = await getCachedDetail(apiSite, id);
+    const result = await getCachedDetail(apiSite, id, request.signal);
 
     return NextResponse.json(result, {
       headers: {

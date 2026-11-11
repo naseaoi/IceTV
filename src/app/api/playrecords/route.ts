@@ -38,13 +38,9 @@ export async function GET(request: NextRequest) {
           { status: 400 },
         );
       }
-      const records: Record<string, PlayRecord> = {};
-      // 复用两种存储的主键查询，串行限制单请求的数据库并发。
-      for (const key of new Set(keys)) {
-        const { source, id } = parseStorageKey(key)!;
-        const record = await db.getPlayRecord(guardResult.username, source, id);
-        if (record) records[key] = record;
-      }
+      const records = await db.getPlayRecordsByKeys(guardResult.username, [
+        ...new Set(keys),
+      ]);
       return NextResponse.json(records, { headers: NO_STORE_HEADERS });
     }
     if (searchParams.get('format') === 'page') {

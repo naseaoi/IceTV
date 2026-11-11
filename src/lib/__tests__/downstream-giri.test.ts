@@ -131,6 +131,38 @@ describe('downstream giri source', () => {
     );
   });
 
+  it('giri 搜索复用非空结果，空结果下次重新回源', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock
+      .mockResolvedValueOnce(createJsonResponse({ list: [] }))
+      .mockResolvedValue(
+        createJsonResponse({ list: [{ id: 103, name: 'Cached', pic: '' }] }),
+      );
+    const site = createGiriSite('https://anime.girigirilove.icu');
+
+    await expect(searchFirstPageFromApi(site, 'reuse')).resolves.toEqual([]);
+    const first = await searchFirstPageFromApi(site, 'reuse');
+    const second = await searchFirstPageFromApi(site, 'reuse');
+
+    expect(first).toEqual([expect.objectContaining({ id: '103' })]);
+    expect(second).toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('giri 搜索消费者取消时返回空结果', async () => {
+    (global.fetch as jest.Mock).mockImplementation(
+      () => new Promise<Response>(() => {}),
+    );
+    const controller = new AbortController();
+    const pending = searchFirstPageFromApi(
+      createGiriSite('https://anime.girigirilove.icu'),
+      'abort',
+      { signal: controller.signal },
+    );
+    controller.abort();
+    await expect(pending).resolves.toEqual([]);
+  });
+
   it('giri 详情标题解码 HTML 实体', async () => {
     const detailHtml = `
       <html>

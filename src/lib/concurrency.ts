@@ -1,3 +1,24 @@
+export function createThrottledMaintenance(intervalMs: number) {
+  let lastStartedAt = -Infinity;
+  let running = false;
+  return (task: () => Promise<void>): void => {
+    const now = Date.now();
+    if (running || now - lastStartedAt < intervalMs) return;
+    running = true;
+    lastStartedAt = now;
+    // 下一轮事件循环才执行，避免 SQLite 同步清理占住当前响应链。
+    const timer = setTimeout(() => {
+      void Promise.resolve()
+        .then(task)
+        .catch(() => {})
+        .finally(() => {
+          running = false;
+        });
+    }, 0);
+    timer.unref?.();
+  };
+}
+
 export async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   concurrency: number,

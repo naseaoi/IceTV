@@ -7,6 +7,7 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 installWebPolyfills();
 
 const mockGetAllPlayRecords = jest.fn();
+const mockGetPlayRecordsByKeys = jest.fn();
 const mockGetPlayRecord = jest.fn();
 const mockGetPlayRecordPage = jest.fn();
 const mockSavePlayRecord = jest.fn();
@@ -24,6 +25,8 @@ jest.mock('@/lib/api-auth', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
+    getPlayRecordsByKeys: (...args: unknown[]) =>
+      mockGetPlayRecordsByKeys(...args),
     getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
     getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
@@ -152,9 +155,9 @@ describe('playrecords route', () => {
   });
 
   it('按候选键去重读取且仅查询当前账号，缺失键省略', async () => {
-    mockGetPlayRecord.mockImplementation(async (_user, _source, id) =>
-      id === 'new' ? records['source+new'] : null,
-    );
+    mockGetPlayRecordsByKeys.mockResolvedValue({
+      'source+new': records['source+new'],
+    });
     const response = await GET(
       createRequest(
         'http://localhost/api/playrecords?keys=source%2Bnew&keys=source%2Bmissing&keys=source%2Bnew',
@@ -163,10 +166,10 @@ describe('playrecords route', () => {
     expect(await response.json()).toEqual({
       'source+new': records['source+new'],
     });
-    expect(mockGetPlayRecord.mock.calls).toEqual([
-      ['demo', 'source', 'new'],
-      ['demo', 'source', 'missing'],
+    expect(mockGetPlayRecordsByKeys.mock.calls).toEqual([
+      ['demo', ['source+new', 'source+missing']],
     ]);
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
     expect(response.headers.get('cache-control')).toContain('no-store');
   });
@@ -183,6 +186,7 @@ describe('playrecords route', () => {
       createRequest(`http://localhost/api/playrecords?${query}`),
     );
     expect(response.status).toBe(400);
+    expect(mockGetPlayRecordsByKeys).not.toHaveBeenCalled();
     expect(mockGetPlayRecord).not.toHaveBeenCalled();
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
@@ -194,8 +198,12 @@ describe('playrecords route', () => {
       createRequest(`http://localhost/api/playrecords?${params}`),
     );
     expect(response.status).toBe(200);
-    expect(mockGetPlayRecord).toHaveBeenCalledTimes(50);
-    expect(mockGetPlayRecord).toHaveBeenCalledWith('demo', 's', '0+part');
+    expect(mockGetPlayRecordsByKeys).toHaveBeenCalledTimes(1);
+    expect(mockGetPlayRecordsByKeys).toHaveBeenCalledWith(
+      'demo',
+      params.getAll('keys'),
+    );
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
   });
 
   it('limit 参数只返回按保存时间排序的最近记录', async () => {

@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
 
   const config = await getConfigForRead();
   const [availableSites, sourceHealthTiers] = await Promise.all([
-    getAvailableApiSites(guardResult.username, config),
+    getAvailableApiSites(guardResult.username, config, guardResult.userAccess),
     getSourceHealthTiers(),
   ]);
   const proxyModes = new Map(

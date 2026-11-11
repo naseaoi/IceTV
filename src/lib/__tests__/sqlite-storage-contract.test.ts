@@ -6,6 +6,7 @@ import {
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
 import {
   assertBatchDeletePlayRecords,
+  assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
@@ -29,6 +30,10 @@ import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+it('批量读取隔离用户并省略缺失键', async () => {
+  await assertBatchReadPlayRecords(new LocalSqliteStorage(':memory:'));
+});
 
 it('公开年度报告存储与关注消息契约', async () => {
   const storage = new LocalSqliteStorage(':memory:');

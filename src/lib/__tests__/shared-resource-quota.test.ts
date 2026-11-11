@@ -2,8 +2,12 @@
 
 import type Database from 'better-sqlite3';
 
+import { db } from '@/lib/db';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
-import { consumeSharedQuota } from '@/lib/shared-resource-quota.server';
+import {
+  consumeSharedQuota,
+  sharedResourceStore,
+} from '@/lib/shared-resource-quota.server';
 import type {
   ResourceAdmission,
   SharedResourceStore,
@@ -54,6 +58,35 @@ describe('pooled shared quota', () => {
       }
     }
   }
+
+  it('returns the store before pruning, limits maintenance frequency, and absorbs failures', async () => {
+    jest.useFakeTimers('modern');
+    jest.spyOn(db, 'getSharedResourceStore').mockResolvedValue(store);
+    let fail!: (reason: Error) => void;
+    const prune = jest.spyOn(store, 'prune').mockReturnValueOnce(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+    await expect(sharedResourceStore()).resolves.toBe(store);
+    expect(prune).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(0);
+    await Promise.resolve();
+    expect(prune).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(120_000);
+    await expect(sharedResourceStore()).resolves.toBe(store);
+    jest.advanceTimersByTime(0);
+    expect(prune).toHaveBeenCalledTimes(1);
+    fail(new Error('prune failed'));
+    for (let step = 0; step < 5; step += 1) await Promise.resolve();
+    await expect(sharedResourceStore()).resolves.toBe(store);
+    jest.advanceTimersByTime(0);
+    for (let step = 0; step < 5; step += 1) await Promise.resolve();
+    expect(prune).toHaveBeenCalledTimes(2);
+    await sharedResourceStore();
+    jest.advanceTimersByTime(0);
+    expect(prune).toHaveBeenCalledTimes(2);
+  });
 
   it('sizes blocks from the limit within unit bounds', async () => {
     const cases: Array<[number, 'requests' | 'bytes', number]> = [

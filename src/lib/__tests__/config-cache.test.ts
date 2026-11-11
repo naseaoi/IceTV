@@ -358,6 +358,47 @@ describe('config cache persistence', () => {
     await expect(keys()).resolves.toEqual(['open', 'relay']);
   });
 
+  it('复用同账号请求快照并保留个人源优先及空列表语义', async () => {
+    const config = cloneBaseConfig();
+    config.SourceConfig = [
+      { key: 'open', name: 'Open', api: 'https://a.example', from: 'custom' },
+      { key: 'group', name: 'Group', api: 'https://b.example', from: 'custom' },
+      {
+        key: 'staff',
+        name: 'Staff',
+        api: 'https://c.example',
+        from: 'custom',
+        adminOnly: true,
+      },
+    ];
+    config.UserConfig.Tags = [{ name: 'vip', enabledApis: ['group', 'staff'] }];
+    const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+      adminConfig: config,
+    });
+    const { db } = require('../db') as typeof import('../db');
+    const snapshot = {
+      username: 'alice',
+      role: 'user' as const,
+      tags: ['vip'],
+      enabledApis: ['open', 'staff'],
+    };
+    const keys = async (access: typeof snapshot) =>
+      (await getAvailableApiSites('alice', config, access)).map(
+        (site) => site.key,
+      );
+    expect(await keys(snapshot)).toEqual(['open']);
+    expect(await keys({ ...snapshot, enabledApis: [] })).toEqual(['group']);
+    expect(await keys({ ...snapshot, enabledApis: [], tags: [] })).toEqual([
+      'open',
+      'group',
+    ]);
+    expect(db.getUserAccess).not.toHaveBeenCalled();
+    await getAvailableApiSites('other', config, snapshot);
+    expect(db.getUserAccess).toHaveBeenCalledWith('other');
+    await getAvailableApiSites('owner-1', config);
+    expect(db.getUserAccess).toHaveBeenCalledWith('owner-1');
+  });
+
   it('uses database users as the source of truth', async () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.UserConfig.Users = [

@@ -27,6 +27,7 @@ import {
 import {
   dedupeSearchLoad,
   getCachedSearchPage,
+  loadSpecialSourceSearch,
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
@@ -312,6 +313,29 @@ export async function probeSourceSearch(
   }
 }
 
+// 共享加载不绑定单个请求的取消，消费者取消只放弃等待
+async function searchSpecialSource(
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const search = isGirigiriSource(apiSite)
+    ? searchFromGirigiri
+    : searchFromXgcartoon;
+  try {
+    return await waitForSharedLoad(
+      () =>
+        loadSpecialSourceSearch(getSourceCacheKey(apiSite), query, () =>
+          search(apiSite, query),
+        ),
+      signal,
+    );
+  } catch (error) {
+    if (signal?.aborted) return [];
+    throw error;
+  }
+}
+
 export async function searchFromApi(
   apiSite: ApiSite,
   query: string,
@@ -321,12 +345,8 @@ export async function searchFromApi(
     return [];
   }
 
-  if (isGirigiriSource(apiSite)) {
-    return searchFromGirigiri(apiSite, query, options.signal);
-  }
-
-  if (isXgcartoonSource(apiSite)) {
-    return searchFromXgcartoon(apiSite, query, options.signal);
+  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
+    return searchSpecialSource(apiSite, query, options.signal);
   }
 
   try {
@@ -405,12 +425,8 @@ export async function searchFirstPageFromApi(
   query: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<SearchResult[]> {
-  if (isGirigiriSource(apiSite)) {
-    return searchFromGirigiri(apiSite, query, options.signal);
-  }
-
-  if (isXgcartoonSource(apiSite)) {
-    return searchFromXgcartoon(apiSite, query, options.signal);
+  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
+    return searchSpecialSource(apiSite, query, options.signal);
   }
 
   try {
