@@ -113,11 +113,17 @@ function loadHeroIntroDetail(target: string) {
   );
 }
 
-// 首屏只等短暂预算：共享缓存命中即刻返回，冷启动回源超时则本次留空，加载在后台继续写缓存
-async function waitWithinBudget<T>(task: Promise<T>): Promise<T | undefined> {
+// 首屏整页共用一个短暂预算：共享缓存命中即刻返回，冷启动回源超时则本次留空，加载在后台继续写缓存
+async function waitWithinBudget<T>(
+  task: Promise<T>,
+  deadline: number,
+): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), HOME_UPSTREAM_WAIT_MS);
+    timer = setTimeout(
+      () => resolve(undefined),
+      Math.max(0, deadline - Date.now()),
+    );
   });
   try {
     return await Promise.race([task, timeout]);
@@ -128,16 +134,17 @@ async function waitWithinBudget<T>(task: Promise<T>): Promise<T | undefined> {
   }
 }
 
-async function getHeroIntro(item: {
-  id: string;
-  type?: string;
-}): Promise<string | undefined> {
+async function getHeroIntro(
+  item: { id: string; type?: string },
+  deadline: number,
+): Promise<string | undefined> {
   if (!/^\d+$/.test(item.id)) return undefined;
   const kind = item.type === 'movie' ? 'movie' : 'tv';
   const target = `https://m.douban.com/rexxar/api/v2/${kind}/${item.id}`;
   return (
     (await waitWithinBudget(
       heroIntros.getOrLoad(target, () => loadHeroIntroDetail(target)),
+      deadline,
     )) || undefined
   );
 }
@@ -145,6 +152,7 @@ async function getHeroIntro(item: {
 function buildHeroItems(
   hotMovies: RecentHotItem[],
   hotTvShows: RecentHotItem[],
+  deadline: number,
 ): Promise<HomeHeroItem[]> {
   const picked = pickHomeHeroItems(hotMovies, hotTvShows);
   return Promise.all(
@@ -152,46 +160,49 @@ function buildHeroItems(
       ...item,
       ...parseDoubanCardSubtitle(subtitle),
       episodesInfo: episodesInfo || undefined,
-      intro: await getHeroIntro(item),
+      intro: await getHeroIntro(item, deadline),
     })),
   );
 }
 
 export async function getHomeInitialData(): Promise<HomeInitialData> {
+  const deadline = Date.now() + HOME_UPSTREAM_WAIT_MS;
   const publicConfig = await getPublicConfig();
   const imageProxyType = await readServerDoubanImageProxyType(
     publicConfig.DoubanImageProxyType,
   );
+  // 超时为 undefined、回源失败为空列表，两者都留给客户端补齐
+  const loadRecentHot = (
+    params: Pick<
+      Parameters<typeof getServerDoubanRecentHot>[0],
+      'kind' | 'category' | 'type'
+    >,
+  ) =>
+    waitWithinBudget(
+      getServerDoubanRecentHot({ ...params, imageProxyType }).catch(
+        () => [] as RecentHotItem[],
+      ),
+      deadline,
+    );
   const [hotMovies, hotTvShows, hotVarietyShows, bangumiCalendarData] =
     await Promise.all([
-      getServerDoubanRecentHot({
-        kind: 'movie',
-        category: '热门',
-        type: '全部',
-        imageProxyType,
-      }).catch(() => []),
-      getServerDoubanRecentHot({
-        kind: 'tv',
-        category: 'tv',
-        type: 'tv',
-        imageProxyType,
-      }).catch(() => []),
-      getServerDoubanRecentHot({
-        kind: 'tv',
-        category: 'show',
-        type: 'show',
-        imageProxyType,
-      }).catch(() => []),
-      waitWithinBudget(getBangumiCalendarData()).then((data) =>
+      loadRecentHot({ kind: 'movie', category: '热门', type: '全部' }),
+      loadRecentHot({ kind: 'tv', category: 'tv', type: 'tv' }),
+      loadRecentHot({ kind: 'tv', category: 'show', type: 'show' }),
+      waitWithinBudget(getBangumiCalendarData(), deadline).then((data) =>
         data && isUsableBangumiCalendarData(data) ? data : [],
       ),
     ]);
 
   return {
-    hotMovies: hotMovies.map(toDoubanItem),
-    hotTvShows: hotTvShows.map(toDoubanItem),
-    hotVarietyShows: hotVarietyShows.map(toDoubanItem),
+    hotMovies: (hotMovies ?? []).map(toDoubanItem),
+    hotTvShows: (hotTvShows ?? []).map(toDoubanItem),
+    hotVarietyShows: (hotVarietyShows ?? []).map(toDoubanItem),
     bangumiCalendarData,
-    heroItems: await buildHeroItems(hotMovies, hotTvShows),
+    // 电影或剧集未赶上预算时由客户端拿到完整列表后再挑，避免 Hero 只含另一类
+    heroItems:
+      hotMovies && hotTvShows
+        ? await buildHeroItems(hotMovies, hotTvShows, deadline)
+        : [],
   };
 }
