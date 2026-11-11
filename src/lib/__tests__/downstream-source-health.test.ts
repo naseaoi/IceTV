@@ -2,7 +2,13 @@
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
-import { probeSourceSearch, searchFromApi } from '@/lib/downstream';
+import {
+  probeSourceSearch,
+  searchFirstPageFromApi,
+  searchFromApi,
+} from '@/lib/downstream';
+import { searchFromGirigiri } from '@/lib/downstream-sources/giri';
+import { searchFromXgcartoon } from '@/lib/downstream-sources/xgcartoon';
 import {
   dedupeSearchLoad,
   getCachedSearchPage,
@@ -10,6 +16,7 @@ import {
 } from '@/lib/search-cache';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { recordSourceSearchOutcome } from '@/lib/source-health.server';
+import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
 jest.mock('@/lib/config', () => ({
@@ -20,7 +27,19 @@ jest.mock('@/lib/config', () => ({
     .fn()
     .mockResolvedValue({ SiteConfig: { SearchRequestTimeoutSeconds: 8 } }),
 }));
+jest.mock('@/lib/downstream-sources/giri', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/giri'),
+  searchFromGirigiri: jest.fn(),
+}));
+jest.mock('@/lib/downstream-sources/xgcartoon', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/xgcartoon'),
+  searchFromXgcartoon: jest.fn(),
+}));
 jest.mock('@/lib/search-cache', () => ({
+  loadSpecialSourceSearch: jest.fn(
+    (_source: string, _query: string, loader: () => Promise<unknown>) =>
+      loader(),
+  ),
   getCachedSearchPage: jest.fn(),
   peekCachedSearchPage: jest.fn(),
   setCachedSearchPage: jest.fn(),
@@ -277,6 +296,90 @@ it.each([
   const results = await searchFromApi(site, 'movie');
   expect(results[0].series_status).toBe(expected);
 });
+
+function searchResult(id: string, source = 'a'): SearchResult {
+  return {
+    id,
+    source,
+    source_name: source,
+    title: 'Movie',
+    poster: '',
+    year: '2026',
+    episodes: ['https://example.com/1.m3u8'],
+    episodes_titles: ['1'],
+  };
+}
+
+it('deduplicates overlapping search pages in first-occurrence order', async () => {
+  fetchMock.mockImplementation(async (url: string) => {
+    const ids = url.includes('pg=2') ? [2, 3] : [1, 1, 2];
+    return new Response(
+      JSON.stringify({
+        list: ids.map((id, index) => ({
+          ...item,
+          vod_id: id,
+          vod_name: `Movie ${id}-${index}`,
+          vod_play_url: '1$https://example.com/1.m3u8',
+        })),
+        pagecount: 2,
+      }),
+    );
+  });
+  const results = await searchFromApi(site, 'movie', { maxSearchPages: 2 });
+  expect(results.map((result) => result.id)).toEqual(['1', '2', '3']);
+  expect(results.map((result) => result.title)).toEqual([
+    'Movie 1-0',
+    'Movie 2-2',
+    'Movie 3-1',
+  ]);
+});
+
+it('deduplicates the first search page without mutating cached results', async () => {
+  const first = searchResult('1');
+  const second = searchResult('2');
+  const cached = [first, { ...first, title: 'duplicate' }, second];
+  (getCachedSearchPage as jest.Mock).mockReturnValue({
+    status: 'ok',
+    data: cached,
+    pageCount: 1,
+  });
+  const results = await searchFirstPageFromApi(site, 'movie');
+  expect(results).toEqual([first, second]);
+  expect(results[0]).toBe(first);
+  expect(cached).toHaveLength(3);
+});
+
+it('preserves distinct source identities and the original unique array', async () => {
+  const cached = [searchResult('1', 'a'), searchResult('1', 'b')];
+  (getCachedSearchPage as jest.Mock).mockReturnValue({
+    status: 'ok',
+    data: cached,
+    pageCount: 1,
+  });
+  expect(await searchFirstPageFromApi(site, 'movie')).toBe(cached);
+});
+
+it.each([
+  ['giri', 'https://www.girigirilove.com', searchFromGirigiri],
+  ['xgcartoon', 'https://www.xgcartoon.com', searchFromXgcartoon],
+])(
+  'deduplicates %s results at both search entry points',
+  async (_name, api, search) => {
+    const first = searchResult('1');
+    const second = searchResult('2');
+    const cached = [first, { ...first, title: 'duplicate' }, second];
+    (search as jest.Mock).mockResolvedValue(cached);
+    expect(await searchFromApi({ ...site, api }, 'movie')).toEqual([
+      first,
+      second,
+    ]);
+    expect(await searchFirstPageFromApi({ ...site, api }, 'movie')).toEqual([
+      first,
+      second,
+    ]);
+    expect(cached).toHaveLength(3);
+  },
+);
 
 it('isolates the first search-page consumer cancellation while the shared loader fills cache', async () => {
   const actual =

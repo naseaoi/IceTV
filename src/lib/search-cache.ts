@@ -43,7 +43,7 @@ const SEARCH_EMPTY_CACHE = createSwrCache<CachedPageEntry>({
 });
 const SEARCH_AGGREGATE_CACHE =
   createSharedServerCache<CachedSearchAggregateEntry>({
-    name: 'search-aggregates',
+    name: 'search-aggregates-v2',
     ...getServerCacheBudget('search-aggregates'),
     freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
     staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,

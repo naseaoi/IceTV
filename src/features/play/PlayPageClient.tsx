@@ -644,9 +644,12 @@ function AuthenticatedPlayPageClient({
     (newSources: SearchResult[]) => {
       setAvailableSources((prev) => {
         const existingKeys = new Set(prev.map((s) => `${s.source}-${s.id}`));
-        const unique = newSources.filter(
-          (s) => !existingKeys.has(`${s.source}-${s.id}`),
-        );
+        const unique = newSources.filter((s) => {
+          const key = `${s.source}-${s.id}`;
+          if (existingKeys.has(key)) return false;
+          existingKeys.add(key);
+          return true;
+        });
         return unique.length > 0 ? [...prev, ...unique] : prev;
       });
     },

@@ -336,6 +336,18 @@ async function searchSpecialSource(
   }
 }
 
+// 各页独立缓存、排名漂移会造成页间重叠；(source, id) 是网格 key，须保留首次出现的条目。
+function uniqueSearchResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  const unique = results.filter((item) => {
+    const key = `${item.source}\u0000${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return unique.length === results.length ? results : unique;
+}
+
 export async function searchFromApi(
   apiSite: ApiSite,
   query: string,
@@ -346,7 +358,9 @@ export async function searchFromApi(
   }
 
   if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
-    return searchSpecialSource(apiSite, query, options.signal);
+    return uniqueSearchResults(
+      await searchSpecialSource(apiSite, query, options.signal),
+    );
   }
 
   try {
@@ -413,7 +427,7 @@ export async function searchFromApi(
       });
     }
 
-    return results;
+    return uniqueSearchResults(results);
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
     return [];
@@ -426,7 +440,9 @@ export async function searchFirstPageFromApi(
   options: { signal?: AbortSignal } = {},
 ): Promise<SearchResult[]> {
   if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
-    return searchSpecialSource(apiSite, query, options.signal);
+    return uniqueSearchResults(
+      await searchSpecialSource(apiSite, query, options.signal),
+    );
   }
 
   try {
@@ -441,7 +457,7 @@ export async function searchFirstPageFromApi(
       runtimeParams.SearchRequestTimeoutSeconds * 1000,
       options.signal,
     );
-    return firstPageResult.results;
+    return uniqueSearchResults(firstPageResult.results);
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
     return [];
