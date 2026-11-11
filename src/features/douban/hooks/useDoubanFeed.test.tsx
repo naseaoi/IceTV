@@ -15,14 +15,8 @@ jest.mock('@/lib/douban.client', () => ({
 }));
 
 function DoubanFeedProbe() {
-  const {
-    doubanData,
-    hasMore,
-    loading,
-    selectorsReady,
-    loadFailed,
-    retryLoad,
-  } = useDoubanFeed('movie');
+  const { doubanData, hasMore, loading, loadFailed, retryLoad } =
+    useDoubanFeed('movie');
 
   return (
     <div>
@@ -31,7 +25,6 @@ function DoubanFeedProbe() {
       <button onClick={retryLoad}>重试</button>
       <span data-testid='has-more'>{String(hasMore)}</span>
       <span data-testid='loading'>{String(loading)}</span>
-      <span data-testid='selectors-ready'>{String(selectorsReady)}</span>
     </div>
   );
 }
@@ -54,6 +47,21 @@ function AnimeFeedProbe({ targetWeekday }: { targetWeekday: string }) {
       <button onClick={() => handleWeekdayChange(targetWeekday)}>
         切换日期
       </button>
+    </div>
+  );
+}
+
+function TvFeedProbe() {
+  const { doubanData, loading, hasMore, loadNextPage } = useDoubanFeed('tv');
+
+  return (
+    <div>
+      <span data-testid='tv-ids'>
+        {doubanData.map((item) => item.id).join(',')}
+      </span>
+      <span data-testid='tv-loading'>{String(loading)}</span>
+      <span data-testid='tv-has-more'>{String(hasMore)}</span>
+      <button onClick={loadNextPage}>下一页</button>
     </div>
   );
 }
@@ -109,6 +117,39 @@ describe('useDoubanFeed', () => {
     expect(getDoubanCategories).toHaveBeenCalledTimes(2);
   });
 
+  it('drops items already loaded when the next page overlaps', async () => {
+    const item = (id: string) => ({
+      id,
+      title: id,
+      poster: '',
+      rate: '',
+      year: '',
+    });
+    (getDoubanCategories as jest.Mock)
+      .mockResolvedValueOnce({
+        code: 200,
+        message: 'ok',
+        list: [item('1'), item('2')],
+      })
+      .mockResolvedValueOnce({
+        code: 200,
+        message: 'ok',
+        list: [item('2'), item('3')],
+      });
+
+    render(<TvFeedProbe />);
+    await waitFor(() => {
+      expect(screen.getByTestId('tv-ids')).toHaveTextContent('1,2');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tv-ids')).toHaveTextContent(/^1,2,3$/);
+    });
+    expect(screen.getByTestId('tv-has-more')).toHaveTextContent('true');
+  });
+
   it('switches Bangumi weekdays from the loaded calendar without showing loading again', async () => {
     const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const currentWeekday = weekdays[new Date().getDay()];
@@ -157,9 +198,5 @@ describe('useDoubanFeed', () => {
     );
     expect(screen.getByTestId('anime-loading')).toHaveTextContent('false');
     expect(GetBangumiCalendarDataWithMeta).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: '重试日历' }));
-    await waitFor(() =>
-      expect(GetBangumiCalendarDataWithMeta).toHaveBeenCalledTimes(2),
-    );
   });
 });

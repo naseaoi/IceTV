@@ -20,14 +20,12 @@ import {
   SECTION_TITLE_TEXT_CLASS,
 } from '@/components/section-header';
 import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
+import { isUsableBangumiCalendarData } from '@/features/bangumi/lib/bangumi-normalize';
 import {
-  isUsableBangumiCalendarData,
-  selectBangumiCardCover,
-} from '@/features/bangumi/lib/bangumi-normalize';
-import {
+  getBangumiWeekdayItems,
   getCurrentWeekday,
-  primeDefaultDoubanFeedViewCache,
-} from '@/features/douban/hooks/useDoubanFeed';
+} from '@/features/douban/lib/feed-query';
+import { seedDefaultFeedPreview } from '@/features/douban/lib/feed-store';
 import { DOUBAN_PAGE_SIZE } from '@/features/douban/lib/grid-layout';
 import { HomeInitialData } from '@/features/home/lib/home.types';
 import {
@@ -330,26 +328,14 @@ export default function HomeClient({
   );
 
   const todayAnimes = useMemo(() => {
-    const items =
-      bangumiCalendarData.find((item) => item.weekday.en === currentWeekday)
-        ?.items || [];
-
-    return items.map((anime) => ({
-      id: anime.id.toString(),
-      title: anime.name_cn || anime.name,
-      poster: selectBangumiCardCover(anime.images),
-      rate: anime.rating?.score?.toFixed(1) || '',
-      year: anime.air_date?.split('-')?.[0] || '',
-    }));
+    return getBangumiWeekdayItems(bangumiCalendarData, currentWeekday) ?? [];
   }, [bangumiCalendarData, currentWeekday]);
 
   useEffect(() => {
-    primeDefaultDoubanFeedViewCache('movie', hotMovies);
-    primeDefaultDoubanFeedViewCache('tv', hotTvShows);
-    primeDefaultDoubanFeedViewCache('show', hotVarietyShows);
-    primeDefaultDoubanFeedViewCache('anime', todayAnimes, {
-      selectedWeekday: currentWeekday,
-    });
+    seedDefaultFeedPreview('movie', hotMovies);
+    seedDefaultFeedPreview('tv', hotTvShows);
+    seedDefaultFeedPreview('show', hotVarietyShows);
+    seedDefaultFeedPreview('anime', todayAnimes, currentWeekday);
   }, [currentWeekday, hotMovies, hotTvShows, hotVarietyShows, todayAnimes]);
 
   useEffect(() => {

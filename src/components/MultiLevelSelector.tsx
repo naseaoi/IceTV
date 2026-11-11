@@ -18,11 +18,44 @@ interface MultiLevelCategory {
 }
 
 interface MultiLevelSelectorProps {
+  value: Record<string, string>;
   onChange: (values: Record<string, string>) => void;
   contentType?: 'movie' | 'tv' | 'show' | 'anime-tv' | 'anime-movie';
 }
 
+function isDefaultOption(categoryKey: string, optionValue: string) {
+  return (
+    optionValue === 'all' || (categoryKey === 'sort' && optionValue === 'T')
+  );
+}
+
+// 父组件的取值即豆瓣接口参数：排序用选项 value、其余用中文 label，默认项保持 all / T
+function toParentValue(categoryKey: string, option: MultiLevelOption) {
+  if (isDefaultOption(categoryKey, option.value) || categoryKey === 'sort') {
+    return option.value;
+  }
+  return option.label;
+}
+
+function toOptionValues(
+  categories: MultiLevelCategory[],
+  parentValues: Record<string, string>,
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  categories.forEach((category) => {
+    const parentValue = parentValues[category.key];
+    const option = category.options.find(
+      (opt) => toParentValue(category.key, opt) === parentValue,
+    );
+    if (option) {
+      values[category.key] = option.value;
+    }
+  });
+  return values;
+}
+
 const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
+  value,
   onChange,
   contentType = 'movie',
 }) => {
@@ -32,7 +65,6 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
     y: number;
     width: number;
   }>({ x: 0, y: 0, width: 0 });
-  const [values, setValues] = useState<Record<string, string>>({});
   const categoryRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -334,6 +366,7 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
       ],
     },
   ];
+  const values = toOptionValues(categories, value);
 
   // 计算下拉框位置
   const calculateDropdownPosition = (categoryKey: string) => {
@@ -385,42 +418,12 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
 
   // 处理选项选择
   const handleOptionSelect = (categoryKey: string, optionValue: string) => {
-    // 更新本地状态
-    const newValues = {
-      ...values,
-      [categoryKey]: optionValue,
-    };
-
-    // 更新内部状态
-    setValues(newValues);
-
-    // 构建传递给父组件的值，排序传递 value，其他传递 label
-    const selectionsForParent: Record<string, string> = {
-      type: 'all',
-      region: 'all',
-      year: 'all',
-      platform: 'all',
-      label: 'all',
-      sort: 'T',
-    };
-
-    Object.entries(newValues).forEach(([key, value]) => {
-      if (value && value !== 'all' && (key !== 'sort' || value !== 'T')) {
-        const category = categories.find((cat) => cat.key === key);
-        if (category) {
-          const option = category.options.find((opt) => opt.value === value);
-          if (option) {
-            // 排序传递 value，其他传递 label
-            selectionsForParent[key] =
-              key === 'sort' ? option.value : option.label;
-          }
-        }
-      }
-    });
-
-    // 调用父组件的回调，传递处理后的选择值
-    onChange(selectionsForParent);
-
+    const option = categories
+      .find((category) => category.key === categoryKey)
+      ?.options.find((opt) => opt.value === optionValue);
+    if (option) {
+      onChange({ ...value, [categoryKey]: toParentValue(categoryKey, option) });
+    }
     setActiveCategory(null);
   };
 

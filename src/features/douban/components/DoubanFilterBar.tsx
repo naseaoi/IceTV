@@ -6,43 +6,36 @@ import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import { getDefaultFeedQuery } from '@/features/douban/lib/feed-query';
 
 const ignoreSelection = () => undefined;
 
 export function DoubanFilterLoading({ type }: { type: string }) {
   const { CUSTOM_CATEGORIES: categories } = useRuntimeConfig();
-  if (type === 'custom') {
-    const primary = categories.some((category) => category.type === 'movie')
-      ? 'movie'
-      : 'tv';
-    return (
-      <div inert aria-hidden='true'>
+  const query = getDefaultFeedQuery(type, categories);
+  return (
+    <div inert aria-hidden='true'>
+      {type === 'custom' ? (
         <DoubanCustomSelector
           customCategories={categories}
-          primarySelection={primary}
-          secondarySelection={
-            categories.find((category) => category.type === primary)?.query
-          }
+          primarySelection={query.primary}
+          secondarySelection={query.secondary}
           onPrimaryChange={ignoreSelection}
           onSecondaryChange={ignoreSelection}
         />
-      </div>
-    );
-  }
-  return (
-    <div inert aria-hidden='true'>
-      <DoubanSelector
-        type={type as 'movie' | 'tv' | 'show' | 'anime'}
-        primarySelection={
-          type === 'movie' ? '热门' : type === 'anime' ? '每日放送' : '最近热门'
-        }
-        secondarySelection={
-          type === 'tv' ? 'tv' : type === 'show' ? 'show' : '全部'
-        }
-        onPrimaryChange={ignoreSelection}
-        onSecondaryChange={ignoreSelection}
-        onWeekdayChange={ignoreSelection}
-      />
+      ) : (
+        <DoubanSelector
+          type={type as 'movie' | 'tv' | 'show' | 'anime'}
+          primarySelection={query.primary}
+          secondarySelection={query.secondary}
+          multiLevelValues={query.filters}
+          selectedWeekday={query.weekday}
+          onPrimaryChange={ignoreSelection}
+          onSecondaryChange={ignoreSelection}
+          onMultiLevelChange={ignoreSelection}
+          onWeekdayChange={ignoreSelection}
+        />
+      )}
     </div>
   );
 }

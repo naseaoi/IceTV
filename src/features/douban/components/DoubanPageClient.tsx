@@ -33,11 +33,12 @@ export function DoubanPageClient() {
   const {
     doubanData,
     loading,
-    selectorsReady,
     hasMore,
     isLoadingMore,
     primarySelection,
     secondarySelection,
+    multiLevelValues,
+    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
@@ -46,17 +47,11 @@ export function DoubanPageClient() {
     loadNextPage,
     loadFailed,
     retryLoad,
-    bangumiCalendarError,
+    calendarStale,
   } = useDoubanFeed(type);
 
   const canLoadMore =
-    hasMore &&
-    !loadFailed &&
-    !bangumiCalendarError &&
-    !isLoadingMore &&
-    !loading &&
-    selectorsReady;
-  const showContent = !loading && selectorsReady;
+    hasMore && !loadFailed && !calendarStale && !isLoadingMore && !loading;
 
   const selectorNode =
     type !== 'custom' ? (
@@ -64,6 +59,8 @@ export function DoubanPageClient() {
         type={type as 'movie' | 'tv' | 'show' | 'anime'}
         primarySelection={primarySelection}
         secondarySelection={secondarySelection}
+        multiLevelValues={multiLevelValues}
+        selectedWeekday={selectedWeekday}
         onPrimaryChange={handlePrimaryChange}
         onSecondaryChange={handleSecondaryChange}
         onMultiLevelChange={handleMultiLevelChange}
@@ -91,7 +88,7 @@ export function DoubanPageClient() {
 
       <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-1 md:pt-6`}>
         <div className={DOUBAN_GRID_WRAPPER_CLASS}>
-          {loading || !selectorsReady ? (
+          {loading ? (
             <DoubanFeedLoading />
           ) : (
             <VirtualizedGrid
@@ -117,11 +114,11 @@ export function DoubanPageClient() {
           )}
         </div>
 
-        {showContent && (loadFailed || bangumiCalendarError) && (
+        {!loading && (loadFailed || calendarStale) && (
           <LoadErrorState onRetry={retryLoad} />
         )}
 
-        {hasMore && !loading && !loadFailed && !bangumiCalendarError && (
+        {hasMore && !loading && !loadFailed && !calendarStale && (
           <div
             ref={loadingRef}
             className='flex h-24 items-center justify-center'
@@ -136,20 +133,17 @@ export function DoubanPageClient() {
           </div>
         )}
 
-        {!hasMore &&
-          !loadFailed &&
-          !bangumiCalendarError &&
-          doubanData.length > 0 && (
-            <div className='mt-6 flex items-center gap-4 py-10 text-xs text-gray-400 dark:text-gray-500'>
-              <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
-              已加载全部
-              <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
-            </div>
-          )}
+        {!hasMore && !loadFailed && !calendarStale && doubanData.length > 0 && (
+          <div className='mt-6 flex items-center gap-4 py-10 text-xs text-gray-400 dark:text-gray-500'>
+            <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
+            已加载全部
+            <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
+          </div>
+        )}
 
-        {showContent &&
+        {!loading &&
           !loadFailed &&
-          !bangumiCalendarError &&
+          !calendarStale &&
           doubanData.length === 0 && (
             <div className='py-24 text-center text-sm text-gray-500 dark:text-gray-400'>
               暂无相关内容
