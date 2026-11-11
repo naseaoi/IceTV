@@ -99,7 +99,6 @@ export default async function RootLayout({
     ENABLE_LIVE_ENTRY: enableLiveEntry,
     DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
     ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
-    LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     AUTO_SWITCH_SOURCE: publicConfig.AutoSwitchSource,
     ENABLE_DANMAKU: publicConfig.EnableDanmaku,
     ENABLE_USER_DANMAKU: publicConfig.EnableUserDanmaku,

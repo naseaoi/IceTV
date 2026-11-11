@@ -56,7 +56,6 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   LiveAccess: 'all',
   DefaultAggregateSearch: true,
   EnableOptimization: true,
-  LiveDirectConnect: false,
   AutoSwitchSource: false,
   UpstreamProxyPoolSegments: false,
   EnableDanmaku: false,
@@ -79,7 +78,6 @@ type EditableSiteSettings = Pick<
   | 'LiveAccess'
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
-  | 'LiveDirectConnect'
   | 'AutoSwitchSource'
   | 'UpstreamProxyPoolSegments'
   | 'EnableDanmaku'
@@ -116,7 +114,6 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     LiveAccess: normalizeLiveAccess(config.SiteConfig.LiveAccess),
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
-    LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource ?? false,
     UpstreamProxyPoolSegments:
       config.SiteConfig.UpstreamProxyPoolSegments ?? false,
@@ -139,7 +136,6 @@ function normalizeEditableSiteSettings(
     LiveAccess: normalizeLiveAccess(value.LiveAccess),
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
-    LiveDirectConnect: value.LiveDirectConnect ?? false,
     AutoSwitchSource: value.AutoSwitchSource ?? false,
     UpstreamProxyPoolSegments: value.UpstreamProxyPoolSegments ?? false,
     EnableDanmaku: value.EnableDanmaku ?? false,

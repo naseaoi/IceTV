@@ -12,9 +12,6 @@ import {
 export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
-export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
-export const LIVE_DIRECT_CONNECT_CHANGE_EVENT =
-  'icetv:live-direct-connect-change';
 export const AUTO_SWITCH_SOURCE_STORAGE_KEY = 'autoSwitchSource';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
@@ -128,41 +125,6 @@ export function writeFluidSearch(value: boolean) {
 
 export function resetFluidSearch() {
   return resetStoredBoolean(FLUID_SEARCH_STORAGE_KEY);
-}
-
-export function readDefaultLiveDirectConnect(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  return window.RUNTIME_CONFIG?.LIVE_DIRECT_CONNECT === true;
-}
-
-export function readLiveDirectConnect(): boolean {
-  return (
-    readStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY) ??
-    readDefaultLiveDirectConnect()
-  );
-}
-
-export function writeLiveDirectConnect(value: boolean) {
-  const saved = writeStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY, value);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent(LIVE_DIRECT_CONNECT_CHANGE_EVENT, {
-        detail: value,
-      }),
-    );
-  }
-  return saved;
-}
-
-export function resetLiveDirectConnect() {
-  const saved = resetStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(LIVE_DIRECT_CONNECT_CHANGE_EVENT));
-  }
-  return saved;
 }
 
 export function readDefaultAutoSwitchSource(): boolean {

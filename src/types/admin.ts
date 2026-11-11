@@ -16,7 +16,6 @@ export interface AdminConfig {
     LiveAccess?: 'all' | 'groups';
     DefaultAggregateSearch: boolean;
     EnableOptimization: boolean;
-    LiveDirectConnect: boolean;
     AutoSwitchSource: boolean;
     SearchDownstreamMaxPage: number;
     SiteInterfaceCacheTime: number;

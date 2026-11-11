@@ -5,34 +5,28 @@ import {
   readDefaultAutoSwitchSource,
   readDefaultEnableOptimization,
   readDefaultFluidSearch,
-  readDefaultLiveDirectConnect,
   readEnableOptimization,
   readFluidSearch,
-  readLiveDirectConnect,
   resetAggregateSearch,
   resetAutoSwitchSource,
   resetEnableOptimization,
   resetFluidSearch,
-  resetLiveDirectConnect,
   writeAggregateSearch,
   writeAutoSwitchSource,
   writeEnableOptimization,
   writeFluidSearch,
-  writeLiveDirectConnect,
 } from '@/lib/local-preferences';
 
 export type LocalPreferenceToggleId =
   | 'defaultAggregateSearch'
   | 'enableOptimization'
   | 'fluidSearch'
-  | 'liveDirectConnect'
   | 'autoSwitchSource';
 
 export type LocalPreferenceToggleSiteConfigKey =
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'FluidSearch'
-  | 'LiveDirectConnect'
   | 'AutoSwitchSource';
 
 export type LocalPreferenceToggleState = Record<
@@ -82,16 +76,6 @@ export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[]
       readDefaultValue: readDefaultFluidSearch,
       writeValue: writeFluidSearch,
       resetValue: resetFluidSearch,
-    },
-    {
-      id: 'liveDirectConnect',
-      siteConfigKey: 'LiveDirectConnect',
-      title: 'IPTV 视频浏览器直连',
-      description: '开启时直播媒体请求由浏览器直连源站',
-      readValue: readLiveDirectConnect,
-      readDefaultValue: readDefaultLiveDirectConnect,
-      writeValue: writeLiveDirectConnect,
-      resetValue: resetLiveDirectConnect,
     },
     {
       id: 'autoSwitchSource',

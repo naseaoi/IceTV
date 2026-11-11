@@ -15,7 +15,6 @@ const baseConfig: AdminConfig = {
     LiveAccess: 'all',
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    LiveDirectConnect: false,
     AutoSwitchSource: false,
     UpstreamProxyPoolSegments: false,
     EnableDanmaku: false,
@@ -529,6 +528,28 @@ describe('config cache persistence', () => {
       DoubanProxyType: 'auto',
       DoubanImageProxyType: 'auto',
     });
+  });
+
+  it('loads legacy site settings through the whitelist and persists only supported fields', async () => {
+    const adminConfig = cloneBaseConfig();
+    Object.assign(adminConfig.SiteConfig, { UnknownSetting: true });
+    const expectedSiteConfig = { ...baseConfig.SiteConfig };
+    const compareAndSetAdminConfig = jest.fn().mockResolvedValue(true);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+      compareAndSetAdminConfig,
+    });
+
+    const loaded = await getConfigForRead();
+
+    expect(loaded.SiteConfig).toEqual(expectedSiteConfig);
+    expect(compareAndSetAdminConfig).toHaveBeenCalledTimes(1);
+    expect(compareAndSetAdminConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SiteConfig: expect.objectContaining({ UnknownSetting: true }),
+      }),
+      expect.objectContaining({ SiteConfig: expectedSiteConfig }),
+    );
   });
 
   it('preserves all supported site settings during config self check', async () => {

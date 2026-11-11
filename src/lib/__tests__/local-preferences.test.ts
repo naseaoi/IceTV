@@ -5,8 +5,6 @@ import {
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
-  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
-  LIVE_DIRECT_CONNECT_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
   readAggregateSearch,
   readAutoPlayNextEnabled,
@@ -17,7 +15,6 @@ import {
   readDanmakuEpisodeSearchTitle,
   readEnableOptimization,
   readFluidSearch,
-  readLiveDirectConnect,
   readPreferredQualityHeight,
   readPreferredQualityPreference,
   readSeenAnnouncement,
@@ -27,7 +24,6 @@ import {
   resetContinueWatchingCount,
   resetEnableOptimization,
   resetFluidSearch,
-  resetLiveDirectConnect,
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAggregateSearch,
@@ -40,7 +36,6 @@ import {
   writeDanmakuEpisodeSearchTitle,
   writeEnableOptimization,
   writeFluidSearch,
-  writeLiveDirectConnect,
   writePreferredQualityHeight,
   writeSeenAnnouncement,
   writeSourcePreferredQualityHeight,
@@ -129,29 +124,6 @@ describe('local preferences', () => {
 
     expect(localStorage.getItem(ENABLE_OPTIMIZATION_STORAGE_KEY)).toBeNull();
     expect(readEnableOptimization()).toBe(false);
-  });
-
-  it('falls back to runtime config after live direct connect reset', () => {
-    window.RUNTIME_CONFIG = {
-      LIVE_DIRECT_CONNECT: true,
-    } as typeof window.RUNTIME_CONFIG;
-
-    writeLiveDirectConnect(true);
-    resetLiveDirectConnect();
-
-    expect(localStorage.getItem(LIVE_DIRECT_CONNECT_STORAGE_KEY)).toBeNull();
-    expect(readLiveDirectConnect()).toBe(true);
-  });
-
-  it('notifies the current page when live direct connect changes', () => {
-    const listener = jest.fn();
-    window.addEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
-
-    writeLiveDirectConnect(true);
-    resetLiveDirectConnect();
-
-    expect(listener).toHaveBeenCalledTimes(2);
-    window.removeEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
   });
 
   it('keeps auto source switch off without a site default', () => {

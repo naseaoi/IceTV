@@ -19,7 +19,6 @@ export interface RuntimeConfig {
   ENABLE_LIVE_ENTRY: boolean;
   DEFAULT_AGGREGATE_SEARCH: boolean;
   ENABLE_OPTIMIZATION: boolean;
-  LIVE_DIRECT_CONNECT: boolean;
   AUTO_SWITCH_SOURCE: boolean;
   ENABLE_DANMAKU: boolean;
   ENABLE_USER_DANMAKU: boolean;
@@ -50,7 +49,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   ENABLE_LIVE_ENTRY: false,
   DEFAULT_AGGREGATE_SEARCH: true,
   ENABLE_OPTIMIZATION: true,
-  LIVE_DIRECT_CONNECT: false,
   AUTO_SWITCH_SOURCE: false,
   ENABLE_DANMAKU: false,
   ENABLE_USER_DANMAKU: false,
@@ -92,7 +90,6 @@ export type ServerConfigPayload = {
   EnableLiveEntry?: boolean;
   DefaultAggregateSearch?: boolean;
   EnableOptimization?: boolean;
-  LiveDirectConnect?: boolean;
   AutoSwitchSource?: boolean;
   EnableDanmaku?: boolean;
   EnableUserDanmaku?: boolean;
@@ -158,10 +155,6 @@ function runtimeConfigFromServerConfig(
       data.EnableOptimization === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_OPTIMIZATION
         : data.EnableOptimization,
-    LIVE_DIRECT_CONNECT:
-      data.LiveDirectConnect === undefined
-        ? DEFAULT_RUNTIME_CONFIG.LIVE_DIRECT_CONNECT
-        : data.LiveDirectConnect,
     AUTO_SWITCH_SOURCE:
       data.AutoSwitchSource === undefined
         ? DEFAULT_RUNTIME_CONFIG.AUTO_SWITCH_SOURCE

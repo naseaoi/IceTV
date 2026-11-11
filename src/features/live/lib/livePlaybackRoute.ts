@@ -1,5 +1,93 @@
 export type LivePlaybackRoute = 'browser' | 'server';
 
+const SERVER_ROUTE_MEMORY_KEY = 'icetv:live-server-route-hosts';
+const SERVER_ROUTE_MEMORY_TTL_MS = 30 * 60 * 1000;
+
+function getStreamHost(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return '';
+  }
+}
+
+// sessionStorage 不可用时靠进程内副本，否则回落后会再次判定为直连而反复切换
+const inMemoryServerRoutes: Record<string, number> = {};
+
+function readServerRouteMemory(now: number): Record<string, number> {
+  let saved: Record<string, unknown> = {};
+  if (typeof window !== 'undefined') {
+    try {
+      saved = JSON.parse(
+        window.sessionStorage.getItem(SERVER_ROUTE_MEMORY_KEY) || '{}',
+      );
+    } catch {}
+  }
+  const active: Record<string, number> = {};
+  for (const [host, until] of Object.entries({
+    ...saved,
+    ...inMemoryServerRoutes,
+  })) {
+    if (typeof until === 'number' && until > now) active[host] = until;
+  }
+  return active;
+}
+
+// 直连失败过的主机在本标签页内直接走服务器，避免每次换台都先失败一次
+export function rememberLiveServerRoute(rawUrl: string, now = Date.now()) {
+  const host = getStreamHost(rawUrl);
+  if (!host) return;
+  inMemoryServerRoutes[host] = now + SERVER_ROUTE_MEMORY_TTL_MS;
+  if (typeof window === 'undefined') return;
+  const memory = readServerRouteMemory(now);
+  try {
+    window.sessionStorage.setItem(
+      SERVER_ROUTE_MEMORY_KEY,
+      JSON.stringify(memory),
+    );
+  } catch {}
+}
+
+export function resolveInitialLiveRoute(
+  rawUrl: string,
+  {
+    pageProtocol = typeof window !== 'undefined'
+      ? window.location.protocol
+      : 'https:',
+    now = Date.now(),
+  }: { pageProtocol?: string; now?: number } = {},
+): LivePlaybackRoute {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return 'server';
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'server';
+  // https 页面里的 http 请求会被浏览器按混合内容拦截
+  if (pageProtocol === 'https:' && url.protocol === 'http:') return 'server';
+  return readServerRouteMemory(now)[url.host] ? 'server' : 'browser';
+}
+
+// 走本站代理的请求失败不代表直连不可用
+export function isDirectLiveRequestUrl(
+  requestUrl: string | undefined,
+  origin = typeof window !== 'undefined'
+    ? window.location.origin
+    : 'http://localhost',
+): boolean {
+  if (!requestUrl) return false;
+  try {
+    const url = new URL(requestUrl, origin);
+    return !(
+      url.origin === new URL(origin).origin &&
+      url.pathname.startsWith('/api/proxy/')
+    );
+  } catch {
+    return false;
+  }
+}
+
 const LIVE_PLAYLIST_CONTEXT_TYPES = new Set([
   'manifest',
   'level',

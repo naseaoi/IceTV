@@ -7,7 +7,6 @@ export interface SiteConfig {
   LiveAccess: 'all' | 'groups';
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
-  LiveDirectConnect: boolean;
   AutoSwitchSource: boolean;
   UpstreamProxyPoolSegments: boolean;
   UpstreamProxyPoolConfigured?: boolean;

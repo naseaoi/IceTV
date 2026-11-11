@@ -32,7 +32,6 @@ export async function POST(request: NextRequest) {
       LiveAccess,
       DefaultAggregateSearch,
       EnableOptimization,
-      LiveDirectConnect,
       AutoSwitchSource,
       UpstreamProxyPoolSegments,
       EnableDanmaku,
@@ -55,7 +54,6 @@ export async function POST(request: NextRequest) {
       LiveAccess?: 'all' | 'groups';
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
-      LiveDirectConnect: boolean;
       AutoSwitchSource?: boolean;
       UpstreamProxyPoolSegments?: boolean;
       EnableDanmaku?: boolean;
@@ -80,7 +78,6 @@ export async function POST(request: NextRequest) {
       typeof EnableLiveEntry !== 'boolean' ||
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
-      typeof LiveDirectConnect !== 'boolean' ||
       (AutoSwitchSource !== undefined &&
         typeof AutoSwitchSource !== 'boolean') ||
       (UpstreamProxyPoolSegments !== undefined &&
@@ -161,7 +158,6 @@ export async function POST(request: NextRequest) {
       LiveAccess: LiveAccess ?? adminConfig.SiteConfig.LiveAccess,
       DefaultAggregateSearch,
       EnableOptimization,
-      LiveDirectConnect,
       AutoSwitchSource:
         AutoSwitchSource ?? adminConfig.SiteConfig.AutoSwitchSource,
       UpstreamProxyPoolSegments:

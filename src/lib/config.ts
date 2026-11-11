@@ -276,7 +276,6 @@ async function getInitConfig(
       LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
       EnableUserDanmaku: false,
@@ -513,7 +512,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
       EnableUserDanmaku: false,
@@ -553,9 +551,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableOptimization !== 'boolean') {
     adminConfig.SiteConfig.EnableOptimization = true;
   }
-  if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
-    adminConfig.SiteConfig.LiveDirectConnect = false;
-  }
   if (typeof adminConfig.SiteConfig.AutoSwitchSource !== 'boolean') {
     adminConfig.SiteConfig.AutoSwitchSource = false;
   }
@@ -582,7 +577,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     LiveAccess: site.LiveAccess,
     DefaultAggregateSearch: site.DefaultAggregateSearch,
     EnableOptimization: site.EnableOptimization,
-    LiveDirectConnect: site.LiveDirectConnect,
     AutoSwitchSource: site.AutoSwitchSource,
     UpstreamProxyPoolSegments: site.UpstreamProxyPoolSegments,
     EnableDanmaku: site.EnableDanmaku,
@@ -808,7 +802,6 @@ export async function getPublicConfig() {
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
-    LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource,
     EnableDanmaku: config.SiteConfig.EnableDanmaku,
     EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku,

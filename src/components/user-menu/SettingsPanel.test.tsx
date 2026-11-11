@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { writeStorage } from '@/lib/browser-storage';
+import { removeStorage, writeStorage } from '@/lib/browser-storage';
 import { testCustomProxy } from '@/lib/custom-proxy-test';
+import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 import { showToast } from '@/lib/toast';
 
 import { SettingsPanel } from './SettingsPanel';
@@ -35,6 +36,48 @@ function selectCustomProxy(index = 0) {
   fireEvent.click(screen.getAllByRole('button', { name: '自动' })[index]);
   fireEvent.click(screen.getByRole('option', { name: '自定义代理' }));
 }
+
+it.each(localPreferenceToggleDefinitions)(
+  '$id 开关更新选中状态并保存本地偏好',
+  (definition) => {
+    render(<SettingsPanel onClose={jest.fn()} />);
+    const toggle = screen.getByRole('checkbox', {
+      name: `${definition.title} ${definition.description}`,
+    });
+    const initialChecked = (toggle as HTMLInputElement).checked;
+    jest.mocked(writeStorage).mockClear();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveProperty('checked', !initialChecked);
+    expect(writeStorage).toHaveBeenCalledWith(
+      definition.id,
+      JSON.stringify(!initialChecked),
+    );
+  },
+);
+
+it('确认恢复后将功能开关恢复为站点默认值并清除本地覆盖', () => {
+  render(<SettingsPanel onClose={jest.fn()} />);
+  for (const definition of localPreferenceToggleDefinitions) {
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: `${definition.title} ${definition.description}`,
+      }),
+    );
+  }
+  fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+  fireEvent.click(screen.getByRole('button', { name: '确认恢复' }));
+
+  for (const definition of localPreferenceToggleDefinitions) {
+    expect(
+      screen.getByRole('checkbox', {
+        name: `${definition.title} ${definition.description}`,
+      }),
+    ).toHaveProperty('checked', definition.readDefaultValue());
+    expect(removeStorage).toHaveBeenCalledWith(definition.id);
+  }
+});
 
 it('更换代理使用轻提示并保留设置面板', () => {
   render(<SettingsPanel onClose={jest.fn()} />);

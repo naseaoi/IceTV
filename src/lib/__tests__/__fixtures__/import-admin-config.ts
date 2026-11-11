@@ -12,7 +12,6 @@ export const IMPORT_ADMIN_CONFIG: AdminConfig = {
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
     EnableUserDanmaku: false,

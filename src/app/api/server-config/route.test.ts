@@ -39,7 +39,6 @@ function createPublicConfig() {
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    LiveDirectConnect: false,
     AutoSwitchSource: true,
     DoubanProxyType: 'direct',
     DoubanImageProxyType: 'direct',

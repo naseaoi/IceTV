@@ -43,7 +43,6 @@ export async function GET(request: NextRequest) {
     EnableLiveEntry: await canUserWatchLive(activeUser?.username, config),
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
     EnableOptimization: publicConfig.EnableOptimization,
-    LiveDirectConnect: publicConfig.LiveDirectConnect,
     AutoSwitchSource: publicConfig.AutoSwitchSource,
     EnableDanmaku: publicConfig.EnableDanmaku,
     EnableUserDanmaku: publicConfig.EnableUserDanmaku,
