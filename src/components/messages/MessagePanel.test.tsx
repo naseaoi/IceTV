@@ -462,6 +462,33 @@ it('公告视图显示站点须知与历史公告，可加载更多', async () =
   ).not.toBeInTheDocument();
 });
 
+it('没有历史公告时加载中与加载后都不显示历史公告标题', async () => {
+  let resolveHistory: (page: {
+    items: never[];
+    nextCursor: null;
+  }) => void = () => undefined;
+  jest.mocked(getAnnouncementHistoryPage).mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveHistory = resolve;
+    }),
+  );
+  renderPanel();
+
+  fireEvent.click(screen.getByRole('button', { name: '查看公告' }));
+  expect(screen.getByText('本站仅提供信息检索')).toBeInTheDocument();
+  expect(
+    screen.queryByRole('heading', { name: '历史公告' }),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    resolveHistory({ items: [], nextCursor: null });
+  });
+  expect(
+    screen.queryByRole('heading', { name: '历史公告' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText('本站仅提供信息检索')).toBeInTheDocument();
+});
+
 it('opens an annual report link and marks its system message read', () => {
   const message: UserMessage = {
     id: 'annual-report:2026',

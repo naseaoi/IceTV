@@ -78,37 +78,43 @@ export default function MessageAnnouncements() {
           </p>
         </section>
       )}
-      {(items.length > 0 || firstLoad || failed) && (
-        <section>
-          <h3 className={SECTION_TITLE_CLASS}>历史公告</h3>
-          <ul className='divide-y divide-gray-100 dark:divide-white/[0.06]'>
-            {items.map((item) => (
-              <li key={item.id} className='py-3 first:pt-1'>
-                <p className={CONTENT_CLASS}>{item.content}</p>
-                <p className='mt-1 text-xs text-gray-400 dark:text-gray-500'>
-                  <time dateTime={new Date(item.createdAt).toISOString()}>
-                    {formatRelativeTime(item.createdAt)}
-                  </time>
-                </p>
-              </li>
-            ))}
-          </ul>
-          {loading ? (
-            <div className='flex justify-center py-3 text-gray-400'>
-              <Spinner className='h-4 w-4' />
-            </div>
-          ) : failed || nextCursor ? (
-            <div className='flex justify-center pt-2'>
-              <button
-                type='button'
-                className='inline-flex min-h-9 items-center rounded-md px-3 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 dark:text-brand-400 dark:hover:bg-brand-950/50'
-                onClick={() => void load(failed ? null : nextCursor)}
-              >
-                {failed ? '重新加载' : '加载更多'}
-              </button>
-            </div>
-          ) : null}
-        </section>
+      {firstLoad ? (
+        <div className='flex justify-center py-3 text-gray-400'>
+          <Spinner className='h-4 w-4' />
+        </div>
+      ) : (
+        (items.length > 0 || failed) && (
+          <section>
+            <h3 className={SECTION_TITLE_CLASS}>历史公告</h3>
+            <ul className='divide-y divide-gray-100 dark:divide-white/[0.06]'>
+              {items.map((item) => (
+                <li key={item.id} className='py-3 first:pt-1'>
+                  <p className={CONTENT_CLASS}>{item.content}</p>
+                  <p className='mt-1 text-xs text-gray-400 dark:text-gray-500'>
+                    <time dateTime={new Date(item.createdAt).toISOString()}>
+                      {formatRelativeTime(item.createdAt)}
+                    </time>
+                  </p>
+                </li>
+              ))}
+            </ul>
+            {loading ? (
+              <div className='flex justify-center py-3 text-gray-400'>
+                <Spinner className='h-4 w-4' />
+              </div>
+            ) : failed || nextCursor ? (
+              <div className='flex justify-center pt-2'>
+                <button
+                  type='button'
+                  className='inline-flex min-h-9 items-center rounded-md px-3 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 dark:text-brand-400 dark:hover:bg-brand-950/50'
+                  onClick={() => void load(failed ? null : nextCursor)}
+                >
+                  {failed ? '重新加载' : '加载更多'}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        )
       )}
     </div>
   );
