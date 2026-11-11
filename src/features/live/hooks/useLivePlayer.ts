@@ -47,6 +47,7 @@ import {
   destroyArtPlayer,
   ensureVideoSource,
 } from '@/lib/player-utils';
+import { isServerRelayPausedHlsError } from '@/lib/server-relay';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
 const LIVE_STALL_RECOVERY_DELAY_MS = 2500;
@@ -214,6 +215,7 @@ export function useLivePlayer({
   const [liveRouteVersion, setLiveRouteVersion] = useState(0);
   const [retryVersion, setRetryVersion] = useState(0);
   const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [relayPaused, setRelayPaused] = useState(false);
   const loadingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -242,6 +244,7 @@ export function useLivePlayer({
   const doCleanup = () => {
     setUnsupportedType(null);
     setPlaybackFailed(false);
+    setRelayPaused(false);
     loadedUrlRef.current = '';
     liveRouteRef.current = 'server';
     liveSourceKeyRef.current = '';
@@ -334,6 +337,7 @@ export function useLivePlayer({
           return;
         }
         setPlaybackFailed(false);
+        setRelayPaused(false);
         mutedAutoplayRequestedRef.current = false;
         userPausedRef.current = false;
         livePlaybackRecoveryRef.current = false;
@@ -552,6 +556,16 @@ export function useLivePlayer({
             if (logResult.expectedAbort || tryFallbackToServer(data)) {
               return;
             }
+            // 中转暂停期间重试无意义，首个被拒请求即停止并提示
+            const relayRejected = isServerRelayPausedHlsError(data);
+            if (relayRejected) {
+              loadedUrlRef.current = '';
+              cleanupPlayer(artPlayerRef);
+              setLiveVideoLoading(false);
+              setRelayPaused(true);
+              setPlaybackFailed(true);
+              return;
+            }
 
             if (!data.fatal) {
               return;
@@ -731,6 +745,7 @@ export function useLivePlayer({
     artPlayerRef,
     cleanupPlayer: doCleanup,
     playbackFailed,
+    relayPaused,
     retryPlayback,
     inactivityStopped,
     resumeAfterInactivity,

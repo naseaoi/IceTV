@@ -8,6 +8,7 @@ import {
   AdminSettingRow,
   AdminSettingsGroup,
 } from '@/features/admin/components/AdminSettings';
+import { TrafficTabSkeleton } from '@/features/admin/components/tabs/traffic/TrafficUsageCard';
 import { RegistrationSummaryCardSkeleton } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
 import type { AdminTabId } from '@/features/admin/lib/admin-tabs';
 import {
@@ -439,6 +440,9 @@ export default function AdminContentSkeleton({
           </div>
         </div>
       );
+      break;
+    case 'traffic':
+      content = <TrafficTabSkeleton />;
       break;
     case 'reviews':
       content = (

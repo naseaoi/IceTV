@@ -50,12 +50,7 @@ export function rememberLiveServerRoute(rawUrl: string, now = Date.now()) {
 
 export function resolveInitialLiveRoute(
   rawUrl: string,
-  {
-    pageProtocol = typeof window !== 'undefined'
-      ? window.location.protocol
-      : 'https:',
-    now = Date.now(),
-  }: { pageProtocol?: string; now?: number } = {},
+  now = Date.now(),
 ): LivePlaybackRoute {
   let url: URL;
   try {
@@ -64,8 +59,8 @@ export function resolveInitialLiveRoute(
     return 'server';
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'server';
-  // https 页面里的 http 请求会被浏览器按混合内容拦截
-  if (pageProtocol === 'https:' && url.protocol === 'http:') return 'server';
+  // https 页面上的 http 频道同样先直连：混合内容拦截在本地立即失败、随即回落，
+  // 放行了不安全内容并装有跨域插件的用户可借此直连
   return readServerRouteMemory(now)[url.host] ? 'server' : 'browser';
 }
 

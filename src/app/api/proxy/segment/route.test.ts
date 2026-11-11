@@ -7,6 +7,7 @@ import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import { isServerRelayPaused } from '@/lib/host-traffic.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
@@ -15,6 +16,11 @@ jest.mock('@/lib/config', () => ({
   getConfigForRead: jest.fn(async () => ({ SiteConfig: {} })),
 }));
 jest.mock('@/lib/api-auth', () => ({ getOptionalActiveUser: jest.fn() }));
+jest.mock('@/lib/host-traffic.server', () => ({
+  isServerRelayPaused: jest.fn(async () => false),
+  serverRelayPausedResponse: jest.requireActual('@/lib/host-traffic.server')
+    .serverRelayPausedResponse,
+}));
 jest.mock('@/app/api/proxy/utils', () => ({
   getProxySourceKey: () => null,
   resolveProxyUserAgent: async () => 'IceTV Test',
@@ -76,6 +82,7 @@ describe('segment shared resource integration', () => {
       username: 'test-user',
     });
     (getOptionalActiveUser as jest.Mock).mockReset();
+    (isServerRelayPaused as jest.Mock).mockResolvedValue(false);
     storage = new LocalSqliteStorage(':memory:');
     jest
       .spyOn(db, 'getSharedResourceStore')
@@ -186,6 +193,14 @@ describe('segment shared resource integration', () => {
     expect(response.status).toBe(200);
     expect(getOptionalActiveUser).toHaveBeenCalledWith(liveRequest);
     await response.body!.cancel();
+  });
+
+  it('rejects relayed segments without contacting the origin while relay is paused', async () => {
+    (isServerRelayPaused as jest.Mock).mockResolvedValue(true);
+    const response = await GET(request());
+    expect(response.status).toBe(503);
+    expect(response.headers.get('x-icetv-relay-paused')).toBe('1');
+    expect(mockOrigin).not.toHaveBeenCalled();
   });
 
   it('retains 404 for disabled live segments', async () => {

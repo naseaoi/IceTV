@@ -10,6 +10,10 @@ import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import {
+  isServerRelayPaused,
+  serverRelayPausedResponse,
+} from '@/lib/host-traffic.server';
+import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
@@ -99,6 +103,8 @@ async function handleGet(request: NextRequest) {
       status: diagnostic.status,
     });
   }
+
+  if (await isServerRelayPaused()) return serverRelayPausedResponse();
 
   const quotaFailure = await requireServerProxyQuota(
     'vod-segment',

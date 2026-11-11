@@ -14,6 +14,7 @@ import {
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
 import { getOwnerUsername } from '@/lib/env.server';
+import { normalizeTrafficSettings } from '@/lib/host-traffic';
 import { isLinuxDoLoginEnabled } from '@/lib/linuxdo-config.server';
 import {
   DEFAULT_RUNTIME_PARAMS,
@@ -500,6 +501,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (!adminConfig.LiveConfig || !Array.isArray(adminConfig.LiveConfig)) {
     adminConfig.LiveConfig = [];
   }
+  adminConfig.TrafficConfig = normalizeTrafficSettings(
+    adminConfig.TrafficConfig,
+  );
   if (!adminConfig.SiteConfig) {
     adminConfig.SiteConfig = {
       SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'IceTV',

@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   FileText,
   FolderOpen,
+  Gauge,
   Megaphone,
   MessageSquare,
   MessageSquareText,
@@ -22,7 +23,8 @@ export type AdminTabId =
   | 'danmaku'
   | 'video-source'
   | 'live-source'
-  | 'category';
+  | 'category'
+  | 'traffic';
 
 export type AdminTabGroupId = 'site' | 'content' | 'community' | 'maintenance';
 
@@ -111,6 +113,13 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     icon: MessageSquareText,
     group: 'community',
     ownerOnly: false,
+  },
+  {
+    id: 'traffic',
+    label: '流量',
+    icon: Gauge,
+    group: 'maintenance',
+    ownerOnly: true,
   },
   {
     id: 'config-file',

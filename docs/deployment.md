@@ -230,7 +230,7 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" 'http://localhost:3000/api/cro
 - 上游返回 429，或返回带 `Retry-After` 的 503 时，该出口对目标主机进入冷却（`src/lib/upstream-cooldown.server.ts`，时长按 `Retry-After` 取 5～300 秒，缺失时 30 秒）。代理池按「节点 + 目标域名」隔离冷却，直连按域名记录；可用出口选择见[上游代理池](#上游代理池)。当前回源路径受冷却阻断时返回带剩余秒数的 503，弹幕接口仍返回 429。冷却经数据库在实例间共享，查询结果在本地缓存 3 秒；冷却存储故障时只在本实例内生效。
 - 请求数与流量额度按 60 秒固定窗口计数：各实例按块向数据库预约后在内存中扣减（预取块为 64 个请求或 8 MiB，流量以 256 KiB 为单位；单次缺口更大时按实际缺口预约），未用完的额度不退还。多实例时每个实例对每项额度最多提前占用一块未用额度，接近上限时可能略早拒绝。实例间时钟同步（如 NTP）时不会超发；时钟落后的实例在窗口翻转时，每项额度最多多放一块。流量额度是保护性上限，不是平滑限速或实际网卡流量统计；单分片仍有 256 MiB 上限。
 - 缓存命中只消耗入口额度，浏览器直连不消耗本站回源额度。资源额度按各自的时间窗口和租约管理。
-- 流量额度只限每分钟速率，不限累计用量。直播页在后台超过 10 分钟或前台 3 小时无输入时停止拉流（阈值见 `src/features/live/lib/liveInactivityPolicy.ts`），这是防止挂机耗尽月流量的唯一机制，只约束正常打开的直播页。
+- 流量额度只限每分钟速率，不限累计用量。累计用量由[月流量监控](#月流量监控)按宿主机网卡统计保护；直播页另在后台超过 10 分钟或前台 3 小时无输入时停止拉流（阈值见 `src/features/live/lib/liveInactivityPolicy.ts`），只约束正常打开的直播页。
 - 这些上限不承诺所有并发用户均可播放。带宽整形、分片复用及容量验收由实际网关、源站码率和部署资源决定。
 
 ### 换源检测
@@ -238,6 +238,32 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" 'http://localhost:3000/api/cro
 - 检测请求同时受额外检测额度和普通回源预算约束；普通播放不占检测额度。每个浏览器页同时检测 2 个源，离开换源标签后不再启动下一批。
 - 额度不足显示「检测暂缓」，进入共享冷却，不记为源站失效、不无限自动重试；冷却后可手动重试。
 - 成功结果复用 10 分钟。清单延迟取实际 GET 首包，不额外发 HEAD。
+
+## 月流量监控
+
+VPS 按月计流量、超额断网时，用宿主机的 vnstat 统计网卡进出流量，IceTV 读取统计文件做后台展示、告警和自动保护。不配置时后台「流量」页显示未接入，其余功能不受影响。
+
+宿主机：
+
+```bash
+apt install -y vnstat            # 安装后 vnstatd 自动开始记录，安装前的用量不会补录
+cat > /usr/local/bin/icetv-traffic-export <<'SH'
+#!/bin/sh
+set -e
+out=/var/lib/docker/volumes/icetv_icetv-data/_data/host-traffic.json   # 数据卷在宿主机上的路径
+vnstat -i eth0 --json d 40 > "$out.tmp"
+chmod 644 "$out.tmp"
+mv "$out.tmp" "$out"
+SH
+chmod 755 /usr/local/bin/icetv-traffic-export
+echo '*/5 * * * * root /usr/local/bin/icetv-traffic-export' > /etc/cron.d/icetv-traffic
+```
+
+- 容器内默认读取 `/data/host-traffic.json`（非 Docker 为 `data/host-traffic.json`），`HOST_TRAFFIC_FILE` 可改路径。文件为 `vnstat --json d` 原样输出，多个网卡按日合计；进出流量合计计入用量。周期按 UTC 日期切分，vnstat 按宿主机时区划日，宿主机不是 UTC 时周期边界那一天的流量可能归入相邻周期。
+- 站长在后台「维护 → 流量」设置月额度（GB，十进制）与每月重置日（1～28），额度为空时只展示不告警、不暂停。设置存于配置的 `TrafficConfig`。
+- 站长告警：用量达 80%、按当前速率预计超额、已暂停中转、统计超过 30 分钟未更新、设了额度却读不到文件。
+- 用量达额度 95% 时自动暂停服务器中转：`/api/proxy/segment` 与服务器模式的 `/api/proxy/m3u8` 返回带 `x-icetv-relay-paused: 1` 的 503，`/api/proxy-modes` 把「自动」源报为直连。浏览器直连播放不受影响，下个周期自动恢复；站长可在流量页手动恢复本周期中转。统计文件缺失或读取出错时不暂停；超过 30 分钟未更新的文件仍按最后一次数据判断，避免导出中断后自动放开中转。
+- 状态在进程内缓存 30 秒，暂停与恢复另受配置缓存影响，最长约 1 分钟生效。
 
 ## 升级与备份
 

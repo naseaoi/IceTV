@@ -461,4 +461,29 @@ describe('useLivePlayer automatic route', () => {
 
     expect((player as unknown as { switch?: string }).switch).toBeUndefined();
   });
+
+  it('stops with a relay-paused failure instead of retrying', async () => {
+    const { result } = renderFreshChannel();
+    const { hls } = await waitForPlayer(1);
+
+    act(() => {
+      hls.emit(MockHls.Events.ERROR, {
+        type: MockHls.ErrorTypes.NETWORK_ERROR,
+        details: 'fragLoadError',
+        fatal: false,
+        frag: {
+          sn: 1,
+          type: 'main',
+          url: `${window.location.origin}/api/proxy/segment?url=x`,
+        },
+        networkDetails: {
+          getResponseHeader: (name: string) =>
+            name === 'x-icetv-relay-paused' ? '1' : null,
+        },
+      });
+    });
+
+    expect(result.current.playbackFailed).toBe(true);
+    expect(result.current.relayPaused).toBe(true);
+  });
 });

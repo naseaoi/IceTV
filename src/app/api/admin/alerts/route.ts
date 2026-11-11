@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getAdminAlerts,
   getSubscriptionAlerts,
+  getTrafficAlerts,
 } from '@/features/admin/lib/admin-alerts.server';
 import { requireAdmin, requireOwner } from '@/lib/api-auth';
 
@@ -17,7 +18,11 @@ export async function GET(request: NextRequest) {
     if (guard.isOwner) {
       const owner = await requireOwner(request);
       if ('response' in owner) return owner.response;
-      alerts.push(...(await getSubscriptionAlerts()));
+      const [subscription, traffic] = await Promise.all([
+        getSubscriptionAlerts(),
+        getTrafficAlerts(),
+      ]);
+      alerts.push(...subscription, ...traffic);
     }
     return NextResponse.json(
       { alerts },

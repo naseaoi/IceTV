@@ -136,6 +136,7 @@ export function LivePlayerOverlay({
   unsupportedType,
   isVideoLoading,
   playbackFailed,
+  relayPaused = false,
   onRetry,
   inactivityStopped,
   onResume,
@@ -143,6 +144,7 @@ export function LivePlayerOverlay({
   unsupportedType: string | null;
   isVideoLoading: boolean;
   playbackFailed: boolean;
+  relayPaused?: boolean;
   onRetry: () => void;
   inactivityStopped: boolean;
   onResume: () => void;
@@ -172,8 +174,12 @@ export function LivePlayerOverlay({
         <PlayerStateOverlay
           zClassName='z-[600]'
           icon={<AlertTriangle />}
-          title='直播流加载失败'
-          message='可以重试，或切换其他频道。'
+          title={relayPaused ? '服务器中转已暂停' : '直播流加载失败'}
+          message={
+            relayPaused
+              ? '该频道无法直连播放，可切换其他频道。'
+              : '可以重试，或切换其他频道。'
+          }
         >
           <button
             type='button'
@@ -225,6 +231,7 @@ function AuthenticatedLivePageClient() {
     artPlayerRef,
     cleanupPlayer,
     playbackFailed,
+    relayPaused,
     retryPlayback,
     inactivityStopped,
     resumeAfterInactivity,
@@ -299,6 +306,7 @@ function AuthenticatedLivePageClient() {
           unsupportedType={sources.unsupportedType}
           isVideoLoading={sources.isVideoLoading}
           playbackFailed={playbackFailed}
+          relayPaused={relayPaused}
           onRetry={retryPlayback}
           inactivityStopped={inactivityStopped}
           onResume={resumeAfterInactivity}

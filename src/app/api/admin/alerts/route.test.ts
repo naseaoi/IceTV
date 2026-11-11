@@ -4,12 +4,14 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import {
   getAdminAlerts,
   getSubscriptionAlerts,
+  getTrafficAlerts,
 } from '@/features/admin/lib/admin-alerts.server';
 import { requireAdmin, requireOwner } from '@/lib/api-auth';
 
 jest.mock('@/features/admin/lib/admin-alerts.server', () => ({
   getAdminAlerts: jest.fn(),
   getSubscriptionAlerts: jest.fn(),
+  getTrafficAlerts: jest.fn(),
 }));
 jest.mock('@/lib/api-auth', () => ({
   requireAdmin: jest.fn(),
@@ -23,6 +25,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(getAdminAlerts).mockResolvedValue([]);
   jest.mocked(getSubscriptionAlerts).mockResolvedValue([]);
+  jest.mocked(getTrafficAlerts).mockResolvedValue([]);
 });
 const request = () =>
   ({
@@ -51,6 +54,7 @@ it('does not read owner-only subscription state for admins', async () => {
   expect(response.headers.get('cache-control')).toContain('no-store');
   expect(requireOwner).not.toHaveBeenCalled();
   expect(getSubscriptionAlerts).not.toHaveBeenCalled();
+  expect(getTrafficAlerts).not.toHaveBeenCalled();
 });
 it('checks owner guard before including subscription alerts', async () => {
   const owner = {
@@ -61,9 +65,21 @@ it('checks owner guard before including subscription alerts', async () => {
   };
   jest.mocked(requireAdmin).mockResolvedValue(owner);
   jest.mocked(requireOwner).mockResolvedValue(owner);
-  await GET(request());
+  const trafficAlert = {
+    key: 'traffic:usage:2026-11-01',
+    type: 'traffic' as const,
+    message: '本周期流量已用 85%',
+    startedAt: 1,
+    count: 1,
+  };
+  jest.mocked(getTrafficAlerts).mockResolvedValue([trafficAlert]);
+  const response = await GET(request());
+  expect(response.status).toBe(200);
   expect(requireOwner).toHaveBeenCalled();
   expect(getSubscriptionAlerts).toHaveBeenCalled();
+  await expect(response.json()).resolves.toMatchObject({
+    alerts: [trafficAlert],
+  });
 });
 it('does not expose raw exceptions', async () => {
   const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);

@@ -10,6 +10,7 @@ interface AlertNoticeState {
   revision: number;
   notifiedAt: number;
   type: AdminAlertType;
+  group?: string;
 }
 type NoticeHistory = Record<string, AlertNoticeState>;
 const memory = new Map<string, NoticeHistory>();
@@ -17,6 +18,7 @@ const RECOVERY_TEXT: Record<AdminAlertType, string> = {
   'source-offline': '视频源持续失效告警已解除',
   'subscription-failed': '订阅更新告警已解除',
   'pending-reports': '待处理举报已处理完毕',
+  traffic: '流量告警已解除',
 };
 
 function readHistory(key: string): NoticeHistory {
@@ -33,7 +35,8 @@ function readHistory(key: string): NoticeHistory {
               typeof item.active === 'boolean' &&
               Number.isFinite(item.revision) &&
               Number.isFinite(item.notifiedAt) &&
-              Object.hasOwn(RECOVERY_TEXT, item.type),
+              Object.hasOwn(RECOVERY_TEXT, item.type) &&
+              (item.group === undefined || typeof item.group === 'string'),
           ),
         ) as NoticeHistory;
         for (const [alertKey, item] of Object.entries(memory.get(key) ?? {})) {
@@ -60,6 +63,9 @@ export function claimAdminAlertNotices(
   const key = `admin-alert-notices:v1:${encodeURIComponent(username)}`;
   const history = readHistory(key);
   const current = new Map(alerts.map((alert) => [alert.key, alert]));
+  const currentGroups = new Set(
+    alerts.flatMap((alert) => (alert.group ? [alert.group] : [])),
+  );
   const notices: { key: string; message: string; recovered: boolean }[] = [];
   for (const alert of alerts) {
     const previous = history[alert.key];
@@ -80,6 +86,7 @@ export function claimAdminAlertNotices(
       revision: alert.startedAt,
       notifiedAt: now,
       type: alert.type,
+      ...(alert.group ? { group: alert.group } : {}),
     };
   }
   for (const [alertKey, previous] of Object.entries(history)) {
@@ -89,6 +96,10 @@ export function claimAdminAlertNotices(
       now - previous.notifiedAt < ADMIN_ALERT_COOLDOWN_MS
     )
       continue;
+    if (previous.group && currentGroups.has(previous.group)) {
+      history[alertKey] = { ...previous, active: false };
+      continue;
+    }
     notices.push({
       key: `admin-alert:${alertKey}`,
       message: RECOVERY_TEXT[previous.type],

@@ -62,6 +62,10 @@ const ReviewsTab = dynamic(
   () => import('@/features/admin/components/tabs/ReviewsTab'),
   { loading: () => <AdminContentSkeleton /> },
 );
+const TrafficTab = dynamic(
+  () => import('@/features/admin/components/tabs/TrafficTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
 const VideoSourceConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/VideoSourceConfigTab').then(
@@ -141,6 +145,8 @@ const AdminTabBody = ({
       return <LiveSourceConfig config={config} refreshConfig={refreshConfig} />;
     case 'category':
       return <CategoryConfig config={config} refreshConfig={refreshConfig} />;
+    case 'traffic':
+      return <TrafficTab />;
     default:
       return null;
   }

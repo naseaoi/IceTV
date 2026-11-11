@@ -50,6 +50,29 @@ describe('createHlsLoaderClass', () => {
       }
     },
   );
+
+  it('中转暂停响应不再重试，其他失败沿用原重试判断', () => {
+    let pausedHeader: string | null = '1';
+    let received: any;
+    class Loader {
+      loader = {
+        getResponseHeader: (name: string) =>
+          name === 'x-icetv-relay-paused' ? pausedHeader : null,
+      };
+      load = jest.fn((_context, config) => {
+        received = config;
+      });
+    }
+    const Wrapped = createHlsLoaderClass(Loader, {});
+    const original = { loadPolicy: { errorRetry: { maxNumRetry: 5 } } };
+    new Wrapped({}).load({ type: 'manifest' }, original, {});
+    const shouldRetry = received.loadPolicy.errorRetry.shouldRetry;
+
+    expect(shouldRetry({}, 0, false, { code: 503 }, true)).toBe(false);
+    pausedHeader = null;
+    expect(shouldRetry({}, 0, false, { code: 503 }, true)).toBe(true);
+    expect(original.loadPolicy.errorRetry).not.toHaveProperty('shouldRetry');
+  });
 });
 
 type Listener = (...args: unknown[]) => void;

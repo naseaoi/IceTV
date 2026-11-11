@@ -7,6 +7,12 @@ import {
 } from '@/features/admin/lib/admin-alerts';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import {
+  formatTrafficBytes,
+  normalizeTrafficSettings,
+  TRAFFIC_WARN_RATIO,
+} from '@/lib/host-traffic';
+import { getHostTrafficStatus } from '@/lib/host-traffic.server';
 import { flushSourceHealthSearch } from '@/lib/source-health.server';
 import { SOURCE_HEALTH_RETENTION_DAYS } from '@/lib/source-quality-policy';
 
@@ -84,4 +90,49 @@ export async function getSubscriptionAlerts(): Promise<AdminAlert[]> {
       count: 1,
     },
   ];
+}
+
+export async function getTrafficAlerts(): Promise<AdminAlert[]> {
+  const config = await getConfigForRead();
+  const settings = normalizeTrafficSettings(config.TrafficConfig);
+  if (settings.QuotaGB <= 0) return [];
+  const status = await getHostTrafficStatus(config);
+  const cycleStartedAt = Date.parse(`${status.cycleStart}T00:00:00Z`);
+  const alert = (
+    level: string,
+    message: string,
+    startedAt = cycleStartedAt,
+  ): AdminAlert => ({
+    key: `traffic:${level}:${status.cycleStart}`,
+    type: 'traffic',
+    message,
+    startedAt,
+    count: 1,
+  });
+  const usageAlert = (level: string, message: string): AdminAlert => ({
+    ...alert(level, message),
+    group: `traffic:usage-level:${status.cycleStart}`,
+  });
+  if (!status.available) return [alert('unavailable', '流量统计不可用')];
+  const alerts: AdminAlert[] = [];
+  if (status.stale && status.updatedAt !== null) {
+    alerts.push(alert('stale', '流量统计已停止更新', status.updatedAt));
+  }
+  const percent = Math.floor((status.usedRatio ?? 0) * 100);
+  if (status.relay === 'paused') {
+    alerts.push(usageAlert('paused', `流量已用 ${percent}%，服务器中转已暂停`));
+  } else if ((status.usedRatio ?? 0) >= TRAFFIC_WARN_RATIO) {
+    alerts.push(usageAlert('usage', `本周期流量已用 ${percent}%`));
+  } else if (
+    status.projectedBytes !== null &&
+    status.projectedBytes > status.quotaBytes
+  ) {
+    alerts.push(
+      usageAlert(
+        'projected',
+        `按当前用量预计本周期用 ${formatTrafficBytes(status.projectedBytes)}，超出额度`,
+      ),
+    );
+  }
+  return alerts;
 }

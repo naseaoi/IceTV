@@ -82,3 +82,36 @@ it('keeps same-tab deduplication when persistence fails', () => {
     claimAdminAlertNotices(user, [alert], ADMIN_ALERT_COOLDOWN_MS * 2),
   ).toEqual([]);
 });
+it('treats a level change inside one alert group as escalation, not recovery', () => {
+  const user = `owner${account}`;
+  const usage: AdminAlert = {
+    key: 'traffic:usage:2026-11-01',
+    type: 'traffic',
+    message: '本周期流量已用 85%',
+    startedAt: 1,
+    count: 1,
+    group: 'traffic:usage-level:2026-11-01',
+  };
+  const paused: AdminAlert = {
+    ...usage,
+    key: 'traffic:paused:2026-11-01',
+    message: '流量已用 96%，服务器中转已暂停',
+  };
+  claimAdminAlertNotices(user, [usage], 1000);
+  expect(
+    claimAdminAlertNotices(user, [paused], ADMIN_ALERT_COOLDOWN_MS + 1000),
+  ).toEqual([
+    expect.objectContaining({
+      key: 'admin-alert:traffic:paused:2026-11-01',
+      recovered: false,
+    }),
+  ]);
+  expect(
+    claimAdminAlertNotices(user, [], ADMIN_ALERT_COOLDOWN_MS * 2 + 1000),
+  ).toEqual([
+    expect.objectContaining({
+      key: 'admin-alert:traffic:paused:2026-11-01',
+      recovered: true,
+    }),
+  ]);
+});

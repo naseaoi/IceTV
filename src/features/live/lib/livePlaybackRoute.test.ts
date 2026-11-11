@@ -102,41 +102,28 @@ describe('initial live route', () => {
     window.sessionStorage.clear();
   });
 
-  it('sends http streams on https pages through the server', () => {
-    expect(
-      resolveInitialLiveRoute('http://1.2.3.4:9901/live.m3u8', {
-        pageProtocol: 'https:',
-      }),
-    ).toBe('server');
-    expect(
-      resolveInitialLiveRoute('http://1.2.3.4:9901/live.m3u8', {
-        pageProtocol: 'http:',
-      }),
-    ).toBe('browser');
-  });
-
-  it('tries https streams directly until the host is remembered as failing', () => {
-    const url = 'https://cdn-a.example/live.m3u8';
-    expect(resolveInitialLiveRoute(url, { pageProtocol: 'https:' })).toBe(
+  it('tries http and https streams directly by default', () => {
+    expect(resolveInitialLiveRoute('http://1.2.3.4:9901/live.m3u8')).toBe(
       'browser',
     );
+    expect(resolveInitialLiveRoute('https://cdn.example/live.m3u8')).toBe(
+      'browser',
+    );
+    expect(resolveInitialLiveRoute('rtmp://cdn.example/live')).toBe('server');
+  });
+
+  it('tries streams directly until the host is remembered as failing', () => {
+    const url = 'https://cdn-a.example/live.m3u8';
+    expect(resolveInitialLiveRoute(url)).toBe('browser');
 
     rememberLiveServerRoute('https://cdn-a.example/other.m3u8', 1_000);
+    expect(resolveInitialLiveRoute(url, 2_000)).toBe('server');
     expect(
-      resolveInitialLiveRoute(url, { pageProtocol: 'https:', now: 2_000 }),
-    ).toBe('server');
-    expect(
-      resolveInitialLiveRoute('https://cdn-b.example/live.m3u8', {
-        pageProtocol: 'https:',
-        now: 2_000,
-      }),
+      resolveInitialLiveRoute('https://cdn-b.example/live.m3u8', 2_000),
     ).toBe('browser');
-    expect(
-      resolveInitialLiveRoute(url, {
-        pageProtocol: 'https:',
-        now: 1_000 + 31 * 60 * 1000,
-      }),
-    ).toBe('browser');
+    expect(resolveInitialLiveRoute(url, 1_000 + 31 * 60 * 1000)).toBe(
+      'browser',
+    );
   });
 
   it('distinguishes direct requests from proxied ones', () => {

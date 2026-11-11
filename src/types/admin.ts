@@ -1,3 +1,5 @@
+import type { TrafficSettings } from '@/lib/host-traffic';
+
 export interface AdminConfig {
   // 仅后台响应与旧数据迁移；运行时配置由 configSelfCheck 剥离。
   ConfigSubscribtion: {
@@ -105,6 +107,7 @@ export interface AdminConfig {
     channelNumber?: number;
     disabled?: boolean;
   }[];
+  TrafficConfig?: TrafficSettings;
 }
 
 export interface AdminConfigResult {

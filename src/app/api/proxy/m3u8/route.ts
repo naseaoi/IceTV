@@ -9,6 +9,10 @@ import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.serv
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
+import {
+  isServerRelayPaused,
+  serverRelayPausedResponse,
+} from '@/lib/host-traffic.server';
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
@@ -85,6 +89,11 @@ async function handleGet(request: NextRequest) {
     return NextResponse.json(toProxyFailurePayload(diagnostic), {
       status: diagnostic.status,
     });
+  }
+
+  // 直连模式只代取清单、分片由浏览器直连，暂停时照常放行
+  if (proxyMode === 'server-proxy' && (await isServerRelayPaused())) {
+    return serverRelayPausedResponse();
   }
 
   const quotaFailure = await requireServerProxyQuota(
