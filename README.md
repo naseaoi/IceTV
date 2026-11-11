@@ -181,6 +181,7 @@ pnpm dev
 - [LibreTV](https://github.com/LibreSpark/LibreTV)
 - [ArtPlayer](https://github.com/zhw2590582/ArtPlayer)
 - [HLS.js](https://github.com/video-dev/hls.js)
+- [danmu_api](https://github.com/huangxd-/danmu_api) — 弹幕服务
 - [Zwei](https://github.com/bestzwei) — 豆瓣 CORS proxy
 - [CMLiussss](https://github.com/cmliu) — 豆瓣 CDN
 - [LINUX DO](https://linux.do) — 社区
