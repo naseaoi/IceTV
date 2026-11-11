@@ -16,7 +16,7 @@ import {
 } from '@/features/play/hooks/usePlayProgress';
 import { PLAY_CHECKPOINT_KEY } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { getAllPlayRecords, savePlayRecord } from '@/lib/db.client';
+import { getPlayRecordsByKeys, savePlayRecord } from '@/lib/db.client';
 import { savePlayIntent } from '@/lib/play-intent';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 
@@ -25,7 +25,7 @@ jest.mock('@/lib/db.client', () => ({
   generateStorageKey: jest.fn(
     (source: string, id: string) => `${source}+${id}`,
   ),
-  getAllPlayRecords: jest.fn(),
+  getPlayRecordsByKeys: jest.fn(),
   savePlayRecord: jest.fn(),
 }));
 
@@ -526,8 +526,8 @@ describe('usePlayProgress helpers', () => {
 });
 
 describe('usePlayProgress 历史恢复与起播握手', () => {
-  const mockedGetAllPlayRecords = getAllPlayRecords as jest.MockedFunction<
-    typeof getAllPlayRecords
+  const mockedGetAllPlayRecords = getPlayRecordsByKeys as jest.MockedFunction<
+    typeof getPlayRecordsByKeys
   >;
   const detail: SearchResult = {
     id: 'id-a',

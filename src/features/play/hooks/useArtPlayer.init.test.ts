@@ -155,6 +155,9 @@ jest.mock('@/features/play/lib/danmaku/slider-drag', () => ({
 }));
 
 jest.mock('@/features/play/lib/nextEpisodePreload', () => ({
+  getForwardBufferSeconds: jest.requireActual(
+    '@/features/play/lib/nextEpisodePreload',
+  ).getForwardBufferSeconds,
   scheduleNextEpisodePreload: jest.fn(),
 }));
 

@@ -8,6 +8,7 @@ import type {
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { FragmentMemoryCacheLoader } from '@/features/play/lib/fragmentMemoryCache';
+import { getForwardBufferSeconds } from '@/features/play/lib/nextEpisodePreload';
 import {
   PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
   resolvePlaybackStallDecision,
@@ -373,6 +374,7 @@ export function createVodM3u8Loader({
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
     const segmentPrebufferController = createVodSegmentPrebufferController({
       getCurrentTime: () => video.currentTime || 0,
+      getForwardBufferSeconds: () => getForwardBufferSeconds(video),
       isServerProxy: () => currentUseServerProxy,
       sourceKey,
     });

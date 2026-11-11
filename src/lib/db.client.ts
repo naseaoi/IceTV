@@ -7,21 +7,21 @@ import type {
 } from '@/features/favorites/lib/library-query';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 
-import { getAuthInfoFromBrowserCookie } from './auth.client';
 import {
   cacheManager,
   createCacheFirstReader,
+  createKeyedCacheFirstReader,
   createOptimisticWriter,
   fetchFromApi,
   fetchWithAuth,
   handleDatabaseOperationFailure,
   retryClientRequest,
-  triggerGlobalError,
 } from './db.client.internal';
 import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   MAX_DELETE_PLAY_RECORD_KEYS,
+  MAX_READ_PLAY_RECORD_KEYS,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   selectRecentPlayRecords,
@@ -73,12 +73,59 @@ const _getAllFavorites = createCacheFirstReader<Record<string, Favorite>>({
   fallback: {},
 });
 
-const _getAllSkipConfigs = createCacheFirstReader<Record<string, SkipConfig>>({
+const _getPlayRecordsByKeys = createKeyedCacheFirstReader<PlayRecord>({
+  getCached: () => cacheManager.getCachedPlayRecords(),
+  setCached: (data) => cacheManager.cachePlayRecords(data),
+  fetchApi: async (keys) => {
+    const records: Record<string, PlayRecord> = {};
+    for (
+      let index = 0;
+      index < keys.length;
+      index += MAX_READ_PLAY_RECORD_KEYS
+    ) {
+      const params = new URLSearchParams();
+      keys
+        .slice(index, index + MAX_READ_PLAY_RECORD_KEYS)
+        .forEach((key) => params.append('keys', key));
+      Object.assign(
+        records,
+        await fetchFromApi<Record<string, PlayRecord>>(
+          `/api/playrecords?${params}`,
+        ),
+      );
+    }
+    return records;
+  },
+  eventName: 'playRecordsUpdated',
+});
+
+const _getFavorite = createKeyedCacheFirstReader<Favorite>({
+  getCached: () => cacheManager.getCachedFavorites(),
+  setCached: (data) => cacheManager.cacheFavorites(data),
+  fetchApi: async ([key]) => {
+    const favorite = await fetchFromApi<Favorite | null>(
+      `/api/favorites?key=${encodeURIComponent(key)}`,
+    );
+    return favorite ? { [key]: favorite } : {};
+  },
+  eventName: 'favoritesUpdated',
+});
+
+const _getSkipConfig = createKeyedCacheFirstReader<SkipConfig>({
   getCached: () => cacheManager.getCachedSkipConfigs(),
   setCached: (data) => cacheManager.cacheSkipConfigs(data),
-  fetchApi: () => fetchFromApi<Record<string, SkipConfig>>(`/api/skipconfigs`),
+  fetchApi: async ([key]) => {
+    const separator = key.indexOf('+');
+    const params = new URLSearchParams({
+      source: key.slice(0, separator),
+      id: key.slice(separator + 1),
+    });
+    const config = await fetchFromApi<SkipConfig | null>(
+      `/api/skipconfigs?${params}`,
+    );
+    return config ? { [key]: config } : {};
+  },
   eventName: 'skipConfigsUpdated',
-  fallback: {},
 });
 
 // ================================================================
@@ -118,6 +165,12 @@ const _writeSkipConfigs = createOptimisticWriter<Record<string, SkipConfig>>({
 // ================================================================
 
 // ---- 播放记录 ----
+
+export async function getPlayRecordsByKeys(
+  keys: string[],
+): Promise<Record<string, PlayRecord>> {
+  return _getPlayRecordsByKeys(keys);
+}
 
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
   return _getAllPlayRecords();
@@ -572,45 +625,7 @@ export async function isFavorited(
 ): Promise<boolean> {
   const key = generateStorageKey(source, id);
 
-  // 未认证时直接返回 false
-  const authInfo = getAuthInfoFromBrowserCookie();
-  if (!authInfo?.username) {
-    return false;
-  }
-
-  const cachedFavorites = cacheManager.getCachedFavorites();
-
-  if (cachedFavorites) {
-    fetchFromApi<Record<string, Favorite>>(`/api/favorites`)
-      .then((freshData) => {
-        if (
-          JSON.stringify(cacheManager.getCachedFavorites()) ===
-            JSON.stringify(cachedFavorites) &&
-          JSON.stringify(cachedFavorites) !== JSON.stringify(freshData)
-        ) {
-          cacheManager.cacheFavorites(freshData);
-          window.dispatchEvent(
-            new CustomEvent('favoritesUpdated', { detail: freshData }),
-          );
-        }
-      })
-      .catch((err) => {
-        console.warn('后台同步收藏失败:', err);
-      });
-
-    return !!cachedFavorites[key];
-  }
-
-  try {
-    const freshData =
-      await fetchFromApi<Record<string, Favorite>>(`/api/favorites`);
-    cacheManager.cacheFavorites(freshData);
-    return !!freshData[key];
-  } catch (err) {
-    console.error('检查收藏状态失败:', err);
-    triggerGlobalError('检查收藏状态失败');
-    return false;
-  }
+  return !!(await _getFavorite([key]))[key];
 }
 
 export async function clearAllFavorites(): Promise<void> {
@@ -632,8 +647,8 @@ export async function getSkipConfig(
 ): Promise<SkipConfig | null> {
   if (typeof window === 'undefined') return null;
   const key = generateStorageKey(source, id);
-  const allConfigs = await _getAllSkipConfigs();
-  return allConfigs[key] || null;
+  const configs = await _getSkipConfig([key]);
+  return configs[key] || null;
 }
 
 export async function saveSkipConfig(

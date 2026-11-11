@@ -1,5 +1,6 @@
 'use client';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   buildDanmakuScopeKey,
   readDanmakuEpisodeId,
@@ -14,18 +15,38 @@ export interface DanmakuEpisodeScope {
   episodeIndex: number;
 }
 
+const missingMappings = new Map<string, number>();
+const mappingRequests = new Map<string, Promise<number | null>>();
+const MISSING_MAPPING_TTL_MS = 30_000;
+
+function getAccount(): string {
+  return getAuthInfoFromBrowserCookie()?.username ?? '';
+}
+
+function mappingCacheKey(scopeKey: string, account = getAccount()): string {
+  return JSON.stringify([account, scopeKey]);
+}
+
+function invalidateMapping(key: string): void {
+  missingMappings.delete(key);
+  mappingRequests.delete(key);
+}
+
 async function fetchEpisodeIdFromServer(
   scopeKey: string,
-): Promise<number | null> {
+): Promise<number | null | undefined> {
   try {
     const response = await fetch(
       `/api/danmaku/episode-mapping?scopeKey=${encodeURIComponent(scopeKey)}`,
     );
-    if (!response.ok) return null;
+    if (!response.ok) return undefined;
     const data = (await response.json()) as { episodeId: number | null };
-    return data.episodeId;
+    return data.episodeId === null ||
+      (Number.isInteger(data.episodeId) && Number(data.episodeId) > 0)
+      ? data.episodeId
+      : undefined;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -72,11 +93,35 @@ export async function getPersistedEpisodeId(
     return localId;
   }
 
-  const serverId = await fetchEpisodeIdFromServer(scopeKey);
-  if (serverId !== null) {
-    writeDanmakuEpisodeId(scopeKey, serverId);
+  const account = getAccount();
+  const key = mappingCacheKey(scopeKey, account);
+  const now = Date.now();
+  for (const [cachedKey, expiresAt] of missingMappings) {
+    if (expiresAt <= now) missingMappings.delete(cachedKey);
   }
-  return serverId;
+  if (missingMappings.has(key)) return null;
+  const pending = mappingRequests.get(key);
+  if (pending) return pending;
+
+  const task = fetchEpisodeIdFromServer(scopeKey)
+    .then((serverId) => {
+      // 绑定、清除或账号切换后，迟到读取不能回写旧映射。
+      if (mappingRequests.get(key) !== task || account !== getAccount())
+        return account === getAccount() ? readDanmakuEpisodeId(scopeKey) : null;
+      if (serverId === null) {
+        missingMappings.set(key, Date.now() + MISSING_MAPPING_TTL_MS);
+        if (missingMappings.size > 200)
+          missingMappings.delete(missingMappings.keys().next().value!);
+      } else if (serverId !== undefined) {
+        writeDanmakuEpisodeId(scopeKey, serverId);
+      }
+      return serverId ?? null;
+    })
+    .finally(() => {
+      if (mappingRequests.get(key) === task) mappingRequests.delete(key);
+    });
+  mappingRequests.set(key, task);
+  return task;
 }
 
 export async function persistEpisodeId(
@@ -89,7 +134,12 @@ export async function persistEpisodeId(
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
   if (!scopeKey) return false;
 
-  if (!(await saveEpisodeIdToServer(scopeKey, episodeId))) return false;
+  const account = getAccount();
+  const key = mappingCacheKey(scopeKey, account);
+  invalidateMapping(key);
+  const ok = await saveEpisodeIdToServer(scopeKey, episodeId);
+  invalidateMapping(key);
+  if (!ok || account !== getAccount()) return false;
   const saved = writeDanmakuEpisodeId(scopeKey, episodeId);
   const titleSaved =
     searchTitle === undefined ||
@@ -105,7 +155,12 @@ export async function clearPersistedEpisodeId(
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
   if (!scopeKey) return false;
 
-  if (!(await deleteEpisodeIdFromServer(scopeKey))) return false;
+  const account = getAccount();
+  const key = mappingCacheKey(scopeKey, account);
+  invalidateMapping(key);
+  const ok = await deleteEpisodeIdFromServer(scopeKey);
+  invalidateMapping(key);
+  if (!ok || account !== getAccount()) return false;
   return writeDanmakuEpisodeId(scopeKey, null);
 }
 
@@ -130,6 +185,7 @@ export function carryOverDanmakuEpisodeMapping(
     if (!scopeKey || scopeKey === targetKey) continue;
     const episodeId = readDanmakuEpisodeId(scopeKey);
     if (episodeId === null) continue;
+    invalidateMapping(mappingCacheKey(targetKey));
     writeDanmakuEpisodeId(targetKey, episodeId);
     writeDanmakuEpisodeSearchTitle(
       targetKey,

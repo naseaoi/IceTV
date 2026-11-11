@@ -33,6 +33,26 @@ export async function runWithConcurrency<T>(
   return results;
 }
 
+// 取消只结束当前消费者的等待，共享加载继续完成并填充缓存。
+export async function waitForSharedLoad<T>(
+  loader: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return loader();
+  if (signal.aborted) throw signal.reason;
+
+  let onAbort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([loader(), cancelled]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 export function withTimeout<T>(
   task: Promise<T>,
   timeoutMs: number,

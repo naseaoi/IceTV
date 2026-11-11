@@ -25,7 +25,7 @@ import {
 } from '@/features/play/lib/resumePlayback';
 import {
   generateStorageKey,
-  getAllPlayRecords,
+  getPlayRecordsByKeys,
   PlayRecord,
   savePlayRecord,
 } from '@/lib/db.client';
@@ -507,7 +507,7 @@ export function usePlayProgress({
       recordsPending = true;
       try {
         const allRecords = await (historyRestoreGate.playRecords ??
-          getAllPlayRecords());
+          getPlayRecordsByKeys([generateStorageKey(currentSource, currentId)]));
         if (disposed) {
           return;
         }

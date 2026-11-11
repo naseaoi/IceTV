@@ -51,6 +51,7 @@ it('同键提交串行，前次失败不撤销最新操作，最新失败回到�
     }),
   );
   await act(async () => {});
+  expect(getSkipConfig).toHaveBeenCalledWith('s', '1');
   const first = { ...initial, intro_time: 10 };
   const second = { ...initial, intro_time: 20 };
   let pending!: Promise<void>;

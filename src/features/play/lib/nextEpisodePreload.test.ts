@@ -14,6 +14,7 @@ import {
   selectPreloadSegmentUrls,
   selectPreloadVariantUrl,
   shouldStartNextEpisodePreload,
+  shouldWarmUpNextEpisode,
 } from '@/features/play/lib/nextEpisodePreload';
 import * as proxyModes from '@/lib/proxy-modes';
 
@@ -164,6 +165,30 @@ describe('shouldStartNextEpisodePreload', () => {
         conditions({ currentTime: 1_492, bufferedAheadSeconds: 7.6 }),
       ),
     ).toBe(true);
+  });
+});
+
+describe('shouldWarmUpNextEpisode', () => {
+  const base = {
+    autoPlayNext: true,
+    currentTime: 3,
+    bufferedAheadSeconds: NEXT_EPISODE_PRELOAD_LIMITS.healthyBufferSeconds,
+    saveData: false,
+  };
+
+  it('当前集已起播且缓冲稳定时预热', () => {
+    expect(shouldWarmUpNextEpisode(base)).toBe(true);
+  });
+
+  it('未起播、缓冲不足、关闭连播或省流量时不预热', () => {
+    expect(shouldWarmUpNextEpisode({ ...base, currentTime: 0 })).toBe(false);
+    expect(shouldWarmUpNextEpisode({ ...base, bufferedAheadSeconds: 5 })).toBe(
+      false,
+    );
+    expect(shouldWarmUpNextEpisode({ ...base, autoPlayNext: false })).toBe(
+      false,
+    );
+    expect(shouldWarmUpNextEpisode({ ...base, saveData: true })).toBe(false);
   });
 });
 
@@ -509,6 +534,46 @@ describe('scheduleNextEpisodePreload', () => {
     await tick();
     await tick();
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('起播且缓冲稳定后预热下一集一次，片尾预载照常', async () => {
+    const warmUp = jest.fn();
+    const video = createVideo({
+      currentTime: 0,
+      buffered: createRanges([[0, 5]]),
+    });
+    scheduleNextEpisodePreload(createOptions(video, { warmUp }));
+
+    await tick();
+    expect(warmUp).not.toHaveBeenCalled();
+
+    video.currentTime = 2;
+    (video as unknown as { buffered: unknown }).buffered = createRanges([
+      [0, 1_500],
+    ]);
+    await tick();
+    expect(warmUp).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    scheduleNextEpisodePreload(createOptions(video, { warmUp }));
+    video.currentTime = 1_450;
+    await tick();
+    expect(warmUp).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('关闭连播时不预热下一集', async () => {
+    const warmUp = jest.fn();
+    const video = createVideo();
+    scheduleNextEpisodePreload(
+      createOptions(video, {
+        warmUp,
+        autoPlayNextEnabledRef: { current: false },
+      }),
+    );
+    await tick();
+    await tick();
+    expect(warmUp).not.toHaveBeenCalled();
   });
 
   it('aborts the running preload when the episode changes', async () => {

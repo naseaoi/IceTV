@@ -1,5 +1,7 @@
 export const SOURCE_PROBE_HEADER = 'X-IceTV-Probe';
 export const SOURCE_PROBE_CONCURRENCY = 2;
+// 小于起播无进展窗口 W 的 5 秒下限（默认 15 秒），给自动换源的同步 peek 留出测速时间。
+export const SOURCE_PROBE_STARTUP_HOLD_MS = 3_000;
 
 export class SourceProbeDeferredError extends Error {
   constructor(readonly retryAfterSeconds: number) {

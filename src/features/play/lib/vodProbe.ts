@@ -1,5 +1,6 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
+import { throwIfPlaybackCancelled } from '@/features/play/lib/sharedPlaybackTask';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import {
   isSourceProbeNetworkError,
@@ -86,12 +87,11 @@ async function probeMp4WithMode(
   rawUrl: string,
   useProxy: boolean,
   sourceKey: string,
+  signal?: AbortSignal,
 ): Promise<VodProbeResult> {
+  throwIfPlaybackCancelled(signal);
   const url = buildMp4ProbeUrl(rawUrl, useProxy, sourceKey);
-  const abortState = createTimedAbortController(
-    undefined,
-    MP4_PROBE_TIMEOUT_MS,
-  );
+  const abortState = createTimedAbortController(signal, MP4_PROBE_TIMEOUT_MS);
   const startedAt = performance.now();
 
   try {
@@ -120,6 +120,7 @@ async function probeMp4WithMode(
       pingTime,
     };
   } catch (error) {
+    throwIfPlaybackCancelled(signal);
     if ((error as Error)?.name === 'AbortError') {
       throw new SourceProbeNetworkError('Timeout loading mp4 sample');
     }
@@ -135,16 +136,19 @@ async function probeMp4(
   rawUrl: string,
   route: SourcePlaybackRoute,
   sourceKey: string,
+  signal?: AbortSignal,
 ): Promise<VodProbeResult> {
   const useProxy = route.useServerProxy;
   try {
-    const result = await probeMp4WithMode(rawUrl, useProxy, sourceKey);
+    const result = await probeMp4WithMode(rawUrl, useProxy, sourceKey, signal);
+    throwIfPlaybackCancelled(signal);
     reportSourceRouteStat(sourceKey, useProxy ? 'server' : 'browser', true);
     if (!useProxy && sourceKey) {
       clearSourceProxyOverride(sourceKey, rawUrl);
     }
     return result;
   } catch (error) {
+    throwIfPlaybackCancelled(signal);
     if (isSourceProbeNetworkError(error))
       reportSourceRouteStat(sourceKey, useProxy ? 'server' : 'browser', false);
     if (
@@ -157,12 +161,19 @@ async function probeMp4(
     }
 
     try {
-      const result = await probeMp4WithMode(rawUrl, !useProxy, sourceKey);
+      const result = await probeMp4WithMode(
+        rawUrl,
+        !useProxy,
+        sourceKey,
+        signal,
+      );
+      throwIfPlaybackCancelled(signal);
       reportSourceRouteStat(sourceKey, useProxy ? 'browser' : 'server', true);
       if (useProxy) clearSourceProxyOverride(sourceKey, rawUrl);
       else rememberSourceServerProxy(sourceKey, rawUrl);
       return result;
     } catch (fallbackError) {
+      throwIfPlaybackCancelled(signal);
       if (isSourceProbeNetworkError(fallbackError))
         reportSourceRouteStat(
           sourceKey,
@@ -178,20 +189,23 @@ export async function probeVodEpisodeUrl(
   rawUrl: string,
   route: SourcePlaybackRoute,
   sourceKey: string,
+  signal?: AbortSignal,
 ): Promise<VodProbeResult> {
+  throwIfPlaybackCancelled(signal);
   const targetUrl = isLazyEpisodeUrl(rawUrl)
-    ? await resolveLazyEpisodeUrl(sourceKey, rawUrl, { probe: true })
+    ? await resolveLazyEpisodeUrl(sourceKey, rawUrl, { probe: true, signal })
     : rawUrl;
 
+  throwIfPlaybackCancelled(signal);
   if (targetUrl !== rawUrl)
     route = getSourcePlaybackRoute(sourceKey, targetUrl);
 
   if (isVodM3u8Url(targetUrl)) {
-    return getVideoResolutionFromM3u8(targetUrl, route, sourceKey);
+    return getVideoResolutionFromM3u8(targetUrl, route, sourceKey, signal);
   }
 
   if (isVodMp4Url(targetUrl)) {
-    return probeMp4(targetUrl, route, sourceKey);
+    return probeMp4(targetUrl, route, sourceKey, signal);
   }
 
   throw new Error('Unsupported vod url for probe');

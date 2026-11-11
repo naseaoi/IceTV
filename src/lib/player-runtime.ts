@@ -125,7 +125,10 @@ export function prefetchM3U8(
   route: Pick<SourcePlaybackRoute, 'directManifest'>,
 ): void {
   if (route.directManifest) return;
-  fetch(proxyUrl, { cache: 'no-store' }).catch(() => {});
+  fetch(proxyUrl, {
+    cache: 'no-store',
+    headers: { 'X-IceTV-Warm-Only': '1' },
+  }).catch(() => {});
 }
 
 export function getManagedVideo(video: HTMLVideoElement): ManagedVideoElement {

@@ -17,7 +17,10 @@ describe('prefetchM3U8', () => {
       expect(fetchMock).not.toHaveBeenCalled();
       const url = '/api/proxy/m3u8?url=test';
       prefetchM3U8(url, { directManifest: false });
-      expect(fetchMock).toHaveBeenCalledWith(url, { cache: 'no-store' });
+      expect(fetchMock).toHaveBeenCalledWith(url, {
+        cache: 'no-store',
+        headers: { 'X-IceTV-Warm-Only': '1' },
+      });
     } finally {
       global.fetch = originalFetch;
     }

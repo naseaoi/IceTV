@@ -32,6 +32,7 @@
 
 ## 收藏库与观看状态
 
+- 播放页的收藏状态只看当前 `source+id` 收藏键是否存在（`isFavorited()` 单键读取），不要改用收藏库观看状态推导。
 - 收藏仍按 `source+id` 存储。收藏查询投影与 JSON 同次写入，写入与用户名合并都经 `favoriteProjection()` 重建；启动按 `projection_version` 分批补齐，投影规则改变须升级版本并回填。
 - 有效观看状态（想看 / 在看 / 看过）与看过时间只在 `src/features/favorites/lib/library-storage.ts` 的 SQL 中推导：手动 `watch_status` 优先，其次评分或末集进度 ≥ 90% 判看过，有播放记录判在看。收藏库、按作品查询、批量匹配与公开收藏共用这段 SQL，**不要在前端或其他查询里另写推导**，否则计数与列表对不上。
 - 收藏列表与收藏数经收藏库查询获取（`libraryStatements()`，接口 `/api/favorites?format=library`，客户端 `src/features/favorites/lib/library-client.ts`）：「我的」页收藏栏按 `limit` 取前几条，登录写入的收藏计数取 `libraryTotal`。收藏范围统一为 `library_valid = 1`，公开范围再加 `profileFavoriteOriginSql()`；个人主页收藏数这类单独的 `COUNT` 必须沿用同样条件，否则与列表对不上。

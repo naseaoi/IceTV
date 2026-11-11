@@ -15,6 +15,7 @@ import { DisplayableError } from '@/lib/user-facing-error';
 
 jest.mock('@/features/play/lib/danmaku/plugin', () => ({
   createDanmakuPlugin: jest.fn(),
+  loadDanmakuPluginModule: jest.fn(),
 }));
 jest.mock('@/features/play/lib/danmaku/resolve', () => ({
   loadDanmakuForEpisode: jest.fn(),

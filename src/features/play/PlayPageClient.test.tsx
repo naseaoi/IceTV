@@ -10,6 +10,10 @@ import type {
 } from '@/features/play/hooks/usePlayInit';
 import type { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import type { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import {
+  holdBackgroundSourceProbes,
+  releaseBackgroundSourceProbes,
+} from '@/features/play/lib/sourceProbeStore';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { PlayPageClient } from '@/features/play/PlayPageClient';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
@@ -79,7 +83,7 @@ const mockPendingLazyResolutions = new Map<
   { resolve: (url: string) => void; reject: (error: unknown) => void }
 >();
 const mockResolveLazyEpisodeUrl = jest.fn(
-  (_source: string, lazyUrl: string) =>
+  (_source: string, lazyUrl: string, _options?: { signal?: AbortSignal }) =>
     new Promise<string>((resolve, reject) => {
       mockPendingLazyResolutions.set(lazyUrl, { resolve, reject });
     }),
@@ -163,6 +167,7 @@ jest.mock('@/features/play/hooks/useSourceSwitch', () => ({
 jest.mock('@/features/play/lib/danmaku/attach', () => ({
   applyDanmakuHeatmapVisibility: jest.fn(),
   ensureDanmakuLoaded: jest.fn(),
+  preloadDanmakuPluginIfEnabled: jest.fn(),
   reloadDanmaku: jest.fn(),
 }));
 
@@ -173,9 +178,11 @@ jest.mock('@/features/play/lib/fragmentMemoryCache', () => ({
 jest.mock('@/features/play/lib/lazyEpisode', () => ({
   peekResolvedLazyEpisodeUrl: (source: string, lazyUrl: string) =>
     mockPeekResolvedLazyEpisodeUrl(source, lazyUrl),
-  prewarmLazyEpisodeUrl: jest.fn(),
-  resolveLazyEpisodeUrl: (source: string, lazyUrl: string) =>
-    mockResolveLazyEpisodeUrl(source, lazyUrl),
+  resolveLazyEpisodeUrl: (
+    source: string,
+    lazyUrl: string,
+    options?: { signal?: AbortSignal },
+  ) => mockResolveLazyEpisodeUrl(source, lazyUrl, options),
 }));
 
 jest.mock('@/features/play/lib/nextEpisodePreload', () => ({
@@ -184,6 +191,8 @@ jest.mock('@/features/play/lib/nextEpisodePreload', () => ({
 
 jest.mock('@/features/play/lib/sourceProbeStore', () => ({
   writePlayerInfo: jest.fn(),
+  holdBackgroundSourceProbes: jest.fn(),
+  releaseBackgroundSourceProbes: jest.fn(),
 }));
 
 jest.mock('@/features/play/lib/vodHlsRuntime', () => ({
@@ -273,6 +282,25 @@ describe('PlayPageClient', () => {
     sessionStorage.clear();
   });
 
+  it('首播和换集暂缓测速，当前源起播、失败或错误后放行', async () => {
+    renderLoadedPage();
+    expect(holdBackgroundSourceProbes).toHaveBeenCalledTimes(1);
+    act(() => lastArg(mockUsePlayProgress).onRestoreEpisodeChange?.());
+    expect(holdBackgroundSourceProbes).toHaveBeenCalledTimes(2);
+    await settleLazyEpisode(LAZY_EPISODES[0], 'https://cdn.example/ep1.m3u8');
+    const player = lastArg(mockUseArtPlayer);
+    player.artPlayerRef.current = {
+      video: document.createElement('video'),
+    } as Artplayer;
+    mockGetVodRuntimeSourceUrl.mockReturnValue(player.videoUrl);
+    act(() => player.onPlaybackStarted?.());
+    expect(releaseBackgroundSourceProbes).toHaveBeenCalledTimes(1);
+    act(() => latestSourceSwitch().onPlaybackStartFailed?.());
+    expect(releaseBackgroundSourceProbes).toHaveBeenCalledTimes(2);
+    act(() => latestPlayInit().setError('请切换源站'));
+    expect(releaseBackgroundSourceProbes).toHaveBeenCalledTimes(3);
+  });
+
   it('历史恢复换集回调同步重置意图，换源提交索引不触发通用重置', () => {
     renderLoadedPage();
     const restore = lastArg(mockUsePlayProgress);
@@ -280,6 +308,27 @@ describe('PlayPageClient', () => {
     expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
     act(() => latestSourceSwitch().setCurrentEpisodeIndex(1));
     expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  it('换集、换源开始和卸载向懒解析传递取消信号', () => {
+    const { unmount } = renderLoadedPage();
+    const firstSignal =
+      mockResolveLazyEpisodeUrl.mock.calls.at(-1)?.[2]?.signal;
+    expect(firstSignal?.aborted).toBe(false);
+    switchToEpisode(1);
+    expect(firstSignal?.aborted).toBe(true);
+    const secondSignal =
+      mockResolveLazyEpisodeUrl.mock.calls.at(-1)?.[2]?.signal;
+    act(() => latestSourceSwitch().cancelEpisodeResolve?.());
+    expect(secondSignal?.aborted).toBe(true);
+    switchToEpisode(2);
+    const thirdSignal =
+      mockResolveLazyEpisodeUrl.mock.calls.at(-1)?.[2]?.signal;
+    unmount();
+    expect(thirdSignal?.aborted).toBe(true);
+    expect(
+      mockSourceSwitch.handleEpisodeUrlResolveFailed,
+    ).not.toHaveBeenCalled();
   });
 
   it('普通详情等待不创建预算，懒解析开始登记源尝试且解析完成保留起点', async () => {

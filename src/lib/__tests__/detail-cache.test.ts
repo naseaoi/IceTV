@@ -52,6 +52,35 @@ describe('detail-cache', () => {
     expect(mockGetDetailFromApi).toHaveBeenCalledTimes(1);
   });
 
+  it('取消首个消费者只结束它的等待，其他消费者和缓存填充继续', async () => {
+    let resolve!: (value: SearchResult) => void;
+    mockGetDetailFromApi.mockReturnValue(
+      new Promise<SearchResult>((done) => {
+        resolve = done;
+      }),
+    );
+    const controller = new AbortController();
+    const first = getCachedDetail(site, 'abc', controller.signal);
+    const second = getCachedDetail(site, 'abc');
+    controller.abort(new Error('cancelled'));
+    await expect(first).rejects.toBe(controller.signal.reason);
+    resolve(makeDetail('abc'));
+    await expect(second).resolves.toEqual(makeDetail('abc'));
+    await expect(getCachedDetail(site, 'abc')).resolves.toEqual(
+      makeDetail('abc'),
+    );
+    expect(mockGetDetailFromApi).toHaveBeenCalledTimes(1);
+  });
+
+  it('已取消消费者不启动共享加载', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled'));
+    await expect(getCachedDetail(site, 'abc', controller.signal)).rejects.toBe(
+      controller.signal.reason,
+    );
+    expect(mockGetDetailFromApi).not.toHaveBeenCalled();
+  });
+
   it('不同源的同一 id 不共用条目', async () => {
     await getCachedDetail(site, 'abc');
     await getCachedDetail(otherSite, 'abc');

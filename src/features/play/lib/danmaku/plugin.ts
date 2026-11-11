@@ -55,6 +55,21 @@ export function applyOffset(
   return shifted;
 }
 
+let pluginModulePromise: Promise<
+  typeof import('artplayer-plugin-danmuku')
+> | null = null;
+
+export function loadDanmakuPluginModule() {
+  pluginModulePromise ??= import('artplayer-plugin-danmuku').catch(
+    (error: unknown) => {
+      // 分块加载失败后允许下次建播放器重新导入
+      pluginModulePromise = null;
+      throw error;
+    },
+  );
+  return pluginModulePromise;
+}
+
 export async function createDanmakuPlugin({
   loadItems,
   opacity,
@@ -63,8 +78,7 @@ export async function createDanmakuPlugin({
   heatmap,
   beforeEmit,
 }: DanmakuPluginOptions) {
-  const { default: artplayerPluginDanmuku } =
-    await import('artplayer-plugin-danmuku');
+  const { default: artplayerPluginDanmuku } = await loadDanmakuPluginModule();
 
   return artplayerPluginDanmuku({
     danmuku: loadItems,

@@ -116,6 +116,7 @@ jest.mock('@/features/play/hooks/useSourceSwitch', () => ({
 jest.mock('@/features/play/lib/danmaku/attach', () => ({
   applyDanmakuHeatmapVisibility: jest.fn(),
   ensureDanmakuLoaded: jest.fn(),
+  preloadDanmakuPluginIfEnabled: jest.fn(),
   reloadDanmaku: jest.fn(),
 }));
 
@@ -124,6 +125,7 @@ jest.mock('@/features/play/lib/nextEpisodePreload', () => ({
 }));
 
 jest.mock('@/features/play/lib/sourceProbeStore', () => ({
+  ...jest.requireActual('@/features/play/lib/sourceProbeStore'),
   writePlayerInfo: jest.fn(),
 }));
 
@@ -306,6 +308,7 @@ describe('PlayPageClient 起播等历史恢复', () => {
     jest.useRealTimers();
     global.fetch = originalFetch;
     document.cookie = 'auth_meta=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    window.dispatchEvent(new Event('auth:session-lost'));
   });
 
   it('测速选完源后播放记录才到时，等历史恢复定下续播的集和时间再起播', async () => {

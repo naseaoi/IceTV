@@ -3,6 +3,12 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { usePlayInit } from '@/features/play/hooks/usePlayInit';
 import type { HistoryRestoreGate } from '@/features/play/hooks/usePlayProgress';
 import { peekResolvedLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
+import {
+  getOrProbe,
+  getSnapshot,
+  releaseBackgroundSourceProbes,
+  resetProbes,
+} from '@/features/play/lib/sourceProbeStore';
 import { getSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
@@ -272,6 +278,8 @@ function setPagePlaybackStarted(
 const originalFetch = global.fetch;
 
 beforeEach(() => {
+  releaseBackgroundSourceProbes();
+  resetProbes();
   (getSourceSelectionContext as jest.Mock).mockClear();
   (getSourceSelectionContext as jest.Mock).mockResolvedValue({
     proxyModes: {},
@@ -303,6 +311,43 @@ describe('usePlayInit 线路偏好', () => {
       healthTiers: { relay: 'good', direct: 'good', poor: 'poor' },
     });
     installFetch({});
+  });
+
+  it('首播前台在途登记到 store，面板不重复测同源且剩余候选先排队', async () => {
+    const a = createSource('race-a');
+    const b = createSource('race-b');
+    const c = createSource('race-c');
+    let finishA!: (value: typeof PASSING_PROBE) => void;
+    let finishB!: (value: typeof PASSING_PROBE) => void;
+    probeMock.mockImplementation((url) => {
+      if (url === a.episodes[0])
+        return new Promise((resolve) => {
+          finishA = resolve;
+        });
+      if (url === b.episodes[0])
+        return new Promise((resolve) => {
+          finishB = resolve;
+        });
+      return Promise.resolve(PASSING_PROBE);
+    });
+    const params = setupHook([a, b, c]);
+    await waitFor(() => expect(probeMock).toHaveBeenCalledTimes(2));
+    expect(getSnapshot().get(`${b.source}-${b.id}`)?.source).toBe('pending');
+    const panel = getOrProbe(b);
+    expect(probeMock).toHaveBeenCalledTimes(2);
+    await act(async () => finishA(PASSING_PROBE));
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith(a.source),
+    );
+    expect(getSnapshot().get(`${c.source}-${c.id}`)?.source).toBe('queued');
+    expect(probeMock).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      finishB(PASSING_PROBE);
+      await panel;
+    });
+    expect(probeMock).toHaveBeenCalledTimes(2);
+    await act(async () => releaseBackgroundSourceProbes());
+    expect(probeMock).toHaveBeenCalledTimes(3);
   });
 
   it('同等级先等直连测速，失败后才以前台中转候选起播', async () => {
@@ -380,6 +425,42 @@ describe('usePlayInit 线路偏好', () => {
     expect(probeMock).not.toHaveBeenCalled();
   });
 
+  it('quick 起播后后台核对完整详情，剧集变化时替换', async () => {
+    const fullDetail = createSeries('direct', 2);
+    installFetch(
+      {},
+      {},
+      {
+        '/api/search/quick': Promise.resolve({
+          detail: direct,
+          sources: [direct],
+        }),
+        '/api/search': Promise.resolve({ results: [direct] }),
+        '/api/detail': Promise.resolve(fullDetail),
+      },
+    );
+    const params = setupHook(null);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(1_000);
+    });
+    await waitFor(() =>
+      expect(apiRequests('/api/detail')).toEqual([
+        '/api/detail?source=direct&id=direct-id',
+      ]),
+    );
+    await waitFor(() => {
+      const updates = (params.setDetail as jest.Mock).mock.calls
+        .map(([update]) =>
+          typeof update === 'function' ? update(direct) : update,
+        )
+        .filter(Boolean);
+      expect(updates.at(-1)?.episodes).toHaveLength(2);
+    });
+  });
+
   it('指定中转源的直达与续播入口保留原选择', async () => {
     installFetch(
       {},
@@ -399,6 +480,89 @@ describe('usePlayInit 线路偏好', () => {
     );
     expect(probeMock).not.toHaveBeenCalled();
     expect(getSourceSelectionContext).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { episodes: [] }])(
+    '快速详情不可用 %j 时仅请求一次，使用搜索补齐结果',
+    async (detail) => {
+      installFetch(
+        {},
+        {},
+        {
+          '/api/detail': Promise.resolve(
+            detail ? { ...relay, ...detail } : null,
+          ),
+          '/api/search': Promise.resolve({ results: [relay] }),
+          '/api/playrecords': Promise.resolve({}),
+        },
+      );
+      const params = setupHook(null, {
+        currentSource: relay.source,
+        currentId: relay.id,
+        needPreferRef: { current: false },
+      });
+      await waitFor(() =>
+        expect(params.setDetail).toHaveBeenCalledWith(
+          expect.objectContaining({ episodes: relay.episodes }),
+        ),
+      );
+      expect(apiRequests('/api/detail')).toHaveLength(1);
+    },
+  );
+
+  it('初始化退出释放探测消费者并中止底层任务', async () => {
+    let signal!: AbortSignal;
+    probeMock.mockImplementation((_url, _route, _source, probeSignal) => {
+      signal = probeSignal!;
+      return new Promise((_, reject) =>
+        signal.addEventListener('abort', () =>
+          reject(new DOMException('cancel', 'AbortError')),
+        ),
+      );
+    });
+    setupHook([relay, direct]);
+    await act(async () => {
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    });
+    expect(signal).toBeDefined();
+    cleanup();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(signal.aborted).toBe(true);
+    expect(
+      Array.from(getSnapshot().values()).some((entry) => entry.info.hasError),
+    ).toBe(false);
+  });
+
+  it('只有一个候选时不等选源上下文直接起播', async () => {
+    jest
+      .mocked(getSourceSelectionContext)
+      .mockReturnValue(new Promise(() => undefined));
+    const params = setupHook([relay]);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
+    );
+  });
+
+  it('多个候选仍等选源上下文后再排序', async () => {
+    let resolveContext: (
+      value: Awaited<ReturnType<typeof getSourceSelectionContext>>,
+    ) => void = () => undefined;
+    jest.mocked(getSourceSelectionContext).mockReturnValue(
+      new Promise((resolve) => {
+        resolveContext = resolve;
+      }),
+    );
+    const params = setupHook([poor, relay], { optimizationEnabled: false });
+    await act(async () => {
+      jest.advanceTimersByTime(1_000);
+      await Promise.resolve();
+    });
+    expect(params.setCurrentSource).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveContext({ proxyModes: {}, healthTiers: {} });
+    });
+    await waitFor(() => expect(params.setCurrentSource).toHaveBeenCalled());
   });
 });
 
@@ -728,13 +892,20 @@ describe('usePlayInit 按续播的集测速', () => {
       }),
     );
     const params = setupHook(null);
-    await waitFor(() =>
-      expect(apiRequests('/api/playrecords')).toHaveLength(1),
-    );
+    expect(apiRequests('/api/playrecords')).toHaveLength(0);
     await act(async () => {
       resolveSearch({ results: [resumed, fresh] });
     });
-    // 记录晚于选源读取本地缓存、早于测速到达，只有提前发出的这次请求能让测速用上
+    await waitFor(() =>
+      expect(apiRequests('/api/playrecords')).toHaveLength(1),
+    );
+    expect(
+      new URL(
+        apiRequests('/api/playrecords')[0],
+        window.location.origin,
+      ).searchParams.getAll('keys'),
+    ).toEqual(['a+a-id', 'b+b-id']);
+    // 候选键确定后读取记录；先到的结果供测速使用，测速仍不等待记录。
     await waitFor(() =>
       expect(apiRequests('/api/proxy-modes')).toHaveLength(1),
     );

@@ -112,6 +112,9 @@ export async function GET(request: NextRequest) {
             ? `user:${authorization.username}`
             : `ip:${getClientIp(request)}`,
       },
+      proxyPoolStickyKey: isLiveStream
+        ? undefined
+        : authorization.proxyPoolStickyKey,
       useProxyPool: !isLiveStream,
       skipInitialValidation: true,
       timeoutMs,

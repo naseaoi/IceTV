@@ -1,3 +1,7 @@
+import {
+  createSharedPlaybackTask,
+  playbackAbortError,
+} from '@/features/play/lib/sharedPlaybackTask';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 
@@ -5,7 +9,10 @@ const RESOLVED_CACHE_TTL_MS = 30 * 60 * 1000;
 const RESOLVED_CACHE_MAX_SIZE = 200;
 
 const resolvedCache = new Map<string, { url: string; expiresAt: number }>();
-const inflight = new Map<string, Promise<string>>();
+const inflight = new Map<
+  string,
+  ReturnType<typeof createSharedPlaybackTask<string>>
+>();
 
 function buildCacheKey(source: string, lazyUrl: string): string {
   return `${source}::${lazyUrl}`;
@@ -29,9 +36,11 @@ async function requestEpisodeUrl(
   source: string,
   lazyUrl: string,
   probe: boolean,
+  signal: AbortSignal,
 ): Promise<string> {
   const response = await (probe ? fetchSourceProbe : fetch)(
     `/api/episode-url?source=${encodeURIComponent(source)}&url=${encodeURIComponent(lazyUrl)}`,
+    { signal },
   );
   if (!response.ok) {
     const message = await response
@@ -50,8 +59,9 @@ async function requestEpisodeUrl(
 export function resolveLazyEpisodeUrl(
   source: string,
   lazyUrl: string,
-  options: { probe?: boolean } = {},
+  options: { probe?: boolean; signal?: AbortSignal } = {},
 ): Promise<string> {
+  if (options.signal?.aborted) return Promise.reject(playbackAbortError());
   if (!isLazyEpisodeUrl(lazyUrl)) {
     return Promise.resolve(lazyUrl);
   }
@@ -62,10 +72,18 @@ export function resolveLazyEpisodeUrl(
 
   const inflightKey = `${key}:${options.probe ? 'probe' : 'playback'}`;
   const pending = inflight.get(inflightKey);
-  if (pending) return pending;
+  if (pending && !pending.signal.aborted)
+    return pending.consume(options.signal);
 
-  const task = requestEpisodeUrl(source, lazyUrl, options.probe === true)
-    .then((url) => {
+  const task = createSharedPlaybackTask(async (signal) => {
+    try {
+      const url = await requestEpisodeUrl(
+        source,
+        lazyUrl,
+        options.probe === true,
+        signal,
+      );
+      if (signal.aborted) throw playbackAbortError();
       resolvedCache.set(key, {
         url,
         expiresAt: Date.now() + RESOLVED_CACHE_TTL_MS,
@@ -75,15 +93,21 @@ export function resolveLazyEpisodeUrl(
         if (oldest) resolvedCache.delete(oldest);
       }
       return url;
-    })
-    .finally(() => {
-      inflight.delete(inflightKey);
-    });
+    } finally {
+      if (inflight.get(inflightKey) === task) inflight.delete(inflightKey);
+    }
+  });
   inflight.set(inflightKey, task);
-  return task;
+  return task.consume(options.signal);
 }
 
-export function prewarmLazyEpisodeUrl(source: string, lazyUrl: string): void {
+export function prewarmLazyEpisodeUrl(
+  source: string,
+  lazyUrl: string,
+  signal?: AbortSignal,
+): void {
   if (!isLazyEpisodeUrl(lazyUrl)) return;
-  void resolveLazyEpisodeUrl(source, lazyUrl).catch(() => undefined);
+  void resolveLazyEpisodeUrl(source, lazyUrl, { signal }).catch(
+    () => undefined,
+  );
 }

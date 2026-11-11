@@ -3,6 +3,7 @@
 import type Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
 
+import { resolveProxyUserAgent } from '@/app/api/proxy/utils';
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
@@ -22,8 +23,11 @@ jest.mock('@/lib/host-traffic.server', () => ({
     .serverRelayPausedResponse,
 }));
 jest.mock('@/app/api/proxy/utils', () => ({
-  getProxySourceKey: () => null,
-  resolveProxyUserAgent: async () => 'IceTV Test',
+  getProxySourceKey: jest.requireActual('@/app/api/proxy/utils')
+    .getProxySourceKey,
+  resolveProxyUserAgent: jest.fn(
+    jest.requireActual('@/app/api/proxy/utils').resolveProxyUserAgent,
+  ),
 }));
 jest.mock('@/lib/proxy-auth', () => ({
   resolveProxyAuthorization: jest.fn(async () => ({
@@ -106,6 +110,40 @@ describe('segment shared resource integration', () => {
     else process.env.UPSTREAM_MEDIA_USER_CONCURRENCY = originalLimit;
     (storage as unknown as { db: Database.Database }).db.close();
   });
+
+  it.each([false, true])(
+    'reads config once and shares it with relay, UA and timeout (live=%s)',
+    async (live) => {
+      const config = {
+        SiteConfig: {
+          EnableLiveEntry: true,
+          LiveAccess: 'all',
+          ProxyRequestTimeoutSeconds: 17,
+        },
+        LiveConfig: [{ key: 'custom', ua: 'Custom UA' }],
+      };
+      (getConfigForRead as jest.Mock).mockClear().mockResolvedValue(config);
+      (resolveProxyUserAgent as jest.Mock).mockClear();
+      (isServerRelayPaused as jest.Mock).mockClear();
+      mockFetchOptions.mockClear();
+      const mediaRequest = request();
+      Object.assign(mediaRequest, {
+        url: `${mediaRequest.url}&source=custom&icetv-live=${live ? '1' : '0'}`,
+      });
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+      expect(getConfigForRead).toHaveBeenCalledTimes(1);
+      expect(isServerRelayPaused).toHaveBeenCalledWith(config);
+      expect(resolveProxyUserAgent).toHaveBeenCalledWith('custom', config);
+      expect(mockFetchOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timeoutMs: 17_000,
+          headers: expect.objectContaining({ 'User-Agent': 'Custom UA' }),
+        }),
+      );
+    },
+  );
 
   it.each([
     [false, true, true],

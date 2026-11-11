@@ -7,6 +7,7 @@ import type {
   VideoQualityInfo,
 } from '@/features/play/hooks/usePlayPageState';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
 import { reportVodPlaybackOutcome } from '@/features/play/lib/vodPlaybackIntent';
 import {
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
@@ -22,6 +23,11 @@ import {
 } from '@/lib/source-playback-stats';
 import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
 import type { SearchResult } from '@/lib/types';
+
+jest.mock('@/features/play/lib/sourceProbeStore', () => ({
+  ...jest.requireActual('@/features/play/lib/sourceProbeStore'),
+  holdBackgroundSourceProbes: jest.fn(),
+}));
 
 jest.mock('@/lib/source-route-stats.client', () => ({
   reportSourcePlayOutcome: jest.fn(),
@@ -76,6 +82,28 @@ function createSource(source: string, episodeTitles: string[]): SearchResult {
     source_name: source.toUpperCase(),
     year: '2024',
   };
+}
+
+// 懒解析候选的剧集结构以详情为准，换源仍先等详情；用于覆盖等待详情窗口内的行为
+function createLazySource(
+  source: string,
+  episodeTitles: string[],
+): SearchResult {
+  return {
+    ...createSource(source, episodeTitles),
+    episodes: episodeTitles.map(
+      (_, index) => `icetv-lazy://test/${source}/${index}`,
+    ),
+  };
+}
+
+// 第一个为当前源，其余为需要先等详情的懒解析候选
+function createWaitingSources(keys: string[]): SearchResult[] {
+  return keys.map((key, index) =>
+    index === 0
+      ? createSource(key, THREE_EPISODES)
+      : createLazySource(key, THREE_EPISODES),
+  );
 }
 
 function info(loadSpeed: string): VideoQualityInfo {
@@ -290,9 +318,7 @@ describe('useSourceSwitch 自动换源', () => {
     const online = jest.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
     const { video, runtimeCleanup } = createLoadingVideo();
     const { result, options } = setupHook({
-      availableSources: ['a', 'b'].map((key) =>
-        createSource(key, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b']),
       video,
     });
     const release = holdNextDetailFetch();
@@ -325,9 +351,7 @@ describe('useSourceSwitch 自动换源', () => {
   it('换集重置中止详情请求，迟到的 JSON 不提交且旧意图失败不计数', async () => {
     localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
     const { result, options } = setupHook({
-      availableSources: ['a', 'b'].map((key) =>
-        createSource(key, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b']),
     });
     let resolveBody!: (value: SearchResult) => void;
     let signal: AbortSignal | null | undefined;
@@ -346,7 +370,7 @@ describe('useSourceSwitch 自动换源', () => {
     await waitFor(() => expect(resolveBody).toBeDefined());
     result.current.resetAutoSourceSwitch();
     expect(signal?.aborted).toBe(true);
-    resolveBody(createSource('b', THREE_EPISODES));
+    resolveBody(createLazySource('b', THREE_EPISODES));
     await Promise.resolve();
     await Promise.resolve();
     result.current.handleEpisodeUrlResolveFailed(oldIntent);
@@ -513,8 +537,8 @@ describe('useSourceSwitch 自动换源', () => {
     const { result, options } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
-        createSource('b', THREE_EPISODES),
-        createSource('c', THREE_EPISODES),
+        createLazySource('b', THREE_EPISODES),
+        createLazySource('c', THREE_EPISODES),
       ],
       fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
     });
@@ -535,7 +559,7 @@ describe('useSourceSwitch 自动换源', () => {
     const { result, options } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
-        createSource('b', THREE_EPISODES),
+        createLazySource('b', THREE_EPISODES),
       ],
       fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
     });
@@ -604,9 +628,7 @@ describe('useSourceSwitch 自动换源', () => {
     localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
     const { video, pause, runtimeCleanup, stopLoad } = createLoadingVideo();
     const { result, options } = setupHook({
-      availableSources: ['a', 'b', 'c'].map((source) =>
-        createSource(source, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b', 'c']),
       video,
     });
     const releaseDetail = holdNextDetailFetch();
@@ -643,9 +665,7 @@ describe('useSourceSwitch 自动换源', () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { video } = createLoadingVideo();
     const { result, options } = setupHook({
-      availableSources: ['a', 'b'].map((source) =>
-        createSource(source, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b']),
       video,
     });
     const detailSignal = hangNextDetailFetch();
@@ -673,9 +693,7 @@ describe('useSourceSwitch 自动换源', () => {
     localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { result, options } = setupHook({
-      availableSources: ['a', 'b', 'c'].map((source) =>
-        createSource(source, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b', 'c']),
     });
     const detailSignal = hangNextDetailFetch();
 
@@ -700,9 +718,7 @@ describe('useSourceSwitch 自动换源', () => {
       .mockImplementation(() => undefined);
     const { video } = createLoadingVideo();
     const { result, options } = setupHook({
-      availableSources: ['a', 'b', 'c'].map((source) =>
-        createSource(source, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b', 'c']),
       video,
     });
     const firstDetailSignal = hangNextDetailFetch();
@@ -725,9 +741,7 @@ describe('useSourceSwitch 自动换源', () => {
   it('自动换源进行中再次失败不重复发起，已发起的目标不会再被选中', async () => {
     localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
     const { result, options } = setupHook({
-      availableSources: ['a', 'b', 'c'].map((source) =>
-        createSource(source, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b', 'c']),
     });
     const releaseDetail = holdNextDetailFetch();
 
@@ -751,9 +765,7 @@ describe('useSourceSwitch 自动换源', () => {
   it('自动换源没能提交就异常结束时，下一次自动换源不再选同一目标', async () => {
     localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
     const { result, options } = setupHook({
-      availableSources: ['a', 'b', 'c'].map((source) =>
-        createSource(source, THREE_EPISODES),
-      ),
+      availableSources: createWaitingSources(['a', 'b', 'c']),
     });
     (options.setCurrentSource as jest.Mock).mockImplementationOnce(() => {
       throw new Error('提交新源失败');
@@ -778,7 +790,7 @@ describe('useSourceSwitch 自动换源', () => {
     const { result, options, player } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
-        createSource('b', THREE_EPISODES),
+        createLazySource('b', THREE_EPISODES),
       ],
       fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
       video,
@@ -989,5 +1001,104 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     expect(options.setCurrentSource).toHaveBeenCalledWith('b');
     expect(options.setCurrentEpisodeIndex).toHaveBeenCalledWith(2);
     expect(readDanmakuEpisodeId('b:b-id:2')).toBeNull();
+  });
+});
+
+describe('useSourceSwitch 候选可直接起播时详情改为后台刷新', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function appliedDetail(
+    options: ReturnType<typeof setupHook>['options'],
+  ): SearchResult | null {
+    const update = (options.setDetail as jest.Mock).mock.calls.at(-1)?.[0];
+    return typeof update === 'function'
+      ? update(options.detailRef.current)
+      : update;
+  }
+
+  it('候选已能确认同一集时不等详情直接提交新源', async () => {
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+    });
+    const releaseDetail = holdNextDetailFetch();
+    jest.mocked(holdBackgroundSourceProbes).mockClear();
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+
+    expect(holdBackgroundSourceProbes).toHaveBeenCalledTimes(1);
+    expect(options.currentSourceRef.current).toBe('b');
+    expect(options.setCurrentEpisodeIndex).toHaveBeenCalledWith(2);
+    expect(fetchedDetailUrls()).toEqual(['/api/detail?source=b&id=b-id']);
+
+    releaseDetail();
+    await Promise.resolve();
+    await Promise.resolve();
+    // 详情与候选一致时不再改动页面
+    expect(options.setDetail).toHaveBeenCalledTimes(1);
+    expect(options.setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it('后台详情的当前集地址变化时换成新详情', async () => {
+    const refreshed = createSource('b', THREE_EPISODES);
+    refreshed.episodes[2] = 'https://b.example/new-2.m3u8';
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+      fullDetails: { 'b-b-id': refreshed },
+    });
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+
+    await waitFor(() => expect(options.setDetail).toHaveBeenCalledTimes(2));
+    expect(appliedDetail(options)?.episodes[2]).toBe(
+      'https://b.example/new-2.m3u8',
+    );
+    expect(options.setCurrentEpisodeIndex).toHaveBeenLastCalledWith(2);
+    expect(options.setAvailableSources).toHaveBeenCalled();
+  });
+
+  it('后台详情缺当前集时保留已提交的候选，不在起播中途跳集', async () => {
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+      fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
+    });
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(options.currentSourceRef.current).toBe('b');
+    expect(options.setDetail).toHaveBeenCalledTimes(1);
+    expect(options.setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it('新的播放意图中止后台详情刷新', async () => {
+    const { result } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+    });
+    const detailSignal = hangNextDetailFetch();
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(detailSignal()?.aborted).toBe(false);
+
+    result.current.resetAutoSourceSwitch();
+    expect(detailSignal()?.aborted).toBe(true);
   });
 });

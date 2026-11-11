@@ -259,6 +259,8 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     getSnapshot,
   );
 
+  const currentSourceKeyRef = useRef('');
+  currentSourceKeyRef.current = `${currentSource}-${currentId}`;
   const currentItemRef = useRef<HTMLButtonElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const userScrollingRef = useRef(false);
@@ -312,6 +314,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           batch.map((source) =>
             getOrProbe(source, {
               force: options?.force,
+              shouldSkip: () =>
+                !isActiveRef.current ||
+                `${source.source}-${source.id}` === currentSourceKeyRef.current,
               episodeIndex: resolveSourceProbeEpisodeIndex({
                 activeDetail,
                 currentEpisodeIndex,

@@ -151,6 +151,53 @@ describe('playrecords route', () => {
     mockSavePlayRecord.mockResolvedValue(undefined);
   });
 
+  it('按候选键去重读取且仅查询当前账号，缺失键省略', async () => {
+    mockGetPlayRecord.mockImplementation(async (_user, _source, id) =>
+      id === 'new' ? records['source+new'] : null,
+    );
+    const response = await GET(
+      createRequest(
+        'http://localhost/api/playrecords?keys=source%2Bnew&keys=source%2Bmissing&keys=source%2Bnew',
+      ),
+    );
+    expect(await response.json()).toEqual({
+      'source+new': records['source+new'],
+    });
+    expect(mockGetPlayRecord.mock.calls).toEqual([
+      ['demo', 'source', 'new'],
+      ['demo', 'source', 'missing'],
+    ]);
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+    expect(response.headers.get('cache-control')).toContain('no-store');
+  });
+
+  it.each([
+    'keys=',
+    'keys=invalid',
+    'keys=%2Bid',
+    'keys=source%2B',
+    `keys=s%2B${'x'.repeat(512)}`,
+    Array.from({ length: 51 }, (_, i) => `keys=s%2B${i}`).join('&'),
+  ])('拒绝无效或超限定向参数 %s', async (query) => {
+    const response = await GET(
+      createRequest(`http://localhost/api/playrecords?${query}`),
+    );
+    expect(response.status).toBe(400);
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it('接受上限 50 个键并保留 id 内的加号', async () => {
+    const params = new URLSearchParams();
+    Array.from({ length: 50 }, (_, i) => params.append('keys', `s+${i}+part`));
+    const response = await GET(
+      createRequest(`http://localhost/api/playrecords?${params}`),
+    );
+    expect(response.status).toBe(200);
+    expect(mockGetPlayRecord).toHaveBeenCalledTimes(50);
+    expect(mockGetPlayRecord).toHaveBeenCalledWith('demo', 's', '0+part');
+  });
+
   it('limit 参数只返回按保存时间排序的最近记录', async () => {
     const response = await GET(
       createRequest('http://localhost/api/playrecords?limit=2'),

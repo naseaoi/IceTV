@@ -66,6 +66,7 @@ describe('probeVodEpisodeUrl', () => {
       'https://example.test/index.m3u8',
       browserRoute,
       'giri',
+      undefined,
     );
   });
 
@@ -91,12 +92,13 @@ describe('probeVodEpisodeUrl', () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/episode-url?source=giri&url=${encodeURIComponent(lazyUrl)}`,
-      { headers: { 'X-IceTV-Probe': '1' } },
+      { headers: { 'X-IceTV-Probe': '1' }, signal: expect.any(AbortSignal) },
     );
     expect(getVideoResolutionFromM3u8).toHaveBeenCalledWith(
       'https://cdn.example/lazy.m3u8',
       browserRoute,
       'giri',
+      undefined,
     );
   });
 

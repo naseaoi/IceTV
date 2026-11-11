@@ -1,8 +1,13 @@
-import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
+import {
+  SOURCE_PROBE_STARTUP_HOLD_MS,
+  SourceProbeDeferredError,
+} from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
   getFreshProbeInfo,
   getOrProbe,
   getSnapshot,
+  holdBackgroundSourceProbes,
+  releaseBackgroundSourceProbes,
   resetProbes,
   resolveRequestedProbeEpisodeUrl,
   seedProbeResults,
@@ -28,6 +33,7 @@ jest.mock('@/lib/proxy-modes', () => ({
 
 jest.mock('@/lib/source-route-stats.client', () => ({
   reportSourcePlayOutcome: jest.fn(),
+  reportSourceRouteStat: jest.fn(),
 }));
 
 function createSearchResult(partial: Partial<SearchResult>): SearchResult {
@@ -46,6 +52,7 @@ function createSearchResult(partial: Partial<SearchResult>): SearchResult {
 
 describe('sourceProbeStore helpers', () => {
   beforeEach(() => {
+    releaseBackgroundSourceProbes();
     resetProbes();
     jest.clearAllMocks();
     (
@@ -57,6 +64,115 @@ describe('sourceProbeStore helpers', () => {
       directManifest: false,
       allowAutoFallback: true,
     });
+  });
+
+  it('暂缓期间后台与面板排队，放行后共享两个执行槽', async () => {
+    const info = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
+    const backgroundProbe = jest.fn().mockResolvedValue(info);
+    jest.mocked(probeVodEpisodeUrl).mockResolvedValue(info);
+    holdBackgroundSourceProbes();
+    const background = getOrProbe(createSearchResult({ id: 'background' }), {
+      probe: backgroundProbe,
+      probeIdentity: 'ep2',
+    });
+    const panel = getOrProbe(createSearchResult({ episodes: ['ep1'] }));
+    await Promise.resolve();
+    expect(backgroundProbe).not.toHaveBeenCalled();
+    expect(probeVodEpisodeUrl).not.toHaveBeenCalled();
+    expect([...getSnapshot().values()].map((entry) => entry.source)).toEqual([
+      'queued',
+      'queued',
+    ]);
+    releaseBackgroundSourceProbes();
+    await Promise.all([background, panel]);
+    expect(backgroundProbe).toHaveBeenCalledTimes(1);
+    expect(probeVodEpisodeUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('失败放行后同步开始下一源，已获槽位的后台任务重新排队', async () => {
+    const probe = jest.fn().mockResolvedValue({
+      quality: '1080p',
+      loadSpeed: '1 MB/s',
+      pingTime: 20,
+    });
+    holdBackgroundSourceProbes();
+    const task = getOrProbe(createSearchResult({}), { probe });
+    releaseBackgroundSourceProbes();
+    holdBackgroundSourceProbes();
+    await Promise.resolve();
+    expect(probe).not.toHaveBeenCalled();
+    expect(getSnapshot().get('source-a-1')?.source).toBe('queued');
+    releaseBackgroundSourceProbes();
+    await task;
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('暂缓上限到达自动放行', async () => {
+    jest.useFakeTimers();
+    try {
+      const probe = jest.fn().mockResolvedValue({
+        quality: '1080p',
+        loadSpeed: '1 MB/s',
+        pingTime: 20,
+      });
+      holdBackgroundSourceProbes();
+      const task = getOrProbe(createSearchResult({}), { probe });
+      jest.advanceTimersByTime(SOURCE_PROBE_STARTUP_HOLD_MS - 1);
+      await Promise.resolve();
+      expect(probe).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      await task;
+      expect(probe).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseBackgroundSourceProbes();
+      jest.useRealTimers();
+    }
+  });
+
+  it('force 提升已排队任务且前台与面板合并时不重复取样', async () => {
+    const info = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
+    let finish!: (value: typeof info) => void;
+    const probe = jest.fn(
+      () =>
+        new Promise<typeof info>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const source = createSearchResult({ episodes: ['ep1', 'ep2'] });
+    holdBackgroundSourceProbes();
+    const background = getOrProbe(source, { probe, probeIdentity: 'ep2' });
+    const forcedPanel = getOrProbe(source, { force: true });
+    await Promise.resolve();
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(getSnapshot().get('source-a-1')?.source).toBe('pending');
+    finish(info);
+    await Promise.all([background, forcedPanel]);
+    expect(probeVodEpisodeUrl).not.toHaveBeenCalled();
+    releaseBackgroundSourceProbes();
+  });
+
+  it('异集初始化等待旧任务结束后独立探测，不把面板结果当作目标集证明', async () => {
+    const info = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
+    let finish!: (value: typeof info) => void;
+    jest.mocked(probeVodEpisodeUrl).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const source = createSearchResult({ episodes: ['ep1', 'ep2'] });
+    const panel = getOrProbe(source);
+    const targetProbe = jest.fn().mockResolvedValue(info);
+    const foreground = getOrProbe(source, {
+      foreground: true,
+      probeIdentity: 'ep2',
+      probe: targetProbe,
+    });
+    for (let i = 0; i < 10 && !finish; i++) await Promise.resolve();
+    expect(targetProbe).not.toHaveBeenCalled();
+    finish(info);
+    await Promise.all([panel, foreground]);
+    expect(targetProbe).toHaveBeenCalledTimes(1);
   });
 
   it('预计算结果只补空位并保留最新测量与原始有效期', () => {
@@ -157,7 +273,27 @@ describe('sourceProbeStore helpers', () => {
         episodes: [`https://example.test/${index}.m3u8`],
       }),
     );
-    const tasks = sources.map((source) => getOrProbe(source, { force: true }));
+    const tasks = sources.map((source, index) =>
+      getOrProbe(
+        source,
+        index < 2
+          ? {
+              foreground: true,
+              probeIdentity: source.episodes[0],
+              probe: () =>
+                probeMock(
+                  source.episodes[0],
+                  {
+                    useServerProxy: false,
+                    directManifest: true,
+                    allowAutoFallback: false,
+                  },
+                  source.source,
+                ),
+            }
+          : { force: true },
+      ),
+    );
 
     for (let index = 0; index < 10 && releases.length < 2; index += 1) {
       await Promise.resolve();
@@ -186,8 +322,8 @@ describe('sourceProbeStore helpers', () => {
     expect(maxActiveCount).toBe(2);
     await Promise.all(tasks);
     expect(probeMock).toHaveBeenCalledTimes(6);
-    expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(6);
-    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('source-0', true);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(4);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('source-2', true);
   });
 
   it('繁忙时保留暂缓状态且不污染源站失败统计', async () => {
@@ -274,4 +410,55 @@ describe('sourceProbeStore helpers', () => {
 
     expect(reportSourcePlayOutcome).toHaveBeenCalledWith('source-server', true);
   });
+});
+
+test('共享探测只在最后消费者离开时中止，取消不记源失败', async () => {
+  resetProbes();
+  releaseBackgroundSourceProbes();
+  jest.clearAllMocks();
+  const first = new AbortController();
+  const second = new AbortController();
+  let signal!: AbortSignal;
+  const probe = jest.fn((sharedSignal: AbortSignal) => {
+    signal = sharedSignal;
+    return new Promise<never>((_, reject) =>
+      signal.addEventListener('abort', () =>
+        reject(new DOMException('cancel', 'AbortError')),
+      ),
+    );
+  });
+  const source = createSearchResult({
+    source: 'shared-cancel',
+    episodes: ['https://cdn.test/1.m3u8'],
+  });
+  const a = getOrProbe(source, { signal: first.signal, probe });
+  const b = getOrProbe(source, { signal: second.signal });
+  await Promise.resolve();
+  first.abort();
+  await a;
+  expect(signal.aborted).toBe(false);
+  second.abort();
+  await b;
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(signal.aborted).toBe(true);
+  expect(probe).toHaveBeenCalledTimes(1);
+  expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
+  expect(getSnapshot().has('shared-cancel-1')).toBe(false);
+});
+
+test('排队探测取消后不占执行槽、不发请求', async () => {
+  resetProbes();
+  holdBackgroundSourceProbes();
+  const controller = new AbortController();
+  const probe = jest.fn();
+  const task = getOrProbe(createSearchResult({ source: 'queued-cancel' }), {
+    signal: controller.signal,
+    probe,
+  });
+  controller.abort();
+  await task;
+  releaseBackgroundSourceProbes();
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(probe).not.toHaveBeenCalled();
+  expect(getSnapshot().has('queued-cancel-1')).toBe(false);
 });

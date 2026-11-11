@@ -3,6 +3,7 @@ import {
   createFragmentEntryFromResponse,
   isCacheableFragmentUrl,
 } from '@/features/play/lib/fragmentMemoryCache';
+import { throwIfPlaybackCancelled } from '@/features/play/lib/sharedPlaybackTask';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import {
   isSourceProbeNetworkError,
@@ -63,8 +64,13 @@ class ProbeError extends Error {
   }
 }
 
-async function loadProbePlaylist(url: string, timeoutMs = 8000) {
-  const abortState = createTimedAbortController(undefined, timeoutMs);
+async function loadProbePlaylist(
+  url: string,
+  timeoutMs = 8000,
+  signal?: AbortSignal,
+) {
+  throwIfPlaybackCancelled(signal);
+  const abortState = createTimedAbortController(signal, timeoutMs);
   const startedAt = performance.now();
   try {
     const response = await fetchSourceProbe(url, {
@@ -82,6 +88,7 @@ async function loadProbePlaylist(url: string, timeoutMs = 8000) {
       url: response.url || new URL(url, window.location.href).href,
     };
   } catch (error) {
+    throwIfPlaybackCancelled(signal);
     if ((error as Error)?.name === 'AbortError' && abortState.signal.aborted)
       throw new SourceProbeNetworkError('Timeout loading playlist');
     throw error;
@@ -94,9 +101,10 @@ async function loadProbePlaylist(url: string, timeoutMs = 8000) {
 export async function checkM3u8PlaylistAvailable(
   playlistUrl: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   try {
-    const { content } = await loadProbePlaylist(playlistUrl, timeoutMs);
+    const { content } = await loadProbePlaylist(playlistUrl, timeoutMs, signal);
     return content.includes('#EXTM3U');
   } catch {
     return false;
@@ -519,17 +527,18 @@ export function takeProbeSegmentSample(
  */
 async function measureSegmentBandwidth(
   segmentUrl: string,
+  signal?: AbortSignal,
 ): Promise<SegmentProbeResult> {
-  const controller = new AbortController();
-  const timeoutTimer = setTimeout(
-    () => controller.abort(),
+  throwIfPlaybackCancelled(signal);
+  const abortState = createTimedAbortController(
+    signal,
     BANDWIDTH_PROBE_TIMEOUT_MS,
   );
   try {
     const requestStartedAt = performance.now();
     const response = await fetchSourceProbe(segmentUrl, {
       cache: 'no-store',
-      signal: controller.signal,
+      signal: abortState.signal,
       headers: {
         Range: `bytes=0-${BANDWIDTH_SAMPLE_MAX_BYTES - 1}`,
       },
@@ -618,6 +627,7 @@ async function measureSegmentBandwidth(
       sample: sampleEntry,
     };
   } catch (err) {
+    throwIfPlaybackCancelled(signal);
     if ((err as Error)?.name === 'AbortError') {
       throw new SourceProbeNetworkError('Timeout loading first segment');
     }
@@ -627,7 +637,7 @@ async function measureSegmentBandwidth(
           (err as { message?: string })?.message || 'Segment probe failed',
         );
   } finally {
-    clearTimeout(timeoutTimer);
+    abortState.cleanup();
   }
 }
 
@@ -657,6 +667,7 @@ async function probeWithMode(
   m3u8Url: string,
   route: SourcePlaybackRoute,
   sourceKey: string,
+  signal?: AbortSignal,
 ): Promise<VideoProbeResult> {
   const proxyUrl = buildVodProxyUrl({
     rawUrl: m3u8Url,
@@ -672,7 +683,7 @@ async function probeWithMode(
       content: playlistContent,
       pingTime,
       url: playlistUrl,
-    } = await loadProbePlaylist(proxyUrl);
+    } = await loadProbePlaylist(proxyUrl, undefined, signal);
     ensureCodecsPlayable(playlistContent);
     const variants = parseMasterVariants(playlistContent, playlistUrl);
     const pickedVariant = pickProbeVariant(variants);
@@ -687,6 +698,8 @@ async function probeWithMode(
     if (pickedVariant?.probePlaylistUrl) {
       const mediaPlaylist = await loadProbePlaylist(
         pickedVariant.probePlaylistUrl,
+        undefined,
+        signal,
       );
       mediaPlaylistContent = mediaPlaylist.content;
       mediaPlaylistUrl = mediaPlaylist.url;
@@ -706,7 +719,8 @@ async function probeWithMode(
     //      TCP 慢启动 + TLS/代理首包延迟占据耗时主导，算出的 KB/s 会严重偏低。
     //   2) 排除握手开销：从「首字节到达」开始计时，而非 fetch 发起时刻。
     //   3) 滑动达标：累计到 ≥ 512KB 或流结束即停止，避免长尾请求拖长总时长。
-    const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl);
+    const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl, signal);
+    throwIfPlaybackCancelled(signal);
     const loadSpeed = segmentProbe.loadSpeed;
 
     const detectedQuality = segmentProbe.dimensions
@@ -732,6 +746,7 @@ async function probeWithMode(
     }
     return result;
   } catch (error) {
+    throwIfPlaybackCancelled(signal);
     if (
       error instanceof SourceProbeDeferredError ||
       isSourceProbeNetworkError(error)
@@ -746,9 +761,11 @@ export async function getVideoResolutionFromM3u8(
   m3u8Url: string,
   route: SourcePlaybackRoute,
   sourceKey = '',
+  signal?: AbortSignal,
 ): Promise<VideoProbeResult> {
   try {
-    const result = await probeWithMode(m3u8Url, route, sourceKey);
+    const result = await probeWithMode(m3u8Url, route, sourceKey, signal);
+    throwIfPlaybackCancelled(signal);
     reportSourceRouteStat(
       sourceKey,
       route.useServerProxy ? 'server' : 'browser',
@@ -759,6 +776,7 @@ export async function getVideoResolutionFromM3u8(
     }
     return result;
   } catch (error) {
+    throwIfPlaybackCancelled(signal);
     if (
       error instanceof SourceProbeDeferredError ||
       (error as Error)?.name === 'AbortError'
@@ -783,7 +801,9 @@ export async function getVideoResolutionFromM3u8(
             directManifest: route.useServerProxy,
           },
           sourceKey,
+          signal,
         );
+        throwIfPlaybackCancelled(signal);
         reportSourceRouteStat(
           sourceKey,
           route.useServerProxy ? 'browser' : 'server',
@@ -793,6 +813,9 @@ export async function getVideoResolutionFromM3u8(
         else rememberSourceServerProxy(sourceKey, m3u8Url);
         return fallbackResult;
       } catch (fallbackError) {
+        throwIfPlaybackCancelled(signal);
+        if ((fallbackError as Error)?.name === 'AbortError')
+          throw fallbackError;
         if (fallbackError instanceof SourceProbeDeferredError)
           throw fallbackError;
         if (isSourceProbeNetworkError(fallbackError))

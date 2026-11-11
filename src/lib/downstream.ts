@@ -1,3 +1,4 @@
+import { waitForSharedLoad } from '@/lib/concurrency';
 import { API_CONFIG, ApiSite, getConfigForRead } from '@/lib/config';
 import {
   getDetailFromGirigiri,
@@ -142,8 +143,12 @@ async function searchWithCache(
     return { results: [] };
   }
 
-  return dedupeSearchLoad(cacheSource, query, page, () =>
-    fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs, signal),
+  return waitForSharedLoad(
+    () =>
+      dedupeSearchLoad(cacheSource, query, page, () =>
+        fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs),
+      ),
+    signal,
   );
 }
 

@@ -131,7 +131,7 @@ it('records its own timeout, even if the parent is subsequently aborted', async 
         });
       }),
   );
-  const result = searchFromApi(site, 'movie', { signal: parent.signal });
+  const result = probeSourceSearch(site, 'movie', parent.signal);
   await started;
   jest.advanceTimersByTime(8000);
   await result;
@@ -144,7 +144,7 @@ it('excludes parent cancellation during upstream loading', async () => {
     parent.abort();
     throw new Error('cancelled');
   });
-  await searchFromApi(site, 'movie', { signal: parent.signal });
+  await probeSourceSearch(site, 'movie', parent.signal);
   expect(recordSourceSearchOutcome).not.toHaveBeenCalled();
 });
 
@@ -276,4 +276,55 @@ it.each([
   );
   const results = await searchFromApi(site, 'movie');
   expect(results[0].series_status).toBe(expected);
+});
+
+it('isolates the first search-page consumer cancellation while the shared loader fills cache', async () => {
+  const actual =
+    jest.requireActual<typeof import('@/lib/search-cache')>(
+      '@/lib/search-cache',
+    );
+  actual.clearSearchCachesForTests();
+  const dedupeMock = dedupeSearchLoad as jest.Mock;
+  dedupeMock.mockImplementation(actual.dedupeSearchLoad);
+  const first = new AbortController();
+  let resolveResponse!: (response: Response) => void;
+  let upstreamSignal!: AbortSignal;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+    upstreamSignal = init.signal as AbortSignal;
+    markStarted();
+    return new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+  });
+  try {
+    const cancelled = searchFromApi(site, 'shared', { signal: first.signal });
+    await started;
+    const active = searchFromApi(site, 'shared');
+    first.abort();
+    await expect(cancelled).resolves.toEqual([]);
+    expect(upstreamSignal.aborted).toBe(false);
+    resolveResponse(
+      new Response(
+        JSON.stringify({
+          list: [{ ...item, vod_play_url: '第1集$https://example.com/1.m3u8' }],
+        }),
+      ),
+    );
+    expect(await active).toHaveLength(1);
+    expect(await searchFromApi(site, 'shared')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(recordSourceSearchOutcome).toHaveBeenCalledTimes(1);
+    expect(recordSourceSearchOutcome).toHaveBeenCalledWith(
+      'a',
+      'ok',
+      expect.any(Number),
+    );
+  } finally {
+    actual.clearSearchCachesForTests();
+    dedupeMock.mockImplementation((_source, _query, _page, loader) => loader());
+  }
 });

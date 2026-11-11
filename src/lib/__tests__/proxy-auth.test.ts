@@ -124,6 +124,71 @@ describe('proxy auth signatures', () => {
     });
   });
 
+  it('derives a stable opaque sticky key and carries it without a session lookup', async () => {
+    mockRequireActiveUser.mockResolvedValue({ username: 'viewer' });
+    const target = 'https://example.com/master.m3u8';
+    const request = {
+      url: `http://localhost/api/proxy/m3u8?url=${target}&icetv-sticky=untrusted`,
+    } as NextRequest;
+    const top = await resolveProxyAuthorization(request, 'm3u8', target);
+    expect(top).toMatchObject({
+      authorized: true,
+      via: 'session',
+      proxyPoolStickyKey: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    if (!top.authorized) throw new Error('Expected authorization');
+    expect(await resolveProxyAuthorization(request, 'm3u8', target)).toEqual(
+      top,
+    );
+    mockRequireActiveUser.mockResolvedValue({ username: 'other-viewer' });
+    const other = await resolveProxyAuthorization(request, 'm3u8', target);
+    expect(other).not.toEqual(top);
+    const params = new URLSearchParams({ url: target });
+    await appendProxySignature(params, 'm3u8', target, top.proxyPoolStickyKey);
+    mockRequireActiveUser.mockClear();
+    await expect(
+      resolveProxyAuthorization(
+        { url: `http://localhost/api/proxy/m3u8?${params}` } as NextRequest,
+        'm3u8',
+        target,
+      ),
+    ).resolves.toEqual({
+      authorized: true,
+      via: 'signature',
+      proxyPoolStickyKey: top.proxyPoolStickyKey,
+    });
+    expect(mockRequireActiveUser).not.toHaveBeenCalled();
+  });
+
+  it.each(['replace', 'remove', 'inject'])(
+    'rejects %s of the signed sticky context',
+    async (change) => {
+      const target = 'https://example.com/segment.ts';
+      const params = new URLSearchParams();
+      await appendProxySignature(
+        params,
+        'segment',
+        target,
+        change === 'inject' ? undefined : 'a'.repeat(64),
+      );
+      if (change === 'remove') params.delete('icetv-sticky');
+      else params.set('icetv-sticky', 'b'.repeat(64));
+      await expect(
+        verifyProxySignature(params, 'segment', target),
+      ).resolves.toBe(false);
+      mockRequireActiveUser.mockResolvedValue({ response: { status: 401 } });
+      await expect(
+        resolveProxyAuthorization(
+          {
+            url: `http://localhost/api/proxy/segment?${params}`,
+          } as NextRequest,
+          'segment',
+          target,
+        ),
+      ).resolves.toMatchObject({ authorized: false });
+    },
+  );
+
   it('未签名且无有效会话时保持拒绝访问', async () => {
     const targetUrl = 'https://example.com/poster.jpg';
     const response = { status: 401 } as NextResponse;

@@ -23,6 +23,7 @@ import {
   waitForDanmakuPlayerSwitch,
 } from '@/features/play/lib/danmaku/load-notice';
 import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
+import { prewarmLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
 import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import {
   type PlayerLoadingSessionState,
@@ -56,6 +57,7 @@ import {
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -200,12 +202,10 @@ export async function initializeArtPlayer(
 
     const nextEpisodeUrl =
       detailRef.current?.episodes?.[currentEpisodeIndex + 1] ?? null;
-    if (nextEpisodeUrl) {
-      if (isVodM3u8Url(nextEpisodeUrl)) {
-        prefetchM3U8(buildProxyUrl(nextEpisodeUrl), playbackRoute);
-      }
-      preconnectForUrl(nextEpisodeUrl);
-    }
+    const nextManifestPrefetchUrl =
+      nextEpisodeUrl && isVodM3u8Url(nextEpisodeUrl)
+        ? buildProxyUrl(nextEpisodeUrl)
+        : null;
     scheduleNextEpisodePreload({
       sourceKey: preSourceKey,
       videoId: playbackInfoContext.id,
@@ -217,6 +217,17 @@ export async function initializeArtPlayer(
       autoPlayNextEnabledRef,
       blockAdEnabledRef,
       skipConfigRef,
+      warmUp: (signal) => {
+        if (!nextEpisodeUrl) return;
+        if (isLazyEpisodeUrl(nextEpisodeUrl)) {
+          prewarmLazyEpisodeUrl(preSourceKey, nextEpisodeUrl, signal);
+          return;
+        }
+        if (nextManifestPrefetchUrl) {
+          prefetchM3U8(nextManifestPrefetchUrl, playbackRoute);
+        }
+        preconnectForUrl(nextEpisodeUrl);
+      },
     });
 
     const { Artplayer, Hls } = await getPlayerModules();

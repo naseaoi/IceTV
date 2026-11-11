@@ -19,6 +19,8 @@ const MAX_STATS_FILE_BYTES = 1024 * 1024;
 
 let snapshotCache: { at: number; snapshot: TrafficSnapshot | null } | null =
   null;
+let snapshotInflight: Promise<TrafficSnapshot | null> | null = null;
+let snapshotGeneration = 0;
 
 function getStatsFilePath(): string {
   const configured = process.env.HOST_TRAFFIC_FILE?.trim();
@@ -61,13 +63,25 @@ async function getSnapshot(now: number): Promise<TrafficSnapshot | null> {
   if (snapshotCache && now - snapshotCache.at < SNAPSHOT_CACHE_MS) {
     return snapshotCache.snapshot;
   }
-  const snapshot = await loadSnapshot();
-  snapshotCache = { at: now, snapshot };
-  return snapshot;
+  if (snapshotInflight) return snapshotInflight;
+  const generation = snapshotGeneration;
+  const task = loadSnapshot()
+    .then((snapshot) => {
+      if (generation === snapshotGeneration)
+        snapshotCache = { at: now, snapshot };
+      return snapshot;
+    })
+    .finally(() => {
+      if (snapshotInflight === task) snapshotInflight = null;
+    });
+  snapshotInflight = task;
+  return task;
 }
 
 export function resetHostTrafficCache(): void {
+  snapshotGeneration += 1;
   snapshotCache = null;
+  snapshotInflight = null;
 }
 
 export async function getHostTrafficStatus(
@@ -83,9 +97,11 @@ export async function getHostTrafficStatus(
 }
 
 // 中转保护不能因统计异常反过来挡住播放，出错一律放行
-export async function isServerRelayPaused(): Promise<boolean> {
+export async function isServerRelayPaused(
+  config?: Readonly<AdminConfig>,
+): Promise<boolean> {
   try {
-    return (await getHostTrafficStatus()).relay === 'paused';
+    return (await getHostTrafficStatus(config)).relay === 'paused';
   } catch (error) {
     console.warn('[host-traffic] 判断中转状态失败:', error);
     return false;

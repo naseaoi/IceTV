@@ -33,6 +33,7 @@ type GuardedFetchInit = RequestInit & {
   timeoutMs?: number;
   resourceContext?: UpstreamResourceContext;
   useProxyPool?: boolean;
+  proxyPoolStickyKey?: string;
 };
 
 type DnsCacheEntry = {
@@ -110,6 +111,7 @@ export async function fetchWithUrlGuard(
     timeoutMs,
     resourceContext,
     useProxyPool = true,
+    proxyPoolStickyKey,
     ...fetchInit
   } = init;
   let currentUrl = raw;
@@ -140,6 +142,7 @@ export async function fetchWithUrlGuard(
         resourceContext,
         abortState.signal,
         useProxyPool,
+        proxyPoolStickyKey,
       );
     } finally {
       abortState.cleanup();
@@ -175,8 +178,12 @@ async function loadUpstream(
   resourceContext: UpstreamResourceContext | undefined,
   signal: AbortSignal,
   useProxyPool: boolean,
+  proxyPoolStickyKey?: string,
 ): Promise<Response> {
-  const routes = getUpstreamRoutes(resourceContext?.identity, useProxyPool);
+  const routes = getUpstreamRoutes(
+    proxyPoolStickyKey ?? resourceContext?.identity,
+    useProxyPool,
+  );
   for (let index = 0; ; index++) {
     const route = routes[index];
     try {

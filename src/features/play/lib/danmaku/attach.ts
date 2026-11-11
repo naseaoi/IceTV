@@ -6,6 +6,7 @@ import {
 import {
   type DanmakuEmitPayload,
   createDanmakuPlugin,
+  loadDanmakuPluginModule,
 } from '@/features/play/lib/danmaku/plugin';
 import {
   type DanmakuEnabledReader,
@@ -115,6 +116,12 @@ function bindPlayerEvent(player: PlayerWithPlugins): DanmakuEventBinder | null {
 
 export function isDanmakuFeatureEnabled(): boolean {
   return getRuntimeConfig()?.ENABLE_DANMAKU === true;
+}
+
+// 建播放器前必须等插件就绪，提前与播放器模块并行导入，避免它串行挡在首个清单请求之前
+export function preloadDanmakuPluginIfEnabled(): void {
+  if (!isDanmakuFeatureEnabled()) return;
+  loadDanmakuPluginModule().catch(() => undefined);
 }
 
 function isUserDanmakuFeatureEnabled(): boolean {

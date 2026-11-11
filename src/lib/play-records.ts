@@ -8,6 +8,8 @@ import type { PlayRecord, PlayRecordPage } from '@/lib/types';
 export const DEFAULT_RECENT_PLAY_RECORD_LIMIT = 10;
 export const MAX_RECENT_PLAY_RECORD_LIMIT = 100;
 export const MAX_DELETE_PLAY_RECORD_KEYS = 200;
+export const MAX_READ_PLAY_RECORD_KEYS = 50;
+export const MAX_PLAY_RECORD_KEY_LENGTH = 512;
 
 export type { PlayRecordPage } from '@/lib/types';
 

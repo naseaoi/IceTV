@@ -23,6 +23,7 @@ import {
   selectAutoSwitchCandidates,
 } from '@/features/play/lib/autoSourceSwitchPolicy';
 import { carryOverDanmakuEpisodeMapping } from '@/features/play/lib/danmaku/episode-storage';
+import { hasDetailContentChange } from '@/features/play/lib/detailContentChange';
 import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
 import {
@@ -33,6 +34,7 @@ import {
 } from '@/features/play/lib/episodeResumePolicy';
 import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
 import { peekSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
 import {
   type SourceSwitchCleanupTask,
@@ -53,6 +55,8 @@ import {
   deleteSkipConfig,
   saveSkipConfig,
 } from '@/lib/db.client';
+import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { readAutoSwitchSource } from '@/lib/local-preferences';
 import { savePlayIntent } from '@/lib/play-intent';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
@@ -113,6 +117,7 @@ function mergeSourceSwitchDetail(
 }
 
 interface UseSourceSwitchOptions {
+  cancelEpisodeResolve?: () => void;
   availableSources: SearchResult[];
   precomputedVideoInfo: ReadonlyMap<string, VideoQualityInfo>;
   currentEpisodeIndex: number;
@@ -209,7 +214,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   // 拒绝换源后当前源要重新加载，重载会清掉播放器提示，留到重新起播后再显示
   const pendingPlaybackNoticeRef = useRef<string | null>(null);
 
+  const cancelEpisodeResolve = options.cancelEpisodeResolve;
   const resetAutoSourceSwitch = useCallback(() => {
+    cancelEpisodeResolve?.();
     sourceChangeRequestIdRef.current += 1;
     sourceDetailAbortRef.current?.abort();
     sourceDetailAbortRef.current = null;
@@ -217,7 +224,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     autoSwitchFailedKeysRef.current = new Set();
     playbackIntentRef.current = createVodPlaybackIntent();
     pendingPlaybackNoticeRef.current = null;
-  }, [sourceChangeRequestIdRef]);
+  }, [sourceChangeRequestIdRef, cancelEpisodeResolve]);
 
   useEffect(() => () => resetAutoSourceSwitch(), [resetAutoSourceSwitch]);
 
@@ -312,6 +319,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       const intent = playbackIntentRef.current;
       const attempt = getVodSourceAttempt(intent, newSource, newId);
       attempt.startedAt = performance.now();
+      cancelEpisodeResolve?.();
       const currentRequestId = ++sourceChangeRequestIdRef.current;
       const isCurrentRequest = () =>
         currentRequestId === sourceChangeRequestIdRef.current &&
@@ -336,6 +344,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       pendingSourceSwitchCleanupRef.current = null;
 
       try {
+        holdBackgroundSourceProbes();
         setVideoLoadingStage('sourceChanging');
         setIsVideoLoading(true);
         setVideoLoadingAttempt((prev) => prev + 1);
@@ -360,63 +369,107 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           previousDetail,
         );
 
-        const config = getRuntimeConfig();
-        const { idleMs } = resolveVodStartupTimeouts(
-          newSource,
-          config?.VOD_PAGE_TIMEOUT_SECONDS,
-          config?.VOD_FRAGMENT_TIMEOUT_SECONDS,
+        const latestEpisodeIndex = Math.max(
+          currentEpisodeIndex,
+          currentEpisodeIndexRef.current,
         );
-        // 详情只占一个无进展窗口，余下预算留给媒体和第二条线路。
-        const detailTimer = setTimeout(
-          () => detailAbortController.abort(),
-          idleMs,
-        );
-        let rejectAborted: () => void = () => undefined;
-        try {
-          const fullDetail = await Promise.race([
-            (async () => {
-              const response = await fetch(
-                `/api/detail?source=${newSource}&id=${newId}`,
-                IS_DEVELOPMENT
-                  ? { cache: 'no-store', signal: detailAbortController.signal }
-                  : { signal: detailAbortController.signal },
-              );
-              return response.ok
-                ? ((await response.json()) as SearchResult)
-                : null;
-            })(),
-            new Promise<never>((_resolve, reject) => {
-              rejectAborted = () =>
-                reject(
-                  new DOMException('Detail request aborted', 'AbortError'),
-                );
-              detailAbortController.signal.addEventListener(
-                'abort',
-                rejectAborted,
-                { once: true },
-              );
-            }),
-          ]);
-          if (!isCurrentRequest()) return;
-          if (fullDetail?.episodes?.length) {
-            saveDetailSnapshot(newSource, newId, fullDetail);
-            newDetail = mergeSourceSwitchDetail(
-              fullDetail,
-              targetSource,
-              previousDetail,
-            );
-            setAvailableSources((prev) => mergeSourceBundle(prev, newDetail));
-          }
-        } catch (err) {
-          if (isCurrentRequest() && (err as Error)?.name !== 'AbortError') {
-            console.error('换源刷新详情失败:', err);
-          }
-        } finally {
-          clearTimeout(detailTimer);
-          detailAbortController.signal.removeEventListener(
-            'abort',
-            rejectAborted,
+        const episodeAnchor = resolveSourceSwitchEpisodeAnchor({
+          currentAnchor: sourceSwitchEpisodeAnchorRef.current,
+          activeDetail: previousDetail,
+          activeEpisodeIndex: latestEpisodeIndex,
+        });
+        const clearTargetEpisodeProgress =
+          clearTargetEpisodeProgressRef.current;
+        const resolveSwitchTarget = (detail: SearchResult) => {
+          const resolved = resolveEpisodeTargetIndex(
+            episodeAnchor.detail,
+            episodeAnchor.episodeIndex,
+            detail,
           );
+          const inRange =
+            !!detail.episodes && resolved.index < detail.episodes.length;
+          const targetIndex = inRange ? resolved.index : 0;
+          const preserveProgress = inRange && resolved.preserveProgress;
+          return {
+            targetIndex,
+            preserveProgress,
+            rejected:
+              !detail.episodes?.length ||
+              (!preserveProgress &&
+                (isAutoSwitch ||
+                  (!clearTargetEpisodeProgress &&
+                    episodeAnchor.episodeIndex > 0))),
+          };
+        };
+        // 普通源的候选与详情接口共用同一剧集解析，已能确认同一集时先起播，详情改为提交后后台刷新；
+        // 懒解析源的搜索结果与详情的剧集结构可能不同，仍先等详情
+        const candidateTarget = resolveSwitchTarget(newDetail);
+        const commitBeforeDetail =
+          candidateTarget.preserveProgress &&
+          !isLazyEpisodeUrl(newDetail.episodes[candidateTarget.targetIndex]);
+
+        if (!commitBeforeDetail) {
+          const config = getRuntimeConfig();
+          const { idleMs } = resolveVodStartupTimeouts(
+            newSource,
+            config?.VOD_PAGE_TIMEOUT_SECONDS,
+            config?.VOD_FRAGMENT_TIMEOUT_SECONDS,
+          );
+          // 详情只占一个无进展窗口，余下预算留给媒体和第二条线路。
+          const detailTimer = setTimeout(
+            () => detailAbortController.abort(),
+            idleMs,
+          );
+          let rejectAborted: () => void = () => undefined;
+          try {
+            const fullDetail = await Promise.race([
+              (async () => {
+                const response = await fetch(
+                  `/api/detail?source=${newSource}&id=${newId}`,
+                  IS_DEVELOPMENT
+                    ? {
+                        cache: 'no-store',
+                        signal: detailAbortController.signal,
+                      }
+                    : { signal: detailAbortController.signal },
+                );
+                return response.ok
+                  ? ((await response.json()) as SearchResult)
+                  : null;
+              })(),
+              new Promise<never>((_resolve, reject) => {
+                rejectAborted = () =>
+                  reject(
+                    new DOMException('Detail request aborted', 'AbortError'),
+                  );
+                detailAbortController.signal.addEventListener(
+                  'abort',
+                  rejectAborted,
+                  { once: true },
+                );
+              }),
+            ]);
+            if (!isCurrentRequest()) return;
+            if (fullDetail?.episodes?.length) {
+              saveDetailSnapshot(newSource, newId, fullDetail);
+              newDetail = mergeSourceSwitchDetail(
+                fullDetail,
+                targetSource,
+                previousDetail,
+              );
+              setAvailableSources((prev) => mergeSourceBundle(prev, newDetail));
+            }
+          } catch (err) {
+            if (isCurrentRequest() && (err as Error)?.name !== 'AbortError') {
+              console.error('换源刷新详情失败:', err);
+            }
+          } finally {
+            clearTimeout(detailTimer);
+            detailAbortController.signal.removeEventListener(
+              'abort',
+              rejectAborted,
+            );
+          }
         }
 
         if (!isCurrentRequest()) return;
@@ -435,36 +488,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           return;
         }
 
-        const latestEpisodeIndex = Math.max(
-          currentEpisodeIndex,
-          currentEpisodeIndexRef.current,
-        );
-        const episodeAnchor = resolveSourceSwitchEpisodeAnchor({
-          currentAnchor: sourceSwitchEpisodeAnchorRef.current,
-          activeDetail: previousDetail,
-          activeEpisodeIndex: latestEpisodeIndex,
-        });
-        const resolvedEpisodeTarget = resolveEpisodeTargetIndex(
-          episodeAnchor.detail,
-          episodeAnchor.episodeIndex,
-          newDetail,
-        );
-        let targetIndex = resolvedEpisodeTarget.index;
-        let preserveProgress = resolvedEpisodeTarget.preserveProgress;
-        const clearTargetEpisodeProgress =
-          clearTargetEpisodeProgressRef.current;
+        const { targetIndex, preserveProgress, rejected } =
+          resolveSwitchTarget(newDetail);
 
-        if (!newDetail.episodes || targetIndex >= newDetail.episodes.length) {
-          targetIndex = 0;
-          preserveProgress = false;
-        }
-
-        if (
-          !newDetail.episodes?.length ||
-          (!preserveProgress &&
-            (isAutoSwitch ||
-              (!clearTargetEpisodeProgress && episodeAnchor.episodeIndex > 0)))
-        ) {
+        if (rejected) {
           // 候选按搜索结果预筛过，拉到完整详情后仍缺目标集时换下一个，不能自动跳到别的集
           if (isAutoSwitch) {
             autoSwitchFailedKeysRef.current.add(
@@ -586,6 +613,63 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             keepPreviousPlayRecord: clearTargetEpisodeProgress,
           };
         }
+
+        if (commitBeforeDetail) {
+          const committedDetail = newDetail;
+          void (async () => {
+            try {
+              const response = await fetch(
+                `/api/detail?source=${newSource}&id=${newId}`,
+                IS_DEVELOPMENT
+                  ? { cache: 'no-store', signal: detailAbortController.signal }
+                  : { signal: detailAbortController.signal },
+              );
+              const fresh = response.ok
+                ? ((await response.json()) as SearchResult)
+                : null;
+              if (
+                !fresh?.episodes?.length ||
+                !isCurrentRequest() ||
+                currentSourceRef.current !== newSource ||
+                currentIdRef.current !== newId
+              )
+                return;
+              saveDetailSnapshot(newSource, newId, fresh);
+              const refreshed = mergeSourceSwitchDetail(
+                fresh,
+                targetSource,
+                previousDetail,
+              );
+              const episodeIndex = currentEpisodeIndexRef.current;
+              // 分组源靠前分组新增剧集后绝对索引会后移，须按分组身份换算
+              const remappedIndex = remapEpisodeIndexToDetail(
+                committedDetail,
+                refreshed,
+                episodeIndex,
+              );
+              // 新详情缺当前集时保留已提交的候选，由播放失败路径兜底，不在起播中途跳集
+              if (remappedIndex >= refreshed.episodes.length) return;
+              if (
+                !hasDetailContentChange(committedDetail, refreshed) &&
+                committedDetail.episodes[episodeIndex] ===
+                  refreshed.episodes[remappedIndex]
+              )
+                return;
+              currentEpisodeIndexRef.current = remappedIndex;
+              setCurrentEpisodeIndex(remappedIndex);
+              setDetail((prev) =>
+                prev && prev.source === newSource && prev.id === newId
+                  ? refreshed
+                  : prev,
+              );
+              setAvailableSources((prev) => mergeSourceBundle(prev, refreshed));
+            } catch (err) {
+              if ((err as Error)?.name !== 'AbortError') {
+                console.warn('换源后台刷新详情失败:', err);
+              }
+            }
+          })();
+        }
       } catch (err) {
         if (!isCurrentRequest()) {
           return;
@@ -608,6 +692,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       }
     },
     [
+      cancelEpisodeResolve,
       availableSources,
       currentEpisodeIndex,
       artPlayerRef,

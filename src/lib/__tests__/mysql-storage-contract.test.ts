@@ -3166,6 +3166,18 @@ describe('mysql storage contract', () => {
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
+    await expect(
+      storage.getPlayRecord('other-user', 'source+1'),
+    ).resolves.toBeNull();
+    await expect(
+      storage.getPlayRecord('demo-user', 'source+missing'),
+    ).resolves.toBeNull();
+    await expect(
+      storage.getFavorite('other-user', 'source+1'),
+    ).resolves.toBeNull();
+    await expect(
+      storage.getSkipConfig('other-user', 'source', '1'),
+    ).resolves.toBeNull();
     await expect(storage.checkUserExist('demo-user')).resolves.toBe(true);
     await expect(
       storage.getPlayRecord('demo-user', 'source+1'),

@@ -416,6 +416,108 @@ function getDatabaseOperationFailureMessage(
  *    a. 有缓存 → 返回缓存，后台 fetchApi，有差异则更新缓存+dispatch
  *    b. 无缓存 → await fetchApi → 缓存 → 返回
  */
+let readerUsername: string | null = null;
+let readerGeneration = 0;
+const readFlights = new Map<string, Promise<unknown>>();
+const writeRevisions = new Map<CacheUpdateEvent, number>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(AUTH_SESSION_LOST_EVENT, () => {
+    readerUsername = null;
+    readerGeneration += 1;
+    readFlights.clear();
+  });
+}
+
+function getReaderScope(): string {
+  const username = getAuthInfoFromBrowserCookie()?.username ?? null;
+  if (username !== readerUsername) {
+    readerUsername = username;
+    readerGeneration += 1;
+    readFlights.clear();
+  }
+  return `${readerGeneration}:${username ?? ''}`;
+}
+
+function mergeReadFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const pending = readFlights.get(key);
+  if (pending) return pending as Promise<T>;
+  const request = load().finally(() => {
+    if (readFlights.get(key) === request) readFlights.delete(key);
+  });
+  readFlights.set(key, request);
+  return request;
+}
+
+// 定向结果只合并已有快照，避免把部分条目冒充全账户缓存。
+export function createKeyedCacheFirstReader<T>(options: {
+  getCached: () => Record<string, T> | null;
+  setCached: (data: Record<string, T>) => void;
+  fetchApi: (keys: string[]) => Promise<Record<string, T>>;
+  eventName: CacheUpdateEvent;
+}): (keys: string[]) => Promise<Record<string, T>> {
+  return async (requestedKeys) => {
+    const keys = [...new Set(requestedKeys)].sort();
+    if (typeof window === 'undefined' || !keys.length) return {};
+    const scope = getReaderScope();
+    if (!getAuthInfoFromBrowserCookie()?.username) return {};
+    const { getCached, setCached, fetchApi, eventName } = options;
+    const select = (data: Record<string, T> | null) =>
+      Object.fromEntries(
+        keys
+          .filter((key) => data?.[key] !== undefined)
+          .map((key) => [key, data![key]]),
+      );
+    const cached = getCached();
+    const baseline = JSON.stringify(select(cached));
+    const revision = writeRevisions.get(eventName);
+    // 缓存只由全量读取建立，快照缺键即视为无记录，立即返回并后台核对。
+    const hasCached = cached !== null;
+    const request = mergeReadFlight(
+      `${scope}:${eventName}:${JSON.stringify(keys)}`,
+      async () => {
+        try {
+          const fresh = await fetchApi(keys);
+          if (getReaderScope() !== scope) return {};
+          const current = getCached();
+          if (
+            writeRevisions.get(eventName) !== revision ||
+            JSON.stringify(select(current)) !== baseline
+          )
+            return select(current);
+          if (current) {
+            const merged = { ...current };
+            for (const key of keys) {
+              if (fresh[key] !== undefined) merged[key] = fresh[key];
+              else delete merged[key];
+            }
+            setCached(merged);
+            window.dispatchEvent(
+              new CustomEvent(eventName, { detail: merged }),
+            );
+          }
+          return fresh;
+        } catch (error) {
+          if (getReaderScope() !== scope) return {};
+          if (hasCached) console.warn(`后台同步${eventName}失败:`, error);
+          else console.error(`读取${eventName}失败:`, error);
+          if (
+            !hasCached &&
+            !isAbortError(error) &&
+            !(
+              isClientRequestError(error) &&
+              ['session_lost', 'auth_rejected'].includes(error.kind)
+            )
+          )
+            triggerGlobalError('加载失败，请稍后重试');
+          return select(getCached());
+        }
+      },
+    );
+    return hasCached ? select(cached) : request;
+  };
+}
+
 export function createCacheFirstReader<T>(options: {
   getCached: () => T | null;
   setCached: (data: T) => void;
@@ -431,51 +533,47 @@ export function createCacheFirstReader<T>(options: {
     }
 
     // 未认证用户：仅返回缓存或空数据，不发起 API 请求（避免 401 → 重定向循环）
+    const scope = getReaderScope();
     const authInfo = getAuthInfoFromBrowserCookie();
     if (!authInfo?.username) {
       return getCached() ?? fallback;
     }
 
     const cachedData = getCached();
-
-    if (cachedData) {
-      // 后台异步同步
-      fetchApi()
-        .then((freshData) => {
-          if (
-            JSON.stringify(getCached()) === JSON.stringify(cachedData) &&
-            JSON.stringify(cachedData) !== JSON.stringify(freshData)
-          ) {
-            setCached(freshData);
-            window.dispatchEvent(
-              new CustomEvent(eventName, { detail: freshData }),
-            );
-          }
-        })
-        .catch((err) => {
-          console.warn(`后台同步${eventName}失败:`, err);
-        });
-
-      return cachedData;
-    }
-
-    try {
-      const freshData = await fetchApi();
-      setCached(freshData);
-      return freshData;
-    } catch (err) {
-      console.error(`获取${eventName}失败:`, err);
-      if (
-        !isAbortError(err) &&
-        !(
-          isClientRequestError(err) &&
-          ['session_lost', 'auth_rejected'].includes(err.kind)
+    const baseline = JSON.stringify(cachedData);
+    const revision = writeRevisions.get(eventName);
+    const request = mergeReadFlight(`${scope}:${eventName}:all`, async () => {
+      try {
+        const freshData = await fetchApi();
+        if (getReaderScope() !== scope) return fallback;
+        if (
+          writeRevisions.get(eventName) !== revision ||
+          JSON.stringify(getCached()) !== baseline
         )
-      ) {
-        triggerGlobalError(getErrorMessage(err, '加载失败，请稍后重试'));
+          return getCached() ?? fallback;
+        setCached(freshData);
+        if (cachedData !== null && baseline !== JSON.stringify(freshData)) {
+          window.dispatchEvent(
+            new CustomEvent(eventName, { detail: freshData }),
+          );
+        }
+        return freshData;
+      } catch (err) {
+        if (getReaderScope() !== scope) return fallback;
+        console.warn(`读取${eventName}失败:`, err);
+        if (
+          cachedData === null &&
+          !isAbortError(err) &&
+          !(
+            isClientRequestError(err) &&
+            ['session_lost', 'auth_rejected'].includes(err.kind)
+          )
+        )
+          triggerGlobalError(getErrorMessage(err, '加载失败，请稍后重试'));
+        return getCached() ?? fallback;
       }
-      return fallback;
-    }
+    });
+    return cachedData ?? request;
   };
 }
 
@@ -516,6 +614,8 @@ export function createOptimisticWriter<TCache>(options: {
       rollbackOnError = true,
     } = mutation;
 
+    const scope = getReaderScope();
+    writeRevisions.set(eventName, (writeRevisions.get(eventName) ?? 0) + 1);
     const cached = getCached();
     const token = Symbol();
     let rollback: (() => void) | undefined;
@@ -547,6 +647,7 @@ export function createOptimisticWriter<TCache>(options: {
         }),
       );
       rollback = () => {
+        if (getReaderScope() !== scope) return;
         const current = getCached();
         if (current === null) return;
         const currentEntries = entries(current);

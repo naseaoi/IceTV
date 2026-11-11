@@ -6,6 +6,8 @@ import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import {
   markPlayRecordUpdateRead,
   MAX_DELETE_PLAY_RECORD_KEYS,
+  MAX_PLAY_RECORD_KEY_LENGTH,
+  MAX_READ_PLAY_RECORD_KEYS,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
@@ -22,6 +24,29 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const { searchParams } = new URL(request.url);
+    if (searchParams.has('keys')) {
+      const keys = searchParams.getAll('keys');
+      if (
+        keys.length > MAX_READ_PLAY_RECORD_KEYS ||
+        keys.some(
+          (key) =>
+            key.length > MAX_PLAY_RECORD_KEY_LENGTH || !parseStorageKey(key),
+        )
+      ) {
+        return NextResponse.json(
+          { error: '无效的播放记录键或查询数量超限' },
+          { status: 400 },
+        );
+      }
+      const records: Record<string, PlayRecord> = {};
+      // 复用两种存储的主键查询，串行限制单请求的数据库并发。
+      for (const key of new Set(keys)) {
+        const { source, id } = parseStorageKey(key)!;
+        const record = await db.getPlayRecord(guardResult.username, source, id);
+        if (record) records[key] = record;
+      }
+      return NextResponse.json(records, { headers: NO_STORE_HEADERS });
+    }
     if (searchParams.get('format') === 'page') {
       const cursor = parsePlayRecordCursor(searchParams.get('cursor'));
       const page = await db.getPlayRecordPage(

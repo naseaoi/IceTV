@@ -76,12 +76,12 @@ export function saveDetailSnapshot(
 }
 
 function pruneDetailSnapshots(maxEntries: number): void {
-  const entries = listStorageKeys(SNAPSHOT_KEY_PREFIX).map((key) => ({
+  const keys = listStorageKeys(SNAPSHOT_KEY_PREFIX);
+  if (keys.length <= maxEntries) return;
+  const entries = keys.map((key) => ({
     key,
     savedAt: parseSnapshotEntry(readStorage(key))?.savedAt ?? 0,
   }));
-  if (entries.length <= maxEntries) return;
-
   entries.sort((a, b) => a.savedAt - b.savedAt);
   for (const item of entries.slice(0, entries.length - maxEntries)) {
     removeStorage(item.key);

@@ -80,3 +80,33 @@ describe('detailSnapshot', () => {
     expect(readDetailSnapshot('giri', 'v30')).not.toBeNull();
   });
 });
+
+test('容量内保存只枚举键，不解析已有快照', () => {
+  window.localStorage.clear();
+  saveDetailSnapshot('giri', 'existing', createDetail());
+  const parse = jest.spyOn(JSON, 'parse');
+  try {
+    saveDetailSnapshot('giri', 'new', createDetail());
+    expect(parse).not.toHaveBeenCalled();
+  } finally {
+    parse.mockRestore();
+  }
+});
+
+test('配额写入失败时减半清理并重试', () => {
+  window.localStorage.clear();
+  for (let i = 0; i < 30; i++)
+    saveDetailSnapshot('giri', String(i), createDetail());
+  const setItem = jest.spyOn(Storage.prototype, 'setItem');
+  setItem.mockImplementationOnce(() => {
+    throw new Error('quota');
+  });
+  try {
+    saveDetailSnapshot('giri', 'retry', createDetail());
+    expect(setItem).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.length).toBe(16);
+    expect(readDetailSnapshot('giri', 'retry')).not.toBeNull();
+  } finally {
+    setItem.mockRestore();
+  }
+});

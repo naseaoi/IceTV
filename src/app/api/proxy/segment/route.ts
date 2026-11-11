@@ -104,7 +104,8 @@ async function handleGet(request: NextRequest) {
     });
   }
 
-  if (await isServerRelayPaused()) return serverRelayPausedResponse();
+  const config = await getConfigForRead();
+  if (await isServerRelayPaused(config)) return serverRelayPausedResponse();
 
   const quotaFailure = await requireServerProxyQuota(
     'vod-segment',
@@ -122,7 +123,6 @@ async function handleGet(request: NextRequest) {
   };
 
   if (isLiveStream) {
-    const config = await getConfigForRead();
     if (config.SiteConfig.EnableLiveEntry !== true) {
       return NextResponse.json({ error: '直播未开启' }, { status: 404 });
     }
@@ -162,8 +162,8 @@ async function handleGet(request: NextRequest) {
     });
   }
 
-  const ua = await resolveProxyUserAgent(source);
-  const siteConfig = (await getConfigForRead()).SiteConfig;
+  const ua = await resolveProxyUserAgent(source, config);
+  const siteConfig = config.SiteConfig;
   const runtimeParams = normalizeRuntimeParams(siteConfig);
   const timeoutMs = resolveVodSegmentProxyTimeoutMs(
     source,
@@ -250,6 +250,9 @@ async function handleGet(request: NextRequest) {
       headers,
       skipInitialValidation: true,
       timeoutMs,
+      proxyPoolStickyKey: isLiveStream
+        ? undefined
+        : authorization.proxyPoolStickyKey,
       useProxyPool:
         !isLiveStream && siteConfig.UpstreamProxyPoolSegments === true,
       resourceContext,

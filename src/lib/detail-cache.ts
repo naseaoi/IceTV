@@ -1,4 +1,5 @@
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
+import { waitForSharedLoad } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi } from '@/lib/downstream';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
@@ -23,10 +24,15 @@ function makeDetailCacheKey(sourceKey: string, id: string): string {
 export function getCachedDetail(
   apiSite: ApiSite,
   id: string,
+  signal?: AbortSignal,
 ): Promise<SearchResult> {
-  return DETAIL_CACHE.getOrLoad(
-    makeDetailCacheKey(getSourceCacheKey(apiSite), id),
-    () => getDetailFromApi(apiSite, id),
+  return waitForSharedLoad(
+    () =>
+      DETAIL_CACHE.getOrLoad(
+        makeDetailCacheKey(getSourceCacheKey(apiSite), id),
+        () => getDetailFromApi(apiSite, id),
+      ),
+    signal,
   );
 }
 

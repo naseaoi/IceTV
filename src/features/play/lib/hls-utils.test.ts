@@ -3,6 +3,12 @@
   getVideoResolutionFromM3u8,
   takeProbeSegmentSample,
 } from '@/features/play/lib/hls-utils';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
+
+jest.mock('@/lib/source-route-stats.client', () => ({
+  reportSourceRouteStat: jest.fn(),
+  reportSourcePlayOutcome: jest.fn(),
+}));
 
 function createHeaders(values: Record<string, string>) {
   return {
@@ -470,5 +476,83 @@ describe('getVideoResolutionFromM3u8', () => {
       ),
     ).rejects.toMatchObject({ name: 'SourceProbeDeferredError' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('探测取消贯穿 fetch', () => {
+  const originalFetch = global.fetch;
+  beforeEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.clearAllMocks();
+  });
+
+  it.each(['manifest', 'segment'])(
+    '%s 请求取消不回落线路、不上报失败',
+    async (stage) => {
+      const controller = new AbortController();
+      let requestSignal!: AbortSignal;
+      global.fetch = jest.fn((url, init) => {
+        if (stage === 'segment' && String(url).endsWith('.m3u8'))
+          return Promise.resolve(
+            playlistResponse([
+              '#EXTM3U',
+              '#EXTINF:4,',
+              'https://cdn.test/segment.ts',
+            ]) as Response,
+          );
+        requestSignal = init!.signal as AbortSignal;
+        return new Promise<Response>((_, reject) => {
+          requestSignal.addEventListener('abort', () =>
+            reject(new DOMException('cancel', 'AbortError')),
+          );
+        });
+      });
+      const task = getVideoResolutionFromM3u8(
+        'https://cdn.test/cancel.m3u8',
+        {
+          useServerProxy: false,
+          directManifest: true,
+          allowAutoFallback: true,
+        },
+        'cancel',
+        controller.signal,
+      );
+      for (let i = 0; i < 20 && !requestSignal; i++) await Promise.resolve();
+      const rejection = expect(task).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      controller.abort();
+      await rejection;
+      expect(requestSignal.aborted).toBe(true);
+      expect(global.fetch).toHaveBeenCalledTimes(stage === 'manifest' ? 1 : 2);
+      expect(reportSourceRouteStat).not.toHaveBeenCalled();
+    },
+  );
+
+  it('离线期间的请求失败不记线路失败', async () => {
+    const online = jest.spyOn(navigator, 'onLine', 'get');
+    online.mockReturnValue(true);
+    global.fetch = jest.fn().mockImplementation(async () => {
+      online.mockReturnValue(false);
+      throw new TypeError('offline');
+    });
+    try {
+      await expect(
+        getVideoResolutionFromM3u8(
+          'https://cdn.test/offline.m3u8',
+          {
+            useServerProxy: false,
+            directManifest: true,
+            allowAutoFallback: true,
+          },
+          'offline',
+        ),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(reportSourceRouteStat).not.toHaveBeenCalled();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      online.mockRestore();
+    }
   });
 });
