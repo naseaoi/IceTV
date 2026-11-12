@@ -42,6 +42,8 @@
 
 `deleteUser` 与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。表内有多个用户名列时（如 `user_follows`）每一列都要覆盖。
 
+片单删除覆盖 `user_lists` 及其 `user_list_items`：删号与非活跃清理在同一事务先清条目再清片单。SQLite 大小写迁移将 `user_lists.username` 纳入用户名收集并转移归属，条目通过不变的 `list_id` 保留，片单与条目均不依赖收藏键。
+
 随用户数据增长的列表在 SQL 层按游标分页（排序键 + 唯一键打破平局），不要全量查询后在内存切页。
 
 播放记录定向读取在服务端经 `DbManager` / `IStorage.getPlayRecordsByKeys(userName, keys)` 完成，两后端按当前用户与去重键集合执行单条参数化 `IN` 查询，空集合直接返回空对象，缺失键省略。接口保留每请求 50 键及键长度校验，结果仍是以完整存储键索引的记录对象。

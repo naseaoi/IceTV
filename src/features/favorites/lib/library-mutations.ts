@@ -14,6 +14,10 @@ import { parseStorageKey } from '@/lib/utils';
 
 export class InvalidFavoriteMutation extends Error {}
 
+// 仅服务端携带到合并事务的前置条件；Symbol 不进入收藏 JSON，也不能由客户端伪造。
+export const CATALOG_BIND_SNAPSHOT = Symbol('catalog-bind-snapshot');
+export class CatalogBindingConflict extends Error {}
+
 export function validateFavoriteBatch(input: unknown): FavoriteBatchInput {
   const fail = () => {
     throw new InvalidFavoriteMutation('收藏操作参数无效');
@@ -148,6 +152,21 @@ export function mergeFavorite(
   favorite: Favorite,
   rows: { favorite_key: string; favorite_json: string }[],
 ) {
+  const binding = (
+    favorite as Favorite & {
+      [CATALOG_BIND_SNAPSHOT]?: { key: string; snapshot: Favorite };
+    }
+  )[CATALOG_BIND_SNAPSHOT];
+  if (binding) {
+    const current = rows.find((row) => row.favorite_key === binding.key);
+    if (
+      !current ||
+      JSON.stringify(JSON.parse(current.favorite_json)) !==
+        JSON.stringify(binding.snapshot)
+    ) {
+      throw new CatalogBindingConflict();
+    }
+  }
   const catalog = (key: string) =>
     isCatalogFavoriteSource(parseStorageKey(key)?.source ?? '');
   const existing = rows.map((row) => ({
@@ -171,6 +190,13 @@ export function mergeFavorite(
     target?.favorite.total_episodes ??
     merged.total_episodes;
   merged.update_detected_at = target?.favorite.update_detected_at;
+  merged.catalog_origin =
+    target?.favorite.catalog_origin ??
+    favorite.catalog_origin ??
+    catalogs[0]?.favorite.catalog_origin;
+  merged.catalog_bind = catalog(finalKey)
+    ? target?.favorite.catalog_bind
+    : undefined;
   const statusOwner = favorite.watch_status
     ? favorite
     : target?.favorite.watch_status

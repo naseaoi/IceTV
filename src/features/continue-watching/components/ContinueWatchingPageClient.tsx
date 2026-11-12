@@ -20,8 +20,10 @@ import {
 } from '@/features/continue-watching/hooks/useContinueWatchingItems';
 import {
   type ContinueWatchingFilter,
+  type ContinueWatchingView,
   CONTINUE_WATCHING_PAGE_SIZE,
   parseContinueWatchingFilter,
+  parseContinueWatchingView,
 } from '@/features/continue-watching/lib/layout';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
@@ -32,13 +34,15 @@ import {
   ContinueWatchingPageFrame,
   ContinueWatchingToolbarSkeleton,
 } from './ContinueWatchingPageFrame';
+import { ContinueWatchingViewSwitch } from './ContinueWatchingViewSwitch';
+import { TrackingCalendar } from './TrackingCalendar';
 
-// 筛选只改地址栏不走路由，避免重新请求服务端组件。state 传 null：带着 Next 内部
+// 筛选与视图只改地址栏不走路由，避免重新请求服务端组件。state 传 null：带着 Next 内部
 // 标记（__NA）的 state 会被当作路由自身调用而不同步，之后路由重渲染会把地址改回去
-function replaceFilterInUrl(filter: ContinueWatchingFilter) {
+function replaceParamInUrl(name: string, value: string | null) {
   const url = new URL(window.location.href);
-  if (filter === 'all') url.searchParams.delete('filter');
-  else url.searchParams.set('filter', filter);
+  if (value === null) url.searchParams.delete(name);
+  else url.searchParams.set(name, value);
   window.history.replaceState(null, '', url);
 }
 
@@ -50,7 +54,9 @@ export function ContinueWatchingPageClient({
   initialCounts?: ContinueWatchingCounts;
 }) {
   // 筛选以地址栏为准：前进后退恢复的是缓存的页面参数，组件内状态会与地址不一致
-  const filter = parseContinueWatchingFilter(useSearchParams()?.get('filter'));
+  const searchParams = useSearchParams();
+  const filter = parseContinueWatchingFilter(searchParams?.get('filter'));
+  const view = parseContinueWatchingView(searchParams?.get('view'));
   const {
     items,
     counts,
@@ -106,8 +112,17 @@ export function ContinueWatchingPageClient({
   const changeFilter = (next: ContinueWatchingFilter) => {
     if (next === filter) return;
     exitEditing();
-    replaceFilterInUrl(next);
+    replaceParamInUrl('filter', next === 'all' ? null : next);
   };
+
+  const changeView = (next: ContinueWatchingView) => {
+    if (next === view) return;
+    exitEditing();
+    replaceParamInUrl('view', next === 'grid' ? null : next);
+  };
+  const viewSwitch = (
+    <ContinueWatchingViewSwitch view={view} onChange={changeView} />
+  );
 
   const toggleSelected = (key: string) => {
     setSelectedKeys((current) => {
@@ -124,93 +139,106 @@ export function ContinueWatchingPageClient({
     exitEditing();
   };
 
-  const toolbar = editing ? (
-    <>
-      <span className='text-sm text-gray-500 dark:text-gray-400'>
-        已选{' '}
-        <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
-          {selectedKeys.size}
-        </span>{' '}
-        项
-      </span>
-      <div className='ml-auto flex items-center gap-1'>
-        <button
-          type='button'
-          onClick={() =>
-            setSelectedKeys(
-              allSelected ? new Set() : new Set(items.map((item) => item.key)),
-            )
-          }
-          className={LIBRARY_TOOLBAR_BUTTON_CLASS}
+  const toolbar =
+    view === 'calendar' ? (
+      <div className='ml-auto flex h-9 items-center'>{viewSwitch}</div>
+    ) : editing ? (
+      <>
+        <span className='text-sm text-gray-500 dark:text-gray-400'>
+          已选{' '}
+          <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
+            {selectedKeys.size}
+          </span>{' '}
+          项
+        </span>
+        <div className='ml-auto flex items-center gap-1'>
+          <button
+            type='button'
+            onClick={() =>
+              setSelectedKeys(
+                allSelected
+                  ? new Set()
+                  : new Set(items.map((item) => item.key)),
+              )
+            }
+            className={LIBRARY_TOOLBAR_BUTTON_CLASS}
+          >
+            {allSelected ? '取消全选' : '全选'}
+          </button>
+          <button
+            type='button'
+            disabled={selectedKeys.size === 0}
+            onClick={() => setConfirmOpen(true)}
+            className={LIBRARY_DANGER_BUTTON_CLASS}
+          >
+            删除
+          </button>
+          <button
+            type='button'
+            onClick={exitEditing}
+            className={LIBRARY_TOOLBAR_BUTTON_CLASS}
+          >
+            完成
+          </button>
+        </div>
+      </>
+    ) : loading && items.length === 0 ? (
+      <ContinueWatchingToolbarSkeleton
+        count={skeletonCount}
+        trailing={viewSwitch}
+      />
+    ) : (
+      <>
+        <div
+          role='group'
+          aria-label='筛选'
+          className='flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
         >
-          {allSelected ? '取消全选' : '全选'}
-        </button>
-        <button
-          type='button'
-          disabled={selectedKeys.size === 0}
-          onClick={() => setConfirmOpen(true)}
-          className={LIBRARY_DANGER_BUTTON_CLASS}
-        >
-          删除
-        </button>
-        <button
-          type='button'
-          onClick={exitEditing}
-          className={LIBRARY_TOOLBAR_BUTTON_CLASS}
-        >
-          完成
-        </button>
-      </div>
-    </>
-  ) : loading && items.length === 0 ? (
-    <ContinueWatchingToolbarSkeleton count={skeletonCount} />
-  ) : (
-    <>
-      <div
-        role='group'
-        aria-label='筛选'
-        className='flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
-      >
-        <LibraryFilterChip
-          label='全部'
-          count={counts.all ?? 0}
-          loading={counts.all === null}
-          active={filter === 'all'}
-          onClick={() => changeFilter('all')}
-        />
-        {showUpdatedChip && (
           <LibraryFilterChip
-            label='有更新'
-            count={updatedCount ?? 0}
-            loading={updatedCount === null}
-            active={filter === 'updated'}
-            onClick={() => changeFilter('updated')}
+            label='全部'
+            count={counts.all ?? 0}
+            loading={counts.all === null}
+            active={filter === 'all'}
+            onClick={() => changeFilter('all')}
           />
-        )}
-        {showShelvedChip && (
-          <LibraryFilterChip
-            label='搁置中'
-            count={shelvedCount ?? 0}
-            loading={shelvedCount === null}
-            active={filter === 'shelved'}
-            onClick={() => changeFilter('shelved')}
-          />
-        )}
-      </div>
-      {items.length > 0 && (
-        <button
-          type='button'
-          onClick={() => setEditing(true)}
-          className={`${LIBRARY_TOOLBAR_BUTTON_CLASS} ml-auto`}
-        >
-          编辑
-        </button>
-      )}
-    </>
-  );
+          {showUpdatedChip && (
+            <LibraryFilterChip
+              label='有更新'
+              count={updatedCount ?? 0}
+              loading={updatedCount === null}
+              active={filter === 'updated'}
+              onClick={() => changeFilter('updated')}
+            />
+          )}
+          {showShelvedChip && (
+            <LibraryFilterChip
+              label='搁置中'
+              count={shelvedCount ?? 0}
+              loading={shelvedCount === null}
+              active={filter === 'shelved'}
+              onClick={() => changeFilter('shelved')}
+            />
+          )}
+        </div>
+        <div className='ml-auto flex shrink-0 items-center gap-2'>
+          {items.length > 0 && (
+            <button
+              type='button'
+              onClick={() => setEditing(true)}
+              className={LIBRARY_TOOLBAR_BUTTON_CLASS}
+            >
+              编辑
+            </button>
+          )}
+          {viewSwitch}
+        </div>
+      </>
+    );
 
   let content: React.ReactNode;
-  if (loading && items.length === 0) {
+  if (view === 'calendar') {
+    content = <TrackingCalendar />;
+  } else if (loading && items.length === 0) {
     content = <ContinueWatchingGridSkeleton count={skeletonCount} />;
   } else if (error && items.length === 0) {
     content = <LoadErrorState message={error} onRetry={retry} />;

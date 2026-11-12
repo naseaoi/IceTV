@@ -222,7 +222,7 @@ export async function handlePublicUser(
       filter !== 'all' &&
       (!isFavoriteWatchStatus(filter) || libraryVisibility < 2)
     )
-      throw new ReviewValidationError('当前片单不支持此筛选');
+      throw new ReviewValidationError('当前公开范围不支持此筛选');
     const page = await db.getFavoriteLibraryPage(profile.username, {
       query: '',
       filter: filter as 'all' | import('@/lib/types').FavoriteWatchStatus,

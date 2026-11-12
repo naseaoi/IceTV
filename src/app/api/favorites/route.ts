@@ -174,6 +174,8 @@ export async function POST(request: NextRequest) {
       total_episodes: favorite.total_episodes ?? 0,
       update_baseline_episodes: undefined,
       update_detected_at: undefined,
+      catalog_bind: undefined,
+      catalog_origin: undefined,
       ...(isCatalogFavoriteSource(parsed.source)
         ? {
             source_name: parsed.source === 'douban' ? '豆瓣' : 'Bangumi',

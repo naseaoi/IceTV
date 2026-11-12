@@ -48,6 +48,31 @@ function createDetail(overrides: Partial<SearchResult> = {}): SearchResult {
 }
 
 describe('buildRefreshedFavorite', () => {
+  it('目录绑定后沿用绑定基线并保留目录评价身份', () => {
+    const bound = {
+      title: '目录标题',
+      year: '2026',
+      source_name: '源',
+      cover: '',
+      save_time: 1,
+      total_episodes: 22,
+      update_baseline_episodes: 22,
+      catalog_origin: { key: 'douban+1', title: '目录标题', year: '2026' },
+    };
+    expect(
+      buildRefreshedFavorite(
+        bound,
+        createDetail({ title: '源站新标题', year: 'unknown' }),
+        100,
+      ),
+    ).toMatchObject({
+      title: '目录标题',
+      year: '2026',
+      update_baseline_episodes: 22,
+      total_episodes: 26,
+      update_detected_at: 100,
+    });
+  });
   it('缺基线旧收藏从刷新前集数起算，刷新失败或不变不制造事件', () => {
     const old = {
       title: '旧收藏',

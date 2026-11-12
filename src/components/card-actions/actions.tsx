@@ -5,6 +5,8 @@ import {
   Check,
   ExternalLink,
   Heart,
+  ListMinus,
+  ListPlus,
   Play,
   Trash2,
 } from 'lucide-react';
@@ -34,6 +36,7 @@ type Handler = CardAction['onClick'];
 export interface CardActionSpec {
   play?: { onClick: Handler; live?: boolean };
   favorite?: { favorited: boolean | null; onToggle: Handler };
+  addToList?: Handler | null;
   watchRecord?: Handler | null;
   updates?: {
     hasUpdate: boolean;
@@ -42,6 +45,7 @@ export interface CardActionSpec {
     onToggleTracking: Handler;
   };
   external?: { url: string; bangumi: boolean } | null;
+  removeFromList?: Handler;
   remove?: Handler;
 }
 
@@ -53,6 +57,7 @@ export function buildCardActions(spec: CardActionSpec): CardAction[] {
       favoriteAction(spec.favorite.favorited, spec.favorite.onToggle),
     );
   }
+  if (spec.addToList) actions.push(addToListAction(spec.addToList));
   if (spec.watchRecord) actions.push(watchRecordAction(spec.watchRecord));
   if (spec.updates) {
     if (spec.updates.hasUpdate) {
@@ -66,6 +71,9 @@ export function buildCardActions(spec: CardActionSpec): CardAction[] {
     actions.push(
       externalDetailAction(spec.external.url, spec.external.bangumi),
     );
+  }
+  if (spec.removeFromList) {
+    actions.push(removeFromListAction(spec.removeFromList));
   }
   if (spec.remove) actions.push(deleteRecordAction(spec.remove));
   return actions;
@@ -170,4 +178,23 @@ export function summarizeSources(sources?: string[]) {
   if (names.length === 0) return '';
   if (names.length <= 2) return names.join(' · ');
   return `${names.slice(0, 2).join(' · ')} 等 ${names.length} 个源`;
+}
+
+export function addToListAction(onClick: Handler): CardAction {
+  return {
+    id: 'add-to-list',
+    label: '加入片单',
+    icon: <ListPlus />,
+    onClick,
+  };
+}
+
+export function removeFromListAction(onClick: Handler): CardAction {
+  return {
+    id: 'remove-from-list',
+    label: '移出片单',
+    icon: <ListMinus />,
+    tone: 'danger',
+    onClick,
+  };
 }

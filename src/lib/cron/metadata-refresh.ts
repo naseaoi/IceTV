@@ -361,8 +361,9 @@ export function buildRefreshedFavorite(
   };
   const total = detail?.episodes?.length ?? 0;
   if (detail && total > 0 && total !== favorite.total_episodes) {
-    next.title = detail.title || favorite.title;
-    next.year = detail.year || favorite.year;
+    next.title =
+      favorite.catalog_origin?.title || detail.title || favorite.title;
+    next.year = favorite.catalog_origin?.year || detail.year || favorite.year;
     next.total_episodes = total;
     if (total > favorite.total_episodes) next.update_detected_at = checkedAt;
   }

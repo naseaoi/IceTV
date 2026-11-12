@@ -8,6 +8,7 @@ import {
 } from '@/components/card-actions/actions';
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import { useOpenListPicker } from '@/components/list-picker-context';
 import {
   POSTER_CARD_COVER_CLASS,
   POSTER_CARD_FIXED_TITLE_ROW_CLASS,
@@ -70,6 +71,7 @@ function PosterCard({
   const showActionSheet = interactionManager?.showActionSheet;
   const hideActionSheet = interactionManager?.hideActionSheet;
   const openWatchRecord = useOpenWatchRecord();
+  const openListPicker = useOpenListPicker();
   const externalUrl = buildExternalSubjectUrl(doubanId, isBangumi);
   const {
     play: handlePlay,
@@ -90,6 +92,17 @@ function PosterCard({
         anchorRect,
         actions: buildCardActions({
           play: { onClick: handlePlay },
+          addToList:
+            openListPicker && doubanId
+              ? () =>
+                  openListPicker({
+                    source: isBangumi ? 'bangumi' : 'douban',
+                    id: String(doubanId),
+                    title,
+                    year,
+                    cover: poster,
+                  })
+              : null,
           watchRecord:
             openWatchRecord && doubanId
               ? () =>
@@ -115,6 +128,7 @@ function PosterCard({
       handlePlay,
       interactionId,
       isBangumi,
+      openListPicker,
       openWatchRecord,
       poster,
       showActionSheet,

@@ -17,6 +17,7 @@ import { SWRegister } from '@/components/SWRegister';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import ToastViewport from '@/components/ToastViewport';
 import { AdminAlertsProvider } from '@/features/admin/components/AdminAlertsProvider';
+import { ListPickerProvider } from '@/features/lists/components/ListPickerProvider';
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
@@ -150,7 +151,9 @@ export default async function RootLayout({
                 <AdminAlertsProvider>
                   <MessageCenterProvider>
                     <CardInteractionProvider>
-                      <WatchRecordProvider>{children}</WatchRecordProvider>
+                      <WatchRecordProvider>
+                        <ListPickerProvider>{children}</ListPickerProvider>
+                      </WatchRecordProvider>
                       <PageScrollRestorer />
                       <ClientErrorReporter />
                       <ToastViewport />

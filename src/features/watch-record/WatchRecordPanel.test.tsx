@@ -84,7 +84,7 @@ it('数据就绪前显示骨架，就绪后才渲染表单', async () => {
   );
 });
 
-it('未改动时不可保存，改状态后按片单键提交', async () => {
+it('未改动时不可保存，改状态后按收藏键提交', async () => {
   const onClose = renderPanel();
   const save = await screen.findByRole('button', { name: '保存' });
   await waitFor(() => expect(screen.queryByRole('radiogroup')).toBeTruthy());
@@ -104,12 +104,12 @@ it('未改动时不可保存，改状态后按片单键提交', async () => {
   expect(showToast).toHaveBeenCalledWith('观看记录已保存', 'success');
 });
 
-it('未在片单的作品只写评分时一并加入片单', async () => {
+it('未收藏的作品只写评分时一并加入收藏', async () => {
   mockGetFavoriteForWork.mockResolvedValue(null);
   renderPanel();
   const slider = await screen.findByRole('slider', { name: '评分' });
   expect(
-    screen.queryByRole('button', { name: '移出片单' }),
+    screen.queryByRole('button', { name: '移出收藏' }),
   ).not.toBeInTheDocument();
 
   fireEvent.keyDown(slider, { key: 'End' });
@@ -180,7 +180,7 @@ it('入口可见观看状态时保存不重复提示', async () => {
 });
 
 it.each([false, true])(
-  '移出片单按入口收藏态可见性反馈：%s',
+  '移出收藏按入口收藏态可见性反馈：%s',
   async (favoriteVisible) => {
     render(
       <WatchRecordPanel
@@ -189,10 +189,10 @@ it.each([false, true])(
         onClose={jest.fn()}
       />,
     );
-    fireEvent.click(await screen.findByRole('button', { name: '移出片单' }));
+    fireEvent.click(await screen.findByRole('button', { name: '移出收藏' }));
     fireEvent.click(screen.getByRole('button', { name: '移出' }));
     await waitFor(() => expect(mockDeleteFavorite).toHaveBeenCalled());
     if (favoriteVisible) expect(showToast).not.toHaveBeenCalled();
-    else expect(showToast).toHaveBeenCalledWith('已移出片单', 'success');
+    else expect(showToast).toHaveBeenCalledWith('已移出收藏', 'success');
   },
 );

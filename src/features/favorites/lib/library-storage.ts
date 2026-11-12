@@ -82,7 +82,7 @@ function binding(username: string, query: FavoriteLibraryQuery): string {
     .digest('hex');
 }
 
-// 个人主页片单不含直播收藏；资料页的收藏数须与片单列表同口径
+// 个人主页收藏不含直播收藏；资料页的收藏数须与收藏列表同口径
 export function profileFavoriteOriginSql(
   dialect: 'sqlite' | 'mysql',
   column = 'favorite_json',

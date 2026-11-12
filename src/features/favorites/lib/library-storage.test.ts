@@ -3,6 +3,10 @@
 import Database from 'better-sqlite3';
 
 import type { FavoriteSort } from '@/features/favorites/lib/favorite-library';
+import {
+  CATALOG_BIND_SNAPSHOT,
+  CatalogBindingConflict,
+} from '@/features/favorites/lib/library-mutations';
 import type { FavoriteLibraryPage } from '@/features/favorites/lib/library-query';
 import {
   favoriteProjection,
@@ -571,6 +575,54 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       }
     });
 
+    it('目录绑定保留观看状态和评价关联，基线使用真实源集数', async () => {
+      await storage.saveMergedFavorite(username, 'douban+1', {
+        ...favorite,
+        total_episodes: 100,
+        watch_status: 'completed',
+        watched_at: 123,
+      });
+      await storage.setVideoReview(username, {
+        ...videoReview,
+        title: favorite.title,
+        title_norm: 'demo',
+        year: favorite.year,
+        rating: 8,
+      });
+      const snapshot = (await storage.getFavorite(username, 'douban+1'))!;
+      const incoming = {
+        ...favorite,
+        total_episodes: 3,
+        catalog_origin: {
+          key: 'douban+1',
+          title: favorite.title,
+          year: favorite.year,
+        },
+        [CATALOG_BIND_SNAPSHOT]: { key: 'douban+1', snapshot },
+      };
+      expect(
+        await storage.saveMergedFavorite(username, 'source+1', incoming),
+      ).toBe('source+1');
+      expect(await storage.getFavorite(username, 'douban+1')).toBeNull();
+      const page = await storage.getFavoriteLibraryPage(username, query);
+      expect(page.total).toBe(1);
+      expect(page.items[0]).toMatchObject({
+        key: 'source+1',
+        myRating: 8,
+        watchStatus: 'completed',
+        watchedAt: 123,
+        favorite: {
+          update_baseline_episodes: 3,
+          total_episodes: 3,
+          catalog_origin: { key: 'douban+1' },
+        },
+      });
+      await expect(
+        storage.saveMergedFavorite(username, 'source+2', incoming),
+      ).rejects.toBeInstanceOf(CatalogBindingConflict);
+      expect(await storage.getFavorite(username, 'source+2')).toBeNull();
+    });
+
     it('目录合并同作品且匹配空年份，作品查询返回最终键及有效状态', async () => {
       await storage.saveMergedFavorite(username, 'douban+1', {
         ...favorite,
@@ -692,7 +744,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       }
     });
 
-    it('资料收藏数与片单同口径，未公开时对他人为 0', async () => {
+    it('资料收藏数与收藏列表同口径，未公开时对他人为 0', async () => {
       await storage.setFavorite(username, 'source+1', favorite);
       await storage.setFavorite(username, 'source+2', {
         ...favorite,

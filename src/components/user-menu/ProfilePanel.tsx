@@ -281,9 +281,9 @@ export function ProfileForm({
             }
             options={[
               { value: '0', label: '不公开' },
-              { value: '1', label: '仅片单' },
-              { value: '2', label: '片单与观看状态' },
-              { value: '3', label: '片单、状态与评分' },
+              { value: '1', label: '仅收藏' },
+              { value: '2', label: '收藏与观看状态' },
+              { value: '3', label: '收藏、状态与评分' },
             ]}
           />
         </div>

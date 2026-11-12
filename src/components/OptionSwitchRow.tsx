@@ -26,7 +26,7 @@ export function OptionSwitchRow({
       aria-label={label}
       aria-busy={pending || disabled || undefined}
       disabled={pending || disabled}
-      className={`flex items-center justify-between gap-3 rounded-lg py-2.5 text-left transition-colors enabled:hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:enabled:hover:bg-white/[0.06] ${className}`}
+      className={`group flex items-center justify-between gap-3 py-2.5 text-left outline-none disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
       onClick={() => onChange(!checked)}
     >
       <span className='min-w-0'>
@@ -47,7 +47,7 @@ export function OptionSwitchRow({
       ) : (
         <span
           aria-hidden='true'
-          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors group-focus-visible:ring-2 group-focus-visible:ring-brand-500/40 ${
             checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
           }`}
         >

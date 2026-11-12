@@ -17,6 +17,11 @@ import {
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
 import {
+  type TrackingCalendarRow,
+  trackingCalendarItems,
+  trackingCalendarSql,
+} from '@/features/continue-watching/lib/tracking-calendar-storage';
+import {
   favoriteMessageQueries,
   favoriteMessagesFromRows,
   favoriteReadStatement,
@@ -42,6 +47,12 @@ import {
   favoriteProjection,
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
+import {
+  type ListPlan,
+  type ListRow,
+  ListPlans,
+  listSchema,
+} from '@/features/lists/lib/list-storage';
 import {
   type PlaybackSourceUsage,
   type PlaybackSourceUsageRow,
@@ -442,6 +453,7 @@ export class MySqlStorage implements IStorage {
       OAUTH_SCHEMA + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
       ...userNoticeSchema('mysql'),
       ...socialSchema('mysql'),
+      ...listSchema('mysql'),
       ...userDanmakuSchema('mysql'),
       ...userAccessSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
@@ -1545,6 +1557,80 @@ export class MySqlStorage implements IStorage {
     ]);
   }
 
+  private async runListPlan<T>(plan: ListPlan<T>): Promise<T> {
+    return this.withTransaction(async (connection) => {
+      let step = plan.next();
+      while (!step.done) {
+        const { sql, params } = step.value;
+        if (sql.startsWith('SELECT')) {
+          const [rows] = await connection.query(sql, params);
+          step = plan.next(rows as ListRow[]);
+        } else {
+          await connection.execute(sql, params);
+          step = plan.next([]);
+        }
+      }
+      return step.value;
+    });
+  }
+  async getTrackingCalendarItems(
+    userName: string,
+  ): ReturnType<IStorage['getTrackingCalendarItems']> {
+    const username = normalizeUsername(userName);
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query(trackingCalendarSql('mysql'), [
+      username,
+      username,
+    ]);
+    return trackingCalendarItems(rows as TrackingCalendarRow[]);
+  }
+
+  async getLists(
+    ...args: Parameters<IStorage['getLists']>
+  ): ReturnType<IStorage['getLists']> {
+    return this.runListPlan(new ListPlans('mysql').getLists(...args));
+  }
+  async countUserLists(
+    ...args: Parameters<IStorage['countUserLists']>
+  ): ReturnType<IStorage['countUserLists']> {
+    return this.runListPlan(new ListPlans('mysql').countUserLists(...args));
+  }
+  async getList(
+    ...args: Parameters<IStorage['getList']>
+  ): ReturnType<IStorage['getList']> {
+    return this.runListPlan(new ListPlans('mysql').getList(...args));
+  }
+  async createList(
+    ...args: Parameters<IStorage['createList']>
+  ): ReturnType<IStorage['createList']> {
+    return this.runListPlan(new ListPlans('mysql').createList(...args));
+  }
+  async updateList(
+    ...args: Parameters<IStorage['updateList']>
+  ): ReturnType<IStorage['updateList']> {
+    return this.runListPlan(new ListPlans('mysql').updateList(...args));
+  }
+  async deleteList(
+    ...args: Parameters<IStorage['deleteList']>
+  ): ReturnType<IStorage['deleteList']> {
+    return this.runListPlan(new ListPlans('mysql').deleteList(...args));
+  }
+  async addListItem(
+    ...args: Parameters<IStorage['addListItem']>
+  ): ReturnType<IStorage['addListItem']> {
+    return this.runListPlan(new ListPlans('mysql').addListItem(...args));
+  }
+  async removeListItem(
+    ...args: Parameters<IStorage['removeListItem']>
+  ): ReturnType<IStorage['removeListItem']> {
+    return this.runListPlan(new ListPlans('mysql').removeListItem(...args));
+  }
+  async reorderListItems(
+    ...args: Parameters<IStorage['reorderListItems']>
+  ): ReturnType<IStorage['reorderListItems']> {
+    return this.runListPlan(new ListPlans('mysql').reorderListItems(...args));
+  }
+
   private socialFor(
     executor: Pick<PoolConnection, 'query' | 'execute'> = this.pool,
   ) {
@@ -2319,6 +2405,17 @@ export class MySqlStorage implements IStorage {
         )
           return false;
       }
+      await connection.query(
+        'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_list_items WHERE list_id IN (SELECT id FROM user_lists WHERE username = ?)',
+        [username],
+      );
+      await connection.execute('DELETE FROM user_lists WHERE username = ?', [
+        username,
+      ]);
       await connection.execute('DELETE FROM user_profiles WHERE username = ?', [
         username,
       ]);

@@ -38,7 +38,10 @@ export async function socialRequest<T>(
       typeof data?.error === 'string'
         ? data.error
         : getHttpErrorMessage(response.status, '请求失败，请稍后重试'),
-      { status: response.status },
+      {
+        status: response.status,
+        code: typeof data?.code === 'string' ? data.code : undefined,
+      },
     );
   if (!data) throw new DisplayableError('服务器响应异常，请稍后重试');
   return data as T;

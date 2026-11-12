@@ -283,6 +283,11 @@ describe('cron route', () => {
     const secondResponse = await GET(createRequest());
 
     expect(firstResponse.status).toBe(200);
+    expect(await firstResponse.json()).toMatchObject({
+      success: true,
+      message: 'Cron job started',
+    });
+    expect(mockLeaseRelease).not.toHaveBeenCalled();
     expect(secondResponse.status).toBe(202);
 
     releaseFirstConfig({

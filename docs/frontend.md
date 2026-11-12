@@ -58,7 +58,7 @@
   - 离场动画时长由 CSS 的 `.toast-*` 动画决定，`TOAST_LEAVE_MS` 必须与之一致，否则节点会在动画结束前被移除或残留。
   - 只在用户主动触发、且界面上没有其他可见变化的操作后提示成功；列表行消失、按钮状态切换等已有直接反馈的操作不再叠加提示。同一操作可能从多个入口触发时（如标记评分面板、卡片菜单），按入口是否已有可见结果决定是否提示。
   - 一次失败只由最靠近操作的一层提示：请求封装与通用写入 hook 只抛错，表单与弹窗内的失败就地显示并保留草稿，其他失败用 error 提示。部分成功写明成功与失败数量，界面只移除确认成功的部分。
-- 界面展示的错误文案一律经 `getErrorMessage(err, fallback)`（`src/lib/user-facing-error.ts`），不直接显示任意 `Error.message`：浏览器网络异常、JSON 解析错误会把英文原文透给用户。请求封装（`socialRequest`、后台 `adminGet` / `adminPost` 等）把 API 的 `error` 包成 `DisplayableError`，只有它的文案被原样展示；`isAbortError()` 为真的取消不提示。
+- 界面展示的错误文案一律经 `getErrorMessage(err, fallback)`（`src/lib/user-facing-error.ts`），不直接显示任意 `Error.message`：浏览器网络异常、JSON 解析错误会把英文原文透给用户。请求封装（`socialRequest`、后台 `adminGet` / `adminPost` 等）把 API 的 `error` 包成 `DisplayableError`，只有它的文案被原样展示，`status` 与业务 `code` 随之保留。`fetchWithAuth` 对非 2xx 直接抛 `ClientRequestError`、不读响应体，需要接口文案、404 或冲突 `code` 时用 `socialRequest`；`isAbortError()` 为真的取消不提示。
 - 读取失败不能表现为空结果：首次加载失败用 `LoadErrorState`（基于 `LoadingStatePanel`，带重试）；加载更多失败保留已加载内容与游标，`usePagedQuery` 的 `retry` 重试失败的那一页；流式搜索中断保留已收到的结果并标为未完成，不写入成功快照；部分源失败的提示条（源名称、只重试这些源）只对站长与管理员显示，普通用户不提示；全部源失败且无结果时所有人都显示不含源名称的 `LoadErrorState`，不显示为“未找到”。
 - 写操作的进行中状态：
   - `ConfirmModal` 简单模式下 `onConfirm` 返回 Promise 时，等待期间确认按钮忙碌、取消与 Esc 失效，成功后关闭，失败保持打开；需要保留确认框的调用方提示错误后要继续 reject。返回非 Promise 仍立即关闭。

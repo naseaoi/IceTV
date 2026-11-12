@@ -19,6 +19,7 @@ import {
   useCardInteractionManager,
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
+import { useOpenListPicker } from '@/components/list-picker-context';
 import {
   POSTER_CARD_INTERACTION_CLASS,
   POSTER_CARD_SUBTITLE_ROW_CLASS,
@@ -109,6 +110,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const router = useRouter();
     const interactionId = useId();
     const openWatchRecord = useOpenWatchRecord();
+    const openListPicker = useOpenListPicker();
     const prefetchTimerRef = useRef<number | null>(null);
     const {
       showActionSheet,
@@ -822,6 +824,18 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                   }),
               }
             : undefined,
+        addToList:
+          openListPicker && origin !== 'live' && recordTarget
+            ? () =>
+                openListPicker({
+                  source: recordTarget.source,
+                  id: recordTarget.id,
+                  title: actualTitle,
+                  year: actualYear,
+                  cover: actualPoster,
+                  searchTitle: actualQuery || undefined,
+                })
+            : null,
         watchRecord:
           openWatchRecord && origin !== 'live' && recordTarget
             ? () =>
@@ -872,6 +886,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       handleMarkUpdateRead,
       handleDeleteRecord,
       origin,
+      openListPicker,
       openWatchRecord,
       source_name,
       actualTitle,

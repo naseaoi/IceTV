@@ -303,7 +303,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     const profile = await this.getUserProfile(username);
     if (!profile) return null;
     const isSelf = username === viewer;
-    // 片单不公开时不统计收藏，避免经由数量泄露
+    // 收藏不公开时不统计收藏数，避免经由数量泄露
     const favoritesVisible = isSelf || profile.favorites_public > 0;
     const [counts] = await this.sql.rows<{
       followers: number;

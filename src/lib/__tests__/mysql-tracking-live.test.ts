@@ -21,8 +21,10 @@ import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
 import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { listsContract } from './__fixtures__/lists-contract';
 import { resetMysqlTestData } from './__fixtures__/mysql-test-data';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
+import { assertTrackingCalendar } from './__fixtures__/tracking-calendar-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
@@ -1381,4 +1383,94 @@ describeLive('MySQL OAuth 身份契约（真实实例）', () => {
         storage as unknown as { pool: import('mysql2/promise').Pool }
       ).pool.end();
   });
+});
+
+describeLive('MySQL 片单契约（真实实例）', () => {
+  const stores: MySqlStorage[] = [];
+  listsContract(() => {
+    const storage = new MySqlStorage(liveUrl);
+    stores.push(storage);
+    return storage;
+  }, resetMysqlTestData);
+  afterAll(async () => {
+    for (const storage of stores)
+      await (
+        storage as unknown as { pool: import('mysql2/promise').Pool }
+      ).pool.end();
+  });
+});
+
+describeLive('MySQL 片单并发（真实实例）', () => {
+  let storage: MySqlStorage;
+  beforeAll(async () => {
+    storage = new MySqlStorage(liveUrl);
+    await resetMysqlTestData(storage);
+    await storage.ensureUserProfile('lists-owner');
+  });
+  afterAll(async () => {
+    await resetMysqlTestData(storage);
+    await (
+      storage as unknown as { pool: import('mysql2/promise').Pool }
+    ).pool.end();
+  });
+  it('并发创建守住上限，重复添加幂等，旧版本排序失败', async () => {
+    for (let i = 0; i < 49; i++)
+      await storage.createList('lists-owner', { name: '片单' });
+    const created = await Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        storage.createList('lists-owner', { name: '并发' }),
+      ),
+    );
+    expect(
+      created.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(await storage.countUserLists('lists-owner')).toBe(50);
+    const list = (await storage.getLists('lists-owner', 'lists-owner'))[0];
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        storage.addListItem('lists-owner', list.id, {
+          title: '作品',
+          year: '',
+          cover: '',
+          source: '',
+          id: null,
+        }),
+      ),
+    );
+    expect(new Set(results.map((result) => result.item.id)).size).toBe(1);
+    expect(new Set(results.map((result) => result.list.version)).size).toBe(1);
+    const sorted = await Promise.allSettled(
+      Array.from({ length: 2 }, () =>
+        storage.reorderListItems(
+          'lists-owner',
+          list.id,
+          [results[0].item.id],
+          results[0].list.version,
+        ),
+      ),
+    );
+    expect(
+      sorted.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(sorted.find((result) => result.status === 'rejected')).toMatchObject(
+      { reason: { code: 'LIST_VERSION_CONFLICT' } },
+    );
+  });
+});
+
+describeLive('MySQL 追剧周历契约（真实实例）', () => {
+  let storage: MySqlStorage;
+  beforeAll(async () => {
+    storage = new MySqlStorage(liveUrl);
+    await resetMysqlTestData(storage);
+  });
+  afterAll(async () => {
+    await resetMysqlTestData(storage);
+    await (
+      storage as unknown as { pool: import('mysql2/promise').Pool }
+    ).pool.end();
+  });
+  it('候选范围、隔离、去重、集刻度与上限', async () => {
+    await assertTrackingCalendar(storage);
+  }, 30_000);
 });

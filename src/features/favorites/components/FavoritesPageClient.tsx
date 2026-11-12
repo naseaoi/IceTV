@@ -4,6 +4,7 @@ import { Heart, ListChecks, SearchX, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAuthSession } from '@/components/AuthProvider';
 import {
   LIBRARY_PILL_BUTTON_CLASS,
   LibraryEmptySkeleton,
@@ -30,7 +31,7 @@ import {
   type FavoriteSort,
 } from '@/features/favorites/lib/favorite-library';
 import type { FavoriteBatchInput } from '@/features/favorites/lib/library-query';
-import { batchFavorites } from '@/lib/db.client';
+import { batchFavorites, bindCatalogFavorites } from '@/lib/db.client';
 import { FAVORITE_RENDER_CHUNK as RENDER_CHUNK } from '@/lib/favorites-count';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
@@ -131,6 +132,10 @@ export function FavoritesPageClient({
 }: {
   favoriteSkeletonCount?: number;
 }) {
+  const { session } = useAuthSession();
+  useEffect(() => {
+    if (session.status === 'authenticated') void bindCatalogFavorites();
+  }, [session]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FavoriteFilter>('all');
   const [sort, setSort] = useState<FavoriteSort>('saved');

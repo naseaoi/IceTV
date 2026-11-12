@@ -58,6 +58,57 @@ function generateStorageKey(source: string, id: string): string {
 
 // 导出便捷方法
 class DbManager {
+  async getTrackingCalendarItems(
+    ...args: Parameters<IStorage['getTrackingCalendarItems']>
+  ): ReturnType<IStorage['getTrackingCalendarItems']> {
+    return (await this.getStorage()).getTrackingCalendarItems(...args);
+  }
+  async getLists(
+    ...args: Parameters<IStorage['getLists']>
+  ): ReturnType<IStorage['getLists']> {
+    return (await this.getStorage()).getLists(...args);
+  }
+  async countUserLists(
+    ...args: Parameters<IStorage['countUserLists']>
+  ): ReturnType<IStorage['countUserLists']> {
+    return (await this.getStorage()).countUserLists(...args);
+  }
+  async getList(
+    ...args: Parameters<IStorage['getList']>
+  ): ReturnType<IStorage['getList']> {
+    return (await this.getStorage()).getList(...args);
+  }
+  async createList(
+    ...args: Parameters<IStorage['createList']>
+  ): ReturnType<IStorage['createList']> {
+    return (await this.getStorage()).createList(...args);
+  }
+  async updateList(
+    ...args: Parameters<IStorage['updateList']>
+  ): ReturnType<IStorage['updateList']> {
+    return (await this.getStorage()).updateList(...args);
+  }
+  async deleteList(
+    ...args: Parameters<IStorage['deleteList']>
+  ): ReturnType<IStorage['deleteList']> {
+    return (await this.getStorage()).deleteList(...args);
+  }
+  async addListItem(
+    ...args: Parameters<IStorage['addListItem']>
+  ): ReturnType<IStorage['addListItem']> {
+    return (await this.getStorage()).addListItem(...args);
+  }
+  async removeListItem(
+    ...args: Parameters<IStorage['removeListItem']>
+  ): ReturnType<IStorage['removeListItem']> {
+    return (await this.getStorage()).removeListItem(...args);
+  }
+  async reorderListItems(
+    ...args: Parameters<IStorage['reorderListItems']>
+  ): ReturnType<IStorage['reorderListItems']> {
+    return (await this.getStorage()).reorderListItems(...args);
+  }
+
   private async getStorage(): Promise<IStorage> {
     return getStorage();
   }

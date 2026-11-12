@@ -7,6 +7,8 @@ import type {
 } from '@/features/favorites/lib/library-query';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 
+import { getAuthInfoFromBrowserCookie } from './auth.client';
+import { isCatalogFavoriteSource } from './catalog-favorites';
 import {
   cacheManager,
   createCacheFirstReader,
@@ -539,9 +541,16 @@ export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
   return cacheManager.getCachedFavorites();
 }
 
-async function refreshFavoritesAfterWrite(): Promise<void> {
+async function refreshFavoritesAfterWrite(
+  expectedUsername?: string,
+): Promise<void> {
   const favorites =
     await fetchFromApi<Record<string, Favorite>>('/api/favorites');
+  if (
+    expectedUsername &&
+    getAuthInfoFromBrowserCookie()?.username !== expectedUsername
+  )
+    return;
   cacheManager.cacheFavorites(favorites);
   window.dispatchEvent(
     new CustomEvent('favoritesUpdated', { detail: favorites }),
@@ -576,6 +585,35 @@ export async function batchFavorites(
   }
 }
 
+const catalogBindingSessions = new Set<string>();
+
+export async function bindCatalogFavorites(key?: string): Promise<void> {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username) return;
+  if (!key) {
+    if (catalogBindingSessions.has(username)) return;
+    catalogBindingSessions.add(username);
+  }
+  try {
+    const response = await fetchWithAuth('/api/favorites/catalog-bind', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(key ? { key } : {}),
+    });
+    const payload = await response.json();
+    const results = key ? [payload] : payload.results;
+    if (getAuthInfoFromBrowserCookie()?.username !== username) return;
+    if (
+      Array.isArray(results) &&
+      results.some((result) => result.status === 'bound')
+    ) {
+      await refreshFavoritesAfterWrite(username);
+    }
+  } catch {
+    // 后台补绑定失败保持目录收藏，等待下一会话按服务端退避重试。
+  }
+}
+
 export async function saveFavorite(
   source: string,
   id: string,
@@ -591,6 +629,9 @@ export async function saveFavorite(
     const result = (await response.json()) as { key: string };
     // 合并可能删除另一目录键，成功后以服务端快照刷新，避免缓存保留幽灵收藏。
     await refreshFavoritesAfterWrite();
+    if (isCatalogFavoriteSource(result.key.split('+')[0])) {
+      void bindCatalogFavorites(result.key);
+    }
     return result.key;
   } catch (error) {
     await handleDatabaseOperationFailure('favorites', error);

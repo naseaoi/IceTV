@@ -30,3 +30,15 @@ it('网络异常保持原样，底层文本不透传', async () => {
   await expect(socialRequest('/api/profile')).rejects.toBe(error);
   expect(getErrorMessage(error, '失败')).toBe('网络连接失败，请检查网络后重试');
 });
+it('错误保留状态码与业务 code', async () => {
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: '片单已更新', code: 'LIST_VERSION_CONFLICT' }),
+  });
+  await expect(socialRequest('/api/lists/a/order')).rejects.toMatchObject({
+    message: '片单已更新',
+    status: 409,
+    code: 'LIST_VERSION_CONFLICT',
+  });
+});

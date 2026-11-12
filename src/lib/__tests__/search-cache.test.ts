@@ -2,6 +2,7 @@ import {
   clearSearchCachesForTests,
   getCachedSearchPage,
   getSearchCacheStats,
+  loadSpecialSourceSearch,
   setCachedSearchPage,
 } from '../search-cache';
 
@@ -45,6 +46,53 @@ describe('search cache', () => {
     jest.spyOn(Date, 'now').mockReturnValue(now + 61_000);
 
     expect(getCachedSearchPage(SOURCE_KEY, 'full-result', 1)).not.toBeNull();
+  });
+
+  it('does not cache failed or empty special-source searches', async () => {
+    const failure = new Error('upstream unavailable');
+    const loader = jest
+      .fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue([]);
+
+    await expect(
+      loadSpecialSourceSearch(SOURCE_KEY, 'special-empty', loader),
+    ).rejects.toBe(failure);
+    await expect(
+      loadSpecialSourceSearch(SOURCE_KEY, 'special-empty', loader),
+    ).resolves.toEqual([]);
+    await expect(
+      loadSpecialSourceSearch(SOURCE_KEY, 'special-empty', loader),
+    ).resolves.toEqual([]);
+    expect(loader).toHaveBeenCalledTimes(3);
+  });
+
+  it('reuses non-empty special-source searches for ten minutes', async () => {
+    const now = Date.parse('2026-01-01T00:00:00.000Z');
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const results = [
+      {
+        id: '1',
+        title: 'Demo',
+        poster: '',
+        episodes: [],
+        episodes_titles: [],
+        source: SOURCE_KEY,
+        source_name: 'Source',
+        year: '2026',
+      },
+    ];
+    const loader = jest.fn().mockResolvedValue(results);
+
+    await expect(
+      loadSpecialSourceSearch(SOURCE_KEY, 'special-full', loader),
+    ).resolves.toEqual(results);
+    jest.spyOn(Date, 'now').mockReturnValue(now + 599_000);
+    await loadSpecialSourceSearch(SOURCE_KEY, 'special-full', loader);
+    expect(loader).toHaveBeenCalledTimes(1);
+    jest.spyOn(Date, 'now').mockReturnValue(now + 601_000);
+    await loadSpecialSourceSearch(SOURCE_KEY, 'special-full', loader);
+    expect(loader).toHaveBeenCalledTimes(2);
   });
 
   it('skips a search page larger than the byte budget', () => {

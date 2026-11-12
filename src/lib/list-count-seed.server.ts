@@ -18,13 +18,13 @@ async function countHistoryFirstPage(
 }
 
 // 登录时按与各列表接口相同的口径写入计数，新设备首次进入也能按真实条数渲染骨架；
-// 口径与客户端写入处保持一致：有效收藏库总数 libraryTotal、本人评价总数、历史首页条数、继续观看上限截断后的条数
+// 口径与客户端写入处保持一致：有效收藏库总数 libraryTotal、本人评价总数、历史首页条数、片单总数、继续观看上限截断后的条数
 async function computeListCounts(
   username: string,
 ): Promise<Record<ListCountCookieName, number>> {
   const params = runtimeParamsFromConfig(await getConfigForRead());
   const historyPageSize = params.PlaybackHistoryPageSize;
-  const [favorites, reviews, history, playRecords] = await Promise.all([
+  const [favorites, reviews, history, playRecords, lists] = await Promise.all([
     db.getFavoriteLibraryPage(username, {
       query: '',
       filter: 'all',
@@ -34,11 +34,13 @@ async function computeListCounts(
     db.getMyVideoReviewCount(username),
     countHistoryFirstPage(username, historyPageSize),
     db.getPlayRecordPage(username, 1),
+    db.countUserLists(username),
   ]);
   return {
     fav_count: favorites.libraryTotal,
     review_count: reviews,
     history_count: history,
+    list_count: lists,
     cw_count: Math.min(
       playRecords.total,
       normalizePlayRecordLimit(params.ContinueWatchingLimit),

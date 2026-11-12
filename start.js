@@ -134,7 +134,7 @@ function executeCronJob(task) {
 
     res.on('end', () => {
       if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-        console.log('Cron job executed successfully:', data);
+        console.log('Cron request accepted:', data);
       } else {
         console.error('Cron job failed:', res.statusCode, data);
       }

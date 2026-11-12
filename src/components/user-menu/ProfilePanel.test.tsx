@@ -93,7 +93,7 @@ it('只提交改动的字段，保存失败保留表单', async () => {
   await renderLoadedForm();
   jest.mocked(updateProfile).mockRejectedValue(new Error('保存失败'));
   const select = screen.getByRole('button', { name: '收藏公开范围' });
-  expect(select).toHaveTextContent('仅片单');
+  expect(select).toHaveTextContent('仅收藏');
   fireEvent.click(select);
   fireEvent.click(screen.getByRole('option', { name: '不公开' }));
   await act(async () => {
@@ -131,13 +131,13 @@ it('换一批保留已选中的候选头像', async () => {
   expect(after.innerHTML).toBe(before);
 });
 
-it('可以选择片单、状态与评分并保存数字等级', async () => {
+it('可以选择收藏、状态与评分并保存数字等级', async () => {
   await renderLoadedForm();
   jest
     .mocked(updateProfile)
     .mockResolvedValue({ ...savedProfile, libraryVisibility: 3 });
   fireEvent.click(screen.getByRole('button', { name: '收藏公开范围' }));
-  fireEvent.click(screen.getByRole('option', { name: '片单、状态与评分' }));
+  fireEvent.click(screen.getByRole('option', { name: '收藏、状态与评分' }));
   await act(async () => {
     fireEvent.click(saveButton());
   });

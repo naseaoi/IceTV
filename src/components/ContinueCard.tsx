@@ -23,6 +23,7 @@ import {
 } from '@/components/continue-card/layout';
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
+import { useOpenListPicker } from '@/components/list-picker-context';
 import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
@@ -100,6 +101,7 @@ export default function ContinueCard({
   const router = useRouter();
   const interactionId = useId();
   const openWatchRecord = useOpenWatchRecord();
+  const openListPicker = useOpenListPicker();
   const { showActionSheet, showConfirm } = useCardInteractionManager();
   const [visibleHasUpdate, setVisibleHasUpdate] = useState(hasUpdate);
   const [visibleTrackingEnabled, setVisibleTrackingEnabled] =
@@ -224,6 +226,17 @@ export default function ContinueCard({
               showToast('已加入收藏', 'success');
             },
           },
+          addToList: openListPicker
+            ? () =>
+                openListPicker({
+                  source,
+                  id,
+                  title,
+                  year,
+                  cover: poster,
+                  searchTitle: query || undefined,
+                })
+            : null,
           watchRecord: openWatchRecord
             ? () =>
                 openWatchRecord({
@@ -264,6 +277,7 @@ export default function ContinueCard({
       handleDelete,
       handleMarkUpdateRead,
       handleToggleTracking,
+      openListPicker,
       openWatchRecord,
       visibleHasUpdate,
       visibleTrackingEnabled,
@@ -323,8 +337,10 @@ export default function ContinueCard({
           sizes={CONTINUE_CARD_COVER_SIZES}
           checkClientCacheBeforeLoad
         />
+        {/* 两种浮层用不同 key 各自挂载，复用同一节点会在切换时互相过渡出黑屏与播放按钮 */}
         {selectable ? (
           <div
+            key='select'
             className={`absolute inset-0 transition ${
               selected ? 'bg-black/30' : 'group-hover:bg-black/10'
             }`}
@@ -340,7 +356,10 @@ export default function ContinueCard({
             </span>
           </div>
         ) : (
-          <div className='absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100'>
+          <div
+            key='play'
+            className='absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100'
+          >
             <span className='flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-gray-900 shadow-lg'>
               <Play
                 aria-hidden='true'

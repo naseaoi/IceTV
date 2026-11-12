@@ -4,12 +4,19 @@ import { FavoritesPageClient } from '@/features/favorites/components/FavoritesPa
 import type { FavoriteItem } from '@/features/favorites/types';
 
 const mockBatch = jest.fn();
+const mockBind = jest.fn();
+jest.mock('@/components/AuthProvider', () => ({
+  useAuthSession: () => ({
+    session: { status: 'authenticated', profileId: 'alice' },
+  }),
+}));
 const mockRetry = jest.fn();
 let mockRefreshing = false;
 let mockError: string | null = null;
 
 jest.mock('@/lib/db.client', () => ({
   batchFavorites: (...args: unknown[]) => mockBatch(...args),
+  bindCatalogFavorites: (...args: unknown[]) => mockBind(...args),
 }));
 jest.mock('@/components/LibraryPage', () => ({
   LIBRARY_PILL_BUTTON_CLASS: '',

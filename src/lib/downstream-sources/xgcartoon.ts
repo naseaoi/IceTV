@@ -4,6 +4,7 @@ import {
   readTextLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -21,7 +22,6 @@ import {
   BROWSER_HTML_HEADERS,
   createTimedAbortController,
   getSiteOrigin,
-  isAbortError,
   toAbsoluteUrl,
   uniqueOrigins,
 } from './shared';
@@ -145,7 +145,8 @@ export async function searchFromXgcartoon(
       signal,
     );
     if (!result) {
-      return [];
+      if (signal?.aborted) return [];
+      throw new SearchSourceUnavailableError(apiSite.name);
     }
 
     const results = extractXgcartoonSearchResults(result.html).filter((item) =>
@@ -167,11 +168,9 @@ export async function searchFromXgcartoon(
       douban_id: 0,
     }));
   } catch (error) {
-    if (isAbortError(error)) {
-      return [];
-    }
+    if (signal?.aborted) return [];
     if (error instanceof ResourceLimitError) throw error;
-    return [];
+    throw new SearchSourceUnavailableError(apiSite.name);
   }
 }
 

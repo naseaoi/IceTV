@@ -361,7 +361,7 @@ function WatchRecordForm({
           is_public: isPublic,
           spoiler,
         });
-        // 评价独立于收藏：作品不在片单时一并加入，状态由评分自动推导
+        // 评价独立于收藏：作品未收藏时一并加入，状态由评分自动推导
         if (!inList) {
           await saveFavorite(target.source, target.id, buildFavorite());
         }
@@ -375,7 +375,7 @@ function WatchRecordForm({
         const parsed = entry && parseStorageKey(entry.key);
         if (parsed) await deleteFavorite(parsed.source, parsed.id);
       },
-      target.feedback?.favoriteVisible ? undefined : '已移出片单',
+      target.feedback?.favoriteVisible ? undefined : '已移出收藏',
     );
 
   return (
@@ -527,7 +527,7 @@ function WatchRecordForm({
             onClick={() => setConfirmRemove(true)}
             className='-ml-3 inline-flex h-9 items-center rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-rose-500/10 hover:text-rose-500 disabled:opacity-50 dark:text-gray-400'
           >
-            移出片单
+            移出收藏
           </button>
         ) : (
           <span />
@@ -545,7 +545,7 @@ function WatchRecordForm({
 
       <ConfirmModal
         isOpen={confirmRemove}
-        title='移出片单？'
+        title='移出收藏？'
         message={`「${target.title}」的观看状态会一并移除，评价会保留。`}
         danger
         cancelText='再想想'

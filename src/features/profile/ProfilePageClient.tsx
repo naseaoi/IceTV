@@ -23,6 +23,7 @@ import {
   FavoriteGrid,
   ReadOnlyFavoriteGridSkeleton,
 } from '@/features/favorites/components/FavoriteGrid';
+import { ProfileLists } from '@/features/lists/components/ProfileLists';
 import {
   FollowList,
   PageFooter,
@@ -51,6 +52,12 @@ const PROFILE_STATS_CLASS = 'mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm';
 const PROFILE_STAT_VALUE_CLASS = 'mr-1 font-semibold tabular-nums';
 const PROFILE_STAT_LABELS = ['评价', '关注', '粉丝'] as const;
 const LIST_SKELETON_LIMIT = 20;
+const PROFILE_TABS = [
+  ['reviews', '评价'],
+  ['favorites', '收藏'],
+  ['lists', '片单'],
+] as const;
+type ProfileTab = (typeof PROFILE_TABS)[number][0];
 const DEFAULT_REVIEW_SKELETON_COUNT = 3;
 // 资料返回前无从得知评价数，沿用本次会话里上次看到的数量
 const knownReviewCounts = new Map<string, number>();
@@ -290,7 +297,7 @@ function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
         </div>
       </div>
       <div className='mb-6 flex gap-2 border-b border-gray-200 dark:border-white/10'>
-        {['评价', '收藏'].map((label) => (
+        {['评价', '收藏', '片单'].map((label) => (
           <span
             key={label}
             className='border-b-2 border-transparent px-5 py-3 text-sm text-gray-500'
@@ -338,7 +345,7 @@ export default function ProfilePageClient({
   );
   const [error, setError] = useState('');
   const [version, setVersion] = useState(0);
-  const [tab, setTab] = useState<'reviews' | 'favorites'>('reviews');
+  const [tab, setTab] = useState<ProfileTab>('reviews');
   const [list, setList] = useState<'followers' | 'following' | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -403,7 +410,7 @@ export default function ProfilePageClient({
       activePath='/me'
       mobileHeader={{ title: profile?.nickname ?? '个人主页', showBack: true }}
     >
-      <main className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-10`}>
+      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-10`}>
         <div className='mx-auto max-w-4xl'>
           {error && (
             <div
@@ -516,7 +523,7 @@ export default function ProfilePageClient({
                 aria-label='个人主页内容'
                 className='mb-6 flex gap-2 border-b border-gray-200 dark:border-white/10'
               >
-                {(['reviews', 'favorites'] as const).map((value) => (
+                {PROFILE_TABS.map(([value, label]) => (
                   <button
                     key={value}
                     type='button'
@@ -525,11 +532,17 @@ export default function ProfilePageClient({
                     onClick={() => setTab(value)}
                     className={`border-b-2 px-5 py-3 text-sm ${tab === value ? 'border-brand-600 font-semibold text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500'}`}
                   >
-                    {value === 'reviews' ? '评价' : '收藏'}
+                    {label}
                   </button>
                 ))}
               </div>
-              {tab === 'reviews' ? (
+              {tab === 'lists' ? (
+                <ProfileLists
+                  key={`${profileId}:${version}`}
+                  profileId={profileId}
+                  isSelf={profile.isSelf}
+                />
+              ) : tab === 'reviews' ? (
                 <ProfileReviews
                   profileId={profileId}
                   isSelf={profile.isSelf}
@@ -572,7 +585,7 @@ export default function ProfilePageClient({
             )
           )}
         </div>
-      </main>
+      </div>
     </PageLayout>
   );
 }

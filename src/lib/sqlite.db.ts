@@ -13,6 +13,11 @@ import {
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
 import {
+  type TrackingCalendarRow,
+  trackingCalendarItems,
+  trackingCalendarSql,
+} from '@/features/continue-watching/lib/tracking-calendar-storage';
+import {
   favoriteMessageQueries,
   favoriteMessagesFromRows,
   favoriteReadStatement,
@@ -37,6 +42,12 @@ import {
   favoriteProjection,
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
+import {
+  type ListPlan,
+  type ListRow,
+  ListPlans,
+  listSchema,
+} from '@/features/lists/lib/list-storage';
 import {
   type PlaybackSourceUsage,
   type PlaybackSourceUsageRow,
@@ -608,6 +619,7 @@ export class LocalSqliteStorage implements IStorage {
         );
     }
     for (const statement of userNoticeSchema('sqlite')) this.db.exec(statement);
+    for (const statement of listSchema('sqlite')) this.db.exec(statement);
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
@@ -1576,6 +1588,9 @@ export class LocalSqliteStorage implements IStorage {
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
         this.db
+          .prepare('UPDATE user_lists SET username = ? WHERE username = ?')
+          .run(canonical, legacy);
+        this.db
           .prepare(
             `INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at)
           SELECT ?, year, time_zone, hide_rhythm, report_json, published_at, updated_at FROM user_annual_recaps WHERE username = ?
@@ -1744,6 +1759,7 @@ export class LocalSqliteStorage implements IStorage {
       'oauth_identities',
       'user_danmaku',
       'user_profiles',
+      'user_lists',
       'user_access',
       'user_group_members',
       'search_history',
@@ -2320,6 +2336,78 @@ export class LocalSqliteStorage implements IStorage {
   async deleteAllFavorites(userName: string): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.deleteFavoritesByUser.run(username);
+  }
+
+  private runListPlan<T>(plan: ListPlan<T>): T {
+    return this.db
+      .transaction(() => {
+        let step = plan.next();
+        while (!step.done) {
+          const { sql, params } = step.value;
+          const query = this.db.prepare(sql);
+          const rows = query.reader
+            ? (query.all(...params) as ListRow[])
+            : (query.run(...params), []);
+          step = plan.next(rows);
+        }
+        return step.value;
+      })
+      .immediate();
+  }
+  async getTrackingCalendarItems(
+    userName: string,
+  ): ReturnType<IStorage['getTrackingCalendarItems']> {
+    const username = normalizeUsername(userName);
+    const rows = this.db
+      .prepare(trackingCalendarSql('sqlite'))
+      .all(username, username) as TrackingCalendarRow[];
+    return trackingCalendarItems(rows as TrackingCalendarRow[]);
+  }
+
+  async getLists(
+    ...args: Parameters<IStorage['getLists']>
+  ): ReturnType<IStorage['getLists']> {
+    return this.runListPlan(new ListPlans('sqlite').getLists(...args));
+  }
+  async countUserLists(
+    ...args: Parameters<IStorage['countUserLists']>
+  ): ReturnType<IStorage['countUserLists']> {
+    return this.runListPlan(new ListPlans('sqlite').countUserLists(...args));
+  }
+  async getList(
+    ...args: Parameters<IStorage['getList']>
+  ): ReturnType<IStorage['getList']> {
+    return this.runListPlan(new ListPlans('sqlite').getList(...args));
+  }
+  async createList(
+    ...args: Parameters<IStorage['createList']>
+  ): ReturnType<IStorage['createList']> {
+    return this.runListPlan(new ListPlans('sqlite').createList(...args));
+  }
+  async updateList(
+    ...args: Parameters<IStorage['updateList']>
+  ): ReturnType<IStorage['updateList']> {
+    return this.runListPlan(new ListPlans('sqlite').updateList(...args));
+  }
+  async deleteList(
+    ...args: Parameters<IStorage['deleteList']>
+  ): ReturnType<IStorage['deleteList']> {
+    return this.runListPlan(new ListPlans('sqlite').deleteList(...args));
+  }
+  async addListItem(
+    ...args: Parameters<IStorage['addListItem']>
+  ): ReturnType<IStorage['addListItem']> {
+    return this.runListPlan(new ListPlans('sqlite').addListItem(...args));
+  }
+  async removeListItem(
+    ...args: Parameters<IStorage['removeListItem']>
+  ): ReturnType<IStorage['removeListItem']> {
+    return this.runListPlan(new ListPlans('sqlite').removeListItem(...args));
+  }
+  async reorderListItems(
+    ...args: Parameters<IStorage['reorderListItems']>
+  ): ReturnType<IStorage['reorderListItems']> {
+    return this.runListPlan(new ListPlans('sqlite').reorderListItems(...args));
   }
 
   private get social() {
@@ -3002,6 +3090,14 @@ export class LocalSqliteStorage implements IStorage {
         )
           return false;
       }
+      this.db
+        .prepare(
+          'DELETE FROM user_list_items WHERE list_id IN (SELECT id FROM user_lists WHERE username = ?)',
+        )
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_lists WHERE username = ?')
+        .run(targetUser);
       this.db
         .prepare('DELETE FROM user_profiles WHERE username = ?')
         .run(targetUser);

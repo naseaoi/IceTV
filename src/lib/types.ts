@@ -64,6 +64,12 @@ export interface Favorite {
   update_detected_at?: number;
   watch_status?: FavoriteWatchStatus;
   watched_at?: number;
+  catalog_bind?: {
+    status: 'skipped' | 'failed';
+    retry_at?: number;
+    attempts?: number;
+  };
+  catalog_origin?: { key: string; title: string; year: string };
 }
 
 // 评价按作品身份（normalizeWorkTitle + normalizeWorkYear）存储，与源站无关
@@ -494,8 +500,15 @@ export interface SiteAnnouncement {
   publishedAt: number | null;
 }
 
+import type { ListStore } from '@/features/lists/lib/list-storage';
+
 // 存储接口
-export interface IStorage {
+export interface IStorage extends ListStore {
+  getTrackingCalendarItems(
+    username: string,
+  ): Promise<
+    import('@/features/continue-watching/lib/tracking-calendar').TrackingCalendarItem[]
+  >;
   getAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecap'];
   getAnnualRecapYears: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecapYears'];
   saveAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['saveAnnualRecap'];

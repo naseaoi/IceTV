@@ -13,6 +13,7 @@ import {
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import { useOpenListPicker } from '@/components/list-picker-context';
 import {
   POSTER_CARD_COVER_CLASS,
   POSTER_CARD_INTERACTION_CLASS,
@@ -77,6 +78,7 @@ export function PlaybackPosterCard({
 }: PlaybackPosterCardProps) {
   const interactionId = useId();
   const openWatchRecord = useOpenWatchRecord();
+  const openListPicker = useOpenListPicker();
   const {
     showActionSheet,
     hideActionSheet,
@@ -165,6 +167,18 @@ export function PlaybackPosterCard({
                 onToggle: () => toggleFavorite(current, true),
               }
             : undefined,
+          addToList:
+            openListPicker && hasTarget
+              ? () =>
+                  openListPicker({
+                    source,
+                    id: videoId,
+                    title,
+                    year: year || record?.year || '',
+                    cover: cover || record?.cover || '',
+                    searchTitle: record?.search_title || undefined,
+                  })
+              : null,
           watchRecord:
             openWatchRecord && hasTarget
               ? () =>
@@ -204,6 +218,7 @@ export function PlaybackPosterCard({
       interactionId,
       onDelete,
       onPlay,
+      openListPicker,
       openWatchRecord,
       selectable,
       showActionSheet,

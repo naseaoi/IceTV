@@ -37,14 +37,23 @@
 - 有效观看状态（想看 / 在看 / 看过）与看过时间只在 `src/features/favorites/lib/library-storage.ts` 的 SQL 中推导：手动 `watch_status` 优先，其次评分或末集进度 ≥ 90% 判看过，有播放记录判在看。收藏库、按作品查询、批量匹配与公开收藏共用这段 SQL，**不要在前端或其他查询里另写推导**，否则计数与列表对不上。
 - 收藏列表与收藏数经收藏库查询获取（`libraryStatements()`，接口 `/api/favorites?format=library`，客户端 `src/features/favorites/lib/library-client.ts`）：「我的」页收藏栏按 `limit` 取前几条，登录写入的收藏计数取 `libraryTotal`。收藏范围统一为 `library_valid = 1`，公开范围再加 `profileFavoriteOriginSql()`；个人主页收藏数这类单独的 `COUNT` 必须沿用同样条件，否则与列表对不上。
 - 状态修改与批量移出走 `POST /api/favorites/batch`；全选提交筛选条件加排除项，筛选语义与 `/api/favorites?format=library` 同一实现，不要先拉全量键再提交。
-- `user_profiles.favorites_public` 存公开等级 0–3（不公开 / 片单 / 加状态 / 加评分），接口字段为 `libraryVisibility`，本人始终按 3 级查看。公开评分只取 `is_public = 1` 的评价；精确年份的私密评价存在时不回落到空年份评价，避免泄露私密评分。
+- `user_profiles.favorites_public` 存公开等级 0–3（不公开 / 仅收藏 / 加状态 / 加评分），接口字段为 `libraryVisibility`，本人始终按 3 级查看。公开评分只取 `is_public = 1` 的评价；精确年份的私密评价存在时不回落到空年份评价，避免泄露私密评分。
 
 ## 目录收藏
 
 - 豆瓣 / Bangumi 目录收藏的键是 `douban+<id>` / `bangumi+<id>`，判定统一用 `isCatalogFavoriteSource()`（`src/lib/catalog-favorites.ts`）。它们没有播放源：点击按标题起播，元数据刷新等假设可播放源的路径须跳过；`douban` / `bangumi` 作为源 key 保留，后台、配置文件与订阅导入均拒绝。
 - 写入收藏时服务端按作品身份（`title_norm` + 年份）合并目录收藏与真实源收藏，最终键可能与提交的键不同。调用方以 `saveFavorite()` 返回的键为准，不要沿用本地拼出的键。
+- 保存目录收藏后客户端后台调用 `POST /api/favorites/catalog-bind`（`{ key }`）；收藏页在每个标签页会话内按账号调用一次 `{}`，最多绑定两条到期目录收藏。绑定复用 quick 选源服务、用户源权限与回源预算，要求标题身份一致、目录和详情年份精确匹配、完整详情有剧集；缺年份或详情已完结（含单集电影）永久跳过。
+- `catalog_bind` 在收藏 JSON 中保存跳过或失败状态；失败从 30 分钟指数退避至最多 24 小时。绑定状态由服务端维护，重存保留，客户端不能覆盖。绑定成功以真实源键吸收目录项，保留 `catalog_origin`、保存时间、手动观看状态与评价身份；事务内复核目录快照，期间删除或修改不会被旧绑定结果覆盖。后台失败静默，成功触发现有收藏刷新事件。
+
+## 片单
+
+- 片单条目是独立的作品快照，取消收藏、目录收藏合并和来源移除均不改动条目；目录或无来源的条目不保存可播放源编号。作品去重使用服务端归一化标题与精确年份，空年份与具体年份各自独立。
+- 单个用户至多 50 个片单、每单至多 200 部作品。数量检查与写入在同一事务；SQLite 用即时事务，MySQL 先锁用户资料再锁片单，覆盖没有 `users` 行的站长。大小写合并保留两侧既有片单，合并后的数量超过上限时只限制继续新建。
+- 元数据、条目和排序修改同事务维护计数、版本与更新时间；重复作品添加返回已有条目且不推进版本。排序提交全部条目 ID 与当前版本，版本过期返回 409 `LIST_VERSION_CONFLICT`，版本有效但条目集合不一致返回 400。客户端刷新冲突后的片单再重新排序。
+- 分享链接和公开片单同样要求登录；他人私密片单、无权写入的片单与不存在的片单统一返回 404。公开响应只含 `profileId`、昵称与头像种子，登录名只在存储层传递。
 
 ## 入口复用
 
-- 标记评分面板由根布局的 `WatchRecordProvider` 挂载，卡片菜单经 `useOpenWatchRecord()` 打开（`src/components/watch-record-context.ts`），未登录时返回 null 隐藏入口。新入口复用它，评价编辑复用 `src/features/reviews/`。
-- 卡片右键 / 长按菜单统一经 `buildCardActions()`（`src/components/card-actions/actions.tsx`）组装，顺序固定为播放 → 收藏 → 标记评分 → 标为已读 / 追更 → 外部详情 → 删除记录；卡片只决定提供哪些项，不要在卡片里手排数组。
+- 标记评分面板由根布局的 `WatchRecordProvider` 挂载，卡片菜单经 `useOpenWatchRecord()` 打开（`src/components/watch-record-context.ts`）；「加入片单」弹窗同样由根布局的 `ListPickerProvider` 挂载，经 `useOpenListPicker()`（`src/components/list-picker-context.ts`）打开。两者未登录时返回 null 隐藏入口。新入口复用它，评价编辑复用 `src/features/reviews/`。
+- 卡片右键 / 长按菜单统一经 `buildCardActions()`（`src/components/card-actions/actions.tsx`）组装，顺序固定为播放 → 收藏 → 加入片单 → 标记评分 → 标为已读 / 追更 → 外部详情 → 删除记录；卡片只决定提供哪些项，不要在卡片里手排数组。

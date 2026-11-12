@@ -1,4 +1,6 @@
 /** @jest-environment node */
+import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
+import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
 import {
   assertBatchDeletePlayRecords,
@@ -9,13 +11,20 @@ import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
-import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
 import { announcementContract } from './__fixtures__/announcement-contract';
+import { listsContract } from './__fixtures__/lists-contract';
+import {
+  type ListFakeState,
+  executeLists,
+  queryLists,
+} from './__fixtures__/lists-fake-sql';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
+import { assertTrackingCalendar } from './__fixtures__/tracking-calendar-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
 
@@ -52,7 +61,7 @@ type HealthPlayRow = {
   failureCount: number;
 };
 
-type FakeState = {
+type FakeState = ListFakeState & {
   announcements: Map<string, AnnouncementRow>;
   healthSearch: HealthSearchRow[];
   healthPlay: HealthPlayRow[];
@@ -95,6 +104,8 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    lists: state.lists.map((row) => ({ ...row })),
+    listItems: state.listItems.map((row) => ({ ...row })),
     announcements: new Map(
       [...state.announcements].map(([id, row]) => [id, { ...row }]),
     ),
@@ -149,6 +160,8 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    lists: [],
+    listItems: [],
     announcements: new Map(),
     healthSearch: [],
     healthPlay: [],
@@ -770,6 +783,8 @@ function createFakePool() {
       if (row) row.provider_username = params[0];
       return [{ affectedRows: row ? 1 : 0 }, []];
     }
+    const listResult = executeLists(normalized, params, currentState);
+    if (listResult !== undefined) return [{ affectedRows: listResult }, []];
     const socialResult = executeSocial(normalized, params, currentState);
     if (socialResult !== undefined) return [{ affectedRows: socialResult }, []];
     if (
@@ -1874,6 +1889,73 @@ function createFakePool() {
         currentState.users.has(String(params[0]))
           ? [{ username: params[0] }]
           : [],
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT entry_key, entry_json, origin, has_update FROM (',
+      )
+    ) {
+      const records =
+        currentState.playRecords.get(String(params[0])) ??
+        new Map<string, string>();
+      const favorites =
+        currentState.favorites.get(String(params[1])) ??
+        new Map<string, string>();
+      const rows: {
+        entry_key: string;
+        entry_json: string;
+        origin: string;
+        has_update: number;
+        activity: number;
+      }[] = [];
+      for (const [key, json] of records) {
+        const record = JSON.parse(json) as PlayRecord;
+        if (isTrackingEnabled(record) && record.series_status !== 'ended')
+          rows.push({
+            entry_key: key,
+            entry_json: json,
+            origin: 'record',
+            has_update: hasPlayRecordUpdate(record) ? 1 : 0,
+            activity: record.save_time,
+          });
+      }
+      for (const [key, json] of favorites) {
+        const favorite = JSON.parse(json) as Favorite;
+        if (
+          !records.has(key) &&
+          !/^(douban|bangumi)+/.test(key) &&
+          (favorite.origin ?? 'vod') === 'vod' &&
+          favoriteProjection(key, json)[5]
+        )
+          rows.push({
+            entry_key: key,
+            entry_json: json,
+            origin: 'favorite',
+            has_update: buildFavoriteUpdateMessage(key, favorite) ? 1 : 0,
+            activity: favorite.save_time,
+          });
+      }
+      return [
+        rows
+          .sort(
+            (a, b) =>
+              b.activity - a.activity || b.entry_key.localeCompare(a.entry_key),
+          )
+          .slice(0, 200),
+        [],
+      ];
+    }
+    const listRows = queryLists(normalized, params, currentState);
+    if (listRows !== undefined) return [listRows, []];
+    if (
+      normalized ===
+      'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE'
+    )
+      return [
+        currentState.social.user_profiles.filter(
+          (row) => row.username === params[0],
+        ),
         [],
       ];
     const socialRows = querySocial(normalized, params, currentState);
@@ -3889,5 +3971,17 @@ describe('MySQL OAuth 身份契约（fake pool）', () => {
 describe('MySQL announcements (fake pool)', () => {
   announcementContract(
     () => new MySqlStorage('mysql://root:password@localhost:3306/icetv'),
+  );
+});
+
+describe('MySQL 片单契约（fake pool）', () => {
+  listsContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+  );
+});
+
+it('MySQL 追剧周历契约（fake pool）', async () => {
+  await assertTrackingCalendar(
+    new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
   );
 });

@@ -7,7 +7,7 @@
 - 聚合执行 `runSearchAggregation()`，聚合缓存 `src/lib/search-cache.ts`，失败源冷却 `src/lib/search-aggregate.ts`。不要在页面层重新实现聚合、缓存或失败冷却。
 - `/api/search` 命中新鲜缓存直接返回；命中过期缓存先返回旧结果再后台刷新。
 - 单源异常（含回源额度申请失败）不让整体搜索失败，接口仍可 200；判断源是否可用看健康数据，不看搜索接口状态码。
-- 失败源与空结果分开上报：`searchFromApi()` 默认把第 1 页失败（超时、非 2xx、网络或 JSON 异常，含页缓存里的 `timeout` / `forbidden`）当空结果返回；聚合传 `reportFailure` 让它抛 `SearchSourceUnavailableError`，经 `collectSearchAggregation()` 记入 `failedSources`。这类失败只靠页缓存短期记住，不进整源失败冷却。上游返回 `list` 不是数组时健康样本记 error，但搜索仍按空结果处理。giri / xgcartoon 失败与无结果都返回空数组，不会上报失败。
+- 失败源与空结果分开上报：`searchFromApi()` 默认把第 1 页失败（超时、非 2xx、网络或 JSON 异常，含页缓存里的 `timeout` / `forbidden`）当空结果返回；聚合传 `reportFailure` 让它抛 `SearchSourceUnavailableError`，经 `collectSearchAggregation()` 记入 `failedSources`。这类失败只靠页缓存短期记住，不进整源失败冷却。普通源上游返回 `list` 不是数组时健康样本记 error，但搜索仍按空结果处理。giri / xgcartoon 回源失败或解析异常同样在聚合中上报 `SearchSourceUnavailableError`，记入 `failedSources` 且不进整源失败冷却；真正无结果返回空数组。默认搜索与仅取第一页的搜索入口保持失败返回空数组，供 quick、搜索建议和详情回退使用。
 - 聚合缓存条目同时保存 `failedSources`：`/api/search` 返回 `totalSources` 与 `failedSources`，流式搜索命中缓存时为它们重放 `source_error`。客户端重试只经 `/api/search/ws?retry=<源 key,…>` 重搜失败源：跳过失败冷却与第 1 页缓存，结果经 `mergeRetriedSearchAggregate()` 替换本实例缓存中这些源的部分；缓存不存在时不凭局部结果新建。
 - `/api/search/quick` 保留用户可用源、作品/年份/类别过滤、健康等级排序、最多 10 源与 4 槽竞速；同等或更好健康等级的直连源保留 1500ms 优先窗口。普通源搜索结果具有源/id、标题、封面、四位年份、源名称、非空 HTTP(S) m3u8/mp4 剧集及逐集标题，且不带分组、关联版本或版本标签时，直接参与竞速；特殊源、懒地址与字段不完整的候选仍先取详情，保留详情字段覆盖与失败后的搜索结果回退。
 - quick 胜者的搜索快照不作为完整详情写缓存；胜出后非阻塞调用共享详情加载，保留详情缓存填充。客户端 quick 分支保存快照并起播；当前的快照后台校验仅在按源/id 读取快照的入口执行，quick 首次起播本身不保证收到新详情。
@@ -45,4 +45,4 @@
 解析结果与特殊源搜索跨实例共享，均按源配置（`getSourceCacheKey()`）分区：
 
 - `src/app/api/episode-url/cache.ts`：不带签名参数（`src/lib/signed-url-params.ts`）的播放地址进共享缓存 `episode-url-v1`，30 分钟新鲜、2 小时陈旧；带签名参数的地址可能绑定出口或短期过期，只留在本实例。解析逻辑改变结果格式或有效期时升级缓存名版本，否则各实例继续命中旧结果。新增解析源若依赖 Cookie、会话或出口 IP，结果不能进共享缓存。
-- giri / xgcartoon 搜索经 `loadSpecialSourceSearch()`（`src/lib/search-cache.ts`）共享非空结果 10 分钟。它们把失败与无结果都返回空数组，空结果因此不缓存。
+- giri / xgcartoon 搜索经 `loadSpecialSourceSearch()`（`src/lib/search-cache.ts`）共享非空结果 10 分钟。失败由 loader 抛出，失败与空结果均不缓存；失败源重试沿用聚合入口。
