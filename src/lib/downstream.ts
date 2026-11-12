@@ -25,12 +25,14 @@ import {
   normalizeRuntimeParams,
 } from '@/lib/runtime-params';
 import {
+  type SearchPageLoadResult,
   dedupeSearchLoad,
   getCachedSearchPage,
   loadSpecialSourceSearch,
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { parseSeriesStatus } from '@/lib/series-status';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
@@ -61,6 +63,10 @@ interface ApiSearchItem {
 interface SearchFromApiOptions {
   maxSearchPages?: number;
   signal?: AbortSignal;
+  // 第 1 页失败时抛 SearchSourceUnavailableError，而不是返回空结果
+  reportFailure?: boolean;
+  // 第 1 页跳过缓存与在途合并，直接回源
+  refreshFirstPage?: boolean;
 }
 
 const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
@@ -118,7 +124,7 @@ async function searchWithCache(
   url: string,
   timeoutMs = 8000,
   signal?: AbortSignal,
-): Promise<{ results: SearchResult[]; pageCount?: number }> {
+): Promise<SearchPageLoadResult> {
   if (signal?.aborted) {
     return { results: [] };
   }
@@ -129,7 +135,7 @@ async function searchWithCache(
     if (cached.status === 'ok') {
       return { results: cached.data, pageCount: cached.pageCount };
     } else {
-      return { results: [] };
+      return { results: [], failed: true };
     }
   }
 
@@ -141,7 +147,7 @@ async function searchWithCache(
     if (stale.entry.status === 'ok') {
       return { results: stale.entry.data, pageCount: stale.entry.pageCount };
     }
-    return { results: [] };
+    return { results: [], failed: true };
   }
 
   return waitForSharedLoad(
@@ -160,7 +166,7 @@ async function fetchAndCacheSearchPage(
   url: string,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<{ results: SearchResult[]; pageCount?: number }> {
+): Promise<SearchPageLoadResult> {
   if (signal?.aborted) {
     return { results: [] };
   }
@@ -188,7 +194,7 @@ async function fetchAndCacheSearchPage(
           [],
         );
       }
-      return { results: [] };
+      return { results: [], failed: true };
     }
 
     const data = await readJsonLimited<any>(
@@ -274,7 +280,7 @@ async function fetchAndCacheSearchPage(
         [],
       );
     }
-    return { results: [] };
+    return { results: [], failed: !abortedByParent };
   } finally {
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
@@ -370,14 +376,30 @@ export async function searchFromApi(
     const apiUrl =
       apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
 
-    const firstPageResult = await searchWithCache(
-      apiSite,
-      query,
-      1,
-      apiUrl,
-      searchTimeoutMs,
-      options.signal,
-    );
+    const firstPageResult = options.refreshFirstPage
+      ? await fetchAndCacheSearchPage(
+          apiSite,
+          query,
+          1,
+          apiUrl,
+          searchTimeoutMs,
+          options.signal,
+        )
+      : await searchWithCache(
+          apiSite,
+          query,
+          1,
+          apiUrl,
+          searchTimeoutMs,
+          options.signal,
+        );
+    if (
+      firstPageResult.failed &&
+      options.reportFailure &&
+      !options.signal?.aborted
+    ) {
+      throw new SearchSourceUnavailableError(apiSite.name);
+    }
     const results = [...firstPageResult.results];
     const pageCountFromFirst = firstPageResult.pageCount;
 
@@ -429,7 +451,12 @@ export async function searchFromApi(
 
     return uniqueSearchResults(results);
   } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
+    if (
+      error instanceof ResourceLimitError ||
+      error instanceof SearchSourceUnavailableError
+    ) {
+      throw error;
+    }
     return [];
   }
 }

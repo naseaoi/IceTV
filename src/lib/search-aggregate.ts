@@ -3,6 +3,8 @@ import { getUpstreamSearchConcurrency } from '@/lib/cache-budget-profile';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import type { CachedSearchAggregateEntry } from '@/lib/search-cache';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import {
   type SourceHealthTier,
   SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
@@ -21,6 +23,8 @@ export interface SearchAggregationOptions {
   sourceTimeoutMs?: number;
   sourceHealthTiers?: ReadonlyMap<string, SourceHealthTier>;
   shouldContinue?: () => boolean;
+  // 用户主动重试失败源：跳过失败冷却与第 1 页缓存
+  retryFailed?: boolean;
   onSourceResult?: (site: ApiSite, results: SearchResult[]) => void;
   onSourceError?: (site: ApiSite, error: unknown) => void;
 }
@@ -54,6 +58,7 @@ export async function runSearchAggregation({
   sourceTimeoutMs,
   sourceHealthTiers,
   shouldContinue,
+  retryFailed = false,
   onSourceResult,
   onSourceError,
 }: SearchAggregationOptions): Promise<SearchResult[]> {
@@ -65,7 +70,9 @@ export async function runSearchAggregation({
   upstreamSearchGate.setLimit(sourceConcurrency);
 
   const searchTasks = apiSites.map((site) => async () => {
-    const cooldown = getSourceFailureCooldown(site, sourceFailureCooldownMs);
+    const cooldown = retryFailed
+      ? null
+      : getSourceFailureCooldown(site, sourceFailureCooldownMs);
     if (cooldown) {
       onSourceError?.(site, cooldown.error);
       return [];
@@ -96,6 +103,8 @@ export async function runSearchAggregation({
           searchFromApi(site, query, {
             maxSearchPages,
             signal: childSignal,
+            reportFailure: true,
+            refreshFirstPage: retryFailed,
           }),
         sourceHealthTiers?.get(site.key) === 'offline'
           ? Math.min(timeoutMs, SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS)
@@ -116,7 +125,11 @@ export async function runSearchAggregation({
         `搜索失败 ${site.name}:`,
         error instanceof Error ? error.message : error,
       );
-      if (!signal?.aborted) {
+      // 单页失败已由页缓存短期记住，不再整源冷却
+      if (
+        !signal?.aborted &&
+        !(error instanceof SearchSourceUnavailableError)
+      ) {
         markSourceFailureCooldown(site, error, sourceFailureCooldownMs);
       }
       onSourceError?.(site, error);
@@ -135,6 +148,21 @@ export async function runSearchAggregation({
   return results
     .filter((result) => result.status === 'fulfilled')
     .flatMap((result) => result.value);
+}
+
+// 聚合并记录失败源，供缓存与客户端区分“没搜到”和“没搜全”
+export async function collectSearchAggregation(
+  options: SearchAggregationOptions,
+): Promise<CachedSearchAggregateEntry> {
+  const failedSources: string[] = [];
+  const results = await runSearchAggregation({
+    ...options,
+    onSourceError: (site, error) => {
+      if (!options.signal?.aborted) failedSources.push(site.key);
+      options.onSourceError?.(site, error);
+    },
+  });
+  return { results, failedSources };
 }
 
 export function clearSearchSourceFailureCooldownsForTests(): void {

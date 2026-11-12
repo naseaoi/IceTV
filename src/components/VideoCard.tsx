@@ -404,6 +404,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       }
     }, [isAggregate, aggregateGroup]);
 
+    const posterAlternates = useMemo(
+      () =>
+        isAggregate && aggregateGroup && aggregateGroup.length > 1
+          ? aggregateGroup.map((item) => item.poster)
+          : undefined,
+      [isAggregate, aggregateGroup],
+    );
+
     const isSingleAggregate = isAggregate && aggregateGroup?.length === 1;
     const aggregateSourceCount = isAggregate
       ? new Set((aggregateGroup || []).map((item) => item.source)).size
@@ -960,6 +968,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           <VideoCardPoster
             title={actualTitle}
             poster={actualPoster}
+            posterAlternates={posterAlternates}
             priority={priority}
             origin={origin}
             from={from}

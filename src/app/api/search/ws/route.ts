@@ -4,12 +4,17 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getSearchSourceConcurrency } from '@/lib/cache-budget-profile';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
-import { runSearchAggregation } from '@/lib/search-aggregate';
+import { collectSearchAggregation } from '@/lib/search-aggregate';
 import {
+  mergeRetriedSearchAggregate,
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
   setCachedSearchAggregate,
 } from '@/lib/search-cache';
+import {
+  type SearchFailedSource,
+  describeFailedSearchSources,
+} from '@/lib/search-failed-sources';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 
@@ -21,6 +26,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
+  const retryParam = searchParams.get('retry');
 
   if (!query) {
     return new Response(JSON.stringify({ error: '搜索关键词不能为空' }), {
@@ -53,12 +59,20 @@ export async function GET(request: NextRequest) {
     maxSearchPages,
     disableYellowFilter: config.SiteConfig.DisableYellowFilter,
   };
-  const cachedAggregate = peekCachedSearchAggregate(aggregateCacheParams);
+  // 重试只搜上次失败的源；缓存键仍按完整源列表计算，便于把结果并回缓存
+  const retrySources =
+    retryParam === null ? null : new Set(retryParam.split(',').filter(Boolean));
+  const targetSites = retrySources
+    ? apiSites.filter((site) => retrySources.has(site.key))
+    : apiSites;
+  const cachedAggregate = retrySources
+    ? null
+    : peekCachedSearchAggregate(aggregateCacheParams);
 
   if (cachedAggregate) {
     if (!cachedAggregate.fresh) {
       void refreshCachedSearchAggregate(aggregateCacheParams, () =>
-        runSearchAggregation({
+        collectSearchAggregation({
           apiSites,
           query,
           maxSearchPages,
@@ -78,6 +92,10 @@ export async function GET(request: NextRequest) {
         query,
         apiSites.length,
         cachedAggregate.entry.results,
+        describeFailedSearchSources(
+          apiSites,
+          cachedAggregate.entry.failedSources,
+        ),
       ),
     );
   }
@@ -136,7 +154,7 @@ export async function GET(request: NextRequest) {
       const startEvent = `data: ${JSON.stringify({
         type: 'start',
         query,
-        totalSources: apiSites.length,
+        totalSources: targetSites.length,
         timestamp: Date.now(),
       })}\n\n`;
 
@@ -147,8 +165,8 @@ export async function GET(request: NextRequest) {
 
       // 记录已完成的源数量
       let completedSources = 0;
-      const finalResults = await runSearchAggregation({
-        apiSites,
+      const aggregate = await collectSearchAggregation({
+        apiSites: targetSites,
         query,
         maxSearchPages,
         disableYellowFilter: config.SiteConfig.DisableYellowFilter,
@@ -157,6 +175,7 @@ export async function GET(request: NextRequest) {
         sourceTimeoutMs,
         sourceHealthTiers,
         signal: searchAbortController.signal,
+        retryFailed: retrySources !== null,
         shouldContinue: () =>
           !streamClosed && !searchAbortController.signal.aborted,
         onSourceResult: (site, results) => {
@@ -201,13 +220,19 @@ export async function GET(request: NextRequest) {
       });
 
       if (!streamClosed) {
-        if (finalResults.length > 0) {
-          setCachedSearchAggregate(aggregateCacheParams, finalResults);
+        if (retrySources) {
+          mergeRetriedSearchAggregate(
+            aggregateCacheParams,
+            new Set(targetSites.map((site) => site.key)),
+            aggregate,
+          );
+        } else {
+          setCachedSearchAggregate(aggregateCacheParams, aggregate);
         }
 
         const completeEvent = `data: ${JSON.stringify({
           type: 'complete',
-          totalResults: finalResults.length,
+          totalResults: aggregate.results.length,
           completedSources,
           timestamp: Date.now(),
         })}\n\n`;
@@ -240,6 +265,7 @@ function buildCachedSearchStream(
   query: string,
   totalSources: number,
   results: unknown[],
+  failedSources: SearchFailedSource[],
 ): string {
   return [
     {
@@ -255,6 +281,13 @@ function buildCachedSearchStream(
       results,
       timestamp: Date.now(),
     },
+    ...failedSources.map((site) => ({
+      type: 'source_error',
+      source: site.key,
+      sourceName: site.name,
+      error: '搜索失败',
+      timestamp: Date.now(),
+    })),
     {
       type: 'complete',
       totalResults: results.length,

@@ -94,6 +94,8 @@ interface CoverImageProps {
   aspectRatio?: string;
   fallbackLabel?: string;
   checkClientCacheBeforeLoad?: boolean;
+  // 所有加载通道都失败（含命中失败缓存）时调用，调用方可换一张图
+  onUnavailable?: () => void;
 }
 
 const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
@@ -105,6 +107,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   fit = 'cover',
   fallbackLabel = '无封面',
   checkClientCacheBeforeLoad = false,
+  onUnavailable,
 }) {
   const isEmpty = !src || src.trim() === '';
   const releaseSlotRef = useRef<(() => void) | null>(null);
@@ -160,6 +163,8 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const [knownCached, setKnownCached] = useState(initiallyKnownCached);
   const [hasError, setHasError] = useState(false);
   const [slotGranted, setSlotGranted] = useState(loadImmediately);
+  const onUnavailableRef = useRef(onUnavailable);
+  onUnavailableRef.current = onUnavailable;
 
   useIsomorphicLayoutEffect(() => {
     if (resetMountedRef.current) {
@@ -191,6 +196,8 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
     }
+    // 在布局阶段通知，换图时不闪出占位
+    if (isFailed) onUnavailableRef.current?.();
   }, [cacheKeys, isEmpty, priority, processed]);
 
   // 记录只说明这张图显示过；换了尺寸规格或浏览器缓存已淘汰时仍要真正下载，
@@ -346,6 +353,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       setLoaded(true);
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
+      onUnavailableRef.current?.();
     },
     [attempt, candidates, recordDoubanRoute],
   );

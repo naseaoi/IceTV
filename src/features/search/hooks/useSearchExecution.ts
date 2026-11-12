@@ -10,6 +10,10 @@ import { sortBatchForNoOrder } from '@/features/search/lib/searchUtils';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
+import {
+  type SearchFailedSource,
+  parseSearchFailedSources,
+} from '@/lib/search-failed-sources';
 import { SearchResult } from '@/lib/types';
 import {
   DisplayableError,
@@ -24,6 +28,34 @@ interface UseSearchExecutionParams {
   viewMode: 'agg' | 'all';
   filterAggYearOrder: 'none' | 'asc' | 'desc';
   filterAllYearOrder: 'none' | 'asc' | 'desc';
+}
+
+type SearchOrdering = Pick<
+  UseSearchExecutionParams,
+  'viewMode' | 'filterAggYearOrder' | 'filterAllYearOrder'
+>;
+
+function orderIncomingBatch(
+  results: SearchResult[],
+  ordering: SearchOrdering,
+  query: string,
+): SearchResult[] {
+  const yearOrder =
+    ordering.viewMode === 'agg'
+      ? ordering.filterAggYearOrder
+      : ordering.filterAllYearOrder;
+  return yearOrder === 'none' ? sortBatchForNoOrder(results, query) : results;
+}
+
+function withFailedSource(
+  list: SearchFailedSource[],
+  key: unknown,
+  name: unknown,
+): SearchFailedSource[] {
+  if (typeof key !== 'string' || !key || list.some((s) => s.key === key)) {
+    return list;
+  }
+  return [...list, { key, name: typeof name === 'string' ? name : key }];
 }
 
 export function useSearchExecution({
@@ -56,6 +88,12 @@ export function useSearchExecution({
   const [resultsQuery, setResultsQuery] = useState(
     initialSnapshot ? query : '',
   );
+  const [failedSources, setFailedSources] = useState<SearchFailedSource[]>(
+    initialSnapshot?.failedSources ?? [],
+  );
+  const [retryingFailed, setRetryingFailed] = useState(false);
+  const failedSourcesRef = useRef(failedSources);
+  const retryStreamRef = useRef<EventSource | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -69,6 +107,10 @@ export function useSearchExecution({
     filterAggYearOrder,
     filterAllYearOrder,
   });
+
+  useEffect(() => {
+    failedSourcesRef.current = failedSources;
+  }, [failedSources]);
 
   useEffect(() => {
     orderingRef.current = {
@@ -94,6 +136,7 @@ export function useSearchExecution({
         setSearchResults(cachedSnapshot.results);
         setTotalSources(cachedSnapshot.totalSources);
         setCompletedSources(cachedSnapshot.completedSources);
+        setFailedSources(cachedSnapshot.failedSources);
         setUseFluidSearch(cachedSnapshot.useFluidSearch);
         setIsLoading(false);
         setShowResults(true);
@@ -104,6 +147,7 @@ export function useSearchExecution({
       setSearchResults([]);
       setTotalSources(0);
       setCompletedSources(0);
+      setFailedSources([]);
       setIsLoading(true);
       setShowResults(true);
 
@@ -139,22 +183,11 @@ export function useSearchExecution({
                   Array.isArray(payload.results) &&
                   payload.results.length > 0
                 ) {
-                  const {
-                    viewMode: activeViewMode,
-                    filterAggYearOrder: activeAggYearOrder,
-                    filterAllYearOrder: activeAllYearOrder,
-                  } = orderingRef.current;
-                  const activeYearOrder =
-                    activeViewMode === 'agg'
-                      ? activeAggYearOrder
-                      : activeAllYearOrder;
-                  const incoming: SearchResult[] =
-                    activeYearOrder === 'none'
-                      ? sortBatchForNoOrder(
-                          payload.results as SearchResult[],
-                          currentQueryRef.current,
-                        )
-                      : (payload.results as SearchResult[]);
+                  const incoming = orderIncomingBatch(
+                    payload.results as SearchResult[],
+                    orderingRef.current,
+                    currentQueryRef.current,
+                  );
                   pendingResultsRef.current.push(...incoming);
 
                   if (!hasFirstBatchRef.current) {
@@ -179,6 +212,9 @@ export function useSearchExecution({
               }
               case 'source_error':
                 setCompletedSources((prev) => prev + 1);
+                setFailedSources((prev) =>
+                  withFailedSource(prev, payload.source, payload.sourceName),
+                );
                 break;
               case 'complete':
                 setCompletedSources(payload.completedSources || 0);
@@ -248,26 +284,20 @@ export function useSearchExecution({
             if (!active || currentQueryRef.current !== trimmed) return;
 
             if (data.results && Array.isArray(data.results)) {
-              const {
-                viewMode: activeViewMode,
-                filterAggYearOrder: activeAggYearOrder,
-                filterAllYearOrder: activeAllYearOrder,
-              } = orderingRef.current;
-              const activeYearOrder =
-                activeViewMode === 'agg'
-                  ? activeAggYearOrder
-                  : activeAllYearOrder;
-              const results: SearchResult[] =
-                activeYearOrder === 'none'
-                  ? sortBatchForNoOrder(
-                      data.results as SearchResult[],
-                      currentQueryRef.current,
-                    )
-                  : (data.results as SearchResult[]);
-
-              setSearchResults(results);
-              setTotalSources(1);
-              setCompletedSources(1);
+              const total =
+                typeof data.totalSources === 'number' && data.totalSources > 0
+                  ? data.totalSources
+                  : 1;
+              setSearchResults(
+                orderIncomingBatch(
+                  data.results as SearchResult[],
+                  orderingRef.current,
+                  currentQueryRef.current,
+                ),
+              );
+              setTotalSources(total);
+              setCompletedSources(total);
+              setFailedSources(parseSearchFailedSources(data.failedSources));
             }
             setIsLoading(false);
           })
@@ -283,6 +313,7 @@ export function useSearchExecution({
       setSearchResults([]);
       setTotalSources(0);
       setCompletedSources(0);
+      setFailedSources([]);
       setIsLoading(false);
       setShowResults(false);
     }
@@ -290,6 +321,11 @@ export function useSearchExecution({
     return () => {
       active = false;
       controller.abort();
+      if (retryStreamRef.current) {
+        retryStreamRef.current.close();
+        retryStreamRef.current = null;
+        setRetryingFailed(false);
+      }
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
@@ -311,6 +347,7 @@ export function useSearchExecution({
       query !== resultsQuery ||
       !showResults ||
       isLoading ||
+      retryingFailed ||
       error
     ) {
       return;
@@ -320,10 +357,13 @@ export function useSearchExecution({
       results: searchResults,
       totalSources,
       completedSources,
+      failedSources,
       useFluidSearch,
     });
   }, [
     error,
+    failedSources,
+    retryingFailed,
     resultsQuery,
     searchResults,
     totalSources,
@@ -333,9 +373,62 @@ export function useSearchExecution({
     isLoading,
   ]);
 
+  const retryFailedSources = () => {
+    const searchQuery = currentQueryRef.current;
+    const targets = failedSourcesRef.current;
+    if (!searchQuery || targets.length === 0 || retryStreamRef.current) return;
+
+    const params = new URLSearchParams({
+      q: searchQuery,
+      retry: targets.map((s) => s.key).join(','),
+    });
+    const es = new EventSource(`/api/search/ws?${params}`);
+    retryStreamRef.current = es;
+    setRetryingFailed(true);
+
+    const finish = () => {
+      es.close();
+      if (retryStreamRef.current !== es) return;
+      retryStreamRef.current = null;
+      setRetryingFailed(false);
+    };
+
+    es.onmessage = (event) => {
+      if (retryStreamRef.current !== es) return;
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        finish();
+        return;
+      }
+      if (payload.type === 'source_result') {
+        setFailedSources((prev) =>
+          prev.filter((s) => s.key !== payload.source),
+        );
+        if (Array.isArray(payload.results) && payload.results.length > 0) {
+          const incoming = orderIncomingBatch(
+            payload.results as SearchResult[],
+            orderingRef.current,
+            searchQuery,
+          );
+          startTransition(() => {
+            setSearchResults((prev) => prev.concat(incoming));
+          });
+        }
+      } else if (payload.type === 'complete') {
+        finish();
+      }
+    };
+    es.onerror = finish;
+  };
+
   return {
     error,
     retry: () => setRetryCount((count) => count + 1),
+    failedSources,
+    retryingFailed,
+    retryFailedSources,
     isLoading,
     setIsLoading,
     showResults,

@@ -12,6 +12,12 @@ export interface CachedPageEntry {
   pageCount?: number;
 }
 
+export interface SearchPageLoadResult {
+  results: SearchResult[];
+  pageCount?: number;
+  failed?: boolean;
+}
+
 export interface SearchAggregateCacheParams {
   query: string;
   apiSites: ApiSite[];
@@ -21,6 +27,7 @@ export interface SearchAggregateCacheParams {
 
 export interface CachedSearchAggregateEntry {
   results: SearchResult[];
+  failedSources?: string[];
 }
 
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -51,10 +58,7 @@ const SEARCH_AGGREGATE_CACHE =
     shouldCache: (entry) => entry.results.length > 0,
   });
 const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
-const SHARED_SEARCH_PAGES = createSharedServerCache<{
-  results: SearchResult[];
-  pageCount?: number;
-}>({
+const SHARED_SEARCH_PAGES = createSharedServerCache<SearchPageLoadResult>({
   name: 'search-page-shared-v1',
   ...getServerCacheBudget('search-empty-pages'),
   freshMs: 60_000,
@@ -70,13 +74,10 @@ const SPECIAL_SOURCE_SEARCHES = createSharedServerCache<SearchResult[]>({
 });
 const SEARCH_AGGREGATE_LOAD_INFLIGHT: Map<
   string,
-  Promise<SearchResult[]>
+  Promise<CachedSearchAggregateEntry>
 > = new Map();
 
-const SEARCH_INFLIGHT: Map<
-  string,
-  Promise<{ results: SearchResult[]; pageCount?: number }>
-> = new Map();
+const SEARCH_INFLIGHT: Map<string, Promise<SearchPageLoadResult>> = new Map();
 
 function makeSearchCacheKey(
   sourceKey: string,
@@ -116,26 +117,45 @@ export function peekCachedSearchAggregate(
 
 export function setCachedSearchAggregate(
   params: SearchAggregateCacheParams,
-  results: SearchResult[],
+  entry: CachedSearchAggregateEntry,
 ): void {
-  if (results.length === 0) return;
+  if (entry.results.length === 0) return;
 
   const key = makeSearchAggregateCacheKey(params);
-  SEARCH_AGGREGATE_CACHE.set(key, { results });
+  SEARCH_AGGREGATE_CACHE.set(key, entry);
+}
+
+// 只重搜失败源后，用新结果替换这些源在已缓存聚合中的部分；没有缓存时不凭局部结果新建
+export function mergeRetriedSearchAggregate(
+  params: SearchAggregateCacheParams,
+  retriedSources: ReadonlySet<string>,
+  retried: CachedSearchAggregateEntry,
+): void {
+  const cached = peekCachedSearchAggregate(params);
+  if (!cached) return;
+
+  setCachedSearchAggregate(params, {
+    results: cached.entry.results
+      .filter((item) => !retriedSources.has(item.source))
+      .concat(retried.results),
+    failedSources: (cached.entry.failedSources ?? [])
+      .filter((key) => !retriedSources.has(key))
+      .concat(retried.failedSources ?? []),
+  });
 }
 
 export function refreshCachedSearchAggregate(
   params: SearchAggregateCacheParams,
-  loader: () => Promise<SearchResult[]>,
+  loader: () => Promise<CachedSearchAggregateEntry>,
 ): Promise<void> {
   const key = makeSearchAggregateCacheKey(params);
   const existing = SEARCH_AGGREGATE_REFRESH_INFLIGHT.get(key);
   if (existing) return existing;
 
   const task = SEARCH_AGGREGATE_CACHE.refresh(key, async () => {
-    const results = await loader();
-    setCachedSearchAggregate(params, results);
-    return { results };
+    const entry = await loader();
+    setCachedSearchAggregate(params, entry);
+    return entry;
   }).finally(() => {
     SEARCH_AGGREGATE_REFRESH_INFLIGHT.delete(key);
   });
@@ -146,21 +166,19 @@ export function refreshCachedSearchAggregate(
 
 export function loadCachedSearchAggregate(
   params: SearchAggregateCacheParams,
-  loader: () => Promise<SearchResult[]>,
-): Promise<SearchResult[]> {
+  loader: () => Promise<CachedSearchAggregateEntry>,
+): Promise<CachedSearchAggregateEntry> {
   const key = makeSearchAggregateCacheKey(params);
   const existing = SEARCH_AGGREGATE_LOAD_INFLIGHT.get(key);
   if (existing) return existing;
 
   const task = SEARCH_AGGREGATE_CACHE.getOrLoad(key, async () => {
-    const results = await loader();
-    setCachedSearchAggregate(params, results);
-    return { results };
-  })
-    .then((entry) => entry.results)
-    .finally(() => {
-      SEARCH_AGGREGATE_LOAD_INFLIGHT.delete(key);
-    });
+    const entry = await loader();
+    setCachedSearchAggregate(params, entry);
+    return entry;
+  }).finally(() => {
+    SEARCH_AGGREGATE_LOAD_INFLIGHT.delete(key);
+  });
 
   SEARCH_AGGREGATE_LOAD_INFLIGHT.set(key, task);
   return task;
@@ -180,8 +198,8 @@ export function dedupeSearchLoad(
   sourceKey: string,
   query: string,
   page: number,
-  loader: () => Promise<{ results: SearchResult[]; pageCount?: number }>,
-): Promise<{ results: SearchResult[]; pageCount?: number }> {
+  loader: () => Promise<SearchPageLoadResult>,
+): Promise<SearchPageLoadResult> {
   const key = makeSearchCacheKey(sourceKey, query, page);
   const existing = SEARCH_INFLIGHT.get(key);
   if (existing) return existing;

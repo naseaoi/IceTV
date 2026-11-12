@@ -589,6 +589,36 @@ describe('CoverImage', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('所有加载通道失败或命中失败缓存时通知调用方换图', () => {
+    const src = 'https://covers.example.com/broken.jpg';
+    const onUnavailable = jest.fn();
+    const firstRender = render(
+      <CoverImage
+        src={src}
+        alt='坏封面'
+        priority
+        onUnavailable={onUnavailable}
+      />,
+    );
+
+    while (screen.queryByTestId('cover-image')) {
+      expect(onUnavailable).not.toHaveBeenCalled();
+      fireEvent.error(screen.getByTestId('cover-image'));
+    }
+    expect(onUnavailable).toHaveBeenCalledTimes(1);
+
+    firstRender.unmount();
+    render(
+      <CoverImage
+        src={src}
+        alt='坏封面'
+        priority
+        onUnavailable={onUnavailable}
+      />,
+    );
+    expect(onUnavailable).toHaveBeenCalledTimes(2);
+  });
+
   it('需要客户端缓存检查时不在服务端输出图片请求', () => {
     const serverHtml = renderToString(
       <CoverImage

@@ -1,3 +1,4 @@
+import type { SearchFailedSource } from '@/lib/search-failed-sources';
 import { createSwrCache } from '@/lib/server-cache';
 import type { SearchResult } from '@/lib/types';
 
@@ -5,6 +6,7 @@ export interface SearchSnapshot {
   results: SearchResult[];
   totalSources: number;
   completedSources: number;
+  failedSources: SearchFailedSource[];
   useFluidSearch: boolean;
 }
 

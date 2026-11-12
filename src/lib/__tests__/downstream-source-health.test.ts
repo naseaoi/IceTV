@@ -14,6 +14,7 @@ import {
   getCachedSearchPage,
   peekCachedSearchPage,
 } from '@/lib/search-cache';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { recordSourceSearchOutcome } from '@/lib/source-health.server';
 import type { SearchResult } from '@/lib/types';
@@ -430,4 +431,53 @@ it('isolates the first search-page consumer cancellation while the shared loader
     actual.clearSearchCachesForTests();
     dedupeMock.mockImplementation((_source, _query, _page, loader) => loader());
   }
+});
+
+describe('first-page failure reporting', () => {
+  it('rejects with SearchSourceUnavailableError only when the caller asks for it', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503, body: null });
+    await expect(searchFromApi(site, 'movie')).resolves.toEqual([]);
+    await expect(
+      searchFromApi(site, 'movie', { reportFailure: true }),
+    ).rejects.toBeInstanceOf(SearchSourceUnavailableError);
+  });
+
+  it('treats a cached timeout page as a failure', async () => {
+    (getCachedSearchPage as jest.Mock).mockReturnValue({
+      status: 'timeout',
+      data: [],
+    });
+    await expect(
+      searchFromApi(site, 'movie', { reportFailure: true }),
+    ).rejects.toBeInstanceOf(SearchSourceUnavailableError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a successful empty page as an empty result', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ list: [] })));
+    await expect(
+      searchFromApi(site, 'movie', { reportFailure: true }),
+    ).resolves.toEqual([]);
+  });
+
+  it('bypasses cached first-page failures when refreshing', async () => {
+    (getCachedSearchPage as jest.Mock).mockReturnValue({
+      status: 'timeout',
+      data: [],
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          list: [{ ...item, vod_play_url: '1$https://example.com/1.m3u8' }],
+        }),
+      ),
+    );
+    const results = await searchFromApi(site, 'movie', {
+      reportFailure: true,
+      refreshFirstPage: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(dedupeSearchLoad).not.toHaveBeenCalled();
+    expect(results.map((result) => result.title)).toEqual(['Movie']);
+  });
 });
