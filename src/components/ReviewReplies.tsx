@@ -11,6 +11,7 @@ import ReportDialog from '@/components/ReportDialog';
 import UserRoleBadge from '@/components/UserRoleBadge';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { PublicReviewReply } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import {
   type ReviewTarget,
   deleteReviewReply,
@@ -65,7 +66,8 @@ export function useReviewReplies(
         );
         setNextCursor(page.nextCursor);
       } catch (loadError) {
-        setError((loadError as Error).message);
+        if (!isAbortError(loadError))
+          setError(getErrorMessage(loadError, '操作失败，请稍后重试'));
       } finally {
         loadingRef.current = false;
         setLoading(false);
@@ -151,7 +153,8 @@ function ReplyComposer({
     try {
       await onSubmit(trimmed);
     } catch (submitError) {
-      setError((submitError as Error).message);
+      if (!isAbortError(submitError))
+        setError(getErrorMessage(submitError, '操作失败，请稍后重试'));
       setSending(false);
     }
   }
@@ -309,8 +312,9 @@ export default function ReviewReplies({
       await controller.remove(deletingId);
       setDeletingId(null);
     } catch (deleteError) {
-      setActionError((deleteError as Error).message);
-      setDeletingId(null);
+      if (!isAbortError(deleteError))
+        setActionError(getErrorMessage(deleteError, '操作失败，请稍后重试'));
+      throw deleteError;
     } finally {
       setDeleting(false);
     }
@@ -407,7 +411,7 @@ export default function ReviewReplies({
         onClose={() => {
           if (!deleting) setDeletingId(null);
         }}
-        onConfirm={() => void confirmDelete()}
+        onConfirm={confirmDelete}
         confirmDisabled={deleting}
         confirmText={deleting ? '删除中...' : '删除'}
         danger

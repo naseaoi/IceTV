@@ -44,14 +44,13 @@ export function createProxySourceHelper<T extends string>({
       : normalizeSource(savedSource);
   }
 
-  function writeSource(value: unknown): T {
+  function writeSource(value: unknown): boolean {
     const normalizedSource = normalizeSource(value);
-    writeStorage(sourceStorageKey, normalizedSource);
-    return normalizedSource;
+    return writeStorage(sourceStorageKey, normalizedSource);
   }
 
-  function resetSource(): void {
-    removeStorage(sourceStorageKey);
+  function resetSource(): boolean {
+    return removeStorage(sourceStorageKey);
   }
 
   function readDefaultProxyUrl(): string {
@@ -71,12 +70,12 @@ export function createProxySourceHelper<T extends string>({
     return savedProxyUrl === null ? readDefaultProxyUrl() : savedProxyUrl;
   }
 
-  function writeProxyUrl(value: string): void {
-    writeStorage(proxyUrlStorageKey, value);
+  function writeProxyUrl(value: string): boolean {
+    return writeStorage(proxyUrlStorageKey, value);
   }
 
-  function resetProxyUrl(): void {
-    removeStorage(proxyUrlStorageKey);
+  function resetProxyUrl(): boolean {
+    return removeStorage(proxyUrlStorageKey);
   }
 
   return {

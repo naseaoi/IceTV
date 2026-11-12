@@ -1,843 +1,325 @@
 ﻿'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import type { BangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
 import {
-  type BangumiCalendarData,
-  GetBangumiCalendarDataWithMeta,
-} from '@/features/bangumi/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
-import { DOUBAN_PAGE_SIZE } from '@/features/douban/lib/grid-layout';
+  type CustomCategory,
+  type FeedQuery,
+  appendUniqueItems,
+  fetchFeedPage,
+  getBangumiWeekdayItems,
+  getDefaultFeedQuery,
+  getFeedQueryKey,
+  isCalendarQuery,
+  uniqueItems,
+  withPrimary,
+} from '@/features/douban/lib/feed-query';
 import {
-  getDoubanCategories,
-  getDoubanList,
-  getDoubanRecommends,
-} from '@/lib/douban.client';
-import { DoubanItem, DoubanResult } from '@/lib/types';
+  type FeedEntry,
+  readFeedEntry,
+  readLastFeedQuery,
+  rememberFeedQuery,
+  writeFeedEntry,
+} from '@/features/douban/lib/feed-store';
+import { getPageScrollTop, scrollPageTo } from '@/hooks/usePageScroll';
+import type { DoubanItem } from '@/lib/types';
 
-export interface CustomCategory {
-  name: string;
-  type: 'movie' | 'tv';
-  query: string;
+export type { CustomCategory } from '@/features/douban/lib/feed-query';
+
+// loading 请求第 0 页并替换列表，loadingMore 请求第 pageCount 页并追加
+type FeedStatus = 'loading' | 'loadingMore' | 'idle' | 'failed';
+
+interface FeedState extends FeedEntry {
+  query: FeedQuery;
+  key: string;
+  customCategories: CustomCategory[];
+  status: FeedStatus;
 }
 
-interface FeedSnapshot {
-  type: string;
-  primarySelection: string;
-  secondarySelection: string;
-  multiLevelSelection: Record<string, string>;
-  selectedWeekday: string;
-  currentPage: number;
-}
-
-const DEFAULT_MULTI_LEVEL: Record<string, string> = {
-  type: 'all',
-  region: 'all',
-  year: 'all',
-  platform: 'all',
-  label: 'all',
-  sort: 'T',
-};
-const FEED_VIEW_CACHE_MS = 60 * 60 * 1000;
-const FEED_LOAD_DEBOUNCE_MS = 50;
-
-const feedViewCache = new Map<
-  string,
-  {
-    data: DoubanItem[];
-    hasMore: boolean;
-    currentPage: number;
-    expiresAt: number;
-  }
->();
-const lastFeedSnapshotByType = new Map<string, FeedSnapshot>();
-
-function computeInitialPrimary(type: string): string {
-  if (type === 'movie') return '热门';
-  if (type === 'tv' || type === 'show') return '最近热门';
-  if (type === 'anime') return '每日放送';
-  return '';
-}
-
-function computeInitialSecondary(type: string): string {
-  if (type === 'movie') return '全部';
-  if (type === 'tv') return 'tv';
-  if (type === 'show') return 'show';
-  return '全部';
-}
-
-export function getCurrentWeekday(): string {
-  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  return weekdays[new Date().getDay()];
-}
-
-function isSnapshotEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
-  return isFeedSelectionEqual(a, b) && a.currentPage === b.currentPage;
-}
-
-function isFeedSelectionEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
-  return (
-    a.type === b.type &&
-    a.primarySelection === b.primarySelection &&
-    a.secondarySelection === b.secondarySelection &&
-    a.selectedWeekday === b.selectedWeekday &&
-    JSON.stringify(a.multiLevelSelection) ===
-      JSON.stringify(b.multiLevelSelection)
-  );
-}
-
-function getFeedViewCacheKey(snapshot: FeedSnapshot): string {
-  const selectedWeekday =
-    snapshot.type === 'anime' && snapshot.primarySelection === '每日放送'
-      ? snapshot.selectedWeekday
-      : '';
-
-  return JSON.stringify([
-    snapshot.type,
-    snapshot.primarySelection,
-    snapshot.secondarySelection,
-    selectedWeekday,
-    normalizeMultiLevelSelection(snapshot.multiLevelSelection),
-  ]);
-}
-
-function normalizeMultiLevelSelection(values: Record<string, string>) {
-  return Object.keys(values)
-    .sort()
-    .map((key) => [key, values[key]]);
-}
-
-function readFeedViewCache(snapshot: FeedSnapshot) {
-  const key = getFeedViewCacheKey(snapshot);
-  const cached = feedViewCache.get(key);
-
-  if (!cached) {
-    return null;
-  }
-
-  if (cached.expiresAt <= Date.now()) {
-    feedViewCache.delete(key);
-    return null;
-  }
-
-  return cached;
-}
-
-function writeFeedViewCache(
-  snapshot: FeedSnapshot,
-  data: DoubanItem[],
-  hasMore: boolean,
-) {
-  const currentPage = Math.max(0, snapshot.currentPage);
-  feedViewCache.set(getFeedViewCacheKey(snapshot), {
-    data,
-    hasMore,
-    currentPage,
-    expiresAt: Date.now() + FEED_VIEW_CACHE_MS,
-  });
-  lastFeedSnapshotByType.set(snapshot.type, {
-    ...snapshot,
-    currentPage,
-  });
-
-  if (feedViewCache.size > 20) {
-    const firstKey = feedViewCache.keys().next().value;
-    if (firstKey) {
-      feedViewCache.delete(firstKey);
+type FeedAction =
+  | { type: 'reset'; state: FeedState }
+  | {
+      type: 'pageLoaded';
+      key: string;
+      page: number;
+      items: DoubanItem[];
+      hasMore: boolean;
+      calendarStale: boolean;
+      loadedAt: number;
     }
-  }
+  | { type: 'pageFailed'; key: string; page: number }
+  | { type: 'loadMore' }
+  | { type: 'retry' };
+
+function getRequestedPage(state: FeedState): number | null {
+  if (state.status === 'loading') return 0;
+  if (state.status === 'loadingMore') return state.pageCount;
+  return null;
 }
 
-function readLastFeedSnapshot(type: string): FeedSnapshot | null {
-  const snapshot = lastFeedSnapshotByType.get(type);
-  if (!snapshot) {
-    return null;
+function createFeedState(
+  query: FeedQuery,
+  customCategories: CustomCategory[],
+  entry: FeedEntry | null,
+): FeedState {
+  const base = { query, key: getFeedQueryKey(query), customCategories };
+  if (entry) {
+    return { ...base, ...entry, status: 'idle' };
   }
-
-  const cached = readFeedViewCache(snapshot);
-  if (!cached) {
-    lastFeedSnapshotByType.delete(type);
-    return null;
-  }
-
   return {
-    ...snapshot,
-    currentPage: cached.currentPage,
+    ...base,
+    items: [],
+    pageCount: 0,
+    hasMore: true,
+    preview: false,
+    calendarStale: false,
+    loadedAt: 0,
+    status: 'loading',
   };
 }
 
-function getInitialHasMore(snapshot: FeedSnapshot, data: DoubanItem[]) {
-  if (snapshot.type === 'anime' && snapshot.primarySelection === '每日放送') {
-    return false;
-  }
-
-  return data.length !== 0;
-}
-
-function getBangumiWeekdayItems(
-  calendarData: BangumiCalendarData[],
-  weekday: string,
-): DoubanItem[] | null {
-  const weekdayData = calendarData.find((item) => item.weekday.en === weekday);
-  if (!weekdayData) {
-    return null;
-  }
-
-  return weekdayData.items.map((item) => ({
-    id: item.id?.toString() || '',
-    title: item.name_cn || item.name,
-    poster: selectBangumiCardCover(item.images),
-    rate: item.rating?.score?.toFixed(1) || '',
-    year: item.air_date?.split('-')?.[0] || '',
-  }));
-}
-
-export function primeDefaultDoubanFeedViewCache(
+function createInitialFeedState(
   type: string,
-  data: DoubanItem[],
-  options: { selectedWeekday?: string } = {},
-) {
-  if (data.length === 0) {
-    return;
+  customCategories: CustomCategory[],
+): FeedState {
+  const query =
+    readLastFeedQuery(type) ?? getDefaultFeedQuery(type, customCategories);
+  return createFeedState(query, customCategories, readFeedEntry(query));
+}
+
+function feedReducer(state: FeedState, action: FeedAction): FeedState {
+  switch (action.type) {
+    case 'reset':
+      return action.state;
+    case 'pageLoaded': {
+      // 只接受当前查询正在等的那一页，切换后晚到的响应自然作废
+      if (action.key !== state.key || action.page !== getRequestedPage(state)) {
+        return state;
+      }
+      const firstPage = action.page === 0;
+      return {
+        ...state,
+        items: firstPage
+          ? uniqueItems(action.items)
+          : appendUniqueItems(state.items, action.items),
+        pageCount: action.page + 1,
+        hasMore: action.hasMore,
+        preview: false,
+        calendarStale: action.calendarStale,
+        loadedAt: firstPage ? action.loadedAt : state.loadedAt,
+        status: 'idle',
+      };
+    }
+    case 'pageFailed':
+      if (action.key !== state.key || action.page !== getRequestedPage(state)) {
+        return state;
+      }
+      return {
+        ...state,
+        hasMore: action.page === 0 ? false : state.hasMore,
+        status: 'failed',
+      };
+    case 'loadMore':
+      if (state.status !== 'idle' || !state.hasMore || state.calendarStale) {
+        return state;
+      }
+      return { ...state, status: 'loadingMore' };
+    case 'retry':
+      if (state.status !== 'failed' && !state.calendarStale) {
+        return state;
+      }
+      return state.pageCount === 0 || state.calendarStale
+        ? { ...state, hasMore: true, status: 'loading' }
+        : { ...state, status: 'loadingMore' };
   }
+}
 
-  const snapshot: FeedSnapshot = {
-    type,
-    primarySelection: computeInitialPrimary(type),
-    secondarySelection: computeInitialSecondary(type),
-    multiLevelSelection: { ...DEFAULT_MULTI_LEVEL },
-    selectedWeekday: type === 'anime' ? options.selectedWeekday || '' : '',
-    currentPage: 0,
-  };
-
-  writeFeedViewCache(snapshot, data, getInitialHasMore(snapshot, data));
+function isSameFilters(a: Record<string, string>, b: Record<string, string>) {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
+  );
 }
 
 export function useDoubanFeed(type: string) {
-  const runtimeConfig = useRuntimeConfig();
-  const [doubanData, setDoubanData] = useState<DoubanItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [bangumiCalendarError, setBangumiCalendarError] = useState<
-    string | null
-  >(null);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [selectorsReady, setSelectorsReady] = useState(false);
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const restoredCurrentPageRef = useRef<number | null>(null);
-  const bangumiCalendarDataRef = useRef<BangumiCalendarData[] | null>(null);
+  const customCategories = useRuntimeConfig().CUSTOM_CATEGORIES;
+  const [state, dispatch] = useReducer(feedReducer, undefined, () =>
+    createInitialFeedState(type, customCategories),
+  );
+  // 分类来自 URL，自定义分类可能在挂载后才到；在同一次渲染内整体换成新查询，旧页码与列表不会带进新分类
+  if (
+    state.query.type !== type ||
+    (type === 'custom' && state.customCategories !== customCategories)
+  ) {
+    dispatch({
+      type: 'reset',
+      state: createInitialFeedState(type, customCategories),
+    });
+  }
 
-  const [customCategories, setCustomCategories] = useState<CustomCategory[]>(
-    runtimeConfig.CUSTOM_CATEGORIES,
-  );
+  const calendarRef = useRef<{
+    data: BangumiCalendarData[];
+    stale: boolean;
+  } | null>(null);
 
-  const [primarySelection, setPrimarySelection] = useState<string>(() =>
-    type === 'custom'
-      ? runtimeConfig.CUSTOM_CATEGORIES.some(
-          (category) => category.type === 'movie',
-        )
-        ? 'movie'
-        : 'tv'
-      : computeInitialPrimary(type),
-  );
-  const [secondarySelection, setSecondarySelection] = useState<string>(() =>
-    type === 'custom'
-      ? runtimeConfig.CUSTOM_CATEGORIES.find(
-          (category) => category.type === primarySelection,
-        )?.query || ''
-      : computeInitialSecondary(type),
-  );
-  const [multiLevelValues, setMultiLevelValues] = useState<
-    Record<string, string>
-  >({ ...DEFAULT_MULTI_LEVEL });
-  const [selectedWeekday, setSelectedWeekday] = useState<string>(() =>
-    getCurrentWeekday(),
-  );
-  const selectedWeekdayRef = useRef(selectedWeekday);
-
-  const currentParamsRef = useRef<FeedSnapshot>({
-    type: '',
-    primarySelection: '',
-    secondarySelection: '',
-    multiLevelSelection: {} as Record<string, string>,
-    selectedWeekday: '',
-    currentPage: 0,
-  });
+  const { key, query, preview } = state;
+  const requestedPage = getRequestedPage(state);
 
   useEffect(() => {
-    const runtimeConfig = window.RUNTIME_CONFIG;
-    if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
-      setCustomCategories(runtimeConfig!.CUSTOM_CATEGORIES);
-    }
-  }, []);
+    if (requestedPage === null) return;
 
-  useEffect(() => {
-    selectedWeekdayRef.current = selectedWeekday;
-    currentParamsRef.current = {
-      type,
-      primarySelection,
-      secondarySelection,
-      multiLevelSelection: multiLevelValues,
-      selectedWeekday,
-      currentPage,
-    };
-  }, [
-    type,
-    primarySelection,
-    secondarySelection,
-    multiLevelValues,
-    selectedWeekday,
-    currentPage,
-  ]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSelectorsReady(true);
-    }, 50);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useLayoutEffect(() => {
-    setSelectorsReady(false);
-    let nextPrimarySelection = '';
-    let nextSecondarySelection = '全部';
-
-    if (type === 'custom' && customCategories.length > 0) {
-      const types = Array.from(
-        new Set(customCategories.map((cat) => cat.type)),
-      );
-      if (types.length > 0) {
-        let selectedType = types[0];
-        if (types.includes('movie')) {
-          selectedType = 'movie';
-        } else {
-          selectedType = 'tv';
+    let cancelled = false;
+    const load = async () => {
+      try {
+        // 首页预填的第一页来自首页自己的缓存；排名变动后升入第一页的条目既不在预填页也不在续页，补取一次分类自己的第一页
+        const [leading, page] = await Promise.all([
+          preview && requestedPage === 1
+            ? fetchFeedPage(query, 0, customCategories).catch(() => null)
+            : null,
+          fetchFeedPage(query, requestedPage, customCategories),
+        ]);
+        if (cancelled) return;
+        if (page.calendar) {
+          calendarRef.current = page.calendar;
         }
-        nextPrimarySelection = selectedType;
-
-        const firstCategory = customCategories.find(
-          (cat) => cat.type === selectedType,
-        );
-        if (firstCategory) {
-          nextSecondarySelection = firstCategory.query;
-        }
-      }
-    } else if (type === 'movie') {
-      nextPrimarySelection = '热门';
-      nextSecondarySelection = '全部';
-    } else if (type === 'tv') {
-      nextPrimarySelection = '最近热门';
-      nextSecondarySelection = 'tv';
-    } else if (type === 'show') {
-      nextPrimarySelection = '最近热门';
-      nextSecondarySelection = 'show';
-    } else if (type === 'anime') {
-      nextPrimarySelection = '每日放送';
-      nextSecondarySelection = '全部';
-    }
-
-    let nextMultiLevelValues = { ...DEFAULT_MULTI_LEVEL };
-    let nextSelectedWeekday = selectedWeekdayRef.current;
-
-    const restoredSnapshot = readLastFeedSnapshot(type);
-    const requestSnapshot = restoredSnapshot ?? {
-      type,
-      primarySelection: nextPrimarySelection,
-      secondarySelection: nextSecondarySelection,
-      multiLevelSelection: nextMultiLevelValues,
-      selectedWeekday: selectedWeekdayRef.current,
-      currentPage: 0,
-    };
-
-    if (restoredSnapshot) {
-      nextPrimarySelection = restoredSnapshot.primarySelection;
-      nextSecondarySelection = restoredSnapshot.secondarySelection;
-      nextMultiLevelValues = restoredSnapshot.multiLevelSelection;
-      nextSelectedWeekday = restoredSnapshot.selectedWeekday;
-    }
-
-    setPrimarySelection(nextPrimarySelection);
-    setSecondarySelection(nextSecondarySelection);
-    setMultiLevelValues(nextMultiLevelValues);
-    setSelectedWeekday(nextSelectedWeekday);
-
-    const cached = readFeedViewCache(requestSnapshot);
-
-    if (cached) {
-      setDoubanData(cached.data);
-      restoredCurrentPageRef.current =
-        cached.currentPage > 0 ? cached.currentPage : null;
-      setCurrentPage(cached.currentPage);
-      setHasMore(cached.hasMore);
-      setIsLoadingMore(false);
-      setLoading(false);
-      setSelectorsReady(true);
-      return;
-    }
-
-    setLoading(true);
-
-    const timer = setTimeout(() => {
-      setSelectorsReady(true);
-    }, 50);
-
-    return () => clearTimeout(timer);
-  }, [type, customCategories]);
-
-  const getRequestParams = useCallback(
-    (pageStart: number) => {
-      if (type === 'tv' || type === 'show') {
-        return {
-          kind: 'tv' as const,
-          category: type,
-          type: secondarySelection,
-          pageLimit: DOUBAN_PAGE_SIZE,
-          pageStart,
-        };
-      }
-      return {
-        kind: type as 'tv' | 'movie',
-        category: primarySelection,
-        type: secondarySelection,
-        pageLimit: DOUBAN_PAGE_SIZE,
-        pageStart,
-      };
-    },
-    [type, primarySelection, secondarySelection],
-  );
-
-  const loadInitialData = useCallback(async () => {
-    const requestSnapshot: FeedSnapshot = {
-      type,
-      primarySelection,
-      secondarySelection,
-      multiLevelSelection: multiLevelValues,
-      selectedWeekday,
-      currentPage: 0,
-    };
-
-    try {
-      const cached = readFeedViewCache(requestSnapshot);
-      if (cached) {
-        setDoubanData(cached.data);
-        restoredCurrentPageRef.current =
-          cached.currentPage > 0 ? cached.currentPage : null;
-        setCurrentPage(cached.currentPage);
-        setHasMore(cached.hasMore);
-        setIsLoadingMore(false);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setDoubanData([]);
-      setCurrentPage(0);
-      setHasMore(true);
-      setIsLoadingMore(false);
-
-      let data: DoubanResult;
-
-      if (type === 'custom') {
-        const selectedCategory = customCategories.find(
-          (cat) =>
-            cat.type === primarySelection && cat.query === secondarySelection,
-        );
-        if (selectedCategory) {
-          data = await getDoubanList({
-            tag: selectedCategory.query,
-            type: selectedCategory.type,
-            pageLimit: DOUBAN_PAGE_SIZE,
-            pageStart: 0,
-          });
-        } else {
-          throw new Error('没有找到对应的分类');
-        }
-      } else if (type === 'anime' && primarySelection === '每日放送') {
-        const calendarResult = await GetBangumiCalendarDataWithMeta();
-        const calendarData = calendarResult.data;
-        bangumiCalendarDataRef.current = calendarData;
-        const weekdayItems = getBangumiWeekdayItems(
-          calendarData,
-          selectedWeekday,
-        );
-        if (weekdayItems) {
-          data = {
-            code: 200,
-            message: 'success',
-            list: weekdayItems,
-          };
-          if (calendarResult.usedStaleFallback) {
-            setBangumiCalendarError(
-              'Bangumi 番剧数据获取失败，当前显示的是本地缓存。',
-            );
-          } else {
-            setBangumiCalendarError(null);
-          }
-        } else {
-          throw new Error('没有找到对应的日期');
-        }
-      } else if (type === 'anime') {
-        data = await getDoubanRecommends({
-          kind: primarySelection === '番剧' ? 'tv' : 'movie',
-          pageLimit: DOUBAN_PAGE_SIZE,
-          pageStart: 0,
-          category: '动画',
-          format: primarySelection === '番剧' ? '电视剧' : '',
-          region: multiLevelValues.region || '',
-          year: multiLevelValues.year || '',
-          platform: multiLevelValues.platform || '',
-          sort: multiLevelValues.sort || '',
-          label: multiLevelValues.label || '',
+        dispatch({
+          type: 'pageLoaded',
+          key,
+          page: requestedPage,
+          items: leading ? [...leading.items, ...page.items] : page.items,
+          hasMore: page.hasMore,
+          calendarStale: page.calendar?.stale ?? false,
+          loadedAt: Date.now(),
         });
-      } else if (primarySelection === '全部') {
-        data = await getDoubanRecommends({
-          kind: type === 'show' ? 'tv' : (type as 'tv' | 'movie'),
-          pageLimit: DOUBAN_PAGE_SIZE,
-          pageStart: 0,
-          category: multiLevelValues.type || '',
-          format: type === 'show' ? '综艺' : type === 'tv' ? '电视剧' : '',
-          region: multiLevelValues.region || '',
-          year: multiLevelValues.year || '',
-          platform: multiLevelValues.platform || '',
-          sort: multiLevelValues.sort || '',
-          label: multiLevelValues.label || '',
-        });
-      } else {
-        data = await getDoubanCategories(getRequestParams(0));
+      } catch (error) {
+        if (cancelled) return;
+        console.error(error);
+        dispatch({ type: 'pageFailed', key, page: requestedPage });
       }
-
-      if (data.code === 200) {
-        const currentSnapshot = { ...currentParamsRef.current };
-        if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-          const nextHasMore = getInitialHasMore(requestSnapshot, data.list);
-          setDoubanData(data.list);
-          restoredCurrentPageRef.current = null;
-          setCurrentPage(0);
-          setHasMore(nextHasMore);
-          setLoading(false);
-          writeFeedViewCache(requestSnapshot, data.list, nextHasMore);
-        }
-      } else {
-        throw new Error(data.message || '获取数据失败');
-      }
-    } catch (err) {
-      console.error(err);
-      const currentSnapshot = { ...currentParamsRef.current };
-      if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-        if (type === 'anime' && primarySelection === '每日放送') {
-          setBangumiCalendarError('Bangumi 番剧数据获取失败，请稍后重试。');
-        }
-        setCurrentPage(0);
-        setHasMore(false);
-        setIsLoadingMore(false);
-        setLoading(false);
-      }
-    }
-  }, [
-    type,
-    primarySelection,
-    secondarySelection,
-    multiLevelValues,
-    selectedWeekday,
-    getRequestParams,
-    customCategories,
-  ]);
-
-  useEffect(() => {
-    if (!selectorsReady) {
-      return;
-    }
-
-    if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
-    }
-
-    debounceTimeoutRef.current = setTimeout(() => {
-      loadInitialData();
-    }, FEED_LOAD_DEBOUNCE_MS);
+    };
+    void load();
 
     return () => {
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
+      cancelled = true;
     };
-  }, [
-    selectorsReady,
-    type,
-    primarySelection,
-    secondarySelection,
-    multiLevelValues,
-    selectedWeekday,
-    loadInitialData,
-  ]);
+  }, [customCategories, key, preview, query, requestedPage]);
+
+  const { items, pageCount, hasMore, calendarStale, loadedAt, status } = state;
 
   useEffect(() => {
-    if (currentPage <= 0) return;
-    if (restoredCurrentPageRef.current === currentPage) {
-      restoredCurrentPageRef.current = null;
-      return;
-    }
+    if (status !== 'idle' || pageCount === 0) return;
+    writeFeedEntry(query, {
+      items,
+      pageCount,
+      hasMore,
+      preview,
+      calendarStale,
+      loadedAt,
+    });
+    rememberFeedQuery(query);
+  }, [
+    calendarStale,
+    hasMore,
+    items,
+    loadedAt,
+    pageCount,
+    preview,
+    query,
+    status,
+  ]);
 
-    const fetchMoreData = async () => {
-      const requestSnapshot: FeedSnapshot = {
-        type,
-        primarySelection,
-        secondarySelection,
-        multiLevelSelection: multiLevelValues,
-        selectedWeekday,
-        currentPage,
-      };
-
-      try {
-        setIsLoadingMore(true);
-
-        let data: DoubanResult;
-        if (type === 'custom') {
-          const selectedCategory = customCategories.find(
-            (cat) =>
-              cat.type === primarySelection && cat.query === secondarySelection,
-          );
-          if (selectedCategory) {
-            data = await getDoubanList({
-              tag: selectedCategory.query,
-              type: selectedCategory.type,
-              pageLimit: DOUBAN_PAGE_SIZE,
-              pageStart: currentPage * DOUBAN_PAGE_SIZE,
-            });
-          } else {
-            throw new Error('没有找到对应的分类');
-          }
-        } else if (type === 'anime' && primarySelection === '每日放送') {
-          data = {
-            code: 200,
-            message: 'success',
-            list: [],
+  const applyQuery = useCallback(
+    (next: FeedQuery) => {
+      let entry = readFeedEntry(next);
+      const calendar = calendarRef.current;
+      // 日历一次取整周，切换星期直接从已有数据里取，不重新请求
+      if (!entry && calendar && isCalendarQuery(next)) {
+        const weekdayItems = getBangumiWeekdayItems(
+          calendar.data,
+          next.weekday,
+        );
+        if (weekdayItems) {
+          entry = {
+            items: weekdayItems,
+            pageCount: 1,
+            hasMore: false,
+            preview: false,
+            calendarStale: calendar.stale,
+            loadedAt: Date.now(),
           };
-        } else if (type === 'anime') {
-          data = await getDoubanRecommends({
-            kind: primarySelection === '番剧' ? 'tv' : 'movie',
-            pageLimit: DOUBAN_PAGE_SIZE,
-            pageStart: currentPage * DOUBAN_PAGE_SIZE,
-            category: '动画',
-            format: primarySelection === '番剧' ? '电视剧' : '',
-            region: multiLevelValues.region || '',
-            year: multiLevelValues.year || '',
-            platform: multiLevelValues.platform || '',
-            sort: multiLevelValues.sort || '',
-            label: multiLevelValues.label || '',
-          });
-        } else if (primarySelection === '全部') {
-          data = await getDoubanRecommends({
-            kind: type === 'show' ? 'tv' : (type as 'tv' | 'movie'),
-            pageLimit: DOUBAN_PAGE_SIZE,
-            pageStart: currentPage * DOUBAN_PAGE_SIZE,
-            category: multiLevelValues.type || '',
-            format: type === 'show' ? '综艺' : type === 'tv' ? '电视剧' : '',
-            region: multiLevelValues.region || '',
-            year: multiLevelValues.year || '',
-            platform: multiLevelValues.platform || '',
-            sort: multiLevelValues.sort || '',
-            label: multiLevelValues.label || '',
-          });
-        } else {
-          data = await getDoubanCategories(
-            getRequestParams(currentPage * DOUBAN_PAGE_SIZE),
-          );
-        }
-
-        if (data.code === 200) {
-          const currentSnapshot = { ...currentParamsRef.current };
-          if (isFeedSelectionEqual(requestSnapshot, currentSnapshot)) {
-            const nextHasMore = data.list.length !== 0;
-            setDoubanData((prev) => {
-              const nextData = [...prev, ...data.list];
-              writeFeedViewCache(requestSnapshot, nextData, nextHasMore);
-              return nextData;
-            });
-            setHasMore(nextHasMore);
-            setIsLoadingMore(false);
-          }
-        } else {
-          throw new Error(data.message || '获取数据失败');
-        }
-      } catch (err) {
-        console.error(err);
-        const currentSnapshot = { ...currentParamsRef.current };
-        if (isFeedSelectionEqual(requestSnapshot, currentSnapshot)) {
-          setHasMore(false);
-          setIsLoadingMore(false);
         }
       }
-    };
-
-    fetchMoreData();
-  }, [
-    currentPage,
-    type,
-    primarySelection,
-    secondarySelection,
-    customCategories,
-    multiLevelValues,
-    selectedWeekday,
-    getRequestParams,
-  ]);
+      dispatch({
+        type: 'reset',
+        state: createFeedState(next, customCategories, entry),
+      });
+      // 换的是一批不同的内容，停在原滚动位置只会看到列表中段或空白
+      if (getPageScrollTop() > 0) {
+        scrollPageTo(0);
+      }
+    },
+    [customCategories],
+  );
 
   const handlePrimaryChange = useCallback(
     (value: string) => {
-      if (value === primarySelection) return;
-
-      setLoading(true);
-      setCurrentPage(0);
-      setDoubanData([]);
-      setHasMore(true);
-      setIsLoadingMore(false);
-      setMultiLevelValues({ ...DEFAULT_MULTI_LEVEL });
-
-      if (type === 'custom' && customCategories.length > 0) {
-        const firstCategory = customCategories.find(
-          (cat) => cat.type === value,
-        );
-        if (firstCategory) {
-          setPrimarySelection(value);
-          setSecondarySelection(firstCategory.query);
-        } else {
-          setPrimarySelection(value);
-        }
-      } else if ((type === 'tv' || type === 'show') && value === '最近热门') {
-        setPrimarySelection(value);
-        if (type === 'tv') {
-          setSecondarySelection('tv');
-        } else if (type === 'show') {
-          setSecondarySelection('show');
-        }
-      } else {
-        setPrimarySelection(value);
-      }
+      if (value === query.primary) return;
+      applyQuery(withPrimary(query, value, customCategories));
     },
-    [primarySelection, type, customCategories],
+    [applyQuery, customCategories, query],
   );
 
   const handleSecondaryChange = useCallback(
     (value: string) => {
-      if (value === secondarySelection) return;
-      setLoading(true);
-      setCurrentPage(0);
-      setDoubanData([]);
-      setHasMore(true);
-      setIsLoadingMore(false);
-      setSecondarySelection(value);
+      if (value === query.secondary) return;
+      applyQuery({ ...query, secondary: value });
     },
-    [secondarySelection],
+    [applyQuery, query],
   );
 
   const handleMultiLevelChange = useCallback(
     (values: Record<string, string>) => {
-      const isEqual = (
-        obj1: Record<string, string>,
-        obj2: Record<string, string>,
-      ) => {
-        const keys1 = Object.keys(obj1).sort();
-        const keys2 = Object.keys(obj2).sort();
-        if (keys1.length !== keys2.length) return false;
-        return keys1.every((key) => obj1[key] === obj2[key]);
-      };
-
-      if (isEqual(values, multiLevelValues)) {
-        return;
-      }
-
-      setLoading(true);
-      setCurrentPage(0);
-      setDoubanData([]);
-      setHasMore(true);
-      setIsLoadingMore(false);
-      setMultiLevelValues(values);
+      if (isSameFilters(values, query.filters)) return;
+      applyQuery({ ...query, filters: values });
     },
-    [multiLevelValues],
+    [applyQuery, query],
   );
 
   const handleWeekdayChange = useCallback(
     (weekday: string) => {
-      if (weekday === selectedWeekday) return;
-
-      const requestSnapshot: FeedSnapshot = {
-        type,
-        primarySelection,
-        secondarySelection,
-        multiLevelSelection: multiLevelValues,
-        selectedWeekday: weekday,
-        currentPage: 0,
-      };
-      const cached = readFeedViewCache(requestSnapshot);
-      const calendarItems = bangumiCalendarDataRef.current
-        ? getBangumiWeekdayItems(bangumiCalendarDataRef.current, weekday)
-        : null;
-
-      if (cached || calendarItems) {
-        const nextData = cached?.data ?? calendarItems ?? [];
-        const nextHasMore = cached?.hasMore ?? false;
-
-        setSelectedWeekday(weekday);
-        setDoubanData(nextData);
-        setCurrentPage(cached?.currentPage ?? 0);
-        setHasMore(nextHasMore);
-        setIsLoadingMore(false);
-        setLoading(false);
-
-        if (!cached) {
-          writeFeedViewCache(requestSnapshot, nextData, nextHasMore);
-        }
-        return;
-      }
-
-      setLoading(true);
-      setCurrentPage(0);
-      setDoubanData([]);
-      setHasMore(true);
-      setIsLoadingMore(false);
-      setSelectedWeekday(weekday);
+      if (weekday === query.weekday) return;
+      applyQuery({ ...query, weekday });
     },
-    [
-      multiLevelValues,
-      primarySelection,
-      secondarySelection,
-      selectedWeekday,
-      type,
-    ],
+    [applyQuery, query],
   );
 
-  const clearBangumiCalendarError = useCallback(() => {
-    setBangumiCalendarError(null);
+  const loadNextPage = useCallback(() => {
+    dispatch({ type: 'loadMore' });
   }, []);
 
-  const loadNextPage = useCallback(() => {
-    setCurrentPage((prev) => prev + 1);
+  const retryLoad = useCallback(() => {
+    dispatch({ type: 'retry' });
   }, []);
 
   return {
-    doubanData,
-    loading,
-    selectorsReady,
+    doubanData: items,
+    loading: status === 'loading',
+    isLoadingMore: status === 'loadingMore',
+    loadFailed: status === 'failed',
     hasMore,
-    isLoadingMore,
-    primarySelection,
-    secondarySelection,
-    selectedWeekday,
+    calendarStale,
+    primarySelection: query.primary,
+    secondarySelection: query.secondary,
+    multiLevelValues: query.filters,
+    selectedWeekday: query.weekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
-    bangumiCalendarError,
-    clearBangumiCalendarError,
+    retryLoad,
   };
 }

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { doubanRouteCache } from '@/app/api/douban/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { createPrivateApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
   DoubanCategoryApiResponse,
   normalizeDoubanCategoryItems,
 } from '@/lib/douban-normalize';
+import { buildDoubanRecentHotUrl } from '@/lib/douban-upstream-url';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
@@ -69,11 +71,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${encodeURIComponent(category)}&type=${encodeURIComponent(type)}`;
+  const target = buildDoubanRecentHotUrl({
+    kind: kind as 'tv' | 'movie',
+    category,
+    type,
+    start: pageStart,
+    limit: pageLimit,
+  });
 
   try {
     // 调用豆瓣 API
-    const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target);
+    const doubanData = (await doubanRouteCache.getOrLoad(target, () =>
+      fetchDoubanData<DoubanCategoryApiResponse>(target),
+    )) as DoubanCategoryApiResponse;
 
     const list = normalizeDoubanCategoryItems(doubanData.items);
 
@@ -85,7 +95,7 @@ export async function GET(request: NextRequest) {
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(response, {
-      headers: createPublicApiCacheHeaders(cacheTime),
+      headers: createPrivateApiCacheHeaders(cacheTime),
     });
   } catch (error) {
     const busy = resourceLimitResponse(error);

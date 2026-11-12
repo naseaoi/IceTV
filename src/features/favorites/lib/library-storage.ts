@@ -67,6 +67,7 @@ type Cursor = {
   saved: number;
   key: string;
 };
+// 条数只改变分页大小，不改变候选集与排序，续页可沿用不同条数的游标。
 function binding(username: string, query: FavoriteLibraryQuery): string {
   return createHash('sha256')
     .update(
@@ -103,7 +104,11 @@ export function validateLibraryQuery(
     !['all', 'planned', 'watching', 'completed', 'reviewed'].includes(
       query.filter,
     ) ||
-    !['saved', 'played', 'watched', 'rating', 'year'].includes(query.sort)
+    !['saved', 'played', 'watched', 'rating', 'year'].includes(query.sort) ||
+    (query.limit !== undefined &&
+      (!Number.isInteger(query.limit) ||
+        query.limit < 1 ||
+        query.limit > FAVORITE_RENDER_CHUNK))
   ) {
     throw new InvalidFavoriteLibraryQuery('收藏查询条件无效');
   }
@@ -156,6 +161,7 @@ export function libraryStatements(
   query: FavoriteLibraryQuery,
 ) {
   const cursor = validateLibraryQuery(query, username);
+  const pageSize = query.limit ?? FAVORITE_RENDER_CHUNK;
   const numericJson = (column: string, field: string) =>
     dialect === 'sqlite'
       ? `CAST(json_extract(${column}, '$.${field}') AS REAL)`
@@ -232,7 +238,7 @@ export function libraryStatements(
       (SELECT COUNT(*) FROM favorites WHERE username = ? AND library_valid = 1) AS library_total ${from} ${where}`,
     countParams: [username, ...params],
     page: `${selection}${after}
-      ORDER BY ${query.sort === 'saved' ? `f.saved_at DESC, ${key} DESC` : `${missing} ASC, ${value} DESC, f.saved_at DESC, ${key} DESC`} LIMIT ${FAVORITE_RENDER_CHUNK + 1}`,
+      ORDER BY ${query.sort === 'saved' ? `f.saved_at DESC, ${key} DESC` : `${missing} ASC, ${value} DESC, f.saved_at DESC, ${key} DESC`} LIMIT ${pageSize + 1}`,
     pageParams: [
       ...params,
       ...(cursor
@@ -263,7 +269,8 @@ export function buildLibraryPage(
     completed: Number(countsRow.completed),
     reviewed: Number(countsRow.reviewed),
   };
-  const page = rows.slice(0, FAVORITE_RENDER_CHUNK);
+  const pageSize = query.limit ?? FAVORITE_RENDER_CHUNK;
+  const page = rows.slice(0, pageSize);
   const last = page.at(-1);
   return {
     items: page.map(libraryItem),
@@ -271,7 +278,7 @@ export function buildLibraryPage(
     total: counts[query.filter],
     libraryTotal: Number(countsRow.library_total),
     nextCursor:
-      rows.length > FAVORITE_RENDER_CHUNK && last
+      rows.length > pageSize && last
         ? Buffer.from(
             JSON.stringify({
               binding: binding(username, query),

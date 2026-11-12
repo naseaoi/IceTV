@@ -164,3 +164,35 @@ it('保存失败时保留面板并提示', async () => {
   expect(showToast).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
 });
+
+it('入口可见观看状态时保存不重复提示', async () => {
+  render(
+    <WatchRecordPanel
+      target={{ ...target, feedback: { watchStateVisible: true } }}
+      open
+      onClose={jest.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('radio', { name: '想看' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(mockBatch).toHaveBeenCalled());
+  expect(showToast).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  '移出片单按入口收藏态可见性反馈：%s',
+  async (favoriteVisible) => {
+    render(
+      <WatchRecordPanel
+        target={{ ...target, feedback: { favoriteVisible } }}
+        open
+        onClose={jest.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '移出片单' }));
+    fireEvent.click(screen.getByRole('button', { name: '移出' }));
+    await waitFor(() => expect(mockDeleteFavorite).toHaveBeenCalled());
+    if (favoriteVisible) expect(showToast).not.toHaveBeenCalled();
+    else expect(showToast).toHaveBeenCalledWith('已移出片单', 'success');
+  },
+);

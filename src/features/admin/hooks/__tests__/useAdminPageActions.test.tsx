@@ -25,7 +25,6 @@ describe('useAdminPageActions', () => {
     const setRole = jest.fn();
     const setError = jest.fn();
     const setLoading = jest.fn();
-    const showAlert = jest.fn();
 
     mockedAdminGet
       .mockResolvedValueOnce({
@@ -39,7 +38,6 @@ describe('useAdminPageActions', () => {
 
     const { result } = renderHook(() =>
       useAdminPageActions({
-        showAlert,
         setConfig,
         setRole,
         setError,
@@ -82,7 +80,6 @@ describe('useAdminPageActions', () => {
 
     const { result } = renderHook(() =>
       useAdminPageActions({
-        showAlert,
         setConfig,
         setRole,
         setError,
@@ -102,12 +99,7 @@ describe('useAdminPageActions', () => {
     expect(setConfig).not.toHaveBeenCalled();
     expect(setRole).not.toHaveBeenCalled();
     expect(setError).toHaveBeenCalledWith('权限不足');
-    expect(showAlert).toHaveBeenCalledWith({
-      type: 'error',
-      title: '错误',
-      message: '权限不足',
-      showConfirm: true,
-    });
+    expect(showAlert).not.toHaveBeenCalled();
     expect(showToast).not.toHaveBeenCalled();
     expect(setLoading).toHaveBeenLastCalledWith(false);
   });
@@ -135,7 +127,6 @@ describe('useAdminPageActions', () => {
 
     const { result } = renderHook(() =>
       useAdminPageActions({
-        showAlert: jest.fn(),
         setConfig,
         setRole: jest.fn(),
         setError: jest.fn(),
@@ -174,7 +165,6 @@ describe('useAdminPageActions', () => {
 
     const { result } = renderHook(() =>
       useAdminPageActions({
-        showAlert,
         setConfig: jest.fn(),
         setRole: jest.fn(),
         setError: jest.fn(),
@@ -187,7 +177,7 @@ describe('useAdminPageActions', () => {
     });
 
     expect(mockedAdminGet).toHaveBeenCalledWith('/api/admin/reset', '重置失败');
-    expect(showToast).toHaveBeenCalledWith('重置成功，请刷新页面！', 'success');
+    expect(showToast).not.toHaveBeenCalled();
     expect(showAlert).not.toHaveBeenCalled();
   });
 });

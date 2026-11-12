@@ -1,10 +1,12 @@
 export interface TrackingSqlDialect {
   jsonNumber(field: string): string;
+  jsonReal(field: string): string;
   jsonTimestamp(field: string): string;
   trackingEnabled(): string;
 }
 
 export const SQLITE_TRACKING_DIALECT: TrackingSqlDialect = {
+  jsonReal: (field) => `CAST(json_extract(record_json, '$.${field}') AS REAL)`,
   jsonNumber: (field) =>
     `CAST(json_extract(record_json, '$.${field}') AS INTEGER)`,
   jsonTimestamp: (field) =>
@@ -14,6 +16,8 @@ export const SQLITE_TRACKING_DIALECT: TrackingSqlDialect = {
 };
 
 export const MYSQL_TRACKING_DIALECT: TrackingSqlDialect = {
+  jsonReal: (field) =>
+    `CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.${field}')) AS DECIMAL(30, 6))`,
   jsonNumber: (field) =>
     `CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.${field}')) AS SIGNED)`,
   jsonTimestamp: (field) =>
@@ -68,4 +72,15 @@ END`;
 `;
 
   return { total, current, baseline, createdAt, unreadWhere };
+}
+
+// 保存时间窗口由调用方绑定参数，分页与计数使用同一个截止时刻。
+export function buildShelvedPlayRecordWhere(
+  dialect: TrackingSqlDialect,
+): string {
+  const { total, current } = buildTrackingSql(dialect);
+  return `${dialect.jsonTimestamp('save_time')} < ?
+    AND NOT (COALESCE(${total}, 0) > 0 AND COALESCE(${current}, 0) >= ${total}
+      AND COALESCE(${dialect.jsonReal('total_time')}, 0) > 0
+      AND COALESCE(${dialect.jsonReal('play_time')}, 0) >= ${dialect.jsonReal('total_time')} * 0.9)`;
 }

@@ -1,10 +1,5 @@
 import 'server-only';
 
-import {
-  DEFAULT_BANGUMI_DATA_SOURCE,
-  normalizeBangumiDataSource,
-  normalizeSiteBangumiDataSource,
-} from '@/lib/bangumi-source';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { type ConfigStateUpdate, stripConfigState } from '@/lib/config-state';
 import { db } from '@/lib/db';
@@ -19,6 +14,8 @@ import {
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
 import { getOwnerUsername } from '@/lib/env.server';
+import { normalizeTrafficSettings } from '@/lib/host-traffic';
+import { isLinuxDoLoginEnabled } from '@/lib/linuxdo-config.server';
 import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
@@ -27,10 +24,12 @@ import {
   DEFAULT_SITE_FOOTER_TEXT,
   normalizeSiteFooterText,
 } from '@/lib/site-footer';
+import { resolveSourceAccessRule } from '@/lib/source-access';
 import {
   DEFAULT_SOURCE_COVER_PROXY_MODE,
   normalizeSourceCoverProxyMode,
 } from '@/lib/source-cover-proxy';
+import type { UserAccess } from '@/lib/user-access';
 import { normalizeUsername } from '@/lib/username';
 import { AdminConfig } from '@/types/admin';
 
@@ -90,6 +89,7 @@ let inflightConfigLoad: Promise<AdminConfig> | null = null;
 let configCacheGeneration = 0;
 const DEFAULT_CONFIG_CACHE_TTL_MS = 60_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
+  'auto',
   'direct',
   'cors-proxy-zwei',
   'cmliussss-cdn-tencent',
@@ -104,12 +104,6 @@ export function getPublicDoubanProxyType(
   return proxyType && PUBLIC_DOUBAN_PROXY_TYPES.has(proxyType)
     ? proxyType
     : DEFAULT_DOUBAN_PROXY_TYPE;
-}
-
-export function getPublicBangumiDataSource(
-  dataSource: string | undefined,
-): string {
-  return dataSource === 'direct' ? dataSource : DEFAULT_BANGUMI_DATA_SOURCE;
 }
 
 export function getPublicDoubanImageProxyType(
@@ -284,7 +278,6 @@ async function getInitConfig(
       LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
       EnableUserDanmaku: false,
@@ -294,10 +287,8 @@ async function getInitConfig(
           Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       }),
-      DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      BangumiDataSource: normalizeBangumiDataSource(
-        process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
-      ),
+      DoubanProxyType:
+        process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || DEFAULT_DOUBAN_PROXY_TYPE,
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
@@ -486,6 +477,18 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   ) {
     delete adminConfig.UserConfig.DefaultUserGroup;
   }
+  const linuxDo = adminConfig.UserConfig.LinuxDo;
+  adminConfig.UserConfig.LinuxDo = {
+    Enabled: linuxDo?.Enabled === true,
+    MinTrustLevel:
+      linuxDo &&
+      Number.isInteger(linuxDo.MinTrustLevel) &&
+      linuxDo.MinTrustLevel >= 0 &&
+      linuxDo.MinTrustLevel <= 4
+        ? linuxDo.MinTrustLevel
+        : 1,
+  };
+  delete adminConfig.UserConfig.LinuxDoConfigured;
   delete adminConfig.UserConfig.InviteCodes;
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];
@@ -499,6 +502,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (!adminConfig.LiveConfig || !Array.isArray(adminConfig.LiveConfig)) {
     adminConfig.LiveConfig = [];
   }
+  adminConfig.TrafficConfig = normalizeTrafficSettings(
+    adminConfig.TrafficConfig,
+  );
   if (!adminConfig.SiteConfig) {
     adminConfig.SiteConfig = {
       SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'IceTV',
@@ -511,7 +517,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
       EnableUserDanmaku: false,
@@ -521,10 +526,8 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
           Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: 7200,
       }),
-      DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      BangumiDataSource: normalizeBangumiDataSource(
-        process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
-      ),
+      DoubanProxyType:
+        process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || DEFAULT_DOUBAN_PROXY_TYPE,
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
@@ -553,11 +556,11 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableOptimization !== 'boolean') {
     adminConfig.SiteConfig.EnableOptimization = true;
   }
-  if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
-    adminConfig.SiteConfig.LiveDirectConnect = false;
-  }
   if (typeof adminConfig.SiteConfig.AutoSwitchSource !== 'boolean') {
     adminConfig.SiteConfig.AutoSwitchSource = false;
+  }
+  if (typeof adminConfig.SiteConfig.UpstreamProxyPoolSegments !== 'boolean') {
+    adminConfig.SiteConfig.UpstreamProxyPoolSegments = false;
   }
   if (typeof adminConfig.SiteConfig.EnableDanmaku !== 'boolean') {
     adminConfig.SiteConfig.EnableDanmaku = false;
@@ -574,22 +577,17 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     SiteName: site.SiteName,
     SiteIcon: site.SiteIcon,
     Announcement: site.Announcement,
-    AnnouncementVersion: site.AnnouncementVersion,
-    AnnouncementPublishedAt: site.AnnouncementPublishedAt,
     FooterText: site.FooterText,
     EnableLiveEntry: site.EnableLiveEntry,
     LiveAccess: site.LiveAccess,
     DefaultAggregateSearch: site.DefaultAggregateSearch,
     EnableOptimization: site.EnableOptimization,
-    LiveDirectConnect: site.LiveDirectConnect,
     AutoSwitchSource: site.AutoSwitchSource,
+    UpstreamProxyPoolSegments: site.UpstreamProxyPoolSegments,
     EnableDanmaku: site.EnableDanmaku,
     EnableUserDanmaku: site.EnableUserDanmaku,
     ...normalizeRuntimeParams(site),
     DoubanProxyType: normalizeSiteDoubanProxyType(site.DoubanProxyType),
-    BangumiDataSource: normalizeSiteBangumiDataSource(
-      site.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
-    ),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       site.DoubanImageProxyType,
     ),
@@ -728,6 +726,7 @@ export function getCacheTime(
 export async function getAvailableApiSites(
   user?: string,
   config?: Readonly<AdminConfig>,
+  userAccess?: Readonly<UserAccess>,
 ): Promise<ApiSite[]> {
   const currentConfig = config || (await getConfigForRead());
   const enabledSources = currentConfig.SourceConfig.filter((s) => !s.disabled);
@@ -737,7 +736,10 @@ export async function getAvailableApiSites(
   }
 
   const lookupUsername = normalizeUsername(user);
-  const userConfig = await db.getUserAccess(lookupUsername);
+  const userConfig =
+    userAccess && normalizeUsername(userAccess.username) === lookupUsername
+      ? userAccess
+      : await db.getUserAccess(lookupUsername);
   const isStaff =
     lookupUsername === normalizeUsername(getOwnerUsername()) ||
     userConfig?.role === 'admin' ||
@@ -749,52 +751,11 @@ export async function getAvailableApiSites(
     return allApiSites;
   }
 
-  // 优先根据用户自己的 enabledApis 配置查找
-  if (userConfig.enabledApis && userConfig.enabledApis.length > 0) {
-    const userApiSitesSet = new Set(userConfig.enabledApis);
-    return allApiSites
-      .filter((s) => userApiSitesSet.has(s.key))
-      .map((s) => ({
-        key: s.key,
-        name: s.name,
-        api: s.api,
-        detail: s.detail,
-      }));
-  }
-
-  // 如果没有 enabledApis 配置，则根据 tags 查找
-  if (
-    userConfig.tags &&
-    userConfig.tags.length > 0 &&
-    currentConfig.UserConfig.Tags
-  ) {
-    const enabledApisFromTags = new Set<string>();
-
-    userConfig.tags.forEach((tagName) => {
-      const tagConfig = currentConfig.UserConfig.Tags?.find(
-        (t) => t.name === tagName,
-      );
-      if (tagConfig && tagConfig.enabledApis) {
-        tagConfig.enabledApis.forEach((apiKey) =>
-          enabledApisFromTags.add(apiKey),
-        );
-      }
-    });
-
-    if (enabledApisFromTags.size > 0) {
-      return allApiSites
-        .filter((s) => enabledApisFromTags.has(s.key))
-        .map((s) => ({
-          key: s.key,
-          name: s.name,
-          api: s.api,
-          detail: s.detail,
-        }));
-    }
-  }
-
-  // 如果都没有配置，返回所有可用的 API 站点
-  return allApiSites;
+  const rule = resolveSourceAccessRule(
+    userConfig,
+    currentConfig.UserConfig.Tags,
+  );
+  return rule ? allApiSites.filter((s) => rule.keys.has(s.key)) : allApiSites;
 }
 
 function toApiSite(site: ApiSite): ApiSite {
@@ -804,13 +765,6 @@ function toApiSite(site: ApiSite): ApiSite {
     api: site.api,
     detail: site.detail,
   };
-}
-
-export async function setCachedConfig(config: AdminConfig) {
-  cachedConfig = configSelfCheck(cloneConfig(config));
-  cachedConfigVersion = getConfigVersion(cachedConfig);
-  cachedConfigLoadedAt = Date.now();
-  bindConfigVersion(cachedConfig, cachedConfigVersion);
 }
 
 function cloneConfig(config: AdminConfig): AdminConfig {
@@ -852,20 +806,17 @@ export async function getPublicConfig() {
     Announcement: config.SiteConfig.Announcement,
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
+    LinuxDoLogin: isLinuxDoLoginEnabled(config),
     RequireInviteCode: !!config.UserConfig.RequireInviteCode,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
-    LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource,
     EnableDanmaku: config.SiteConfig.EnableDanmaku,
     EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku,
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
-    ),
-    BangumiDataSource: getPublicBangumiDataSource(
-      config.SiteConfig.BangumiDataSource,
     ),
     DoubanImageProxyType: getPublicDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,

@@ -10,44 +10,31 @@ import { useSite } from '@/components/SiteProvider';
 import Spinner from '@/components/Spinner';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
+import { getLinuxDoErrorMessage } from '@/lib/linuxdo-errors';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { validateNickname } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 
 import { useUsernameAvailability } from './hooks/useUsernameAvailability';
 import {
+  FIELD_ERROR_CLASS,
+  FIELD_HINT_CLASS,
+  FIELD_OK_CLASS,
+  inputClass,
+  PRIMARY_SUBMIT_CLASS,
+  SWITCH_LINK_CLASS,
+} from './lib/login-form-styles';
+import {
   type RegisterField,
   type RegisterFieldErrors,
   validateRegisterForm,
 } from './lib/registerValidation';
+import { LinuxDoInviteForm } from './LinuxDoInviteForm';
+import { LinuxDoLoginButton } from './LinuxDoLoginButton';
 import { PosterWallBackdrop } from './PosterWallBackdrop';
-
-// 与 MODAL_INPUT_CLASS 同风格；移动端保持 16px 字号，避免 iOS 聚焦时放大页面
-const INPUT_BASE_CLASS =
-  'block h-11 w-full rounded-lg border-0 bg-gray-900/[0.04] px-3.5 text-base text-gray-900 ring-1 ring-inset transition-colors placeholder:text-gray-400 focus:bg-white focus:ring-2 dark:bg-white/[0.06] dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:bg-gray-950 sm:text-sm';
-
-const INPUT_VALID_RING_CLASS =
-  'ring-gray-900/[0.08] focus:ring-brand-500 dark:ring-white/[0.08]';
-
-const INPUT_INVALID_RING_CLASS =
-  'ring-rose-500/60 focus:ring-rose-500 dark:ring-rose-500/60';
-
-const inputClass = (invalid = false) =>
-  `${INPUT_BASE_CLASS} ${
-    invalid ? INPUT_INVALID_RING_CLASS : INPUT_VALID_RING_CLASS
-  }`;
-
-const FIELD_ERROR_CLASS = 'mt-1.5 text-xs text-rose-600 dark:text-rose-400';
-
-const FIELD_HINT_CLASS = 'mt-1.5 text-xs text-gray-500 dark:text-gray-400';
-
-const FIELD_OK_CLASS = 'mt-1.5 text-xs text-brand-600 dark:text-brand-400';
 
 const PASSWORD_TOGGLE_CLASS =
   'absolute inset-y-0 right-0 flex w-11 items-center justify-center text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300';
-
-const SWITCH_LINK_CLASS =
-  'font-medium text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-400 dark:hover:text-brand-300';
 
 function FormNotice({
   tone,
@@ -90,6 +77,9 @@ export function LoginPageClient() {
   const [touched, setTouched] = useState<
     Partial<Record<RegisterField, boolean>>
   >({});
+  const [linuxDoLogin, setLinuxDoLogin] = useState(false);
+  const [linuxDoInvite, setLinuxDoInvite] = useState<string | null>(null);
+  const [redirectTarget, setRedirectTarget] = useState('/');
 
   const { siteName } = useSite();
 
@@ -97,7 +87,7 @@ export function LoginPageClient() {
     let cancelled = false;
 
     const loadRuntimeConfig = async () => {
-      const { openRegister, requireInviteCode } =
+      const { openRegister, requireInviteCode, linuxDoLogin } =
         await getClientAuthRuntimeConfig();
       if (cancelled) {
         return;
@@ -105,10 +95,50 @@ export function LoginPageClient() {
 
       setRegisterEnabled(openRegister);
       setInviteCodeRequired(requireInviteCode);
+      setLinuxDoLogin(linuxDoLogin);
     };
 
     loadRuntimeConfig();
 
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    setRedirectTarget(url.searchParams.get('redirect') || '/');
+
+    const errorCode = url.searchParams.get('error');
+    const inviteStep = url.searchParams.get('linuxdo') === 'invite';
+    if (!errorCode && !inviteStep) return;
+
+    // 一次性结果参数读取后移除，刷新页面不重复提示
+    url.searchParams.delete('error');
+    url.searchParams.delete('linuxdo');
+    window.history.replaceState(null, '', url);
+
+    if (errorCode) {
+      setError(
+        getLinuxDoErrorMessage(errorCode) ?? 'LinuxDo 登录失败，请稍后重试',
+      );
+    }
+    if (!inviteStep) return;
+
+    let cancelled = false;
+    fetch('/api/auth/linuxdo/register')
+      .then(async (res) => {
+        const data = res.ok ? await res.json() : null;
+        if (cancelled) return;
+        if (typeof data?.providerUsername === 'string') {
+          setLinuxDoInvite(data.providerUsername);
+        } else {
+          setError(getLinuxDoErrorMessage('linuxdo_invalid_state') ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError('网络错误，请稍后重试');
+      });
     return () => {
       cancelled = true;
     };
@@ -256,7 +286,10 @@ export function LoginPageClient() {
       } else if (res.status === 403) {
         const data = await res.json().catch(() => ({}));
         setError(
-          data.error ?? (mode === 'register' ? '当前未开放注册' : '无访问权限'),
+          data.code === 'USER_BANNED'
+            ? '账号已被封禁，请联系管理员'
+            : (data.error ??
+                (mode === 'register' ? '当前未开放注册' : '无访问权限')),
         );
       } else if (res.status === 409) {
         const data = await res.json().catch(() => ({}));
@@ -298,221 +331,254 @@ export function LoginPageClient() {
         <main className='flex flex-1 justify-center px-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-7 sm:px-8 lg:items-center lg:px-14 lg:pb-16 lg:pt-16'>
           <div className='w-full max-w-[360px] animate-slide-up'>
             <h1 className='mb-7 text-2xl font-semibold tracking-tight text-gray-900 dark:text-white lg:mb-8 lg:text-[28px]'>
-              {isRegister ? '注册账号' : '登录'}
+              {linuxDoInvite ? '完成注册' : isRegister ? '注册账号' : '登录'}
             </h1>
 
             {error && <FormNotice tone='error'>{error}</FormNotice>}
             {success && <FormNotice tone='success'>{success}</FormNotice>}
 
-            <form onSubmit={handleSubmit} className='space-y-4'>
-              {shouldAskUsername && (
-                <div>
-                  <label htmlFor='username' className={MODAL_LABEL_CLASS}>
-                    用户名
-                  </label>
-                  <input
-                    id='username'
-                    type='text'
-                    autoComplete='username'
-                    className={inputClass(usernameInvalid)}
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    onBlur={() => markTouched('username')}
-                    aria-invalid={usernameInvalid}
-                    aria-describedby={
-                      usernameHint ? 'username-error' : undefined
-                    }
-                  />
-                  {usernameHint && (
-                    <p id='username-error' className={usernameHint.className}>
-                      {usernameHint.text}
-                    </p>
+            {linuxDoInvite ? (
+              <LinuxDoInviteForm
+                providerUsername={linuxDoInvite}
+                onError={setError}
+                onCancel={() => {
+                  setLinuxDoInvite(null);
+                  switchMode('login');
+                }}
+              />
+            ) : (
+              <>
+                <form onSubmit={handleSubmit} className='space-y-4'>
+                  {shouldAskUsername && (
+                    <div>
+                      <label htmlFor='username' className={MODAL_LABEL_CLASS}>
+                        用户名
+                      </label>
+                      <input
+                        id='username'
+                        type='text'
+                        autoComplete='username'
+                        className={inputClass(usernameInvalid)}
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        onBlur={() => markTouched('username')}
+                        aria-invalid={usernameInvalid}
+                        aria-describedby={
+                          usernameHint ? 'username-error' : undefined
+                        }
+                      />
+                      {usernameHint && (
+                        <p
+                          id='username-error'
+                          className={usernameHint.className}
+                        >
+                          {usernameHint.text}
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
 
-              {isRegister && (
-                <div>
-                  <label htmlFor='nickname' className={MODAL_LABEL_CLASS}>
-                    昵称
-                  </label>
-                  <input
-                    id='nickname'
-                    autoComplete='nickname'
-                    value={nickname}
-                    onChange={(event) => setNickname(event.target.value)}
-                    required
-                    className={inputClass(
-                      nicknameAvailability.status === 'error',
-                    )}
-                  />
-                  {nicknameAvailability.message && (
-                    <p
-                      className={
-                        nicknameAvailability.status === 'error'
-                          ? FIELD_ERROR_CLASS
-                          : FIELD_HINT_CLASS
-                      }
-                    >
-                      {nicknameAvailability.message}
-                    </p>
+                  {isRegister && (
+                    <div>
+                      <label htmlFor='nickname' className={MODAL_LABEL_CLASS}>
+                        昵称
+                      </label>
+                      <input
+                        id='nickname'
+                        autoComplete='nickname'
+                        value={nickname}
+                        onChange={(event) => setNickname(event.target.value)}
+                        required
+                        className={inputClass(
+                          nicknameAvailability.status === 'error',
+                        )}
+                      />
+                      {nicknameAvailability.message && (
+                        <p
+                          className={
+                            nicknameAvailability.status === 'error'
+                              ? FIELD_ERROR_CLASS
+                              : FIELD_HINT_CLASS
+                          }
+                        >
+                          {nicknameAvailability.message}
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-              <div>
-                <label htmlFor='password' className={MODAL_LABEL_CLASS}>
-                  密码
-                </label>
-                <div className='relative'>
-                  <input
-                    id='password'
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete={
-                      mode === 'register' ? 'new-password' : 'current-password'
-                    }
-                    className={`${inputClass(!!visibleError('password'))} pr-11`}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    onBlur={() => markTouched('password')}
-                    aria-invalid={!!visibleError('password')}
-                    aria-describedby={
-                      visibleError('password') ? 'password-error' : undefined
-                    }
-                  />
+                  <div>
+                    <label htmlFor='password' className={MODAL_LABEL_CLASS}>
+                      密码
+                    </label>
+                    <div className='relative'>
+                      <input
+                        id='password'
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete={
+                          mode === 'register'
+                            ? 'new-password'
+                            : 'current-password'
+                        }
+                        className={`${inputClass(!!visibleError('password'))} pr-11`}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        onBlur={() => markTouched('password')}
+                        aria-invalid={!!visibleError('password')}
+                        aria-describedby={
+                          visibleError('password')
+                            ? 'password-error'
+                            : undefined
+                        }
+                      />
+                      <button
+                        type='button'
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        className={PASSWORD_TOGGLE_CLASS}
+                        aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                      >
+                        {showPassword ? (
+                          <EyeOff className='h-[18px] w-[18px]' />
+                        ) : (
+                          <Eye className='h-[18px] w-[18px]' />
+                        )}
+                      </button>
+                    </div>
+                    {visibleError('password') && (
+                      <p id='password-error' className={FIELD_ERROR_CLASS}>
+                        {visibleError('password')}
+                      </p>
+                    )}
+                  </div>
+
+                  {mode === 'register' && (
+                    <div>
+                      <label
+                        htmlFor='confirm-password'
+                        className={MODAL_LABEL_CLASS}
+                      >
+                        确认密码
+                      </label>
+                      <div className='relative'>
+                        <input
+                          id='confirm-password'
+                          type={showConfirmPassword ? 'text' : 'password'}
+                          autoComplete='new-password'
+                          className={`${inputClass(
+                            !!visibleError('confirmPassword'),
+                          )} pr-11`}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          onBlur={() => markTouched('confirmPassword')}
+                          aria-invalid={!!visibleError('confirmPassword')}
+                          aria-describedby={
+                            visibleError('confirmPassword')
+                              ? 'confirm-password-error'
+                              : undefined
+                          }
+                        />
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setShowConfirmPassword((prev) => !prev)
+                          }
+                          className={PASSWORD_TOGGLE_CLASS}
+                          aria-label={
+                            showConfirmPassword
+                              ? '隐藏确认密码'
+                              : '显示确认密码'
+                          }
+                        >
+                          {showConfirmPassword ? (
+                            <EyeOff className='h-[18px] w-[18px]' />
+                          ) : (
+                            <Eye className='h-[18px] w-[18px]' />
+                          )}
+                        </button>
+                      </div>
+                      {visibleError('confirmPassword') && (
+                        <p
+                          id='confirm-password-error'
+                          className={FIELD_ERROR_CLASS}
+                        >
+                          {visibleError('confirmPassword')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {mode === 'register' && inviteCodeRequired && (
+                    <div>
+                      <label
+                        htmlFor='invite-code'
+                        className={MODAL_LABEL_CLASS}
+                      >
+                        邀请码
+                      </label>
+                      <input
+                        id='invite-code'
+                        type='text'
+                        autoComplete='off'
+                        autoCapitalize='characters'
+                        className={inputClass(!!visibleError('inviteCode'))}
+                        value={inviteCode}
+                        onChange={(e) => setInviteCode(e.target.value)}
+                        onBlur={() => markTouched('inviteCode')}
+                        aria-invalid={!!visibleError('inviteCode')}
+                        aria-describedby={
+                          visibleError('inviteCode')
+                            ? 'invite-code-error'
+                            : undefined
+                        }
+                      />
+                      {visibleError('inviteCode') && (
+                        <p id='invite-code-error' className={FIELD_ERROR_CLASS}>
+                          {visibleError('inviteCode')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <button
-                    type='button'
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    className={PASSWORD_TOGGLE_CLASS}
-                    aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                    type='submit'
+                    disabled={
+                      !password ||
+                      loading ||
+                      (shouldAskUsername && !username) ||
+                      (isRegister &&
+                        (Object.keys(fieldErrors).length > 0 || usernameTaken))
+                    }
+                    className={PRIMARY_SUBMIT_CLASS}
                   >
-                    {showPassword ? (
-                      <EyeOff className='h-[18px] w-[18px]' />
-                    ) : (
-                      <Eye className='h-[18px] w-[18px]' />
-                    )}
+                    {loading && <Spinner className='h-4 w-4' />}
+                    {loading
+                      ? mode === 'register'
+                        ? '注册中...'
+                        : '登录中...'
+                      : mode === 'register'
+                        ? '注册'
+                        : '登录'}
                   </button>
-                </div>
-                {visibleError('password') && (
-                  <p id='password-error' className={FIELD_ERROR_CLASS}>
-                    {visibleError('password')}
-                  </p>
-                )}
-              </div>
+                </form>
 
-              {mode === 'register' && (
-                <div>
-                  <label
-                    htmlFor='confirm-password'
-                    className={MODAL_LABEL_CLASS}
-                  >
-                    确认密码
-                  </label>
-                  <div className='relative'>
-                    <input
-                      id='confirm-password'
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      autoComplete='new-password'
-                      className={`${inputClass(
-                        !!visibleError('confirmPassword'),
-                      )} pr-11`}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      onBlur={() => markTouched('confirmPassword')}
-                      aria-invalid={!!visibleError('confirmPassword')}
-                      aria-describedby={
-                        visibleError('confirmPassword')
-                          ? 'confirm-password-error'
-                          : undefined
-                      }
-                    />
+                {!isRegister && linuxDoLogin && (
+                  <LinuxDoLoginButton redirect={redirectTarget} />
+                )}
+
+                {(isRegister || registerEnabled === true) && (
+                  <p className='mt-6 text-center text-sm text-gray-500 dark:text-gray-400'>
+                    {isRegister ? '已有账号？' : '还没有账号？'}
                     <button
                       type='button'
-                      onClick={() => setShowConfirmPassword((prev) => !prev)}
-                      className={PASSWORD_TOGGLE_CLASS}
-                      aria-label={
-                        showConfirmPassword ? '隐藏确认密码' : '显示确认密码'
+                      onClick={() =>
+                        switchMode(isRegister ? 'login' : 'register')
                       }
+                      className={SWITCH_LINK_CLASS}
                     >
-                      {showConfirmPassword ? (
-                        <EyeOff className='h-[18px] w-[18px]' />
-                      ) : (
-                        <Eye className='h-[18px] w-[18px]' />
-                      )}
+                      {isRegister ? '去登录' : '注册'}
                     </button>
-                  </div>
-                  {visibleError('confirmPassword') && (
-                    <p
-                      id='confirm-password-error'
-                      className={FIELD_ERROR_CLASS}
-                    >
-                      {visibleError('confirmPassword')}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {mode === 'register' && inviteCodeRequired && (
-                <div>
-                  <label htmlFor='invite-code' className={MODAL_LABEL_CLASS}>
-                    邀请码
-                  </label>
-                  <input
-                    id='invite-code'
-                    type='text'
-                    autoComplete='off'
-                    autoCapitalize='characters'
-                    className={inputClass(!!visibleError('inviteCode'))}
-                    value={inviteCode}
-                    onChange={(e) => setInviteCode(e.target.value)}
-                    onBlur={() => markTouched('inviteCode')}
-                    aria-invalid={!!visibleError('inviteCode')}
-                    aria-describedby={
-                      visibleError('inviteCode')
-                        ? 'invite-code-error'
-                        : undefined
-                    }
-                  />
-                  {visibleError('inviteCode') && (
-                    <p id='invite-code-error' className={FIELD_ERROR_CLASS}>
-                      {visibleError('inviteCode')}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <button
-                type='submit'
-                disabled={
-                  !password ||
-                  loading ||
-                  (shouldAskUsername && !username) ||
-                  (isRegister &&
-                    (Object.keys(fieldErrors).length > 0 || usernameTaken))
-                }
-                className='!mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-600 text-[15px] font-medium text-white transition-colors hover:bg-brand-500 active:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50'
-              >
-                {loading && <Spinner className='h-4 w-4' />}
-                {loading
-                  ? mode === 'register'
-                    ? '注册中...'
-                    : '登录中...'
-                  : mode === 'register'
-                    ? '注册'
-                    : '登录'}
-              </button>
-            </form>
-
-            {(isRegister || registerEnabled === true) && (
-              <p className='mt-6 text-center text-sm text-gray-500 dark:text-gray-400'>
-                {isRegister ? '已有账号？' : '还没有账号？'}
-                <button
-                  type='button'
-                  onClick={() => switchMode(isRegister ? 'login' : 'register')}
-                  className={SWITCH_LINK_CLASS}
-                >
-                  {isRegister ? '去登录' : '注册'}
-                </button>
-              </p>
+                  </p>
+                )}
+              </>
             )}
           </div>
         </main>

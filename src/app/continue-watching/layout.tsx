@@ -8,7 +8,11 @@ export default function ContinueWatchingLayout({
   children: ReactNode;
 }) {
   return (
-    <AuthenticatedRoute activePath='/' message='请先登录后再查看继续观看记录。'>
+    <AuthenticatedRoute
+      activePath='/continue-watching'
+      message='请先登录后再查看继续观看记录。'
+      mobileHeader={{ title: '继续观看', showBack: true }}
+    >
       {children}
     </AuthenticatedRoute>
   );

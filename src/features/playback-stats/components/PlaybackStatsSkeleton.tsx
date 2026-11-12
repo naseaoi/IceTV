@@ -17,6 +17,34 @@ export const STATS_COLUMN_CLASS = 'flex min-w-0 flex-col';
 export const STATS_CARD_CLASS =
   'mt-2 flex flex-col rounded-2xl bg-white p-4 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10 sm:p-5 md:mb-6 md:flex-1';
 
+// 指标行：标签胶囊与数值同排，左侧本周（或选中日）为主，右侧累计为辅；骨架与真实组件共用
+export const METRIC_ROW_CLASS =
+  'flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2';
+export const METRIC_CLASS = 'flex min-w-0 items-baseline gap-2';
+export const METRIC_LABEL_CLASS =
+  'shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium leading-4';
+export const METRIC_VALUE_CLASS =
+  'flex items-baseline gap-0.5 whitespace-nowrap';
+export const METRIC_NUMBER_CLASS = {
+  primary: 'text-[28px] font-semibold leading-none tracking-tight',
+  secondary: 'text-xl font-semibold leading-none tracking-tight',
+} as const;
+export const METRIC_UNIT_CLASS = 'mr-1 text-[13px]';
+
+// 周柱状图：每天一条满宽底槽，时长从底部按比例填充；骨架与真实组件共用
+export const WEEK_CHART_CLASS =
+  'mt-5 grid min-h-0 flex-1 grid-cols-7 gap-2 sm:gap-2.5';
+export const WEEK_DAY_CLASS = 'flex min-w-0 flex-col items-stretch gap-2';
+export const WEEK_TRACK_CLASS =
+  'relative flex h-[104px] w-full items-end overflow-hidden rounded-lg md:h-auto md:min-h-[104px] md:flex-1';
+export const WEEK_LABEL_CLASS = 'flex h-4 items-center justify-center text-xs';
+
+// 时段条：24 格热度 + 刻度行，骨架与真实组件共用
+export const HOUR_STRIP_CLASS = 'mt-4 shrink-0';
+export const HOUR_STRIP_CELLS_CLASS = 'flex h-3 gap-[2px]';
+export const HOUR_STRIP_AXIS_CLASS =
+  'relative mt-1.5 h-[15px] text-[10px] leading-[15px] tabular-nums';
+
 export function StatsHeading({
   title,
   children,
@@ -36,22 +64,28 @@ export function StatsHeading({
 
 const BLOCK_CLASS = 'skeleton rounded';
 
-function MetricSkeleton() {
+// 用不可见的同款文字撑出与真实指标一致的尺寸，色块覆盖其上
+function MetricSkeleton({
+  variant,
+  parts,
+}: {
+  variant: keyof typeof METRIC_NUMBER_CLASS;
+  parts: Array<[string, string]>;
+}) {
   return (
-    <div>
-      <div className='flex h-[1.5em] items-center text-[13px]'>
-        <div className={`h-3 w-10 ${BLOCK_CLASS}`} />
-      </div>
-      <div className='relative mt-1 flex items-baseline gap-0.5'>
-        <span
-          aria-hidden='true'
-          className='invisible flex items-baseline gap-0.5'
-        >
-          <span className='text-[28px] font-semibold leading-none'>0</span>
-          <span className='text-[13px]'>分钟</span>
-        </span>
-        <div className={`absolute inset-y-0 w-24 ${BLOCK_CLASS}`} />
-      </div>
+    <div aria-hidden='true' className={METRIC_CLASS}>
+      <span className={`${METRIC_LABEL_CLASS} skeleton text-transparent`}>
+        本周
+      </span>
+      <span className={`relative ${METRIC_VALUE_CLASS}`}>
+        {parts.map(([value, unit]) => (
+          <span key={unit} className='invisible flex items-baseline gap-0.5'>
+            <span className={METRIC_NUMBER_CLASS[variant]}>{value}</span>
+            <span className={METRIC_UNIT_CLASS}>{unit}</span>
+          </span>
+        ))}
+        <span className={`absolute inset-0 ${BLOCK_CLASS}`} />
+      </span>
     </div>
   );
 }
@@ -70,24 +104,29 @@ export function PlaybackStatsSkeleton() {
       <section className={STATS_COLUMN_CLASS}>
         <StatsHeading title='观看统计' />
         <div className={STATS_CARD_CLASS}>
-          <div className='flex flex-wrap gap-x-8 gap-y-3'>
-            <MetricSkeleton />
-            <MetricSkeleton />
+          <div className={METRIC_ROW_CLASS}>
+            <MetricSkeleton variant='primary' parts={[['00', '分钟']]} />
+            <MetricSkeleton
+              variant='secondary'
+              parts={[
+                ['00', '小时'],
+                ['0', '分'],
+              ]}
+            />
           </div>
-          <div className='mt-5 grid flex-1 grid-cols-7 gap-1.5'>
+          <div className={WEEK_CHART_CLASS}>
             {Array.from({ length: 7 }, (_, index) => (
-              <div key={index} className='flex flex-col items-center gap-2'>
-                <div className='flex h-20 w-full items-end justify-center md:h-auto md:min-h-20 md:flex-1'>
-                  <div
-                    className={`w-full max-w-[28px] rounded-md ${BLOCK_CLASS}`}
-                    style={{ height: 12 + ((index * 11) % 44) }}
-                  />
-                </div>
-                <div className='flex h-4 items-center'>
+              <div key={index} className={WEEK_DAY_CLASS}>
+                <div className={`${WEEK_TRACK_CLASS} skeleton`} />
+                <div className={WEEK_LABEL_CLASS}>
                   <div className={`h-3 w-4 ${BLOCK_CLASS}`} />
                 </div>
               </div>
             ))}
+          </div>
+          <div className={HOUR_STRIP_CLASS}>
+            <div className={`${HOUR_STRIP_CELLS_CLASS} ${BLOCK_CLASS}`} />
+            <div className={HOUR_STRIP_AXIS_CLASS} />
           </div>
         </div>
       </section>

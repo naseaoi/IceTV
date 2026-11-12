@@ -10,6 +10,7 @@ export interface FavoriteLibraryQuery {
   filter: FavoriteFilter;
   sort: FavoriteSort;
   cursor?: string | null;
+  limit?: number;
   profileScope?: 'public' | 'self';
 }
 

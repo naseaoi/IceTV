@@ -7,6 +7,7 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useRef,
 } from 'react';
 
 import type { SkipConfigState } from '@/features/play/hooks/usePlayPageState';
@@ -16,6 +17,8 @@ import {
   getSkipConfig,
   saveSkipConfig,
 } from '@/lib/db.client';
+import { showToast } from '@/lib/toast';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 interface UseSkipConfigOptions {
   currentSource: string;
@@ -27,6 +30,17 @@ interface UseSkipConfigOptions {
   setSkipConfig: Dispatch<SetStateAction<SkipConfigState>>;
 }
 
+type SaveState = {
+  confirmed: SkipConfigState;
+  revision: number;
+  queue: Promise<void>;
+};
+const EMPTY_CONFIG: SkipConfigState = {
+  enable: false,
+  intro_time: 0,
+  outro_time: 0,
+};
+
 export function useSkipConfig({
   currentSource,
   currentId,
@@ -36,113 +50,116 @@ export function useSkipConfig({
   artPlayerRef,
   setSkipConfig,
 }: UseSkipConfigOptions) {
-  const handleSkipConfigChange = useCallback(
-    async (newConfig: SkipConfigState) => {
-      if (!currentSourceRef.current || !currentIdRef.current) return;
+  const states = useRef(new Map<string, SaveState>());
 
-      try {
-        setSkipConfig(newConfig);
-        if (
-          !newConfig.enable &&
-          !newConfig.intro_time &&
-          !newConfig.outro_time
-        ) {
-          await deleteSkipConfig(
-            currentSourceRef.current,
-            currentIdRef.current,
-          );
-          const updateSetting = artPlayerRef.current?.setting.update.bind(
-            artPlayerRef.current.setting,
-          );
-          if (updateSetting) {
-            updateSetting({
-              name: '跳过片头片尾',
-              html: '跳过片头片尾',
-              switch: skipConfigRef.current.enable,
-              onSwitch(item: { switch?: boolean }) {
-                const cfg = { ...skipConfigRef.current, enable: !item.switch };
-                handleSkipConfigChange(cfg);
-                return !item.switch;
-              },
-            } as Parameters<typeof updateSetting>[0]);
-            updateSetting({
-              name: '设置片头',
-              html: '设置片头',
-              icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="12" r="2" fill="#ffffff"/><path d="M9 12L17 12" stroke="#ffffff" stroke-width="2"/><path d="M17 6L17 18" stroke="#ffffff" stroke-width="2"/></svg>',
-              tooltip:
-                skipConfigRef.current.intro_time === 0
-                  ? '设置片头时间'
-                  : `${formatTimeSimple(skipConfigRef.current.intro_time)}`,
-              onClick: function () {
-                const currentTime = artPlayerRef.current?.currentTime || 0;
-                if (currentTime > 0) {
-                  const cfg = {
-                    ...skipConfigRef.current,
-                    intro_time: currentTime,
-                  };
-                  handleSkipConfigChange(cfg);
-                  return `${formatTimeSimple(currentTime)}`;
-                }
-              },
-            } as Parameters<typeof updateSetting>[0]);
-            updateSetting({
-              name: '设置片尾',
-              html: '设置片尾',
-              icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 6L7 18" stroke="#ffffff" stroke-width="2"/><path d="M7 12L15 12" stroke="#ffffff" stroke-width="2"/><circle cx="19" cy="12" r="2" fill="#ffffff"/></svg>',
-              tooltip:
-                skipConfigRef.current.outro_time >= 0
-                  ? '设置片尾时间'
-                  : `-${formatTimeSimple(-skipConfigRef.current.outro_time)}`,
-              onClick: function () {
-                const outroTime =
-                  -(
-                    (artPlayerRef.current?.duration ?? 0) -
-                    (artPlayerRef.current?.currentTime ?? 0)
-                  ) || 0;
-                if (outroTime < 0) {
-                  const cfg = {
-                    ...skipConfigRef.current,
-                    outro_time: outroTime,
-                  };
-                  handleSkipConfigChange(cfg);
-                  return `-${formatTimeSimple(-outroTime)}`;
-                }
-              },
-            } as Parameters<typeof updateSetting>[0]);
-          }
-        } else {
-          await saveSkipConfig(
-            currentSourceRef.current,
-            currentIdRef.current,
-            newConfig,
-          );
-        }
-      } catch (err) {
-        console.error('保存跳过片头片尾配置失败:', err);
-      }
+  const applyConfig = useCallback(
+    (config: SkipConfigState) => {
+      skipConfigRef.current = config;
+      setSkipConfig(config);
+      const setting = artPlayerRef.current?.setting;
+      if (!setting) return;
+      setting.update({
+        name: '跳过片头片尾',
+        html: '跳过片头片尾',
+        switch: config.enable,
+      });
+      setting.update({
+        name: '设置片头',
+        html: '设置片头',
+        tooltip:
+          config.intro_time === 0
+            ? '设置片头时间'
+            : formatTimeSimple(config.intro_time),
+      });
+      setting.update({
+        name: '设置片尾',
+        html: '设置片尾',
+        tooltip:
+          config.outro_time >= 0
+            ? '设置片尾时间'
+            : `-${formatTimeSimple(-config.outro_time)}`,
+      });
     },
-    [
-      artPlayerRef,
-      currentSourceRef,
-      currentIdRef,
-      setSkipConfig,
-      skipConfigRef,
-    ],
+    [artPlayerRef, setSkipConfig, skipConfigRef],
   );
 
-  // 读取跳过配置
-  useEffect(() => {
-    const initSkipConfig = async () => {
-      if (!currentSource || !currentId) return;
-      try {
-        const config = await getSkipConfig(currentSource, currentId);
-        if (config) setSkipConfig(config);
-      } catch (err) {
-        console.error('读取跳过片头片尾配置失败:', err);
+  const handleSkipConfigChange = useCallback(
+    (newConfig: SkipConfigState): Promise<void> => {
+      const source = currentSourceRef.current;
+      const id = currentIdRef.current;
+      if (!source || !id) return Promise.resolve();
+      const key = `${source}+${id}`;
+      let state = states.current.get(key);
+      if (!state) {
+        state = {
+          confirmed: { ...skipConfigRef.current },
+          revision: 0,
+          queue: Promise.resolve(),
+        };
+        states.current.set(key, state);
       }
+      const saveState = state;
+      const revision = ++saveState.revision;
+      const config = { ...newConfig };
+      applyConfig(config);
+      saveState.queue = saveState.queue.then(async () => {
+        try {
+          if (!config.enable && !config.intro_time && !config.outro_time) {
+            await deleteSkipConfig(source, id);
+          } else {
+            await saveSkipConfig(source, id, config);
+          }
+          saveState.confirmed = config;
+        } catch (error) {
+          if (
+            saveState.revision === revision &&
+            currentSourceRef.current === source &&
+            currentIdRef.current === id
+          ) {
+            applyConfig(saveState.confirmed);
+          }
+          if (!isAbortError(error))
+            showToast(
+              getErrorMessage(error, '跳过片头片尾设置未能保存，请重试'),
+              'error',
+            );
+        }
+      });
+      return saveState.queue;
+    },
+    [applyConfig, currentSourceRef, currentIdRef, skipConfigRef],
+  );
+
+  useEffect(() => {
+    if (!currentSource || !currentId) return;
+    let active = true;
+    const key = `${currentSource}+${currentId}`;
+    const existing = states.current.get(key);
+    const revision = existing?.revision ?? 0;
+    void getSkipConfig(currentSource, currentId)
+      .then((config) => {
+        if (!active || (states.current.get(key)?.revision ?? 0) !== revision)
+          return;
+        const confirmed = config ?? EMPTY_CONFIG;
+        if (!existing)
+          states.current.set(key, {
+            confirmed,
+            revision: 0,
+            queue: Promise.resolve(),
+          });
+        applyConfig(existing?.confirmed ?? confirmed);
+      })
+      .catch((error) => {
+        if (active && !isAbortError(error))
+          showToast(
+            getErrorMessage(error, '读取跳过片头片尾设置失败'),
+            'error',
+          );
+      });
+    return () => {
+      active = false;
     };
-    void initSkipConfig();
-  }, [currentSource, currentId, setSkipConfig]);
+  }, [currentSource, currentId, applyConfig]);
 
   return { handleSkipConfigChange };
 }

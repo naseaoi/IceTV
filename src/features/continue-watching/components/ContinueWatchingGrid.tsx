@@ -1,11 +1,9 @@
 'use client';
 
-import VideoCard from '@/components/VideoCard';
+import ContinueCard from '@/components/ContinueCard';
+import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
 import type { ContinueWatchingItem } from '@/features/continue-watching/hooks/useContinueWatchingItems';
-import {
-  CONTINUE_WATCHING_GRID_CLASS,
-  CONTINUE_WATCHING_GRID_ITEM_CLASS,
-} from '@/features/continue-watching/lib/layout';
+import { CONTINUE_WATCHING_GRID_CLASS } from '@/features/continue-watching/lib/layout';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import {
   getPlayRecordEpisodeDisplay,
@@ -22,21 +20,23 @@ function getProgress(record: ContinueWatchingItem) {
 
 export function ContinueWatchingGrid({
   items,
+  selecting,
+  selectedKeys,
+  onToggleSelect,
   onDelete,
+  pendingCount = 0,
 }: {
   items: ContinueWatchingItem[];
+  selecting: boolean;
+  selectedKeys: Set<string>;
+  onToggleSelect: (key: string) => void;
   onDelete: (key: string) => void;
+  // 加载更多时追加在末尾的骨架数
+  pendingCount?: number;
 }) {
   const containerRef = useListLayoutMotion<HTMLDivElement>(
-    items.map((record) => String(record.key)),
+    items.map((record) => record.key),
   );
-  if (items.length === 0) {
-    return (
-      <div className='py-5 text-center text-gray-500 dark:text-gray-400'>
-        暂无继续观看内容
-      </div>
-    );
-  }
 
   return (
     <div
@@ -51,33 +51,38 @@ export function ContinueWatchingGrid({
         return (
           <div
             key={record.key}
-            data-list-motion-key={String(record.key)}
-            className={CONTINUE_WATCHING_GRID_ITEM_CLASS}
+            data-list-motion-key={record.key}
+            className='min-w-0'
           >
-            <VideoCard
+            <ContinueCard
+              fluid
+              source={parsedKey.source}
               id={parsedKey.id}
               title={record.title}
               poster={record.cover}
               year={record.year}
-              source={parsedKey.source}
-              source_name={record.source_name}
-              progress={getProgress(record)}
-              episodes={episodeDisplay.totalEpisodes}
+              sourceName={record.source_name}
               currentEpisode={episodeDisplay.currentEpisode}
+              totalEpisodes={episodeDisplay.totalEpisodes}
+              resumeEpisodeIndex={Math.max(0, record.index - 1)}
+              resumeGroup={getPlayRecordResumeGroup(record)}
+              progress={getProgress(record)}
               hasUpdate={hasPlayRecordUpdate(record)}
               trackingEnabled={isTrackingEnabled(record)}
               availableEpisodes={episodeDisplay.totalEpisodes}
-              resumeEpisodeIndex={Math.max(0, record.index - 1)}
-              resumeGroup={getPlayRecordResumeGroup(record)}
               resumeTime={Math.max(0, Math.floor(record.play_time || 0))}
               query={record.search_title}
-              from='playrecord'
               onDelete={() => onDelete(record.key)}
-              type={record.total_episodes > 1 ? 'tv' : ''}
+              selectable={selecting}
+              selected={selectedKeys.has(record.key)}
+              onSelect={() => onToggleSelect(record.key)}
             />
           </div>
         );
       })}
+      {Array.from({ length: pendingCount }, (_, index) => (
+        <ContinueWatchingCardSkeleton key={`pending-${index}`} fluid />
+      ))}
     </div>
   );
 }

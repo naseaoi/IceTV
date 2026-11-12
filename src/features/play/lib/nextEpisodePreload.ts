@@ -1,4 +1,4 @@
-import { shouldFilterAdsOnClient } from '@/features/play/lib/ad-filter-strategy-registry';
+import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import {
   type FragmentMemoryCache,
   type FragmentMemoryEntry,
@@ -8,14 +8,13 @@ import {
   isCacheableFragmentUrl,
 } from '@/features/play/lib/fragmentMemoryCache';
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
-import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
 import {
   buildVodProxyUrl,
   isVodM3u8Url,
 } from '@/features/play/lib/vodProxyUrl';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { getManagedVideo } from '@/lib/player-runtime';
-import { isServerProxy } from '@/lib/proxy-modes';
+import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
 
 export const NEXT_EPISODE_PRELOAD_LIMITS = {
   remainingSeconds: 60,
@@ -29,6 +28,26 @@ const BUFFER_TOLERANCE_SECONDS = 0.5;
 const PLAYLIST_TIMEOUT_MS = 10_000;
 const SEGMENT_TIMEOUT_MS = 20_000;
 const PLAY_PAGE_PATH = '/play';
+
+export type NextEpisodeWarmUpConditions = {
+  autoPlayNext: boolean;
+  currentTime: number;
+  bufferedAheadSeconds: number;
+  saveData: boolean;
+};
+
+// 当前集真实起播且缓冲稳定后才准备下一集，避免与首帧抢本站和上游资源
+export function shouldWarmUpNextEpisode(
+  conditions: NextEpisodeWarmUpConditions,
+): boolean {
+  const { autoPlayNext, currentTime, bufferedAheadSeconds, saveData } =
+    conditions;
+  if (!autoPlayNext || saveData) return false;
+  if (!Number.isFinite(currentTime) || currentTime <= 0) return false;
+  return (
+    bufferedAheadSeconds >= NEXT_EPISODE_PRELOAD_LIMITS.healthyBufferSeconds
+  );
+}
 
 export type NextEpisodePreloadConditions = {
   autoPlayNext: boolean;
@@ -324,13 +343,16 @@ export async function preloadEpisodeFragments(
   const resolvedUrl = await resolveLazyEpisodeUrl(
     sourceKey,
     options.episodeUrl,
+    { signal },
   );
   if (signal.aborted || !isVodM3u8Url(resolvedUrl)) return 0;
 
+  const route = await resolveSourcePlaybackRoute(sourceKey, resolvedUrl);
+  if (signal.aborted) return 0;
   const manifestUrl = new URL(
     buildVodProxyUrl({
       rawUrl: resolvedUrl,
-      useServerProxy: isServerProxy(sourceKey, resolvedUrl),
+      ...route,
       sourceKey,
       playbackRequestMode: 'episode',
     }),
@@ -350,7 +372,7 @@ export async function preloadEpisodeFragments(
   if (!playlist || signal.aborted) return 0;
 
   const mediaText = options.filterAds
-    ? filterAdsFromM3U8(playlist.text)
+    ? filterM3U8AdsForSource(playlist.text, playlist.url, sourceKey)
     : playlist.text;
   const segmentUrls = selectPreloadSegmentUrls(
     mediaText,
@@ -402,11 +424,15 @@ export type NextEpisodePreloadOptions = {
   autoPlayNextEnabledRef: RefLike<boolean>;
   blockAdEnabledRef: RefLike<boolean>;
   skipConfigRef: RefLike<SkipConfigLike | null>;
+  // 下一集的解析与清单缓存预热，每集最多执行一次
+  warmUp?: (signal: AbortSignal) => void;
 };
 
 type PreloadSession = {
   key: string;
   options: NextEpisodePreloadOptions & { nextEpisodeUrl: string };
+  warmedUp: boolean;
+  warmUpController: AbortController;
   timer: ReturnType<typeof setInterval> | null;
   controller: AbortController | null;
 };
@@ -449,6 +475,22 @@ function checkPreloadSession(session: PreloadSession): void {
   const video = options.getVideo();
   if (!video) return;
 
+  const autoPlayNext = options.autoPlayNextEnabledRef.current;
+  const saveData = isSaveDataEnabled();
+  const bufferedAheadSeconds = getForwardBufferSeconds(video);
+  if (
+    !session.warmedUp &&
+    shouldWarmUpNextEpisode({
+      autoPlayNext,
+      currentTime: video.currentTime,
+      bufferedAheadSeconds,
+      saveData,
+    })
+  ) {
+    session.warmedUp = true;
+    options.warmUp?.(session.warmUpController.signal);
+  }
+
   const hls: HlsLike | null = getManagedVideo(video).hls ?? null;
   // 内存分片只由 hls.js 的 fLoader 消费，未接入时预载只会白占带宽
   if (!hls || hls.config?.fLoader !== FragmentMemoryCacheLoader) return;
@@ -457,12 +499,12 @@ function checkPreloadSession(session: PreloadSession): void {
     ? options.skipConfigRef.current
     : null;
   const shouldStart = shouldStartNextEpisodePreload({
-    autoPlayNext: options.autoPlayNextEnabledRef.current,
+    autoPlayNext,
     currentTime: video.currentTime,
     duration: video.duration,
     outroSeconds: skip && skip.outro_time < 0 ? -skip.outro_time : 0,
-    bufferedAheadSeconds: getForwardBufferSeconds(video),
-    saveData: isSaveDataEnabled(),
+    bufferedAheadSeconds,
+    saveData,
   });
   if (!shouldStart) return;
 
@@ -476,9 +518,7 @@ function checkPreloadSession(session: PreloadSession): void {
     episodeUrl: options.nextEpisodeUrl,
     targetBitrate: getHlsLevelBitrate(hls),
     startOffsetSeconds: skip && skip.intro_time > 0 ? skip.intro_time : 0,
-    filterAds:
-      options.blockAdEnabledRef.current &&
-      shouldFilterAdsOnClient(options.sourceKey),
+    filterAds: options.blockAdEnabledRef.current,
     signal: controller.signal,
   })
     .catch(() => 0)
@@ -493,6 +533,7 @@ export function cancelNextEpisodePreload(): void {
   if (!session) return;
   if (session.timer !== null) clearInterval(session.timer);
   session.timer = null;
+  session.warmUpController.abort();
   session.controller?.abort();
   session.controller = null;
 }
@@ -523,6 +564,8 @@ export function scheduleNextEpisodePreload(
   const session: PreloadSession = {
     key,
     options: { ...options, nextEpisodeUrl },
+    warmedUp: false,
+    warmUpController: new AbortController(),
     timer: null,
     controller: null,
   };

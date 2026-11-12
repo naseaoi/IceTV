@@ -10,7 +10,6 @@ import {
   MetadataRecordPage,
   PlaybackPeriodSession,
   PlaybackSession,
-  PlaybackSessionQuery,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
@@ -23,7 +22,6 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
-  StorageImportData,
   UserMessageState,
   VideoReview,
   WorkReviewSummary,
@@ -94,6 +92,36 @@ class DbManager {
     return (await this.getStorage()).isNicknameAvailable(...args);
   }
 
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    return (await this.getStorage()).getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    return (await this.getStorage()).getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    return (await this.getStorage()).saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    return (await this.getStorage()).deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    return (await this.getStorage()).getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    return (await this.getStorage()).getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -336,6 +364,13 @@ class DbManager {
     return storage.getPlayRecord(userName, key);
   }
 
+  async getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>> {
+    return (await this.getStorage()).getPlayRecordsByKeys(userName, keys);
+  }
+
   async savePlayRecord(
     userName: string,
     source: string,
@@ -388,9 +423,16 @@ class DbManager {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage> {
     const storage = await this.getStorage();
-    return storage.getPlayRecordPage(userName, limit, cursorTime, cursorKey);
+    return storage.getPlayRecordPage(
+      userName,
+      limit,
+      cursorTime,
+      cursorKey,
+      filter,
+    );
   }
 
   async getUnreadTrackingPlayRecordPage(
@@ -426,19 +468,27 @@ class DbManager {
     await storage.deletePlayRecord(userName, key);
   }
 
+  async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const storage = await this.getStorage();
+    await storage.deletePlayRecords(userName, keys);
+  }
+
   async deleteAllPlayRecords(userName: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.deleteAllPlayRecords(userName);
   }
 
-  /** 按原始 key 写入播放记录（用于数据导入等场景） */
-  async setPlayRecordByKey(
-    userName: string,
-    key: string,
-    record: PlayRecord,
-  ): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.setPlayRecord(userName, key, record);
+  async getFavoriteUpdateMessagePage(
+    ...args: Parameters<IStorage['getFavoriteUpdateMessagePage']>
+  ) {
+    return (await this.getStorage()).getFavoriteUpdateMessagePage(...args);
+  }
+
+  async readFavoriteUpdate(
+    ...args: Parameters<IStorage['readFavoriteUpdate']>
+  ) {
+    return (await this.getStorage()).readFavoriteUpdate(...args);
   }
 
   async getFavorite(
@@ -502,23 +552,6 @@ class DbManager {
     return storage.getStaleFavoritePage(userName, now, ttlMs, limit, cursorKey);
   }
 
-  async getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive = true,
-  ) {
-    const storage = await this.getStorage();
-    return storage.getFavoritePage(
-      userName,
-      limit,
-      cursorTime,
-      cursorKey,
-      includeLive,
-    );
-  }
-
   async getFavoriteLibraryPage(
     ...args: Parameters<IStorage['getFavoriteLibraryPage']>
   ) {
@@ -541,16 +574,6 @@ class DbManager {
     await storage.deleteAllFavorites(userName);
   }
 
-  /** 按原始 key 写入收藏（用于数据导入等场景） */
-  async setFavoriteByKey(
-    userName: string,
-    key: string,
-    favorite: Favorite,
-  ): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.setFavorite(userName, key, favorite);
-  }
-
   async isFavorited(
     userName: string,
     source: string,
@@ -560,14 +583,47 @@ class DbManager {
     return favorite !== null;
   }
 
+  async getOAuthIdentity(...args: Parameters<IStorage['getOAuthIdentity']>) {
+    return (await this.getStorage()).getOAuthIdentity(...args);
+  }
+
+  async getUserOAuthIdentity(
+    ...args: Parameters<IStorage['getUserOAuthIdentity']>
+  ) {
+    return (await this.getStorage()).getUserOAuthIdentity(...args);
+  }
+
+  async bindOAuthIdentity(...args: Parameters<IStorage['bindOAuthIdentity']>) {
+    return (await this.getStorage()).bindOAuthIdentity(...args);
+  }
+
+  async unbindOAuthIdentity(
+    ...args: Parameters<IStorage['unbindOAuthIdentity']>
+  ) {
+    return (await this.getStorage()).unbindOAuthIdentity(...args);
+  }
+
+  async updateOAuthProviderUsername(
+    ...args: Parameters<IStorage['updateOAuthProviderUsername']>
+  ) {
+    return (await this.getStorage()).updateOAuthProviderUsername(...args);
+  }
+
   async registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void> {
     const storage = await this.getStorage();
-    await storage.registerUser(userName, password, nickname, userGroups);
+    await storage.registerUser(
+      userName,
+      password,
+      nickname,
+      userGroups,
+      identity,
+    );
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -580,17 +636,27 @@ class DbManager {
     return storage.checkUserExist(userName);
   }
 
-  async changePassword(userName: string, newPassword: string): Promise<void> {
+  async isPasswordSet(userName: string): Promise<boolean> {
+    return (await this.getStorage()).isPasswordSet(userName);
+  }
+
+  async changePassword(
+    userName: string,
+    newPassword: string,
+    admin = false,
+    currentPassword?: string | null,
+  ): Promise<boolean> {
     const storage = await this.getStorage();
-    await storage.changePassword(userName, newPassword);
+    return storage.changePassword(
+      userName,
+      newPassword,
+      admin,
+      currentPassword,
+    );
   }
 
   async getUserAccess(...args: Parameters<IStorage['getUserAccess']>) {
     return (await this.getStorage()).getUserAccess(...args);
-  }
-
-  async getAllUserAccess() {
-    return (await this.getStorage()).getAllUserAccess();
   }
 
   async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
@@ -670,24 +736,54 @@ class DbManager {
     return storage.getAllUsers();
   }
 
-  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
-    const storage = await this.getStorage();
-    return storage.getAllUsersWithPasswords();
-  }
-
   async recordUserActivity(userName: string, activeAt: number): Promise<void> {
     const storage = await this.getStorage();
     await storage.recordUserLogin(userName, activeAt);
   }
 
-  async getUserLastActive(userName: string): Promise<number | null> {
-    const storage = await this.getStorage();
-    return storage.getUserLastLogin(userName);
-  }
-
   async getAllUserLastActive(): Promise<Record<string, number>> {
     const storage = await this.getStorage();
     return storage.getAllUserLastLogins();
+  }
+
+  async listAnnouncements(
+    ...args: Parameters<IStorage['listAnnouncements']>
+  ): ReturnType<IStorage['listAnnouncements']> {
+    return (await this.getStorage()).listAnnouncements(...args);
+  }
+
+  async countAnnouncements(): ReturnType<IStorage['countAnnouncements']> {
+    return (await this.getStorage()).countAnnouncements();
+  }
+
+  async getPublishedAnnouncements(
+    ...args: Parameters<IStorage['getPublishedAnnouncements']>
+  ): ReturnType<IStorage['getPublishedAnnouncements']> {
+    return (await this.getStorage()).getPublishedAnnouncements(...args);
+  }
+
+  async getAnnouncement(
+    ...args: Parameters<IStorage['getAnnouncement']>
+  ): ReturnType<IStorage['getAnnouncement']> {
+    return (await this.getStorage()).getAnnouncement(...args);
+  }
+
+  async createAnnouncement(
+    ...args: Parameters<IStorage['createAnnouncement']>
+  ): ReturnType<IStorage['createAnnouncement']> {
+    return (await this.getStorage()).createAnnouncement(...args);
+  }
+
+  async updateAnnouncement(
+    ...args: Parameters<IStorage['updateAnnouncement']>
+  ): ReturnType<IStorage['updateAnnouncement']> {
+    return (await this.getStorage()).updateAnnouncement(...args);
+  }
+
+  async deleteAnnouncement(
+    ...args: Parameters<IStorage['deleteAnnouncement']>
+  ): ReturnType<IStorage['deleteAnnouncement']> {
+    return (await this.getStorage()).deleteAnnouncement(...args);
   }
 
   async getAllInviteCodes(): ReturnType<IStorage['getAllInviteCodes']> {
@@ -749,6 +845,19 @@ class DbManager {
     await storage.deleteInviteCodeUsage(code);
   }
 
+  async getUserNoticeMessages(
+    ...args: Parameters<IStorage['getUserNoticeMessages']>
+  ) {
+    return (await this.getStorage()).getUserNoticeMessages(...args);
+  }
+  async getUserNoticeCount(
+    ...args: Parameters<IStorage['getUserNoticeCount']>
+  ) {
+    return (await this.getStorage()).getUserNoticeCount(...args);
+  }
+  async purgeUserNotices(before: number) {
+    return (await this.getStorage()).purgeUserNotices(before);
+  }
   async getUserMessageState(userName: string): Promise<UserMessageState> {
     const storage = await this.getStorage();
     return storage.getUserMessageState(userName);
@@ -859,22 +968,22 @@ class DbManager {
     await storage.setPlaybackSession(userName, session);
   }
 
-  async getPlaybackSessions(
-    userName: string,
-    query?: PlaybackSessionQuery,
-  ): Promise<PlaybackSession[]> {
-    const storage = await this.getStorage();
-    return storage.getPlaybackSessions(userName, query);
+  async saveWatchSessionReport(
+    ...args: Parameters<IStorage['saveWatchSessionReport']>
+  ): ReturnType<IStorage['saveWatchSessionReport']> {
+    return (await this.getStorage()).saveWatchSessionReport(...args);
   }
 
-  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
-    const storage = await this.getStorage();
-    return storage.getAllPlaybackSessions(userName);
+  async getWatchHistoryPage(
+    ...args: Parameters<IStorage['getWatchHistoryPage']>
+  ): ReturnType<IStorage['getWatchHistoryPage']> {
+    return (await this.getStorage()).getWatchHistoryPage(...args);
   }
 
-  async deletePlaybackSession(userName: string, id: string): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.deletePlaybackSession(userName, id);
+  async deleteWatchHistoryEntry(
+    ...args: Parameters<IStorage['deleteWatchHistoryEntry']>
+  ): ReturnType<IStorage['deleteWatchHistoryEntry']> {
+    return (await this.getStorage()).deleteWatchHistoryEntry(...args);
   }
 
   async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
@@ -890,6 +999,12 @@ class DbManager {
     return storage.getPlaybackWatchTotals(userName, since);
   }
 
+  async getPlaybackSourceUsage(
+    ...args: Parameters<IStorage['getPlaybackSourceUsage']>
+  ): ReturnType<IStorage['getPlaybackSourceUsage']> {
+    return (await this.getStorage()).getPlaybackSourceUsage(...args);
+  }
+
   async getPlaybackPeriodSessions(
     userName: string,
     start: number,
@@ -897,6 +1012,18 @@ class DbManager {
   ): Promise<PlaybackPeriodSession[]> {
     const storage = await this.getStorage();
     return storage.getPlaybackPeriodSessions(userName, start, end);
+  }
+
+  async hasPlaybackAnnualActivity(
+    ...args: Parameters<IStorage['hasPlaybackAnnualActivity']>
+  ): Promise<boolean> {
+    return (await this.getStorage()).hasPlaybackAnnualActivity(...args);
+  }
+
+  async getPlaybackAnnualData(
+    ...args: Parameters<IStorage['getPlaybackAnnualData']>
+  ): ReturnType<IStorage['getPlaybackAnnualData']> {
+    return (await this.getStorage()).getPlaybackAnnualData(...args);
   }
 
   async recordSourceHealthSearchBatch(
@@ -1004,16 +1131,6 @@ class DbManager {
   async pruneSharedCache(now: number, limit: number): Promise<void> {
     const storage = await this.getStorage();
     await storage.pruneSharedCache(now, limit);
-  }
-
-  async clearAllData(): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.clearAllData();
-  }
-
-  async replaceAllData(data: StorageImportData): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.replaceAllData(data);
   }
 
   async getSharedResourceStore() {

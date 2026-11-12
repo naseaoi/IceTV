@@ -1,103 +1,11 @@
-import type { PlaybackSession } from '@/lib/types';
+import { isGroupedPlayRecordScale } from '@/lib/play-records';
+import { formatTime } from '@/lib/player-utils';
+import type { WatchHistoryEntry } from '@/lib/types';
 
-type DedupePlaybackSessionsOptions = {
-  limit?: number;
-  mergeWatchSeconds?: boolean;
-};
-
-type PlaybackSessionGroup = {
-  session: PlaybackSession;
-  watchSeconds: number;
-  ids: Set<string>;
-};
-
-export function normalizePlaybackTitleKey(title: string): string {
-  return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-}
-
-function normalizePlaybackSourceKey(session: PlaybackSession): string {
-  return (session.source || session.source_name)
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLocaleLowerCase();
-}
-
-function getPlaybackSessionTime(session: PlaybackSession): number {
-  return (
-    session.started_at ||
-    session.ended_at ||
-    session.updated_at ||
-    session.created_at ||
-    0
-  );
-}
-
-export function getPlaybackSessionMergeKey(session: PlaybackSession): string {
-  const titleKey = normalizePlaybackTitleKey(session.title);
-  if (!titleKey) return session.id;
-  return `${normalizePlaybackSourceKey(session)}+${titleKey}`;
-}
-
-export function filterPlaybackHistorySessions(
-  sessions: PlaybackSession[],
-): PlaybackSession[] {
-  return sessions.filter(
-    (session) => Math.max(0, session.watch_seconds || 0) > 0,
-  );
-}
-
-export function dedupePlaybackSessionsByTitle(
-  sessions: PlaybackSession[],
-  options?: number | DedupePlaybackSessionsOptions,
-): PlaybackSession[] {
-  const limit = typeof options === 'number' ? options : options?.limit;
-  const mergeWatchSeconds =
-    typeof options === 'number' ? false : options?.mergeWatchSeconds === true;
-  const grouped = new Map<string, PlaybackSessionGroup>();
-
-  for (const session of sessions) {
-    const key = getPlaybackSessionMergeKey(session);
-    const existing = grouped.get(key);
-    if (!existing) {
-      grouped.set(key, {
-        session,
-        watchSeconds: Math.max(0, session.watch_seconds || 0),
-        ids: new Set([session.id]),
-      });
-      continue;
-    }
-
-    if (!existing.ids.has(session.id)) {
-      existing.watchSeconds += Math.max(0, session.watch_seconds || 0);
-      existing.ids.add(session.id);
-    }
-
-    if (
-      getPlaybackSessionTime(session) >=
-      getPlaybackSessionTime(existing.session)
-    ) {
-      existing.session = session;
-    }
-  }
-
-  const deduped = Array.from(grouped.values()).map((group) =>
-    mergeWatchSeconds
-      ? {
-          ...group.session,
-          watch_seconds: group.watchSeconds,
-        }
-      : group.session,
-  );
-
-  deduped.sort((a, b) => getPlaybackSessionTime(b) - getPlaybackSessionTime(a));
-
-  return typeof limit === 'number' ? deduped.slice(0, limit) : deduped;
-}
-
-export interface PlaybackSessionDayGroup {
+export interface WatchHistoryDayGroup {
   key: string;
   label: string;
-  sessions: PlaybackSession[];
+  entries: WatchHistoryEntry[];
 }
 
 function startOfLocalDay(timestamp: number): number {
@@ -116,27 +24,46 @@ function formatDayLabel(dayStart: number, todayStart: number): string {
     : `${date.getFullYear()}年${monthDay}`;
 }
 
-// 按本地日期分组，保持传入顺序（调用方已按时间倒序）
-export function groupPlaybackSessionsByDay(
-  sessions: PlaybackSession[],
+// 按最后观看的本地日期分组，保持传入顺序（接口已按时间倒序）
+export function groupWatchHistoryByDay(
+  entries: WatchHistoryEntry[],
   now = Date.now(),
-): PlaybackSessionDayGroup[] {
+): WatchHistoryDayGroup[] {
   const todayStart = startOfLocalDay(now);
-  const groups = new Map<number, PlaybackSessionDayGroup>();
+  const groups = new Map<number, WatchHistoryDayGroup>();
 
-  for (const session of sessions) {
-    const dayStart = startOfLocalDay(getPlaybackSessionTime(session));
+  for (const entry of entries) {
+    const dayStart = startOfLocalDay(entry.last_watched_at);
     let group = groups.get(dayStart);
     if (!group) {
       group = {
         key: String(dayStart),
         label: formatDayLabel(dayStart, todayStart),
-        sessions: [],
+        entries: [],
       };
       groups.set(dayStart, group);
     }
-    group.sessions.push(session);
+    group.entries.push(entry);
   }
 
   return Array.from(groups.values());
+}
+
+export function getWatchHistoryProgressPercent(
+  entry: WatchHistoryEntry,
+): number {
+  if (!(entry.duration > 0)) return 0;
+  return Math.min(100, Math.max(0, (entry.position / entry.duration) * 100));
+}
+
+// 分组源显示组内集数；单集作品只显示观看位置（迁移来的旧记录总集数可能为 0）
+export function formatWatchHistoryProgress(entry: WatchHistoryEntry): string {
+  const position = `看到 ${formatTime(Math.max(0, Math.floor(entry.position)))}`;
+  if (isGroupedPlayRecordScale(entry)) {
+    return `第 ${entry.group_index} 集 · ${position}`;
+  }
+  if (entry.total_episodes > 1 || entry.episode_index > 1) {
+    return `第 ${entry.episode_index} 集 · ${position}`;
+  }
+  return position;
 }

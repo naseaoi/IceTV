@@ -29,7 +29,7 @@ it('deduplicates inflight reads and validates external tier values', async () =>
     getSourceSelectionContext(),
     getSourceSelectionContext(),
   ]);
-  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(global.fetch).toHaveBeenCalledTimes(2);
   expect(a).toEqual({
     proxyModes: { relay: 'server' },
     healthTiers: { relay: 'good' },
@@ -49,7 +49,7 @@ it('reuses the cached context without another request', async () => {
   mockTiers({ relay: 'good' });
   await getSourceSelectionContext();
   await getSourceSelectionContext();
-  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(global.fetch).toHaveBeenCalledTimes(2);
 });
 
 it('peeks synchronously: empty before the first load, cached afterwards', async () => {
@@ -63,5 +63,31 @@ it('peeks synchronously: empty before the first load, cached afterwards', async 
     proxyModes: { relay: 'server' },
     healthTiers: { relay: 'good' },
   });
-  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+});
+
+it('does not wait for personal statistics and enriches the existing peek cache when ready', async () => {
+  let finish!: (value: unknown) => void;
+  global.fetch = jest.fn().mockImplementation((url: string) =>
+    url.includes('playback-stats')
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve({ ok: true, json: async () => ({ relay: 'good' }) }),
+  );
+  const context = await getSourceSelectionContext();
+  expect(context.healthTiers.relay).toBe('good');
+  expect(context.watchSeconds).toBeUndefined();
+  finish({
+    ok: true,
+    json: async () => ({
+      sources: [
+        { source: 'relay', watchSeconds: 600 },
+        { source: 'bad', watchSeconds: -1 },
+      ],
+    }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(peekSourceSelectionContext().watchSeconds).toEqual({ relay: 600 });
+  expect(global.fetch).toHaveBeenCalledTimes(2);
 });

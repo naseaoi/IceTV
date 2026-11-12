@@ -26,12 +26,13 @@ import {
   buildCoverImageVariantUrl,
   supportsCoverImageVariants,
 } from '@/lib/cover-image-variants';
-import { imageScheduler } from '@/lib/image-scheduler';
 import {
-  isSourceCoverProxyUrl,
-  markSourceCoverProxyHostFailed,
-} from '@/lib/source-cover-proxy';
-import { processImageUrl } from '@/lib/utils';
+  readDoubanFallbackRoute,
+  recordDoubanRouteResult,
+} from '@/lib/douban-route-memory';
+import { imageScheduler } from '@/lib/image-scheduler';
+import { rememberSourceCoverDirectHost } from '@/lib/source-cover-proxy';
+import { getImageCandidates } from '@/lib/utils';
 
 const useIsomorphicLayoutEffect =
   typeof window === 'undefined' ? useEffect : useLayoutEffect;
@@ -54,6 +55,12 @@ function needsImageUnoptimized(
 
 // 服务端回源超时之外再留出缩放与传输时间，避免服务端仍在取图时前端先判失败
 const COVER_LOAD_TIMEOUT_GRACE_MS = 5000;
+// 豆瓣第三方镜像只是候选之一，等待太久不如尽快换下一个
+const DOUBAN_MIRROR_TIMEOUT_MS = 8000;
+
+// 已在浏览器缓存里的图片通常在这之前就完成解码，只有确实慢的才显示扫光与淡入，
+// 避免换页回来时缓存命中的封面也闪一遍加载态
+const LOADING_INDICATOR_DELAY_MS = 200;
 
 const VIEWPORT_PRELOAD_MARGIN = '520px 180px';
 const REDUCED_VIEWPORT_PRELOAD_MARGIN = '320px 96px';
@@ -87,6 +94,8 @@ interface CoverImageProps {
   aspectRatio?: string;
   fallbackLabel?: string;
   checkClientCacheBeforeLoad?: boolean;
+  // 所有加载通道都失败（含命中失败缓存）时调用，调用方可换一张图
+  onUnavailable?: () => void;
 }
 
 const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
@@ -98,25 +107,40 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   fit = 'cover',
   fallbackLabel = '无封面',
   checkClientCacheBeforeLoad = false,
+  onUnavailable,
 }) {
   const isEmpty = !src || src.trim() === '';
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadingBackdropRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
-  const shouldAnimateRevealRef = useRef(true);
   const runtimeConfig = useRuntimeConfig();
-  const [useDirectFallback, setUseDirectFallback] = useState(false);
+  const clientHydrated = useClientHydrated();
+  // 服务端输出与首屏水合时图片还没开始加载，直接显示扫光；客户端换页挂载时先等一小段时间
+  const [showLoadingIndicator, setShowLoadingIndicator] = useState(
+    () => !clientHydrated,
+  );
+  const shouldAnimateRevealRef = useRef(!clientHydrated);
+  const resetMountedRef = useRef(false);
+  // 只在水合后挂载时读取，避免首屏地址与服务端输出不一致
+  const [preferredDoubanRoute] = useState(() =>
+    clientHydrated ? readDoubanFallbackRoute('image') : null,
+  );
+  const [attempt, setAttempt] = useState(0);
 
-  const processed = useMemo(
+  const candidates = useMemo(
     () =>
       isEmpty
-        ? ''
-        : useDirectFallback
-          ? src
-          : processImageUrl(src, runtimeConfig.SOURCE_COVER_PROXY_MODE),
-    [isEmpty, runtimeConfig.SOURCE_COVER_PROXY_MODE, src, useDirectFallback],
+        ? []
+        : getImageCandidates(
+            src,
+            runtimeConfig.SOURCE_COVER_PROXY_MODE,
+            preferredDoubanRoute,
+          ),
+    [isEmpty, preferredDoubanRoute, runtimeConfig.SOURCE_COVER_PROXY_MODE, src],
   );
+  const candidate = candidates[Math.min(attempt, candidates.length - 1)];
+  const processed = candidate?.url ?? '';
 
   const usesCoverVariants = supportsCoverImageVariants(processed);
   const needsUnoptimized = useMemo(
@@ -128,7 +152,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
-  const clientHydrated = useClientHydrated();
   const [initiallyKnownCached] = useState(
     () => clientHydrated && isCoverImageCached(cacheKeys),
   );
@@ -140,11 +163,17 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const [knownCached, setKnownCached] = useState(initiallyKnownCached);
   const [hasError, setHasError] = useState(false);
   const [slotGranted, setSlotGranted] = useState(loadImmediately);
+  const onUnavailableRef = useRef(onUnavailable);
+  onUnavailableRef.current = onUnavailable;
 
   useIsomorphicLayoutEffect(() => {
-    shouldAnimateRevealRef.current = true;
+    if (resetMountedRef.current) {
+      shouldAnimateRevealRef.current = false;
+      setShowLoadingIndicator(false);
+    }
+    resetMountedRef.current = true;
     setHasError(false);
-    setUseDirectFallback(false);
+    setAttempt(0);
     setLoaded(false);
     setKnownCached(false);
     releaseSlotRef.current?.();
@@ -167,7 +196,17 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
     }
+    // 在布局阶段通知，换图时不闪出占位
+    if (isFailed) onUnavailableRef.current?.();
   }, [cacheKeys, isEmpty, priority, processed]);
+
+  // 记录只说明这张图显示过；换了尺寸规格或浏览器缓存已淘汰时仍要真正下载，
+  // 挂载后未完成就回到普通加载流程，慢了照常显示扫光
+  useIsomorphicLayoutEffect(() => {
+    const image = imageRef.current;
+    if (!knownCached || loaded || !image || image.complete) return;
+    setKnownCached(false);
+  }, [knownCached, loaded, processed, slotGranted]);
 
   useEffect(() => {
     if (isEmpty || isNearViewport || priority) return;
@@ -220,6 +259,16 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const showFallback = isEmpty || hasError;
   const revealed = loaded || knownCached;
 
+  useEffect(() => {
+    if (revealed || showFallback || showLoadingIndicator) return;
+
+    const timeoutId = setTimeout(() => {
+      shouldAnimateRevealRef.current = true;
+      setShowLoadingIndicator(true);
+    }, LOADING_INDICATOR_DELAY_MS);
+    return () => clearTimeout(timeoutId);
+  }, [revealed, showFallback, showLoadingIndicator]);
+
   useIsomorphicLayoutEffect(() => {
     if (!loaded || showFallback || !shouldAnimateRevealRef.current) {
       return;
@@ -262,40 +311,58 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     return () => animations.forEach((animation) => animation.cancel());
   }, [loaded, processed, showFallback]);
 
+  const recordDoubanRoute = useCallback(
+    (succeeded: boolean) => {
+      if (!candidate?.doubanRoute) return;
+      recordDoubanRouteResult(
+        'image',
+        candidates.map((item) => item.doubanRoute ?? ''),
+        candidates[0]?.doubanRoute ?? '',
+        Math.min(attempt, candidates.length - 1),
+        succeeded,
+      );
+    },
+    [attempt, candidate, candidates],
+  );
+
   const handleLoad = useCallback(() => {
+    recordDoubanRoute(true);
+    if (candidate?.sourceDirectFallback) rememberSourceCoverDirectHost(src);
     setLoaded(true);
     markCoverImagesLoaded(cacheKeys);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
-  }, [cacheKeys]);
+  }, [cacheKeys, candidate, recordDoubanRoute, src]);
 
   const failLoad = useCallback(
     (persistFailure: boolean) => {
-      if (
-        runtimeConfig.SOURCE_COVER_PROXY_MODE === 'auto' &&
-        isSourceCoverProxyUrl(processed) &&
-        !useDirectFallback
-      ) {
-        markSourceCoverProxyHostFailed(src);
+      recordDoubanRoute(false);
+      if (attempt < candidates.length - 1) {
         setLoaded(false);
         setHasError(false);
-        setUseDirectFallback(true);
+        setAttempt(attempt + 1);
         return;
       }
 
-      // 超时只说明这次没等到，不记入失败缓存，下次挂载仍会重试
-      if (persistFailure) markCoverImagesFailed([processed]);
+      // 超时只说明这次没等到，不记入失败缓存，下次挂载仍会重试。
+      // 记下全部候选，重新挂载时首个候选即命中失败缓存
+      if (persistFailure) {
+        markCoverImagesFailed(candidates.map((item) => item.url));
+      }
       setHasError(true);
       setLoaded(true);
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
+      onUnavailableRef.current?.();
     },
-    [processed, runtimeConfig.SOURCE_COVER_PROXY_MODE, src, useDirectFallback],
+    [attempt, candidates, recordDoubanRoute],
   );
   const handleError = useCallback(() => failLoad(true), [failLoad]);
   const loadTimeoutMs =
-    runtimeConfig.IMAGE_PROXY_TIMEOUT_SECONDS * 1000 +
-    COVER_LOAD_TIMEOUT_GRACE_MS;
+    candidate?.doubanRoute && candidate.doubanRoute !== 'server'
+      ? DOUBAN_MIRROR_TIMEOUT_MS
+      : runtimeConfig.IMAGE_PROXY_TIMEOUT_SECONDS * 1000 +
+        COVER_LOAD_TIMEOUT_GRACE_MS;
 
   useEffect(() => {
     if (!slotGranted || loaded || hasError) return;
@@ -360,7 +427,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     >
       <ImageLoadingBackdrop
         ref={loadingBackdropRef}
-        active={!revealed}
+        active={!revealed && showLoadingIndicator}
         data-cover-loading-backdrop
         data-cover-state={revealed ? 'revealed' : 'loading'}
         className={`pointer-events-none absolute inset-0 z-[100] rounded-lg ${

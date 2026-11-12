@@ -1,158 +1,54 @@
 import {
-  dedupePlaybackSessionsByTitle,
-  filterPlaybackHistorySessions,
-  groupPlaybackSessionsByDay,
+  formatWatchHistoryProgress,
+  getWatchHistoryProgressPercent,
+  groupWatchHistoryByDay,
 } from '@/features/playback-stats/lib/history';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 
-function createSession(
-  partial: Partial<PlaybackSession> & { id: string },
-): PlaybackSession {
+function createEntry(
+  partial: Partial<WatchHistoryEntry> & { id: string },
+): WatchHistoryEntry {
   return {
-    id: partial.id,
-    source: partial.source || 'source',
-    video_id: partial.video_id || partial.id,
-    episode_index: partial.episode_index || 1,
-    title: partial.title || 'Demo',
-    source_name: partial.source_name || 'Source',
-    cover: partial.cover || '',
-    year: partial.year || '2026',
-    started_at: partial.started_at || 1000,
-    ended_at: partial.ended_at || partial.started_at || 1000,
-    watch_seconds: partial.watch_seconds || 0,
-    last_position: partial.last_position || 0,
-    total_time: partial.total_time || 0,
-    created_at: partial.created_at || partial.started_at || 1000,
-    updated_at: partial.updated_at || partial.ended_at || 1000,
+    source: 'source',
+    video_id: partial.id,
+    title: 'Demo',
+    source_name: 'Source',
+    cover: '',
+    year: '2026',
+    episode_index: 1,
+    total_episodes: 1,
+    position: 0,
+    duration: 0,
+    first_watched_at: 1000,
+    last_watched_at: 1000,
+    ...partial,
   };
 }
 
-describe('playback history dedupe', () => {
-  it('keeps the latest session for the same source and title', () => {
-    const episode39 = createSession({
-      id: 'session_39',
-      source: 'source-a',
-      title: 'Re: 从零开始的异世界生活',
-      episode_index: 39,
-      started_at: 1000,
-      ended_at: 2000,
-      last_position: 120,
-    });
-    const episode40 = createSession({
-      id: 'session_40',
-      source: 'source-a',
-      title: ' Re:  从零开始的异世界生活 ',
-      episode_index: 40,
-      started_at: 3000,
-      ended_at: 4000,
-      last_position: 60,
-    });
-
-    expect(dedupePlaybackSessionsByTitle([episode39, episode40])).toEqual([
-      episode40,
-    ]);
-  });
-
-  it('keeps same-title sessions from different sources', () => {
-    const sourceA = createSession({
-      id: 'session_source_a',
-      source: 'source-a',
-      source_name: '源站A',
-      title: '你的名字',
-      started_at: 1000,
-      ended_at: 2000,
-    });
-    const sourceB = createSession({
-      id: 'session_source_b',
-      source: 'source-b',
-      source_name: '源站B',
-      title: '你的名字',
-      started_at: 3000,
-      ended_at: 4000,
-    });
-
-    expect(dedupePlaybackSessionsByTitle([sourceA, sourceB])).toEqual([
-      sourceB,
-      sourceA,
-    ]);
-  });
-
-  it('can merge watch seconds into the latest session', () => {
-    const watchedSession = createSession({
-      id: 'session_watched',
-      source: 'source-a',
-      title: 'Demo',
-      episode_index: 1,
-      watch_seconds: 75,
-      started_at: 1000,
-      ended_at: 2000,
-    });
-    const latestSession = createSession({
-      id: 'session_latest',
-      source: 'source-a',
-      title: ' Demo ',
-      episode_index: 2,
-      watch_seconds: 0,
-      started_at: 3000,
-      ended_at: 4000,
-    });
-
-    expect(
-      dedupePlaybackSessionsByTitle([watchedSession, latestSession], {
-        mergeWatchSeconds: true,
-      }),
-    ).toEqual([{ ...latestSession, watch_seconds: 75 }]);
-  });
-
-  it('filters sessions without watched seconds from history', () => {
-    const failedSession = createSession({
-      id: 'session_failed',
-      watch_seconds: 0,
-      started_at: 3000,
-      ended_at: 4000,
-    });
-    const watchedSession = createSession({
-      id: 'session_watched',
-      watch_seconds: 30,
-      started_at: 1000,
-      ended_at: 2000,
-    });
-
-    expect(
-      dedupePlaybackSessionsByTitle(
-        filterPlaybackHistorySessions([failedSession, watchedSession]),
-        {
-          mergeWatchSeconds: true,
-        },
-      ),
-    ).toEqual([watchedSession]);
-  });
-});
-
-describe('groupPlaybackSessionsByDay', () => {
-  it('按本地日期分组并生成相对标签', () => {
+describe('groupWatchHistoryByDay', () => {
+  it('按最后观看的本地日期分组并生成相对标签', () => {
     const now = new Date(2026, 10, 3, 20).getTime();
-    const groups = groupPlaybackSessionsByDay(
+    const groups = groupWatchHistoryByDay(
       [
-        createSession({
+        createEntry({
           id: 'a',
-          started_at: new Date(2026, 10, 3, 9).getTime(),
+          last_watched_at: new Date(2026, 10, 3, 9).getTime(),
         }),
-        createSession({
+        createEntry({
           id: 'b',
-          started_at: new Date(2026, 10, 3, 1).getTime(),
+          last_watched_at: new Date(2026, 10, 3, 1).getTime(),
         }),
-        createSession({
+        createEntry({
           id: 'c',
-          started_at: new Date(2026, 10, 2, 23).getTime(),
+          last_watched_at: new Date(2026, 10, 2, 23).getTime(),
         }),
-        createSession({
+        createEntry({
           id: 'd',
-          started_at: new Date(2026, 9, 28, 12).getTime(),
+          last_watched_at: new Date(2026, 9, 28, 12).getTime(),
         }),
-        createSession({
+        createEntry({
           id: 'e',
-          started_at: new Date(2025, 11, 31, 12).getTime(),
+          last_watched_at: new Date(2025, 11, 31, 12).getTime(),
         }),
       ],
       now,
@@ -164,6 +60,68 @@ describe('groupPlaybackSessionsByDay', () => {
       '10月28日',
       '2025年12月31日',
     ]);
-    expect(groups[0].sessions.map((session) => session.id)).toEqual(['a', 'b']);
+    expect(groups[0].entries.map((entry) => entry.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('formatWatchHistoryProgress', () => {
+  it('剧集显示集数与观看位置', () => {
+    expect(
+      formatWatchHistoryProgress(
+        createEntry({
+          id: 'a',
+          episode_index: 3,
+          total_episodes: 12,
+          position: 724,
+        }),
+      ),
+    ).toBe('第 3 集 · 看到 12:04');
+  });
+
+  it('分组源显示组内集数', () => {
+    expect(
+      formatWatchHistoryProgress(
+        createEntry({
+          id: 'a',
+          episode_index: 15,
+          total_episodes: 24,
+          group_label: '简中',
+          group_index: 3,
+          group_total: 12,
+          position: 60,
+        }),
+      ),
+    ).toBe('第 3 集 · 看到 01:00');
+  });
+
+  it('单集作品只显示观看位置；总集数未知但不在第 1 集时仍显示集数', () => {
+    expect(
+      formatWatchHistoryProgress(createEntry({ id: 'a', position: 3725 })),
+    ).toBe('看到 01:02:05');
+    expect(
+      formatWatchHistoryProgress(
+        createEntry({
+          id: 'b',
+          episode_index: 2,
+          total_episodes: 0,
+          position: 5,
+        }),
+      ),
+    ).toBe('第 2 集 · 看到 00:05');
+  });
+});
+
+describe('getWatchHistoryProgressPercent', () => {
+  it('按位置与时长计算，时长未知时为 0', () => {
+    expect(
+      getWatchHistoryProgressPercent(
+        createEntry({ id: 'a', position: 30, duration: 120 }),
+      ),
+    ).toBe(25);
+    expect(
+      getWatchHistoryProgressPercent(
+        createEntry({ id: 'b', position: 30, duration: 0 }),
+      ),
+    ).toBe(0);
   });
 });

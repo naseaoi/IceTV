@@ -3,6 +3,8 @@ import { ADMIN_USER_DANMAKU_PAGE_SIZE } from '@/lib/user-danmaku';
 import { normalizeUsername } from '@/lib/username';
 
 export interface StoredUserDanmaku {
+  title?: string;
+  year?: string;
   id: string;
   episodeKey: string;
   username: string;
@@ -33,10 +35,12 @@ export const USER_DANMAKU_COLUMNS = [
   'mode',
   'color',
   'created_at',
+  'title',
+  'year',
 ];
-export const USER_DANMAKU_INSERT = `INSERT INTO user_danmaku (${USER_DANMAKU_COLUMNS.join(', ')}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+export const USER_DANMAKU_INSERT = `INSERT INTO user_danmaku (${USER_DANMAKU_COLUMNS.join(', ')}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 export const USER_DANMAKU_PROJECTION =
-  'id, episode_key AS episodeKey, username, time_ms AS timeMs, text, mode, color, created_at AS createdAt';
+  'id, episode_key AS episodeKey, username, time_ms AS timeMs, text, mode, color, created_at AS createdAt, title, year';
 
 export function userDanmakuValues(item: StoredUserDanmaku) {
   return [
@@ -48,6 +52,8 @@ export function userDanmakuValues(item: StoredUserDanmaku) {
     item.mode,
     item.color,
     item.createdAt,
+    item.title ?? '',
+    item.year ?? '',
   ];
 }
 
@@ -67,6 +73,8 @@ export function userDanmakuSchema(dialect: 'sqlite' | 'mysql'): string[] {
       text ${mysql ? 'VARCHAR(400)' : 'TEXT'} NOT NULL,
       mode ${mysql ? 'TINYINT' : 'INTEGER'} NOT NULL,
       color ${mysql ? 'VARCHAR(7)' : 'TEXT'} NOT NULL,
+      title VARCHAR(191) NOT NULL DEFAULT '',
+      year VARCHAR(16) NOT NULL DEFAULT '',
       created_at ${mysql ? 'BIGINT' : 'INTEGER'} NOT NULL
       ${mysql ? indexes.map(([name, columns]) => `, KEY idx_user_danmaku_${name} (${columns})`).join('') : ''}
     )${mysql ? ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin' : ''}`,
@@ -109,8 +117,12 @@ export function userDanmakuPageSql(query: UserDanmakuQuery) {
 }
 
 export function storedUserDanmaku(row: StoredUserDanmaku): StoredUserDanmaku {
+  if (!row.title) delete row.title;
+  if (!row.year) delete row.year;
   return {
     ...row,
+    ...(row.title ? { title: row.title } : {}),
+    ...(row.year ? { year: row.year } : {}),
     timeMs: Number(row.timeMs),
     createdAt: Number(row.createdAt),
     mode: Number(row.mode) as UserDanmakuMode,

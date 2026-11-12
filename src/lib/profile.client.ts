@@ -8,6 +8,7 @@ import type {
   PublicVideoReviewPage,
   UserProfileView,
 } from '@/lib/types';
+import { DisplayableError, getHttpErrorMessage } from '@/lib/user-facing-error';
 
 export const PROFILE_REQUIRED_EVENT = 'auth:profile-required';
 export type MyProfile = PublicUserRef & {
@@ -22,15 +23,24 @@ export async function socialRequest<T>(
   let data = await response.json().catch(() => null);
   if (response.status === 403 && data?.code === 'NICKNAME_REQUIRED') {
     window.dispatchEvent(new Event(PROFILE_REQUIRED_EVENT));
-    throw new Error(data.error);
+    throw new DisplayableError(
+      typeof data.error === 'string' ? data.error : '请先设置昵称',
+      { status: response.status, code: data.code },
+    );
   }
   // 其余 401/403 视为会话可能失效（封禁、删号），交给统一鉴权恢复；社交写接口均幂等，可重放
   if (response.status === 401 || response.status === 403) {
     response = await fetchWithAuth(url, init);
     data = await response.json().catch(() => null);
   }
-  if (!data) throw new Error('服务器响应异常，请稍后重试');
-  if (!response.ok) throw new Error(data.error || '请求失败，请稍后重试');
+  if (!response.ok)
+    throw new DisplayableError(
+      typeof data?.error === 'string'
+        ? data.error
+        : getHttpErrorMessage(response.status, '请求失败，请稍后重试'),
+      { status: response.status },
+    );
+  if (!data) throw new DisplayableError('服务器响应异常，请稍后重试');
   return data as T;
 }
 

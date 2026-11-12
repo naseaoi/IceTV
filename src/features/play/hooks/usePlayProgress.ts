@@ -25,7 +25,7 @@ import {
 } from '@/features/play/lib/resumePlayback';
 import {
   generateStorageKey,
-  getAllPlayRecords,
+  getPlayRecordsByKeys,
   PlayRecord,
   savePlayRecord,
 } from '@/lib/db.client';
@@ -296,6 +296,7 @@ interface UsePlayProgressParams {
   currentEpisodeIndex: number;
   detail: SearchResult | null;
   setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>;
+  onRestoreEpisodeChange?: () => void;
   cleanupPlayer: () => void;
 }
 
@@ -321,6 +322,7 @@ export function usePlayProgress({
   currentId,
   detail,
   setCurrentEpisodeIndex,
+  onRestoreEpisodeChange,
   cleanupPlayer,
 }: UsePlayProgressParams) {
   const searchTitleRef = useRef(searchTitle);
@@ -472,6 +474,7 @@ export function usePlayProgress({
       }) => {
         const activeEpisodeIndex = currentEpisodeIndexRef.current;
         if (episodeIndex !== activeEpisodeIndex) {
+          onRestoreEpisodeChange?.();
           // 显式恢复到其它集时，同样先阻断旧播放器残留进度回写。
           clearTargetEpisodeProgressRef.current = true;
           stableCurrentTimeRef.current = 0;
@@ -504,7 +507,7 @@ export function usePlayProgress({
       recordsPending = true;
       try {
         const allRecords = await (historyRestoreGate.playRecords ??
-          getAllPlayRecords());
+          getPlayRecordsByKeys([generateStorageKey(currentSource, currentId)]));
         if (disposed) {
           return;
         }
@@ -623,6 +626,7 @@ export function usePlayProgress({
     currentSourceRef,
     detailRef,
     historyRestoreGateRef,
+    onRestoreEpisodeChange,
     resumeModeRef,
     resumeTimeRef,
     detail,

@@ -74,7 +74,7 @@ function parseExtinfDuration(line: string): number {
   return duration;
 }
 
-function resolveSegmentAssetUri(uri: string): string {
+export function resolveSegmentAssetUri(uri: string): string {
   try {
     const base =
       typeof window !== 'undefined'

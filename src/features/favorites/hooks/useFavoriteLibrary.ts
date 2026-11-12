@@ -14,17 +14,18 @@ import type {
   FavoriteFilter,
   FavoriteSort,
 } from '@/features/favorites/lib/favorite-library';
-import type { FavoriteLibraryPage } from '@/features/favorites/lib/library-query';
+import {
+  fetchFavoriteLibraryPage,
+  toFavoriteItem,
+} from '@/features/favorites/lib/library-client';
 import type { FavoriteItem } from '@/features/favorites/types';
 import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { clearAllFavorites, subscribeToDataUpdates } from '@/lib/db.client';
-import { fetchWithAuth } from '@/lib/db.client.internal';
 import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
 import {
   readFavoriteItemsCount,
   writeFavoriteItemsCount,
 } from '@/lib/local-preferences';
-import { parseStorageKey } from '@/lib/utils';
 import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
 
 const useIsomorphicLayoutEffect =
@@ -47,24 +48,11 @@ export function useFavoriteLibrary(
   );
   const queryPending = query !== options.query;
   const fetchPage = useCallback(
-    async (
-      cursor: string | undefined,
-      signal: AbortSignal,
-    ): Promise<FavoriteLibraryPage> => {
-      const params = new URLSearchParams({
-        format: 'library',
-        q: query,
-        filter: options.filter,
-        sort: options.sort,
-      });
-      if (cursor) params.set('cursor', cursor);
-      const response = await fetchWithAuth(`/api/favorites?${params}`, {
+    (cursor: string | undefined, signal: AbortSignal) =>
+      fetchFavoriteLibraryPage(
+        { query, filter: options.filter, sort: options.sort, cursor },
         signal,
-        cache: 'no-store',
-      });
-      if (!response.ok) throw new Error('收藏加载失败，请重试');
-      return response.json();
-    },
+      ),
     [query, options.filter, options.sort],
   );
   const {
@@ -74,6 +62,7 @@ export function useFavoriteLibrary(
     loadingMore,
     error,
     refresh,
+    retry,
     loadMore,
   } = usePagedQuery({
     scopeKey: profileId,
@@ -118,43 +107,20 @@ export function useFavoriteLibrary(
 
   const items = useMemo<FavoriteItem[]>(
     () =>
-      (page?.items ?? []).flatMap(
-        ({
-          key,
-          favorite,
-          playRecord,
-          myRating,
-          watchStatus,
-          watchStatusManual,
-          watchedAt,
-        }) => {
-          const parsed = parseStorageKey(key);
-          return parsed
-            ? [
-                {
-                  id: parsed.id,
-                  source: parsed.source,
-                  title: favorite.title,
-                  year: favorite.year,
-                  poster: favorite.cover,
-                  episodes: favorite.total_episodes,
-                  source_name: favorite.source_name,
-                  currentEpisode: playRecord?.index,
-                  progress:
-                    playRecord && playRecord.total_time > 0
-                      ? (playRecord.play_time / playRecord.total_time) * 100
-                      : 0,
-                  search_title: favorite.search_title,
-                  origin: favorite.origin,
-                  myRating: myRating ?? undefined,
-                  watchStatus,
-                  watchStatusManual,
-                  watchedAt,
-                },
-              ]
-            : [];
-        },
-      ),
+      (page?.items ?? []).flatMap((entry) => {
+        const item = toFavoriteItem(entry);
+        return item
+          ? [
+              {
+                ...item,
+                myRating: entry.myRating ?? undefined,
+                watchStatus: entry.watchStatus,
+                watchStatusManual: entry.watchStatusManual,
+                watchedAt: entry.watchedAt,
+              },
+            ]
+          : [];
+      }),
     [page],
   );
   const clearFavorites = useCallback(async () => {
@@ -170,7 +136,7 @@ export function useFavoriteLibrary(
     refreshing: refreshing || (page !== null && queryPending),
     loadingMore,
     error: error ? '收藏加载失败，请重试' : null,
-    retry: refresh,
+    retry,
     skeletonCount,
     clearFavorites,
     counts: page?.counts ?? EMPTY_FAVORITE_COUNTS,

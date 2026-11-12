@@ -1,4 +1,5 @@
 import { getConfigForRead } from '@/lib/config';
+import type { AdminConfig } from '@/types/admin';
 
 const DEFAULT_LIVE_UA = 'AptvPlayer/1.4.10';
 const DEFAULT_BROWSER_UA =
@@ -12,10 +13,13 @@ export function getProxySourceKey(searchParams: URLSearchParams) {
   );
 }
 
-export async function resolveProxyUserAgent(source: string | null) {
-  const config = await getConfigForRead();
+export async function resolveProxyUserAgent(
+  source: string | null,
+  config?: Readonly<AdminConfig>,
+) {
+  const resolvedConfig = config ?? (await getConfigForRead());
   const liveSource = source
-    ? config.LiveConfig?.find((s: any) => s.key === source)
+    ? resolvedConfig.LiveConfig?.find((s: any) => s.key === source)
     : null;
   if (liveSource) {
     return liveSource.ua || DEFAULT_LIVE_UA;

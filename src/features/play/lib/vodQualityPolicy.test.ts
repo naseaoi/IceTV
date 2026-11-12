@@ -14,7 +14,9 @@ describe('VOD quality policy', () => {
     });
   });
 
-  it('leaves sources without a profile on native HLS behavior', () => {
-    expect(resolveVodQualityPolicy('other')).toBeNull();
+  it('leaves sources without a profile on native ABR with failure downgrade', () => {
+    expect(resolveVodQualityPolicy('other')).toEqual({
+      allowFailureDowngrade: true,
+    });
   });
 });

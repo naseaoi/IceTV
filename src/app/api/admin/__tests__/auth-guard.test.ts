@@ -89,6 +89,7 @@ jest.mock('@/lib/db', () => ({
       ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
     }),
     getLiveSourceChannelCounts: jest.fn().mockResolvedValue({}),
+    countAnnouncements: jest.fn().mockResolvedValue(0),
     getUserAccess: jest.fn(),
     getAdminUserPage: jest.fn(),
     countInviteCodes: jest.fn().mockResolvedValue(0),
@@ -178,12 +179,10 @@ describe('admin api auth guard regression', () => {
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      LiveDirectConnect: false,
       AutoSwitchSource: false,
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',
-      BangumiDataSource: 'server',
       DoubanImageProxyType: 'direct',
       DisableYellowFilter: false,
       FluidSearch: true,
@@ -199,6 +198,48 @@ describe('admin api auth guard regression', () => {
     CustomCategories: [],
     LiveConfig: [],
   };
+
+  it('每次鉴权读取当前权限并带出同一快照，拒绝封禁与删号', async () => {
+    const { requireActiveUserFromAuthInfo, isGuardFailure } =
+      await import('@/lib/api-auth');
+    const auth = {
+      username: 'normal-1',
+      sessionType: 'account' as const,
+      expiresAt: Date.now() + 60_000,
+      signature: 'valid',
+    };
+    const snapshot = {
+      username: 'normal-1',
+      role: 'admin' as const,
+      tags: ['vip'],
+      enabledApis: ['a'],
+    };
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce(snapshot);
+    const first = await requireActiveUserFromAuthInfo(auth);
+    expect(first).toMatchObject({ role: 'admin', userAccess: snapshot });
+    if (!isGuardFailure(first)) expect(first.userAccess).toBe(snapshot);
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce({
+      ...snapshot,
+      role: 'user',
+    });
+    expect(await requireActiveUserFromAuthInfo(auth)).toMatchObject({
+      role: 'user',
+    });
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce({
+      ...snapshot,
+      banned: true,
+    });
+    const banned = await requireActiveUserFromAuthInfo(auth);
+    expect(
+      isGuardFailure(banned) && (await banned.response.json()),
+    ).toMatchObject({ code: 'USER_BANNED' });
+    (db.getUserAccess as jest.Mock).mockResolvedValueOnce(null);
+    const deleted = await requireActiveUserFromAuthInfo(auth);
+    expect(
+      isGuardFailure(deleted) && (await deleted.response.json()),
+    ).toMatchObject({ code: 'USER_NOT_FOUND' });
+    expect(db.getUserAccess).toHaveBeenCalledTimes(4);
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -275,6 +316,29 @@ describe('admin api auth guard regression', () => {
     expect(payload.Config.UserConfig.TotalUsers).toBe(
       baseConfig.UserConfig.Users.length,
     );
+    expect(payload.Config.SiteConfig.UpstreamProxyPoolConfigured).toBe(false);
+  });
+
+  it('reports a configured upstream proxy pool to admins', async () => {
+    const { getAdminConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'admin-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+    const original = process.env.UPSTREAM_PROXY_POOL;
+    process.env.UPSTREAM_PROXY_POOL = 'http://127.0.0.1:8081,direct';
+    try {
+      const response = await getAdminConfig({
+        url: 'http://localhost/api/admin/config',
+      } as any);
+      const payload = await response.json();
+      expect(payload.Config.SiteConfig.UpstreamProxyPoolConfigured).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.UPSTREAM_PROXY_POOL;
+      else process.env.UPSTREAM_PROXY_POOL = original;
+    }
   });
 
   it('returns 403 when non-owner tries to reset config', async () => {
@@ -312,12 +376,10 @@ describe('admin api auth guard regression', () => {
         EnableLiveEntry: false,
         DefaultAggregateSearch: true,
         EnableOptimization: true,
-        LiveDirectConnect: false,
         AutoSwitchSource: true,
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 300,
         DoubanProxyType: 'direct',
-        BangumiDataSource: 'server',
         DoubanImageProxyType: 'direct',
         DisableYellowFilter: false,
         FluidSearch: true,
@@ -418,6 +480,51 @@ describe('admin api auth guard regression', () => {
         ...baseConfig.SiteConfig,
         FooterText: '',
         AutoSwitchSource: 'yes',
+      }),
+    } as any);
+
+    expect(response.status).toBe(400);
+    expect(mockedSaveConfig).not.toHaveBeenCalled();
+  });
+
+  it('saves the segment upstream pool switch and ignores the response-only pool flag', async () => {
+    const { updateSiteConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'owner-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+
+    const response = await updateSiteConfig({
+      json: async () => ({
+        ...baseConfig.SiteConfig,
+        FooterText: '',
+        UpstreamProxyPoolSegments: true,
+        UpstreamProxyPoolConfigured: true,
+      }),
+    } as any);
+
+    expect(response.status).toBe(200);
+    const saved = mockedSaveConfig.mock.calls[0][0].SiteConfig;
+    expect(saved.UpstreamProxyPoolSegments).toBe(true);
+    expect(saved).not.toHaveProperty('UpstreamProxyPoolConfigured');
+  });
+
+  it('rejects a non-boolean segment upstream pool switch', async () => {
+    const { updateSiteConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'owner-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+
+    const response = await updateSiteConfig({
+      json: async () => ({
+        ...baseConfig.SiteConfig,
+        FooterText: '',
+        UpstreamProxyPoolSegments: 'on',
       }),
     } as any);
 

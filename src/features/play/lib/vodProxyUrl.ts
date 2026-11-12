@@ -27,14 +27,17 @@ export function appendVodPlaybackRequestContext(
 export function buildVodProxyUrl({
   rawUrl,
   useServerProxy,
+  directManifest = false,
   sourceKey,
   playbackRequestMode,
 }: {
   rawUrl: string;
   useServerProxy: boolean;
+  directManifest?: boolean;
   sourceKey: string;
   playbackRequestMode: PlaybackRequestMode;
 }): string {
+  if (directManifest) return rawUrl;
   const params = new URLSearchParams({ url: rawUrl });
   if (useServerProxy) {
     params.set('forceServer', 'true');

@@ -5,8 +5,6 @@ import { normalizeRuntimeParam } from '@/lib/runtime-params';
 export const BROWSER_ROUTE_FAILURE_THRESHOLD = 3;
 export const SERVER_ROUTE_FAILURE_THRESHOLD = 2;
 export const AUTO_ROUTE_FAILURE_WINDOW_MS = 20_000;
-export const AUTO_ROUTE_PROXY_COOLDOWN_MS = 60_000;
-export const AUTO_ROUTE_PROXY_PROBE_TIMEOUT_MS = 8_000;
 
 // 运行参数只控制首字节超时；整段下载上限要容纳慢网下的大分片，不能随它缩短
 export const VOD_FRAGMENT_MAX_LOAD_TIME_MS = 120_000;
@@ -53,12 +51,6 @@ export function resolveAutoRouteFailureWindowMs(
     AUTO_ROUTE_FAILURE_WINDOW_MS,
     2 * fragmentTimeoutMs + VOD_FRAGMENT_MAX_RETRY_DELAY_MS,
   );
-}
-
-export function resolveAutoRouteProxyProbeTimeoutMs(
-  fragmentTimeoutMs: number,
-): number {
-  return Math.max(AUTO_ROUTE_PROXY_PROBE_TIMEOUT_MS, fragmentTimeoutMs);
 }
 
 export class ConsecutiveRouteFailureTracker {

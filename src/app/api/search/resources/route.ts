@@ -10,7 +10,11 @@ export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
   try {
-    const apiSites = await getAvailableApiSites(guardResult.username);
+    const apiSites = await getAvailableApiSites(
+      guardResult.username,
+      undefined,
+      guardResult.userAccess,
+    );
 
     return NextResponse.json(apiSites);
   } catch {

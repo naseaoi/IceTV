@@ -11,6 +11,7 @@ import {
   getSearchSnapshot,
   setSearchSnapshot,
 } from '@/features/search/lib/searchSnapshotCache';
+import { readFluidSearch } from '@/lib/local-preferences';
 
 jest.mock('@/lib/db.client', () => ({ addSearchHistory: jest.fn() }));
 jest.mock('@/lib/local-preferences', () => ({
@@ -33,6 +34,7 @@ function createSnapshot(title: string): SearchSnapshot {
     ],
     totalSources: 4,
     completedSources: 4,
+    failedSources: [],
     useFluidSearch: false,
   };
 }
@@ -193,5 +195,133 @@ describe('useSearchExecution cached navigation', () => {
     } finally {
       await act(async () => root.unmount());
     }
+  });
+});
+
+describe('搜索失败反馈', () => {
+  const originalFetch = global.fetch;
+  const originalEventSource = global.EventSource;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    global.EventSource = originalEventSource;
+    jest.mocked(readFluidSearch).mockReturnValue(true);
+    clearSearchSnapshotCache();
+  });
+  it('普通请求失败不会写为空结果快照，重试可恢复', async () => {
+    jest.mocked(readFluidSearch).mockReturnValue(false);
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: '搜索失败' }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) });
+    const { result } = renderHook(() => useExecution('failure'));
+    await act(async () => {});
+    expect(result.current.error).toBe('搜索失败');
+    expect(getSearchSnapshot('failure')).toBeNull();
+    await act(async () => result.current.retry());
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+  it('流式中断保留结果并标搜索未完成，取消旧查询不污染新查询', async () => {
+    const streams: EventSource[] = [];
+    global.EventSource = jest.fn(() => {
+      const stream = { close: jest.fn() } as unknown as EventSource;
+      streams.push(stream);
+      return stream;
+    }) as unknown as typeof EventSource;
+    const { result, rerender } = renderHook(
+      ({ query }) => useExecution(query),
+      { initialProps: { query: 'partial' } },
+    );
+    await act(async () => {
+      streams[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'source_result',
+            results: createSnapshot('item').results,
+          }),
+        }),
+      );
+      streams[0].onerror?.(new Event('error'));
+    });
+    expect(result.current.searchResults).toHaveLength(1);
+    expect(result.current.error).toBe('搜索未完成');
+    expect(getSearchSnapshot('partial')).toBeNull();
+    rerender({ query: 'next' });
+    act(() => streams[0].onerror?.(new Event('error')));
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+  });
+  it('记录失败源，只重试失败源并把结果并入快照', async () => {
+    const streams: { url: string; stream: EventSource }[] = [];
+    global.EventSource = jest.fn((url: string) => {
+      const stream = { close: jest.fn() } as unknown as EventSource;
+      streams.push({ url, stream });
+      return stream;
+    }) as unknown as typeof EventSource;
+    const send = (stream: EventSource, payload: object) =>
+      stream.onmessage?.(
+        new MessageEvent('message', { data: JSON.stringify(payload) }),
+      );
+    const { result } = renderHook(() => useExecution('flaky'));
+    const main = streams[0].stream;
+    await act(async () => {
+      send(main, { type: 'start', totalSources: 2 });
+      send(main, {
+        type: 'source_error',
+        source: 'b',
+        sourceName: 'B 源',
+      });
+      send(main, { type: 'source_result', source: 'a', results: [] });
+      send(main, { type: 'complete', completedSources: 2 });
+    });
+    expect(result.current.failedSources).toEqual([{ key: 'b', name: 'B 源' }]);
+    expect(getSearchSnapshot('flaky')?.failedSources).toEqual([
+      { key: 'b', name: 'B 源' },
+    ]);
+
+    act(() => result.current.retryFailedSources());
+    expect(result.current.retryingFailed).toBe(true);
+    const retryUrl = new URL(streams[1].url, 'http://localhost');
+    expect(retryUrl.pathname).toBe('/api/search/ws');
+    expect(retryUrl.searchParams.get('q')).toBe('flaky');
+    expect(retryUrl.searchParams.get('retry')).toBe('b');
+
+    const retry = streams[1].stream;
+    await act(async () => {
+      send(retry, {
+        type: 'source_result',
+        source: 'b',
+        results: createSnapshot('found').results,
+      });
+      send(retry, { type: 'complete' });
+    });
+    expect(result.current.retryingFailed).toBe(false);
+    expect(result.current.failedSources).toEqual([]);
+    expect(result.current.searchResults.map((item) => item.title)).toEqual([
+      'found',
+    ]);
+    expect(getSearchSnapshot('flaky')).toMatchObject({
+      failedSources: [],
+      results: [expect.objectContaining({ title: 'found' })],
+    });
+  });
+
+  it('普通请求读取失败源与源总数', async () => {
+    jest.mocked(readFluidSearch).mockReturnValue(false);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [],
+        totalSources: 3,
+        failedSources: [{ key: 'c', name: 'C' }, { bad: true }],
+      }),
+    });
+    const { result } = renderHook(() => useExecution('classic'));
+    await act(async () => {});
+    expect(result.current.totalSources).toBe(3);
+    expect(result.current.failedSources).toEqual([{ key: 'c', name: 'C' }]);
   });
 });

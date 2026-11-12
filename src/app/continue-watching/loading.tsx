@@ -1,7 +1,7 @@
-import SkeletonText from '@/components/SkeletonText';
 import {
   ContinueWatchingGridSkeleton,
   ContinueWatchingPageFrame,
+  ContinueWatchingToolbarSkeleton,
 } from '@/features/continue-watching/components/ContinueWatchingPageFrame';
 import { CONTINUE_WATCHING_PAGE_SIZE } from '@/features/continue-watching/lib/layout';
 import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
@@ -14,10 +14,7 @@ export default async function ContinueWatchingLoading() {
 
   return (
     <ContinueWatchingPageFrame
-      total={null}
-      action={
-        <SkeletonText className='text-sm' barClassName='h-4 w-7 rounded' />
-      }
+      toolbar={<ContinueWatchingToolbarSkeleton count={count} />}
     >
       <ContinueWatchingGridSkeleton count={count} />
     </ContinueWatchingPageFrame>

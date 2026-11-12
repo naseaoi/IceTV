@@ -5,22 +5,18 @@ import {
   removeAdSegmentsKeepingDiscontinuities,
 } from '@/features/play/lib/ad-filter-manifest';
 import {
-  type ServerAdFilterSignal,
+  type AdFilterSignal,
   type SourceAdFilterStrategy,
   getSourceAdFilterStrategy,
-  shouldRunServerAdFilter,
 } from '@/features/play/lib/ad-filter-strategy-registry';
-import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { fetchWithUrlGuard } from '@/lib/url-guard';
-import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
+import {
+  filterAdsFromM3U8,
+  resolveSegmentAssetUri,
+} from '@/features/play/lib/playUtils';
 
 interface PeriodicLayout {
   fragmentCount: number;
   duration: number;
-}
-
-export function shouldRunAdDetection(source: string | null): boolean {
-  return shouldRunServerAdFilter(source);
 }
 
 function isNearInteger(d: number): boolean {
@@ -346,15 +342,13 @@ function detectByExtinfIntegerPattern(segments: DiscontSegment[]): Set<number> {
   return result;
 }
 
-function isAbsoluteUrl(p: string): boolean {
-  return /^https?:\/\//i.test(p);
-}
-
 function collectSegmentHosts(seg: DiscontSegment, baseUrl: string): string[] {
   const hosts: string[] = [];
   for (const p of seg.tsPaths) {
     try {
-      hosts.push(new URL(p, baseUrl).host.toLowerCase());
+      hosts.push(
+        new URL(resolveSegmentAssetUri(p), baseUrl).host.toLowerCase(),
+      );
     } catch {}
   }
   return hosts;
@@ -389,10 +383,8 @@ function detectByHostAnomaly(
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
 
-    const absCount = seg.tsPaths.filter(isAbsoluteUrl).length;
-    if (absCount < 2) continue;
     const hosts = collectSegmentHosts(seg, baseUrl);
-    if (hosts.length === 0) continue;
+    if (hosts.length < 2) continue;
     if (hosts.every((h) => h !== dominantHost)) {
       result.add(i);
     }
@@ -400,150 +392,11 @@ function detectByHostAnomaly(
   return result;
 }
 
-function computeDurationMode(segments: DiscontSegment[]): number | null {
-  if (segments.length < 3) return null;
-
-  const buckets = new Map<number, number>();
-  for (const s of segments) {
-    const key = Math.round(s.duration * 10) / 10;
-    buckets.set(key, (buckets.get(key) || 0) + 1);
-  }
-  const sorted = Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]);
-  const [modeKey, modeCount] = sorted[0];
-
-  if (modeCount / segments.length < 0.6) return null;
-  return modeKey;
-}
-
-async function fetchTsSize(url: string, ua: string): Promise<number> {
-  const abortState = createTimedAbortController(undefined, 5000);
-  try {
-    const res = await fetchWithUrlGuard(url, {
-      method: 'GET',
-      headers: { 'User-Agent': ua, Range: 'bytes=0-187' },
-      signal: abortState.signal,
-      cache: 'no-store',
-      redirect: 'follow',
-    });
-    await res.body?.cancel().catch(() => {});
-    if (!res.ok || res.status !== 206) return 0;
-    const cr = res.headers.get('content-range') || '';
-    const total = Number.parseInt(cr.split('/')[1] || '0', 10);
-
-    return Number.isFinite(total) ? total : 0;
-  } catch {
-    return 0;
-  } finally {
-    abortState.cleanup();
-  }
-}
-
-async function computeSegmentBitrate(
-  seg: DiscontSegment,
-  baseUrl: string,
-  ua: string,
-): Promise<number> {
-  if (seg.duration <= 0 || seg.tsPaths.length === 0) return 0;
-
-  const sizes = await Promise.all(
-    seg.tsPaths.map((p) => fetchTsSize(resolveUrl(baseUrl, p), ua)),
-  );
-  const total = sizes.reduce((a, b) => a + b, 0);
-  if (total === 0) return 0;
-  return (total * 8) / seg.duration / 1000;
-}
-
-async function computeBaselineBitrate(
-  segments: DiscontSegment[],
-  mode: number,
-  baseUrl: string,
-  ua: string,
-): Promise<number> {
-  const candidates = segments.filter(
-    (s) => Math.abs(s.duration - mode) < 0.5 && s.tsPaths.length > 0,
-  );
-  if (candidates.length === 0) return 0;
-
-  const step = Math.max(1, Math.floor(candidates.length / 5));
-  const sampled: DiscontSegment[] = [];
-  for (let i = 0; i < candidates.length && sampled.length < 5; i += step) {
-    sampled.push(candidates[i]);
-  }
-
-  const rates = await Promise.all(
-    sampled.map((s) => computeSegmentBitrate(s, baseUrl, ua)),
-  );
-  const valid = rates.filter((r) => r > 0).sort((a, b) => a - b);
-  if (valid.length === 0) return 0;
-  return valid[Math.floor(valid.length / 2)];
-}
-
-function collectBitrateSuspectIndices(
-  segments: DiscontSegment[],
-  durationMode: number | null,
-): number[] {
-  const suspiciousIdx: number[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    if (segment.tsPaths.length === 0) continue;
-    if (
-      i === segments.length - 1 &&
-      segment.tsPaths.length === 1 &&
-      segment.duration < 5
-    ) {
-      continue;
-    }
-
-    const durationOutlier =
-      durationMode !== null && Math.abs(segment.duration - durationMode) >= 1;
-    const intRatio = integerRatioOfSegment(segment);
-    const coarseRatio = coarseGridRatioOfSegment(segment);
-    const weakExtinfPattern =
-      segment.tsDurations.length >= 4 && intRatio >= 0.3 && coarseRatio >= 0.85;
-
-    if (durationOutlier || weakExtinfPattern) {
-      suspiciousIdx.push(i);
-    }
-  }
-  return suspiciousIdx;
-}
-
-async function detectByBitrate(
-  segments: DiscontSegment[],
-  baseUrl: string,
-  ua: string,
-): Promise<Set<number>> {
-  const result = new Set<number>();
-
-  const durationMode = computeDurationMode(segments);
-  const suspiciousIdx = collectBitrateSuspectIndices(segments, durationMode);
-  if (suspiciousIdx.length === 0) return result;
-
-  const baselineMode =
-    durationMode ??
-    median(segments.map((segment) => segment.duration).filter((d) => d > 0));
-  if (baselineMode <= 0) return result;
-
-  const [baseline, suspectRates] = await Promise.all([
-    computeBaselineBitrate(segments, baselineMode, baseUrl, ua),
-    Promise.all(
-      suspiciousIdx.map((i) => computeSegmentBitrate(segments[i], baseUrl, ua)),
-    ),
-  ]);
-  if (baseline <= 0) return result;
-
-  suspiciousIdx.forEach((segIdx, k) => {
-    const r = suspectRates[k];
-    if (r > 0 && r > baseline * 2) result.add(segIdx);
-  });
-  return result;
-}
-
 function strategyUsesSignal(
   strategy: SourceAdFilterStrategy,
-  signal: ServerAdFilterSignal,
+  signal: AdFilterSignal,
 ): boolean {
-  return strategy.server?.signals.includes(signal) === true;
+  return strategy.signals.includes(signal);
 }
 
 function rebuildFilteredPlaylist(
@@ -553,25 +406,23 @@ function rebuildFilteredPlaylist(
   strategy: SourceAdFilterStrategy,
   periodicLayout: PeriodicLayout | null,
 ): string {
-  if (periodicLayout && strategy.server?.timeline === 'continuous-periodic') {
+  if (periodicLayout && strategy.timeline === 'continuous-periodic') {
     return rebuildContinuousPlaylist(lines, segments, adIndices);
   }
   return removeAdSegmentsKeepingDiscontinuities(lines, segments, adIndices);
 }
 
-async function applyServerAdFilterStrategy(
+function applyAdFilterStrategy(
   m3u8Content: string,
   originM3u8Url: string,
-  ua: string,
   strategy: SourceAdFilterStrategy,
-): Promise<string> {
-  if (!strategy.server) return m3u8Content;
+): string {
   if (!m3u8Content.includes('#EXT-X-DISCONTINUITY')) return m3u8Content;
 
   const { lines, segments } = parseDiscontinuitySegments(m3u8Content);
   if (segments.length < 4) return m3u8Content;
 
-  const baseUrl = getBaseUrl(originM3u8Url);
+  const baseUrl = resolveSegmentAssetUri(originM3u8Url);
   const periodicLayout = detectPeriodicLayout(segments);
 
   const adSet = new Set<number>();
@@ -607,44 +458,18 @@ async function applyServerAdFilterStrategy(
     );
   }
 
-  if (strategyUsesSignal(strategy, 'bitrate-fallback')) {
-    try {
-      const bitrateSet = await detectByBitrate(segments, baseUrl, ua);
-      if (bitrateSet.size > 0) {
-        return rebuildFilteredPlaylist(
-          lines,
-          segments,
-          bitrateSet,
-          strategy,
-          periodicLayout,
-        );
-      }
-    } catch {}
-  }
-
-  if (periodicLayout && strategy.server.timeline === 'continuous-periodic') {
+  if (periodicLayout && strategy.timeline === 'continuous-periodic') {
     return rebuildContinuousPlaylist(lines, segments, new Set());
   }
   return m3u8Content;
 }
 
-export async function filterM3U8AdsForSource(
+export function filterM3U8AdsForSource(
   m3u8Content: string,
-  originM3u8Url: string,
-  ua: string,
-  source: string | null,
-): Promise<string> {
+  manifestUrl: string,
+  source: string | null | undefined,
+): string {
   const strategy = getSourceAdFilterStrategy(source);
-  if (strategy?.execution !== 'server') return m3u8Content;
-  return applyServerAdFilterStrategy(m3u8Content, originM3u8Url, ua, strategy);
-}
-
-export async function stripAdSegmentsByPhysicalSignal(
-  m3u8Content: string,
-  originM3u8Url: string,
-  ua: string,
-): Promise<string> {
-  const strategy = getSourceAdFilterStrategy('rycj');
-  if (!strategy) return m3u8Content;
-  return applyServerAdFilterStrategy(m3u8Content, originM3u8Url, ua, strategy);
+  if (!strategy) return filterAdsFromM3U8(m3u8Content);
+  return applyAdFilterStrategy(m3u8Content, manifestUrl, strategy);
 }

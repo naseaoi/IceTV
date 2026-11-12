@@ -7,13 +7,11 @@ export type RuntimeParamSettings = Pick<
   | 'VodPageTimeoutSeconds'
   | 'VodFragmentTimeoutSeconds'
   | 'PlaybackHistoryPageSize'
-  | 'PlaybackHistoryLimit'
   | 'SearchHistoryLimit'
   | 'SearchRequestTimeoutSeconds'
   | 'SourceFailureCooldownSeconds'
   | 'ContinueWatchingLimit'
   | 'CoverImageCacheSize'
-  | 'DataImportPlaybackSessionsLimit'
   | 'LivePrecheckTimeoutSeconds'
   | 'ProxyRequestTimeoutSeconds'
   | 'ImageProxyTimeoutSeconds'
@@ -31,13 +29,11 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   VodPageTimeoutSeconds: 15,
   VodFragmentTimeoutSeconds: 10,
   PlaybackHistoryPageSize: 10,
-  PlaybackHistoryLimit: 500,
   SearchHistoryLimit: 20,
   SearchRequestTimeoutSeconds: 8,
   SourceFailureCooldownSeconds: 300,
   ContinueWatchingLimit: 10,
   CoverImageCacheSize: 500,
-  DataImportPlaybackSessionsLimit: 500,
   LivePrecheckTimeoutSeconds: 15,
   ProxyRequestTimeoutSeconds: 30,
   ImageProxyTimeoutSeconds: 15,
@@ -55,13 +51,11 @@ export const RUNTIME_PARAM_RANGES: Record<
   VodPageTimeoutSeconds: { min: 5, max: 120 },
   VodFragmentTimeoutSeconds: { min: 3, max: 60 },
   PlaybackHistoryPageSize: { min: 1, max: 100 },
-  PlaybackHistoryLimit: { min: 1, max: 10000 },
   SearchHistoryLimit: { min: 1, max: 200 },
   SearchRequestTimeoutSeconds: { min: 1, max: 60 },
   SourceFailureCooldownSeconds: { min: 0, max: 3600 },
   ContinueWatchingLimit: { min: 1, max: 100 },
   CoverImageCacheSize: { min: 50, max: 5000 },
-  DataImportPlaybackSessionsLimit: { min: 1, max: 20000 },
   LivePrecheckTimeoutSeconds: { min: 1, max: 60 },
   ProxyRequestTimeoutSeconds: { min: 1, max: 120 },
   ImageProxyTimeoutSeconds: { min: 1, max: 120 },

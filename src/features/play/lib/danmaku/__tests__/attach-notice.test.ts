@@ -13,6 +13,7 @@ import { showTimedArtNotice } from '@/lib/player-utils';
 
 jest.mock('@/features/play/lib/danmaku/plugin', () => ({
   createDanmakuPlugin: jest.fn(),
+  loadDanmakuPluginModule: jest.fn(),
 }));
 jest.mock('@/features/play/lib/danmaku/resolve', () => ({
   loadDanmakuForEpisode: jest.fn(),

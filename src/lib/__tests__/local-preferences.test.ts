@@ -2,13 +2,9 @@ import {
   AUTO_PLAY_NEXT_STORAGE_KEY,
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
-  CONTINUE_WATCHING_COUNT_STORAGE_KEY,
-  CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
-  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
-  LIVE_DIRECT_CONNECT_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
   readAggregateSearch,
   readAutoPlayNextEnabled,
@@ -19,7 +15,6 @@ import {
   readDanmakuEpisodeSearchTitle,
   readEnableOptimization,
   readFluidSearch,
-  readLiveDirectConnect,
   readPreferredQualityHeight,
   readPreferredQualityPreference,
   readSeenAnnouncement,
@@ -29,7 +24,6 @@ import {
   resetContinueWatchingCount,
   resetEnableOptimization,
   resetFluidSearch,
-  resetLiveDirectConnect,
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAggregateSearch,
@@ -42,7 +36,6 @@ import {
   writeDanmakuEpisodeSearchTitle,
   writeEnableOptimization,
   writeFluidSearch,
-  writeLiveDirectConnect,
   writePreferredQualityHeight,
   writeSeenAnnouncement,
   writeSourcePreferredQualityHeight,
@@ -59,9 +52,6 @@ describe('local preferences', () => {
     resetContinueWatchingCount();
     expect(readContinueWatchingCount()).toBe(0);
     expect(readContinueWatchingPageCount()).toBe(0);
-    expect(
-      localStorage.getItem(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
-    ).toBeNull();
     expect(document.cookie).not.toContain('cw_page_count=');
   });
 
@@ -136,29 +126,6 @@ describe('local preferences', () => {
     expect(readEnableOptimization()).toBe(false);
   });
 
-  it('falls back to runtime config after live direct connect reset', () => {
-    window.RUNTIME_CONFIG = {
-      LIVE_DIRECT_CONNECT: true,
-    } as typeof window.RUNTIME_CONFIG;
-
-    writeLiveDirectConnect(true);
-    resetLiveDirectConnect();
-
-    expect(localStorage.getItem(LIVE_DIRECT_CONNECT_STORAGE_KEY)).toBeNull();
-    expect(readLiveDirectConnect()).toBe(true);
-  });
-
-  it('notifies the current page when live direct connect changes', () => {
-    const listener = jest.fn();
-    window.addEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
-
-    writeLiveDirectConnect(true);
-    resetLiveDirectConnect();
-
-    expect(listener).toHaveBeenCalledTimes(2);
-    window.removeEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
-  });
-
   it('keeps auto source switch off without a site default', () => {
     expect(readAutoSwitchSource()).toBe(false);
   });
@@ -217,15 +184,11 @@ describe('local preferences', () => {
   it('stores and resets the continue watching count through the shared helper', () => {
     writeContinueWatchingCount(4.8);
 
-    expect(localStorage.getItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY)).toBe('4');
     expect(readContinueWatchingCount()).toBe(4);
     expect(document.cookie).toContain('cw_count=4');
 
     resetContinueWatchingCount();
 
-    expect(
-      localStorage.getItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY),
-    ).toBeNull();
     expect(readContinueWatchingCount()).toBe(0);
     expect(document.cookie).not.toContain('cw_count=4');
   });
@@ -286,4 +249,17 @@ describe('local preferences', () => {
     });
     expect(localStorage.length).toBe(0);
   });
+});
+
+it('本地偏好写入受限时返回失败', () => {
+  const spy = jest
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+  try {
+    expect(writeAggregateSearch(false)).toBe(false);
+  } finally {
+    spy.mockRestore();
+  }
 });

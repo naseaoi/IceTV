@@ -39,6 +39,7 @@ describe('proxy modes', () => {
     respond({ ok: true, json: async () => ({ demo: 'server' }) });
     await expect(route).resolves.toEqual({
       useServerProxy: true,
+      directManifest: false,
       allowAutoFallback: false,
     });
   });
@@ -63,7 +64,11 @@ describe('proxy modes', () => {
       );
       jest.advanceTimersByTime(2_000);
       const route = await pending;
-      expect(route).toEqual({ useServerProxy: false, allowAutoFallback: true });
+      expect(route).toEqual({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: true,
+      });
       expect((fetch as jest.Mock).mock.calls[0][1].signal.aborted).toBe(true);
       respond({ ok: true, json: async () => ({ demo: 'browser' }) });
       (fetch as jest.Mock).mockResolvedValue({
@@ -72,7 +77,11 @@ describe('proxy modes', () => {
       });
       await expect(
         mod.resolveSourcePlaybackRoute('demo', 'https://cdn.example/a.m3u8'),
-      ).resolves.toEqual({ useServerProxy: true, allowAutoFallback: false });
+      ).resolves.toEqual({
+        useServerProxy: true,
+        directManifest: false,
+        allowAutoFallback: false,
+      });
       expect(route.allowAutoFallback).toBe(true);
       expect(fetch).toHaveBeenCalledTimes(2);
     } finally {
@@ -87,8 +96,36 @@ describe('proxy modes', () => {
     const mod = require('../proxy-modes') as typeof import('../proxy-modes.js');
     await expect(
       mod.resolveSourcePlaybackRoute('demo', 'https://cdn.example/a.m3u8'),
-    ).resolves.toEqual({ useServerProxy: false, allowAutoFallback: true });
+    ).resolves.toEqual({
+      useServerProxy: false,
+      directManifest: true,
+      allowAutoFallback: true,
+    });
   });
+
+  it.each([
+    ['browser', false, true, false],
+    ['server', true, false, false],
+    ['auto', false, true, true],
+  ])(
+    'resolves %s without confusing segment and manifest routes',
+    async (mode, useServerProxy, directManifest, allowAutoFallback) => {
+      const modes = { demo: mode as string };
+      const mod = await loadModule(modes);
+      const url = 'https://cdn.example/a.m3u8';
+      const expected = { useServerProxy, directManifest, allowAutoFallback };
+      expect(mod.getSourcePlaybackRoute('demo', url, modes)).toEqual(expected);
+      await expect(
+        mod.resolveSourcePlaybackRoute('demo', url),
+      ).resolves.toEqual(expected);
+      mod.rememberSourceServerProxy('demo', url);
+      expect(mod.getSourcePlaybackRoute('demo', url)).toEqual({
+        ...expected,
+        useServerProxy: mode === 'browser' ? false : true,
+        directManifest: mode === 'browser',
+      });
+    },
+  );
 
   it('uses configured fixed routes', async () => {
     const mod = await loadModule({
@@ -119,7 +156,7 @@ describe('proxy modes', () => {
     expect(mod.shouldUseServerProxy('missingSource', url)).toBe(true);
   });
 
-  it('stores automatic fallback per source and url', async () => {
+  it('stores automatic fallback per source and manifest host', async () => {
     const mod = await loadModule({ autoSource: 'auto' });
     const firstUrl = 'https://cdn.example.com/show/1/index.m3u8';
     const secondUrl = 'https://cdn.example.com/show/2/index.m3u8';
@@ -127,11 +164,26 @@ describe('proxy modes', () => {
     mod.rememberSourceServerProxy('autoSource', firstUrl);
 
     expect(mod.shouldUseServerProxy('autoSource', firstUrl)).toBe(true);
-    expect(mod.shouldUseServerProxy('autoSource', secondUrl)).toBe(false);
+    expect(mod.shouldUseServerProxy('autoSource', secondUrl)).toBe(true);
+    expect(
+      mod.shouldUseServerProxy('autoSource', 'https://other.example/a.m3u8'),
+    ).toBe(false);
+    expect(mod.shouldUseServerProxy('otherSource', firstUrl)).toBe(false);
 
     mod.clearSourceProxyOverride('autoSource', firstUrl);
 
     expect(mod.shouldUseServerProxy('autoSource', firstUrl)).toBe(false);
+  });
+
+  it('expires host memory after thirty minutes', async () => {
+    const mod = await loadModule({ demo: 'auto' });
+    const url = 'https://cdn.example/a.m3u8';
+    const now = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    mod.rememberSourceServerProxy('demo', url);
+    expect(mod.getSourcePlaybackRoute('demo', url).useServerProxy).toBe(true);
+    jest.spyOn(Date, 'now').mockReturnValue(now + 30 * 60 * 1000 + 1);
+    expect(mod.getSourcePlaybackRoute('demo', url).directManifest).toBe(true);
   });
 
   it('does not store automatic fallback for fixed browser mode', async () => {

@@ -2,7 +2,12 @@ import 'server-only';
 
 import { createHash } from 'crypto';
 
-import { getConfigForRead } from '@/lib/config';
+import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
+import {
+  buildAnnouncementMessageId,
+  parseAnnouncementMessageId,
+} from '@/lib/announcement-identity';
+import { getAnnualReportMessage } from '@/lib/annual-report-message.server';
 import { db } from '@/lib/db';
 import {
   decodeCursor,
@@ -11,9 +16,11 @@ import {
   messageSortKey,
 } from '@/lib/message-cursor.server';
 import {
+  AnnouncementHistoryPage,
   AnnouncementUserMessage,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
+  toMessageToastPreview,
   TrackingUpdateUserMessage,
   UserMessage,
   UserMessagePage,
@@ -25,31 +32,29 @@ import {
   hasPlayRecordUpdate,
   markPlayRecordUpdateRead,
 } from '@/lib/play-records';
-import { PlayRecord, UserMessageState } from '@/lib/types';
+import { PlayRecord, SiteAnnouncement, UserMessageState } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
+import { ReviewValidationError } from '@/lib/video-reviews';
 
 const READ_ALL_BATCH_SIZE = 200;
+// 与社交通知一致只回看最近 30 天：新注册用户不会收到全部历史公告
+const ANNOUNCEMENT_UNREAD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const ANNOUNCEMENT_UNREAD_LIMIT = 50;
+const ANNOUNCEMENT_HISTORY_LIMIT = 20;
 
 function hashValue(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 20);
 }
 
-function buildAnnouncementMessage(
-  announcement: string,
-  version?: string,
-  publishedAt?: number,
+function toAnnouncementMessage(
+  row: SiteAnnouncement,
 ): AnnouncementUserMessage | null {
-  const content = announcement.trim();
-  if (!content) return null;
-
+  if (row.publishedAt === null) return null;
   return {
-    id: `announcement:${version || hashValue(content)}`,
+    id: buildAnnouncementMessageId(row.id, row.publishedAt),
     type: 'announcement',
-    content,
-    createdAt:
-      typeof publishedAt === 'number' && Number.isFinite(publishedAt)
-        ? publishedAt
-        : 0,
+    content: row.content,
+    createdAt: row.publishedAt,
   };
 }
 
@@ -86,24 +91,25 @@ function buildTrackingMessage(
 }
 
 async function getAnnouncementContext(userName: string): Promise<{
-  announcement: AnnouncementUserMessage | null;
+  announcements: AnnouncementUserMessage[];
   state: UserMessageState;
 }> {
-  const [config, state] = await Promise.all([
-    getConfigForRead(),
+  const [rows, state] = await Promise.all([
+    db.getPublishedAnnouncements({
+      since: Date.now() - ANNOUNCEMENT_UNREAD_WINDOW_MS,
+      limit: ANNOUNCEMENT_UNREAD_LIMIT,
+    }),
     db.getUserMessageState(userName),
   ]);
-  const siteConfig = config.SiteConfig;
-  const currentAnnouncement = buildAnnouncementMessage(
-    siteConfig.Announcement,
-    siteConfig.AnnouncementVersion,
-    siteConfig.AnnouncementPublishedAt,
-  );
-  const announcement =
-    currentAnnouncement?.id === state.readAnnouncementId
-      ? null
-      : currentAnnouncement;
-  return { announcement, state };
+  const readAt = state.announcementReadAt ?? 0;
+  const readIds = new Set(state.announcementReadIds ?? []);
+  const announcements = rows.flatMap((row) => {
+    const message = toAnnouncementMessage(row);
+    return message && message.createdAt > readAt && !readIds.has(message.id)
+      ? [message]
+      : [];
+  });
+  return { announcements, state };
 }
 
 function buildTrackingMessages(
@@ -173,14 +179,19 @@ async function getVisibleMessageSources(
   ] as const;
   const [
     tracking,
+    favorites,
     followed,
     followCount,
+    recaps,
+    recapCount,
     replies,
     replyCount,
     followers,
     followerCount,
     likes,
     likeCount,
+    notices,
+    noticeCount,
   ] = await Promise.all([
     muted.has('tracking-update')
       ? { items: {}, total: 0, nextCursor: null }
@@ -191,15 +202,26 @@ async function getVisibleMessageSources(
           before
             ? before.key.startsWith('tracking:')
               ? before.key.slice(9)
-              : '\u0001'
+              : before.key > 'tracking:'
+                ? '￿'
+                : '\u0001'
             : undefined,
         ),
+    muted.has('tracking-update')
+      ? { items: [], total: 0 }
+      : db.getFavoriteUpdateMessagePage(userName, limit, before),
     muted.has('follow-review')
       ? []
       : db.getFollowReviewMessages(...followArgs, query),
     muted.has('follow-review')
       ? 0
       : db.getFollowReviewMessageCount(...followArgs),
+    muted.has('follow-review')
+      ? []
+      : db.getFollowRecapMessages(...followArgs, query),
+    muted.has('follow-review')
+      ? 0
+      : db.getFollowRecapMessageCount(...followArgs),
     muted.has('review-reply')
       ? []
       : db.getReviewReplyMessages(...replyArgs, query),
@@ -212,17 +234,33 @@ async function getVisibleMessageSources(
       ? []
       : db.getSocialNotifications(...likeArgs, query),
     muted.has('review-like') ? 0 : db.getSocialNotificationCount(...likeArgs),
+    db.getUserNoticeMessages(
+      userName,
+      state.userNoticeReadAt ?? 0,
+      state.userNoticeReadIds ?? [],
+      now,
+      query,
+    ),
+    db.getUserNoticeCount(
+      userName,
+      state.userNoticeReadAt ?? 0,
+      state.userNoticeReadIds ?? [],
+      now,
+    ),
   ]);
   return {
     tracking,
-    followed,
-    followCount,
+    favorites,
+    followed: [...followed, ...recaps],
+    followCount: followCount + recapCount,
     replies,
     replyCount,
     followers,
     followerCount,
     likes,
     likeCount,
+    notices,
+    noticeCount,
   };
 }
 
@@ -230,23 +268,31 @@ export async function getUserMessagePage(
   userName: string,
   limit: number,
   cursor?: string | null,
+  timeZone = 'UTC',
 ): Promise<UserMessagePage> {
   const before = decodeCursor(cursor);
-  const { announcement, state } = await getAnnouncementContext(userName);
+  const { announcements, state } = await getAnnouncementContext(userName);
   const sources = await getVisibleMessageSources(
     userName,
     state,
     limit + 1,
     before,
   );
-  const includeAnnouncement = !before && !!announcement;
-  const pageLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
+  const annualReport = await getAnnualReportMessage(userName, state, timeZone);
+  const pinned = before
+    ? []
+    : [...announcements, ...(annualReport ? [annualReport] : [])].sort(
+        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+      );
+  const pageLimit = Math.max(0, limit - pinned.length);
   const merged: UserMessage[] = [
     ...buildTrackingMessages(sources.tracking.items),
+    ...sources.favorites.items,
     ...sources.followed,
     ...sources.replies,
     ...sources.followers,
     ...sources.likes,
+    ...sources.notices,
   ];
   const remaining = merged.filter(
     (message) =>
@@ -264,17 +310,17 @@ export async function getUserMessagePage(
   const hasMore =
     remaining.length > page.length || !!sources.tracking.nextCursor;
   return {
-    items: [
-      ...(includeAnnouncement && announcement ? [announcement] : []),
-      ...page,
-    ],
+    items: [...pinned, ...page],
     total:
       sources.tracking.total +
+      sources.favorites.total +
       sources.followCount +
       sources.replyCount +
       sources.followerCount +
       sources.likeCount +
-      (announcement ? 1 : 0),
+      sources.noticeCount +
+      announcements.length +
+      (annualReport ? 1 : 0),
     nextCursor: hasMore
       ? page.length
         ? encodeCursor(page[page.length - 1])
@@ -285,27 +331,50 @@ export async function getUserMessagePage(
 
 export async function getUserMessageSummary(
   userName: string,
+  timeZone = 'UTC',
 ): Promise<UserMessageSummary> {
-  const { announcement, state } = await getAnnouncementContext(userName);
-  const sources = await getVisibleMessageSources(userName, state, 1);
+  const { announcements, state } = await getAnnouncementContext(userName);
+  const [sources, annualReport] = await Promise.all([
+    getVisibleMessageSources(userName, state, 1),
+    getAnnualReportMessage(userName, state, timeZone),
+  ]);
   const latestTracking =
-    buildTrackingMessages(sources.tracking.items)[0] ?? null;
+    [
+      ...buildTrackingMessages(sources.tracking.items),
+      ...sources.favorites.items,
+    ].sort(
+      (a, b) =>
+        b.createdAt - a.createdAt ||
+        (messageSortKey(a) < messageSortKey(b) ? 1 : -1),
+    )[0] ?? null;
   const unreadCount =
     sources.tracking.total +
+    sources.favorites.total +
     sources.followCount +
     sources.replyCount +
     sources.followerCount +
     sources.likeCount +
-    (announcement ? 1 : 0);
+    sources.noticeCount +
+    announcements.length +
+    (annualReport ? 1 : 0);
   const latest = [
     ...sources.followed,
     ...sources.replies,
     ...sources.followers,
     ...sources.likes,
+    ...sources.notices,
   ];
+  const latestUnread = [
+    ...latest,
+    ...announcements,
+    ...(annualReport ? [annualReport] : []),
+    ...(latestTracking ? [latestTracking] : []),
+  ].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
   return {
+    latestUnreadAt: latestUnread?.createdAt ?? 0,
+    latestUnread: latestUnread ? toMessageToastPreview(latestUnread) : null,
     unreadCount,
-    trackingUnreadCount: sources.tracking.total,
+    trackingUnreadCount: sources.tracking.total + sources.favorites.total,
     followReviewUnreadCount: sources.followCount,
     reviewReplyUnreadCount: sources.replyCount,
     newFollowerUnreadCount: sources.followerCount,
@@ -314,11 +383,15 @@ export async function getUserMessageSummary(
       [
         unreadCount,
         sources.tracking.total,
+        sources.favorites.total,
+        ...sources.favorites.items.map((message) => message.id),
         sources.followCount,
         sources.replyCount,
         sources.followerCount,
         sources.likeCount,
-        announcement?.id ?? '',
+        sources.noticeCount,
+        ...announcements.map((message) => message.id),
+        annualReport?.id ?? '',
         latestTracking?.id ?? '',
         ...latest.map(
           (message) =>
@@ -326,7 +399,8 @@ export async function getUserMessageSummary(
         ),
       ].join('|'),
     ),
-    announcement,
+    announcement: announcements[0] ?? null,
+    annualReport,
     latestTracking,
   };
 }
@@ -334,21 +408,52 @@ export async function getUserMessageSummary(
 export async function readUserMessage(
   userName: string,
   messageId: string,
+  timeZone = 'UTC',
 ): Promise<ReadUserMessageResult | null> {
-  const { announcement, state } = await getAnnouncementContext(userName);
-  if (announcement?.id === messageId) {
+  if (messageId.startsWith('annual-report:')) {
+    // 重复已读仍可成功；资格重新按当前用户与开放期检查。
+    const message = await getAnnualReportMessage(userName, {}, timeZone);
+    if (!message || message.id !== messageId) return null;
     await db.updateUserMessageState(userName, {
-      announcement: {
-        id: announcement.id,
-        previousId: state.readAnnouncementId,
-      },
+      annualReportReadYear: message.year,
     });
-    return { message: announcement };
+    return { message };
+  }
+  if (messageId.startsWith('announcement:')) {
+    const parsed = parseAnnouncementMessageId(messageId);
+    const row = parsed ? await db.getAnnouncement(parsed.rowId) : null;
+    const message = row ? toAnnouncementMessage(row) : null;
+    if (!message || message.id !== messageId) return null;
+    await db.updateUserMessageState(userName, {
+      announcement: { id: message.id, createdAt: message.createdAt },
+    });
+    return { message };
   }
 
-  const messageKind = messageId.startsWith('tracking:')
-    ? 'tracking-update'
-    : messageId.split(':')[0];
+  const state = await db.getUserMessageState(userName);
+
+  if (messageId.startsWith('user-notice:')) {
+    const [message] = await db.getUserNoticeMessages(
+      userName,
+      state.userNoticeReadAt ?? 0,
+      state.userNoticeReadIds ?? [],
+      Date.now(),
+      { id: messageId, limit: 1 },
+    );
+    if (!message) return null;
+    await db.updateUserMessageState(userName, {
+      userNotice: { id: message.id, createdAt: message.createdAt },
+    });
+    return { message };
+  }
+
+  const messageKind =
+    messageId.startsWith('tracking:') ||
+    messageId.startsWith('favorite-tracking:')
+      ? 'tracking-update'
+      : messageId.startsWith('follow-recap:')
+        ? 'follow-review'
+        : messageId.split(':')[0];
   if (state.mutedKinds?.some((kind) => kind === messageKind)) return null;
   for (const [kind, field] of [
     ['new-follower', 'newFollower'],
@@ -387,8 +492,14 @@ export async function readUserMessage(
     return { message };
   }
 
-  if (messageId.startsWith('follow-review:')) {
-    const messages = await db.getFollowReviewMessages(
+  if (
+    messageId.startsWith('follow-review:') ||
+    messageId.startsWith('follow-recap:')
+  ) {
+    const getMessages = messageId.startsWith('follow-recap:')
+      ? db.getFollowRecapMessages.bind(db)
+      : db.getFollowReviewMessages.bind(db);
+    const messages = await getMessages(
       userName,
       state.followReviewReadAt ?? 0,
       state.followReviewReadIds ?? [],
@@ -401,6 +512,32 @@ export async function readUserMessage(
       followReview: { id: messageId, createdAt: message.createdAt },
     });
     return { message };
+  }
+
+  if (messageId.startsWith('favorite-tracking:')) {
+    const parsed = parseTrackingMessageId(
+      messageId.replace('favorite-tracking:', 'tracking:'),
+    );
+    const key = parsed && parseStorageKey(parsed.recordKey);
+    if (!parsed || !key) return null;
+    const [favorite, record] = await Promise.all([
+      db.getFavorite(userName, key.source, key.id),
+      db.getPlayRecord(userName, key.source, key.id),
+    ]);
+    const message =
+      favorite && !record
+        ? buildFavoriteUpdateMessage(parsed.recordKey, favorite)
+        : null;
+    if (!message || parsed.toEpisodes > message.toEpisodes) return null;
+    await db.readFavoriteUpdate(userName, parsed.recordKey, parsed.toEpisodes);
+    return {
+      message: {
+        ...message,
+        id: messageId,
+        fromEpisodes: parsed.fromEpisodes,
+        toEpisodes: parsed.toEpisodes,
+      },
+    };
   }
 
   const parsedMessage = parseTrackingMessageId(messageId);
@@ -444,17 +581,14 @@ export async function readUserMessage(
 
 export async function readAllUserMessages(
   userName: string,
+  timeZone = 'UTC',
 ): Promise<ReadAllUserMessagesResult> {
-  const { announcement, state } = await getAnnouncementContext(userName);
+  const state = await db.getUserMessageState(userName);
+  const annualReport = await getAnnualReportMessage(userName, state, timeZone);
   await db.updateUserMessageState(userName, {
-    ...(announcement
-      ? {
-          announcement: {
-            id: announcement.id,
-            previousId: state.readAnnouncementId,
-          },
-        }
-      : {}),
+    ...(annualReport ? { annualReportReadYear: annualReport.year } : {}),
+    userNoticeReadAt: Date.now(),
+    announcementReadAt: Date.now(),
     followReviewReadAt: Date.now(),
     reviewReplyReadAt: Date.now(),
     newFollowerReadAt: Date.now(),
@@ -478,5 +612,56 @@ export async function readAllUserMessages(
     Object.assign(updatedRecords, batch);
   }
 
+  let before: import('@/lib/message-cursor.server').MessageCursor | undefined;
+  while (!state.mutedKinds?.includes('tracking-update')) {
+    const page = await db.getFavoriteUpdateMessagePage(
+      userName,
+      READ_ALL_BATCH_SIZE,
+      before,
+    );
+    for (const message of page.items) {
+      await db.readFavoriteUpdate(
+        userName,
+        message.recordKey,
+        message.toEpisodes,
+      );
+    }
+    const last = page.items[page.items.length - 1];
+    if (!last || page.items.length < READ_ALL_BATCH_SIZE) break;
+    before = { createdAt: last.createdAt, key: messageSortKey(last) };
+  }
   return { updatedRecords };
+}
+
+export async function getAnnouncementHistory(
+  cursor?: string | null,
+): Promise<AnnouncementHistoryPage> {
+  const before = decodeAnnouncementCursor(cursor);
+  const rows = await db.getPublishedAnnouncements({
+    ...(before ? { before } : {}),
+    limit: ANNOUNCEMENT_HISTORY_LIMIT + 1,
+  });
+  const page = rows.slice(0, ANNOUNCEMENT_HISTORY_LIMIT);
+  const last = page[page.length - 1];
+  return {
+    items: page.flatMap((row) => {
+      const message = toAnnouncementMessage(row);
+      return message ? [message] : [];
+    }),
+    nextCursor:
+      rows.length > page.length && last?.publishedAt != null
+        ? `${last.publishedAt}:${last.id}`
+        : null,
+  };
+}
+
+function decodeAnnouncementCursor(
+  cursor?: string | null,
+): { publishedAt: number; id: string } | null {
+  if (!cursor) return null;
+  const match = /^(\d+):(.+)$/.exec(cursor);
+  const publishedAt = Number(match?.[1]);
+  if (!match || !Number.isSafeInteger(publishedAt) || match[2].length > 64)
+    throw new ReviewValidationError('公告列表已更新，请重新打开');
+  return { publishedAt, id: match[2] };
 }

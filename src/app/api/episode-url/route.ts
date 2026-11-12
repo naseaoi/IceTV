@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { episodeUrlCache } from '@/app/api/episode-url/cache';
-import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import {
+  episodeUrlCache,
+  getEpisodeUrlCacheKey,
+} from '@/app/api/episode-url/cache';
+import { withAuthenticatedSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
+import type { ActiveUserInfo } from '@/lib/api-auth';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import {
@@ -14,6 +17,7 @@ import {
   resolveXgcartoonEpisodeUrlByPath,
 } from '@/lib/downstream-sources/xgcartoon';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -40,13 +44,10 @@ async function resolveEpisodeUrl(
 }
 
 export async function GET(request: NextRequest) {
-  return withSourceProbeBudget(request, handleGet);
+  return withAuthenticatedSourceProbeBudget(request, handleGet);
 }
 
-async function handleGet(request: NextRequest) {
-  const guardResult = await requireActiveUser(request);
-  if (isGuardFailure(guardResult)) return guardResult.response;
-
+async function handleGet(request: NextRequest, guardResult: ActiveUserInfo) {
   const { searchParams } = new URL(request.url);
   const sourceCode = searchParams.get('source');
   const lazyUrl = searchParams.get('url');
@@ -62,18 +63,24 @@ async function handleGet(request: NextRequest) {
 
   try {
     const config = await getConfigForRead();
-    const apiSites = await getAvailableApiSites(guardResult.username, config);
+    const apiSites = await getAvailableApiSites(
+      guardResult.username,
+      config,
+      guardResult.userAccess,
+    );
     const apiSite = apiSites.find((site) => site.key === sourceCode);
 
     if (!apiSite || !matchesLazyKind(target.kind, apiSite)) {
       return NextResponse.json({ error: '无效的API来源' }, { status: 400 });
     }
 
-    const cacheKey = `${sourceCode}::${lazyUrl}`;
+    const cacheKey = getEpisodeUrlCacheKey(apiSite, lazyUrl);
     const url = IS_DEVELOPMENT
       ? await resolveEpisodeUrl(target.kind, apiSite, target.path)
-      : await episodeUrlCache.getOrLoad(cacheKey, () =>
-          resolveEpisodeUrl(target.kind, apiSite, target.path),
+      : await episodeUrlCache.getOrLoad(
+          cacheKey,
+          () => resolveEpisodeUrl(target.kind, apiSite, target.path),
+          request.signal,
         );
 
     return NextResponse.json(
@@ -85,7 +92,9 @@ async function handleGet(request: NextRequest) {
       },
     );
   } catch (error) {
-    console.error('播放地址解析失败:', error);
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
+    if (!request.signal.aborted) console.error('播放地址解析失败:', error);
     return NextResponse.json({ error: '播放地址解析失败' }, { status: 500 });
   }
 }

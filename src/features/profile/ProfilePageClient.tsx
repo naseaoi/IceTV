@@ -18,6 +18,7 @@ import PublicReviewContent, {
 import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
+import { RecapEntryLink } from '@/features/annual-report/components/RecapEntryLink';
 import {
   FavoriteGrid,
   ReadOnlyFavoriteGridSkeleton,
@@ -41,6 +42,7 @@ import type {
   LibraryVisibility,
   UserProfileView,
 } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 
 const REVIEW_TITLE_TEXT_CLASS = 'mb-1.5';
@@ -326,10 +328,14 @@ function CopyProfileLinkButton({ profileId }: { profileId: string }) {
 
 export default function ProfilePageClient({
   profileId,
+  initialProfile = null,
 }: {
   profileId: string;
+  initialProfile?: UserProfileView | null;
 }) {
-  const [profile, setProfile] = useState<UserProfileView | null>(null);
+  const [profile, setProfile] = useState<UserProfileView | null>(
+    initialProfile,
+  );
   const [error, setError] = useState('');
   const [version, setVersion] = useState(0);
   const [tab, setTab] = useState<'reviews' | 'favorites'>('reviews');
@@ -338,6 +344,11 @@ export default function ProfilePageClient({
   const [busy, setBusy] = useState(false);
   const following = useRef(false);
   useEffect(() => {
+    // 服务端已预取同一用户时首轮不再请求，version 变化后照常重新拉取
+    if (version === 0 && initialProfile?.profileId === profileId) {
+      knownReviewCounts.set(profileId, initialProfile.publicReviewCount);
+      return;
+    }
     let active = true;
     setError('');
     getUserProfile(profileId)
@@ -346,12 +357,14 @@ export default function ProfilePageClient({
         if (active) setProfile(value);
       })
       .catch((error) => {
-        if (active) setError((error as Error).message);
+        if (active)
+          if (!isAbortError(error))
+            setError(getErrorMessage(error, '操作失败，请稍后重试'));
       });
     return () => {
       active = false;
     };
-  }, [profileId, version]);
+  }, [initialProfile, profileId, version]);
   async function follow() {
     if (!profile || following.current) return;
     following.current = true;
@@ -378,7 +391,8 @@ export default function ProfilePageClient({
       );
     } catch (error) {
       setProfile(previous);
-      setError((error as Error).message);
+      if (!isAbortError(error))
+        setError(getErrorMessage(error, '操作失败，请稍后重试'));
     } finally {
       following.current = false;
       setBusy(false);
@@ -455,6 +469,13 @@ export default function ProfilePageClient({
                           {label}
                         </button>
                       ))}
+                      {profile.recap && (
+                        <RecapEntryLink
+                          href={`/u/${encodeURIComponent(profileId)}/recap/${profile.recap.year}`}
+                          year={profile.recap.year}
+                          className='-my-1'
+                        />
+                      )}
                     </div>
                   </div>
                   <div className='flex items-center gap-2'>
@@ -532,6 +553,7 @@ export default function ProfilePageClient({
               />
               {editing && (
                 <ProfilePanel
+                  showSuccessToast={false}
                   onClose={() => {
                     setEditing(false);
                     setVersion((value) => value + 1);

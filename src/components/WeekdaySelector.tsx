@@ -2,8 +2,11 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+import { useClientHydrated } from '@/hooks/useClientHydrated';
+
 interface WeekdaySelectorProps {
-  onWeekdayChange: (weekday: string) => void;
+  value: string;
+  onChange: (weekday: string) => void;
   className?: string;
 }
 
@@ -18,27 +21,19 @@ const weekdays = [
 ];
 
 const WeekdaySelector: React.FC<WeekdaySelectorProps> = ({
-  onWeekdayChange,
+  value,
+  onChange,
   className = '',
 }) => {
+  // 默认星期取自本地时区，服务端渲染的时区可能不同，水合后再高亮
+  const hydrated = useClientHydrated();
+  const selectedWeekday = hydrated ? value : '';
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const onWeekdayChangeRef = useRef(onWeekdayChange);
-  onWeekdayChangeRef.current = onWeekdayChange;
   const [indicatorStyle, setIndicatorStyle] = useState<{
     left: number;
     width: number;
   }>({ left: 0, width: 0 });
-
-  // 获取今天的星期数，默认选中今天
-  const getTodayWeekday = (): string => {
-    const today = new Date().getDay();
-    const weekdayMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    return weekdayMap[today];
-  };
-
-  const [selectedWeekday, setSelectedWeekday] =
-    useState<string>(getTodayWeekday());
 
   // 更新指示器位置
   const updateIndicatorPosition = (activeIndex: number) => {
@@ -65,16 +60,6 @@ const WeekdaySelector: React.FC<WeekdaySelectorProps> = ({
     }
   };
 
-  // 组件初始化时通知父组件默认选中的星期并计算指示器位置
-  useEffect(() => {
-    onWeekdayChangeRef.current(getTodayWeekday());
-    const activeIndex = weekdays.findIndex(
-      (w) => w.value === getTodayWeekday(),
-    );
-    updateIndicatorPosition(activeIndex);
-  }, []);
-
-  // 监听选中项变化
   useEffect(() => {
     const activeIndex = weekdays.findIndex((w) => w.value === selectedWeekday);
     const cleanup = updateIndicatorPosition(activeIndex);
@@ -105,10 +90,7 @@ const WeekdaySelector: React.FC<WeekdaySelectorProps> = ({
             ref={(el) => {
               buttonRefs.current[index] = el;
             }}
-            onClick={() => {
-              setSelectedWeekday(weekday.value);
-              onWeekdayChange(weekday.value);
-            }}
+            onClick={() => onChange(weekday.value)}
             className={`relative z-10 whitespace-nowrap rounded-full px-3 py-1 text-[13px] transition-colors duration-200 sm:px-3.5 sm:py-1.5 sm:text-sm ${
               isActive
                 ? 'cursor-default text-gray-900 dark:text-gray-100'

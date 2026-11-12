@@ -1,6 +1,7 @@
 import 'server-only';
 
 import Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
@@ -11,6 +12,11 @@ import {
   adminUserPage,
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
+import {
+  favoriteMessageQueries,
+  favoriteMessagesFromRows,
+  favoriteReadStatement,
+} from '@/features/favorites/lib/favorite-tracking';
 import {
   applyFavoriteStatus,
   batchSelection,
@@ -32,26 +38,38 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type PlaybackSourceUsage,
+  type PlaybackSourceUsageRow,
+  aggregateSourceUsage,
+  sourceUsageSql,
+} from '@/features/playback-stats/lib/source-usage';
+import {
+  type AnnouncementRow,
+  ANNOUNCEMENT_INSERT_SQL,
+  ANNOUNCEMENT_LIST_SQL,
+  announcementUpdateQuery,
+  publishedAnnouncementQuery,
+  readAnnouncement,
+} from '@/lib/announcement-storage';
+import {
   type ConfigStateUpdate,
   type ConfigSubscription,
   sameSubscription,
-  stripConfigState,
-  subscriptionFromConfig,
 } from '@/lib/config-state';
 import {
   type InviteCodePurge,
   type InviteCodeQuery,
-  importedInviteCodes,
-  INVITE_INSERT_SQL,
-  inviteValues,
 } from '@/lib/invite-code-storage';
 import {
-  REPLY_INSERT,
-  REPLY_REPORT_INSERT,
-  replyValues,
-} from '@/lib/review-reply-storage';
+  type OAuthBindResult,
+  type OAuthIdentity,
+  OAUTH_INSERT,
+  OAUTH_SCHEMA,
+  oauthIdentityParams,
+  readOAuthIdentity,
+} from '@/lib/oauth-identity';
+import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
 import {
-  importedProfileValues,
   newProfileId,
   NicknameTakenError,
   ReviewSocialStorage,
@@ -76,6 +94,17 @@ import {
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
+  accessPermissionsKey,
+  configPermissionsChanged,
+} from '@/lib/user-notice';
+import {
+  type NoticeMutation,
+  noticeInsert,
+  NoticeModeration,
+  userNoticeSchema,
+  UserNoticeStorage,
+} from '@/lib/user-notice-storage';
 import { validateNickname } from '@/lib/user-profile';
 import {
   publicReview,
@@ -88,25 +117,36 @@ import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import {
+  ANNUAL_BUCKETS_SQL,
+  ANNUAL_EARLIEST_SQL,
+  ANNUAL_MESSAGE_EXISTS_SQL,
+  ANNUAL_SESSIONS_SQL,
+} from './playback-annual-storage';
+import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
-import { normalizeRuntimeParam } from './runtime-params';
-import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
+import {
+  buildShelvedPlayRecordWhere,
+  buildTrackingSql,
+  SQLITE_TRACKING_DIALECT,
+} from './tracking-sql';
 import {
   AdminVideoReviewPage,
   Favorite,
-  FavoritePage,
   IStorage,
   MetadataRecordPage,
+  PlaybackAnnualData,
   PlaybackPeriodSession,
   PlaybackSession,
-  PlaybackSessionQuery,
+  PlaybackWatchBucket,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
   SharedCacheRecord,
+  SiteAnnouncement,
   SkipConfig,
+  SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
   SourcePlayReporterSummary,
@@ -114,10 +154,12 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
-  StorageImportData,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
+  WatchHistoryEntry,
+  WatchHistoryQuery,
+  WatchHistoryWrite,
   WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
@@ -340,38 +382,6 @@ function buildTrackingPlayRecordPage(
   };
 }
 
-function buildFavoritePage(
-  rows: Array<{
-    favorite_key: string;
-    favorite_json: string;
-    record_json?: string | null;
-  }>,
-  total: number,
-  limit: number,
-): FavoritePage {
-  const items = rows.slice(0, limit).flatMap((row) => {
-    const favorite = parseJsonValue<Favorite>(row.favorite_json);
-    if (!favorite) return [];
-    const playRecord = parseJsonValue<PlayRecord>(row.record_json);
-    return [
-      {
-        key: row.favorite_key,
-        favorite,
-        ...(playRecord ? { playRecord } : {}),
-      },
-    ];
-  });
-  const lastItem = items.at(-1);
-  return {
-    items,
-    total,
-    nextCursor:
-      rows.length > limit && lastItem
-        ? `${lastItem.favorite.save_time}|${lastItem.key}`
-        : null,
-  };
-}
-
 function buildMetadataRecordPage<T>(
   rows: Array<{ record_key: string; record_json: string }>,
   limit: number,
@@ -437,6 +447,8 @@ export class LocalSqliteStorage implements IStorage {
     getStalePlayRecordPageAfter: Database.Statement;
     getPlayRecordPage: Database.Statement;
     getPlayRecordPageAfter: Database.Statement;
+    getUpdatedPlayRecordPage: Database.Statement;
+    getUpdatedPlayRecordPageAfter: Database.Statement;
     countPlayRecords: Database.Statement;
     getUnreadTrackingPlayRecordPage: Database.Statement;
     getUnreadTrackingPlayRecordPageAfter: Database.Statement;
@@ -458,9 +470,6 @@ export class LocalSqliteStorage implements IStorage {
     getAllFavorites: Database.Statement;
     getStaleFavoritePage: Database.Statement;
     getStaleFavoritePageAfter: Database.Statement;
-    getFavoritePage: Database.Statement;
-    getFavoritePageAfter: Database.Statement;
-    countFavorites: Database.Statement;
     deleteFavorite: Database.Statement;
     // users
     registerUser: Database.Statement;
@@ -469,7 +478,6 @@ export class LocalSqliteStorage implements IStorage {
     checkUserExist: Database.Statement;
     deleteUserRow: Database.Statement;
     getAllUsers: Database.Statement;
-    getAllUsersWithPasswords: Database.Statement;
     // search_history
     getSearchHistory: Database.Statement;
     deleteSearchHistoryAll: Database.Statement;
@@ -484,7 +492,6 @@ export class LocalSqliteStorage implements IStorage {
     deleteSkipConfig: Database.Statement;
     getAllSkipConfigs: Database.Statement;
     setPlaybackSession: Database.Statement;
-    deletePlaybackSession: Database.Statement;
     deletePlaybackSessionsBefore: Database.Statement;
     // admin_config
     getAdminConfig: Database.Statement;
@@ -578,12 +585,37 @@ export class LocalSqliteStorage implements IStorage {
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });
+    const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as {
+      name: string;
+    }[];
+    // 存量第三方自动建号的账号只有随机密码，迁移时标为未设密，用户可直接首次设置
+    if (!userColumns.some((column) => column.name === 'password_set'))
+      this.db.transaction(() => {
+        this.db.exec(
+          'ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1',
+        );
+        this.db.exec(
+          'UPDATE users SET password_set = 0 WHERE username IN (SELECT username FROM oauth_identities WHERE auto_created = 1)',
+        );
+      })();
+    for (const name of ['title', 'year']) {
+      const columns = this.db
+        .prepare('PRAGMA table_info(user_danmaku)')
+        .all() as { name: string }[];
+      if (!columns.some((column) => column.name === name))
+        this.db.exec(
+          `ALTER TABLE user_danmaku ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`,
+        );
+    }
+    for (const statement of userNoticeSchema('sqlite')) this.db.exec(statement);
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
       this.migrateUserProfileAvatarSeed();
     });
     this.migrateFavoriteProjection();
+    this.migratePlaybackSchema();
+    this.migrateReviewFirstPublished();
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -597,11 +629,140 @@ export class LocalSqliteStorage implements IStorage {
       });
       this.checkpointWal();
     }
+    this.migrateWatchHistory();
     this.backfillFavoriteProjection();
     this.backfillUserProfiles();
     new SqliteUserAccessStore(this.db).migrate();
     this.invites.migrate();
     new SqliteConfigStateStore(this.db).migrate();
+  }
+
+  private migrateReviewFirstPublished(): void {
+    this.db
+      .transaction(() => {
+        const columns = this.db.pragma('table_info(video_reviews)') as {
+          name: string;
+        }[];
+        if (!columns.some((column) => column.name === 'first_published_at'))
+          this.db.exec(
+            'ALTER TABLE video_reviews ADD COLUMN first_published_at INTEGER',
+          );
+        if (
+          this.db
+            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
+            .get('review_first_published_v1')
+        )
+          return;
+        this.db.exec(
+          'UPDATE video_reviews SET first_published_at = updated_at WHERE first_published_at IS NULL',
+        );
+        this.db
+          .prepare(
+            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
+          )
+          .run('review_first_published_v1', Date.now());
+      })
+      .immediate();
+  }
+
+  private migratePlaybackSchema(): void {
+    this.db
+      .transaction(() => {
+        const columns = this.db.pragma('table_info(playback_sessions)') as {
+          name: string;
+        }[];
+        if (!columns.some((column) => column.name === 'measurement_version'))
+          this.db.exec(
+            'ALTER TABLE playback_sessions ADD COLUMN measurement_version INTEGER NOT NULL DEFAULT 1',
+          );
+        this.db.exec(`
+        CREATE TABLE IF NOT EXISTS storage_migrations (name TEXT PRIMARY KEY, completed_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS playback_watch_buckets (
+          username TEXT NOT NULL, session_id TEXT NOT NULL, bucket_start INTEGER NOT NULL,
+          watch_ms INTEGER NOT NULL, PRIMARY KEY (username, session_id, bucket_start)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_buckets_user_time ON playback_watch_buckets(username, bucket_start);
+        CREATE TABLE IF NOT EXISTS watch_history (
+          username TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, video_id TEXT NOT NULL,
+          title TEXT NOT NULL, source_name TEXT NOT NULL, cover TEXT NOT NULL, year TEXT NOT NULL,
+          episode_index INTEGER NOT NULL, total_episodes INTEGER NOT NULL,
+          group_label TEXT, group_index INTEGER, group_total INTEGER,
+          position REAL NOT NULL, duration REAL NOT NULL,
+          first_watched_at INTEGER NOT NULL, last_watched_at INTEGER NOT NULL,
+          PRIMARY KEY (username, id), UNIQUE (username, source, video_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_history_page ON watch_history(username, last_watched_at, id);
+      `);
+      })
+      .immediate();
+  }
+
+  private migrateWatchHistory(): void {
+    // 完成标记与回填同事务提交，重启不会复活已删除的历史。
+    this.db
+      .transaction(() => {
+        if (
+          this.db
+            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
+            .get('watch_history_v1')
+        )
+          return;
+        const rows = this.db
+          .prepare(
+            `SELECT ranked.*, p.record_json FROM (
+        SELECT s.*, MIN(started_at) OVER (PARTITION BY username, source, video_id) AS first_watched_at,
+          ROW_NUMBER() OVER (PARTITION BY username, source, video_id ORDER BY updated_at DESC, id DESC) AS row_num
+        FROM playback_sessions s WHERE watch_seconds > 0
+      ) ranked LEFT JOIN play_records p ON p.username = ranked.username AND p.record_key = ranked.source || '+' || ranked.video_id
+      WHERE ranked.row_num = 1`,
+          )
+          .all() as (PlaybackSession & {
+          username: string;
+          first_watched_at: number;
+          record_json: string | null;
+        })[];
+        for (const row of rows) {
+          let record: Partial<PlayRecord> = {};
+          try {
+            record = JSON.parse(row.record_json || '{}') ?? {};
+          } catch {
+            // 无效旧记录不阻塞迁移。
+          }
+          this.db
+            .prepare(
+              `INSERT INTO watch_history (
+          username, id, source, video_id, title, source_name, cover, year, episode_index,
+          total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT DO NOTHING`,
+            )
+            .run(
+              row.username,
+              randomUUID(),
+              row.source,
+              row.video_id,
+              row.title,
+              row.source_name,
+              row.cover,
+              row.year,
+              row.episode_index,
+              record.total_episodes || Math.max(1, row.episode_index),
+              record.group_label ?? null,
+              record.group_index ?? null,
+              record.group_total ?? null,
+              row.last_position,
+              row.total_time,
+              row.first_watched_at,
+              row.updated_at,
+            );
+        }
+        this.db
+          .prepare(
+            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
+          )
+          .run('watch_history_v1', Date.now());
+      })
+      .immediate();
   }
 
   private migrateFavoriteProjection(): void {
@@ -729,7 +890,8 @@ export class LocalSqliteStorage implements IStorage {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        password_set INTEGER NOT NULL DEFAULT 1
       );
 
       CREATE TABLE IF NOT EXISTS play_records (
@@ -759,6 +921,7 @@ export class LocalSqliteStorage implements IStorage {
       CREATE INDEX IF NOT EXISTS idx_video_reviews_work ON video_reviews (title_norm, is_public, updated_at);
       CREATE INDEX IF NOT EXISTS idx_video_reviews_public ON video_reviews (is_public, updated_at);
 
+      ${OAUTH_SCHEMA};
       CREATE TABLE IF NOT EXISTS search_history (
         username TEXT NOT NULL,
         keyword TEXT NOT NULL,
@@ -823,6 +986,15 @@ export class LocalSqliteStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS live_source_state (
         source_key TEXT PRIMARY KEY, channel_number INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS announcements (
+        id TEXT PRIMARY KEY COLLATE BINARY,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        published_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_announcements_published ON announcements(published_at, id);
+
       CREATE TABLE IF NOT EXISTS invite_codes (
         code TEXT PRIMARY KEY COLLATE BINARY,
         created_at INTEGER NOT NULL,
@@ -980,6 +1152,29 @@ export class LocalSqliteStorage implements IStorage {
                   record_key DESC
          LIMIT ?`,
       ),
+      getUpdatedPlayRecordPage: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         ORDER BY CAST(json_extract(record_json, '$.save_time') AS INTEGER) DESC,
+                  record_key DESC
+         LIMIT ?`,
+      ),
+      getUpdatedPlayRecordPageAfter: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+           AND (
+             CAST(json_extract(record_json, '$.save_time') AS INTEGER) < ?
+             OR (
+               CAST(json_extract(record_json, '$.save_time') AS INTEGER) = ?
+               AND record_key < ?
+             )
+           )
+         ORDER BY CAST(json_extract(record_json, '$.save_time') AS INTEGER) DESC,
+                  record_key DESC
+         LIMIT ?`,
+      ),
       countPlayRecords: this.db.prepare(
         'SELECT COUNT(*) AS count FROM play_records WHERE username = ?',
       ),
@@ -1016,9 +1211,10 @@ export class LocalSqliteStorage implements IStorage {
       getVideoReview: this.db.prepare(REVIEW_SQL.own),
       getLatestVideoReview: this.db.prepare(REVIEW_SQL.latest),
       setVideoReview: this.db.prepare(`INSERT INTO video_reviews
-        (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+        (username, title_norm, year, review_json, is_public, updated_at, first_published_at) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(username, title_norm, year) DO UPDATE SET
         review_json = json_set(excluded.review_json, '$.created_at', json_extract(video_reviews.review_json, '$.created_at')),
+        first_published_at = COALESCE(video_reviews.first_published_at, excluded.first_published_at),
         is_public = excluded.is_public, updated_at = excluded.updated_at`),
       deleteVideoReview: this.db.prepare(REVIEW_SQL.delete),
       deleteVideoReviewsByUser: this.db.prepare(
@@ -1064,45 +1260,12 @@ export class LocalSqliteStorage implements IStorage {
          ORDER BY favorite_key ASC
          LIMIT ?`,
       ),
-      getFavoritePage: this.db.prepare(
-        `SELECT f.favorite_key, f.favorite_json, p.record_json
-         FROM favorites f
-         LEFT JOIN play_records p
-           ON p.username = f.username AND p.record_key = f.favorite_key
-         WHERE f.username = ?
-           AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})
-         ORDER BY CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) DESC,
-                  f.favorite_key DESC
-         LIMIT ?`,
-      ),
-      getFavoritePageAfter: this.db.prepare(
-        `SELECT f.favorite_key, f.favorite_json, p.record_json
-         FROM favorites f
-         LEFT JOIN play_records p
-           ON p.username = f.username AND p.record_key = f.favorite_key
-         WHERE f.username = ?
-           AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})
-           AND (
-             CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) < ?
-             OR (
-               CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) = ?
-               AND f.favorite_key < ?
-             )
-           )
-         ORDER BY CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) DESC,
-                  f.favorite_key DESC
-         LIMIT ?`,
-      ),
-      countFavorites: this.db.prepare(
-        `SELECT COUNT(*) AS count FROM favorites
-         WHERE username = ? AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})`,
-      ),
       deleteFavorite: this.db.prepare(
         'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
       ),
       // users
       registerUser: this.db.prepare(
-        'INSERT INTO users (username, password) VALUES (?, ?)',
+        'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)',
       ),
       getPassword: this.db.prepare(
         'SELECT password FROM users WHERE username = ?',
@@ -1116,9 +1279,6 @@ export class LocalSqliteStorage implements IStorage {
       deleteUserRow: this.db.prepare('DELETE FROM users WHERE username = ?'),
       getAllUsers: this.db.prepare(
         'SELECT username FROM users ORDER BY username ASC',
-      ),
-      getAllUsersWithPasswords: this.db.prepare(
-        'SELECT username, password FROM users ORDER BY username ASC',
       ),
       // search_history
       getSearchHistory: this.db.prepare(
@@ -1162,7 +1322,6 @@ export class LocalSqliteStorage implements IStorage {
           total_time, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          username = excluded.username,
           source = excluded.source,
           video_id = excluded.video_id,
           episode_index = excluded.episode_index,
@@ -1176,10 +1335,8 @@ export class LocalSqliteStorage implements IStorage {
           last_position = excluded.last_position,
           total_time = excluded.total_time,
           created_at = excluded.created_at,
-          updated_at = excluded.updated_at`,
-      ),
-      deletePlaybackSession: this.db.prepare(
-        'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
+          updated_at = excluded.updated_at
+        WHERE playback_sessions.username = excluded.username AND playback_sessions.measurement_version = 1`,
       ),
       deletePlaybackSessionsBefore: this.db.prepare(
         'DELETE FROM playback_sessions WHERE updated_at < ?',
@@ -1294,6 +1451,8 @@ export class LocalSqliteStorage implements IStorage {
       'SELECT 1 AS v FROM search_history LIMIT 1',
       'SELECT 1 AS v FROM skip_configs LIMIT 1',
       'SELECT 1 AS v FROM playback_sessions LIMIT 1',
+      'SELECT 1 AS v FROM watch_history LIMIT 1',
+      'SELECT 1 AS v FROM playback_watch_buckets LIMIT 1',
       'SELECT 1 AS v FROM admin_config LIMIT 1',
       'SELECT 1 AS v FROM user_danmaku_settings LIMIT 1',
     ];
@@ -1417,6 +1576,25 @@ export class LocalSqliteStorage implements IStorage {
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
         this.db
+          .prepare(
+            `INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at)
+          SELECT ?, year, time_zone, hide_rhythm, report_json, published_at, updated_at FROM user_annual_recaps WHERE username = ?
+          ON CONFLICT(username, year) DO UPDATE SET time_zone = excluded.time_zone, hide_rhythm = excluded.hide_rhythm, report_json = excluded.report_json, published_at = excluded.published_at, updated_at = excluded.updated_at
+          WHERE excluded.updated_at > user_annual_recaps.updated_at`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
+            'UPDATE OR IGNORE oauth_identities SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM oauth_identities WHERE username = ?')
+          .run(legacy);
+        this.db
           .prepare('UPDATE user_danmaku SET username = ? WHERE username = ?')
           .run(canonical, legacy);
         this.db
@@ -1459,10 +1637,11 @@ export class LocalSqliteStorage implements IStorage {
         this.db
           .prepare(
             `INSERT INTO video_reviews
-          (username, title_norm, year, review_json, is_public, updated_at)
-          SELECT ?, title_norm, year, review_json, is_public, updated_at FROM video_reviews WHERE username = ?
+          (username, title_norm, year, review_json, is_public, updated_at, first_published_at)
+          SELECT ?, title_norm, year, review_json, is_public, updated_at, first_published_at FROM video_reviews WHERE username = ?
           ON CONFLICT(username, title_norm, year) DO UPDATE SET
-            review_json = excluded.review_json, is_public = excluded.is_public, updated_at = excluded.updated_at
+            review_json = excluded.review_json, is_public = excluded.is_public, updated_at = excluded.updated_at,
+            first_published_at = CASE WHEN video_reviews.first_published_at IS NULL THEN excluded.first_published_at WHEN excluded.first_published_at IS NULL THEN video_reviews.first_published_at ELSE MIN(video_reviews.first_published_at, excluded.first_published_at) END
           WHERE excluded.updated_at > video_reviews.updated_at`,
           )
           .run(canonical, legacy);
@@ -1480,6 +1659,33 @@ export class LocalSqliteStorage implements IStorage {
           legacy,
           canonical,
         );
+        this.db
+          .prepare(
+            `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
+          SELECT ?, session_id, bucket_start, watch_ms FROM playback_watch_buckets WHERE username = ?
+          ON CONFLICT(username, session_id, bucket_start) DO UPDATE SET watch_ms = MAX(watch_ms, excluded.watch_ms)`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM playback_watch_buckets WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
+            `DELETE FROM watch_history AS canonical WHERE username = ? AND EXISTS (
+          SELECT 1 FROM watch_history AS legacy WHERE legacy.username = ?
+          AND (legacy.id = canonical.id OR (legacy.source = canonical.source AND legacy.video_id = canonical.video_id))
+          AND legacy.last_watched_at > canonical.last_watched_at
+        )`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare(
+            'UPDATE OR IGNORE watch_history SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM watch_history WHERE username = ?')
+          .run(legacy);
         this.db
           .prepare(
             'UPDATE playback_sessions SET username = ? WHERE username = ?',
@@ -1508,6 +1714,7 @@ export class LocalSqliteStorage implements IStorage {
         .prepare('UPDATE user_profiles SET username = ? WHERE username = ?')
         .run(canonical, legacy);
     for (const [table, columns] of [
+      ['user_notice_events', ['recipient_username']],
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
       ['video_review_reports', ['author', 'reporter']],
@@ -1528,72 +1735,13 @@ export class LocalSqliteStorage implements IStorage {
     );
   }
 
-  private importSocialData(snapshot: StorageImportData): void {
-    const ids = new Set<string>();
-    const names = new Set<string>();
-    for (const [username, data] of Object.entries(snapshot.userData)) {
-      this.db
-        .prepare(
-          'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        )
-        .run(...importedProfileValues(username, data.profile, ids, names));
-      for (const row of data.replies ?? [])
-        this.db.prepare(REPLY_INSERT).run(...replyValues(username, row));
-      for (const row of data.replyReports ?? [])
-        this.db
-          .prepare(REPLY_REPORT_INSERT)
-          .run(
-            row.reply_id,
-            normalizeUsername(username),
-            row.reason,
-            row.detail,
-            row.created_at,
-          );
-      for (const row of data.follows ?? [])
-        this.db
-          .prepare(
-            'INSERT OR IGNORE INTO user_follows (follower, followee, created_at) VALUES (?, ?, ?)',
-          )
-          .run(
-            normalizeUsername(username),
-            normalizeUsername(row.followee),
-            row.created_at,
-          );
-      for (const row of data.likes ?? [])
-        this.db
-          .prepare(
-            'INSERT OR IGNORE INTO video_review_likes (author, title_norm, year, liker, created_at) VALUES (?, ?, ?, ?, ?)',
-          )
-          .run(
-            normalizeUsername(row.author),
-            row.title_norm,
-            row.year,
-            normalizeUsername(username),
-            row.created_at,
-          );
-      for (const row of data.reports ?? [])
-        this.db
-          .prepare(
-            'INSERT OR REPLACE INTO video_review_reports (author, title_norm, year, reporter, reason, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          )
-          .run(
-            normalizeUsername(row.author),
-            row.title_norm,
-            row.year,
-            normalizeUsername(username),
-            row.reason,
-            row.detail,
-            row.created_at,
-          );
-    }
-  }
-
   private collectDistinctUsernames(): string[] {
     const tables = [
       'users',
       'play_records',
       'favorites',
       'video_reviews',
+      'oauth_identities',
       'user_danmaku',
       'user_profiles',
       'user_access',
@@ -1601,7 +1749,10 @@ export class LocalSqliteStorage implements IStorage {
       'search_history',
       'skip_configs',
       'playback_sessions',
+      'watch_history',
+      'playback_watch_buckets',
       'user_message_state',
+      'user_annual_recaps',
       'user_danmaku_settings',
     ];
     const usernames = new Set<string>();
@@ -1616,6 +1767,7 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     for (const [table, columns] of [
+      ['user_notice_events', ['recipient_username']],
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
       ['video_review_reports', ['author', 'reporter']],
@@ -1635,8 +1787,8 @@ export class LocalSqliteStorage implements IStorage {
   private mergeUserRow(legacy: string, canonical: string): void {
     this.db
       .prepare(
-        `INSERT INTO users (username, password)
-         SELECT ?, password FROM users WHERE username = ?
+        `INSERT INTO users (username, password, password_set)
+         SELECT ?, password, password_set FROM users WHERE username = ?
          ON CONFLICT(username) DO NOTHING`,
       )
       .run(canonical, legacy);
@@ -1748,6 +1900,28 @@ export class LocalSqliteStorage implements IStorage {
     return parseJsonValue<PlayRecord>(row?.record_json);
   }
 
+  async getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>> {
+    const uniqueKeys = [...new Set(keys)];
+    if (!uniqueKeys.length) return {};
+    const rows = this.db
+      .prepare(
+        `SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      )
+      .all(normalizeUsername(userName), ...uniqueKeys) as {
+      record_key: string;
+      record_json: string;
+    }[];
+    const result: Record<string, PlayRecord> = {};
+    for (const row of rows) {
+      const record = parseJsonValue<PlayRecord>(row.record_json);
+      if (record) result[row.record_key] = record;
+    }
+    return result;
+  }
+
   async setPlayRecord(
     userName: string,
     key: string,
@@ -1844,20 +2018,56 @@ export class LocalSqliteStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage> {
     const username = normalizeUsername(userName);
+    if (filter === 'shelved') {
+      const where = buildShelvedPlayRecordWhere(SQLITE_TRACKING_DIALECT);
+      const cutoff = Date.now() - SHELVED_PLAY_RECORD_AGE_MS;
+      const saveTime = SQLITE_TRACKING_DIALECT.jsonTimestamp('save_time');
+      const hasCursor = cursorTime !== undefined && !!cursorKey;
+      const rows = this.db
+        .prepare(
+          `SELECT record_key, record_json FROM play_records
+        WHERE username = ? AND ${where}${hasCursor ? ` AND (${saveTime} < ? OR (${saveTime} = ? AND record_key < ?))` : ''}
+        ORDER BY ${saveTime} DESC, record_key DESC LIMIT ?`,
+        )
+        .all(
+          ...(hasCursor
+            ? [username, cutoff, cursorTime, cursorTime, cursorKey, limit + 1]
+            : [username, cutoff, limit + 1]),
+        ) as { record_key: string; record_json: string }[];
+      const count = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM play_records WHERE username = ? AND ${where}`,
+        )
+        .get(username, cutoff) as { count: number };
+      return buildPlayRecordPage(rows, count.count, limit);
+    }
+    const pageStatement =
+      filter === 'updated'
+        ? this.stmts.getUpdatedPlayRecordPage
+        : this.stmts.getPlayRecordPage;
+    const afterStatement =
+      filter === 'updated'
+        ? this.stmts.getUpdatedPlayRecordPageAfter
+        : this.stmts.getPlayRecordPageAfter;
+    const countStatement =
+      filter === 'updated'
+        ? this.stmts.countUnreadTrackingPlayRecords
+        : this.stmts.countPlayRecords;
     const rows = (
       cursorTime !== undefined && cursorKey
-        ? this.stmts.getPlayRecordPageAfter.all(
+        ? afterStatement.all(
             username,
             cursorTime,
             cursorTime,
             cursorKey,
             limit + 1,
           )
-        : this.stmts.getPlayRecordPage.all(username, limit + 1)
+        : pageStatement.all(username, limit + 1)
     ) as { record_key: string; record_json: string }[];
-    const countRow = this.stmts.countPlayRecords.get(username) as {
+    const countRow = countStatement.get(username) as {
       count: number;
     };
     return buildPlayRecordPage(rows, countRow.count, limit);
@@ -1892,9 +2102,44 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.deletePlayRecord.run(username, key);
   }
 
+  async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const uniqueKeys = [...new Set(keys)];
+    this.db
+      .prepare(
+        `DELETE FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      )
+      .run(normalizeUsername(userName), ...uniqueKeys);
+  }
+
   async deleteAllPlayRecords(userName: string): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.deletePlayRecordsByUser.run(username);
+  }
+
+  async getFavoriteUpdateMessagePage(
+    userName: string,
+    limit: number,
+    before?: import('@/lib/message-cursor.server').MessageCursor | null,
+  ) {
+    const username = normalizeUsername(userName);
+    const sql = favoriteMessageQueries('sqlite', username, limit, before);
+    const rows = this.db.prepare(sql.page).all(...sql.params) as {
+      favorite_key: string;
+      favorite_json: string;
+    }[];
+    const count = this.db.prepare(sql.count).get(username) as { count: number };
+    return { items: favoriteMessagesFromRows(rows), total: count.count };
+  }
+
+  async readFavoriteUpdate(
+    userName: string,
+    key: string,
+    episodes: number,
+  ): Promise<void> {
+    this.db
+      .prepare(favoriteReadStatement('sqlite'))
+      .run(episodes, normalizeUsername(userName), key, episodes, episodes);
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
@@ -2053,43 +2298,6 @@ export class LocalSqliteStorage implements IStorage {
     return buildMetadataFavoritePage(rows, pageLimit);
   }
 
-  async getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive = true,
-  ): Promise<FavoritePage> {
-    const username = normalizeUsername(userName);
-    const rows = (
-      cursorTime !== undefined && cursorKey
-        ? this.stmts.getFavoritePageAfter.all(
-            username,
-            Number(includeLive),
-            cursorTime,
-            cursorTime,
-            cursorKey,
-            limit + 1,
-          )
-        : this.stmts.getFavoritePage.all(
-            username,
-            Number(includeLive),
-            limit + 1,
-          )
-    ) as Array<{
-      favorite_key: string;
-      favorite_json: string;
-      record_json?: string | null;
-    }>;
-    const countRow = this.stmts.countFavorites.get(
-      username,
-      Number(includeLive),
-    ) as {
-      count: number;
-    };
-    return buildFavoritePage(rows, countRow.count, limit);
-  }
-
   async getFavoriteLibraryPage(userName: string, query: FavoriteLibraryQuery) {
     const username = normalizeUsername(userName);
     const sql = libraryStatements('sqlite', username, query);
@@ -2154,6 +2362,36 @@ export class LocalSqliteStorage implements IStorage {
     return this.social.isNicknameAvailable(...args);
   }
 
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    return this.social.getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    return this.social.getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    return this.social.saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    return this.social.deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    return this.social.getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    return this.social.getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -2208,35 +2446,67 @@ export class LocalSqliteStorage implements IStorage {
     return this.social.getFollowReviewMessages(...args);
   }
 
+  private runNoticeMutation(mutation: NoticeMutation): number {
+    return this.db
+      .transaction(() => {
+        let step = mutation.next();
+        while (!step.done) {
+          const statement = step.value;
+          const rows = statement.read
+            ? (this.db
+                .prepare(statement.sql)
+                .all(...statement.params) as Record<string, unknown>[])
+            : (this.db.prepare(statement.sql).run(...statement.params), []);
+          step = mutation.next(rows);
+        }
+        return step.value;
+      })
+      .immediate();
+  }
+
+  private get notices() {
+    return new UserNoticeStorage({
+      dialect: 'sqlite' as const,
+      rows: async <T>(sql: string, params: unknown[] = []) =>
+        this.db.prepare(sql).all(...params) as T[],
+      run: async (sql: string, params: unknown[] = []) =>
+        this.db.prepare(sql).run(...params).changes,
+    });
+  }
+  async getUserNoticeMessages(
+    ...args: Parameters<IStorage['getUserNoticeMessages']>
+  ) {
+    return this.notices.messages(...args);
+  }
+  async getUserNoticeCount(
+    ...args: Parameters<IStorage['getUserNoticeCount']>
+  ) {
+    return this.notices.count(...args);
+  }
+  async purgeUserNotices(before: number): Promise<number> {
+    return this.db
+      .prepare('DELETE FROM user_notice_events WHERE created_at <= ?')
+      .run(before).changes;
+  }
+
   async deleteReviewReply(
     id: string,
     username: string,
     admin = false,
   ): Promise<boolean> {
-    return this.db.transaction(() => {
-      const result = this.db
-        .prepare(
-          'DELETE FROM video_review_replies WHERE id = ? AND (? = 1 OR username = ?)',
-        )
-        .run(id, admin ? 1 : 0, normalizeUsername(username));
-      if (result.changes)
-        this.db
-          .prepare('DELETE FROM video_review_reply_reports WHERE reply_id = ?')
-          .run(id);
-      return result.changes > 0;
-    })();
+    return (
+      (await this.runNoticeMutation(
+        new NoticeModeration('sqlite').reply(id, username, admin),
+      )) > 0
+    );
   }
   async moderateReplyReports(
     id: string,
     action: 'dismiss' | 'delete-reply',
   ): Promise<void> {
-    if (action === 'delete-reply') {
-      await this.deleteReviewReply(id, '', true);
-      return;
-    }
-    this.db
-      .prepare('DELETE FROM video_review_reply_reports WHERE reply_id = ?')
-      .run(id);
+    await this.runNoticeMutation(
+      new NoticeModeration('sqlite').reply(id, '', true, action),
+    );
   }
 
   async getReviewReplies(
@@ -2339,12 +2609,7 @@ export class LocalSqliteStorage implements IStorage {
     );
   }
   async deleteUserDanmakuBatch(ids: string[]): Promise<number> {
-    if (!ids.length) return 0;
-    return this.db
-      .prepare(
-        `DELETE FROM user_danmaku WHERE id IN (${ids.map(() => '?').join(',')})`,
-      )
-      .run(...ids).changes;
+    return this.runNoticeMutation(new NoticeModeration('sqlite').danmaku(ids));
   }
 
   async getVideoReview(
@@ -2369,6 +2634,7 @@ export class LocalSqliteStorage implements IStorage {
       JSON.stringify(review),
       review.is_public ? 1 : 0,
       review.updated_at,
+      review.is_public ? review.updated_at : null,
     );
   }
 
@@ -2378,79 +2644,25 @@ export class LocalSqliteStorage implements IStorage {
     year: string,
     publicOnly = false,
   ): Promise<void> {
-    this.db.transaction(() => {
-      const result = this.stmts.deleteVideoReview.run(
-        normalizeUsername(userName),
+    await this.runNoticeMutation(
+      new NoticeModeration('sqlite').review(
+        userName,
         titleNorm,
         year,
-        publicOnly ? 1 : 0,
-      );
-      if (result.changes)
-        this.deleteReviewSocialRows(
-          normalizeUsername(userName),
-          titleNorm,
-          year,
-        );
-    })();
+        'delete-review',
+        publicOnly,
+      ),
+    );
   }
-
-  private deleteReviewSocialRows(
-    author: string,
-    title: string,
-    year: string,
-  ): void {
-    this.db
-      .prepare(
-        'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
-      )
-      .run(author, title, year);
-    this.db
-      .prepare(
-        'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
-      )
-      .run(author, title, year);
-    for (const table of ['video_review_likes', 'video_review_reports'])
-      this.db
-        .prepare(
-          `DELETE FROM ${table} WHERE author = ? AND title_norm = ? AND year = ?`,
-        )
-        .run(author, title, year);
-  }
-
   async moderateReviewReports(
     author: string,
     title: string,
     year: string,
     action: 'dismiss' | 'mark-spoiler' | 'delete-review',
   ): Promise<void> {
-    author = normalizeUsername(author);
-    this.db.transaction(() => {
-      const target = [author, title, year];
-      if (
-        !this.db
-          .prepare(
-            'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1',
-          )
-          .get(...target)
-      )
-        return;
-      if (action === 'delete-review') {
-        this.stmts.deleteVideoReview.run(...target, 1);
-        this.deleteReviewSocialRows(author, title, year);
-      } else {
-        if (action === 'mark-spoiler')
-          this.db
-            .prepare(
-              "UPDATE video_reviews SET review_json = json_set(review_json, '$.spoiler', json('true')) WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1",
-            )
-            .run(...target);
-        this.db
-          .prepare(
-            'DELETE FROM video_review_reports WHERE author = ? AND title_norm = ? AND year = ?',
-          )
-          .run(...target);
-      }
-    })();
+    await this.runNoticeMutation(
+      new NoticeModeration('sqlite').review(author, title, year, action, true),
+    );
   }
 
   async getMyVideoReviewPage(
@@ -2531,11 +2743,78 @@ export class LocalSqliteStorage implements IStorage {
     return reviewPage(await this.social.enrichReviews(rows));
   }
 
+  async getOAuthIdentity(id: string) {
+    return readOAuthIdentity(
+      this.db
+        .prepare(
+          "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND provider_user_id = ?",
+        )
+        .get(id) as Record<string, unknown> | undefined,
+    );
+  }
+  async getUserOAuthIdentity(username: string) {
+    return readOAuthIdentity(
+      this.db
+        .prepare(
+          "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND username = ?",
+        )
+        .get(normalizeUsername(username)) as
+        | Record<string, unknown>
+        | undefined,
+    );
+  }
+  async bindOAuthIdentity(identity: OAuthIdentity): Promise<OAuthBindResult> {
+    const username = normalizeUsername(identity.username);
+    return this.db.transaction(() => {
+      if (!this.stmts.checkUserExist.get(username)) return 'user_missing';
+      const existing = readOAuthIdentity(
+        this.db
+          .prepare(
+            "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND provider_user_id = ?",
+          )
+          .get(identity.providerUserId) as Record<string, unknown> | undefined,
+      );
+      if (existing)
+        return existing.username === username ? 'bound' : 'identity_taken';
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM oauth_identities WHERE provider = 'linuxdo' AND username = ?",
+          )
+          .get(username)
+      )
+        return 'user_bound';
+      this.db
+        .prepare(OAUTH_INSERT)
+        .run(
+          ...oauthIdentityParams({ ...identity, username, autoCreated: false }),
+        );
+      return 'bound';
+    })();
+  }
+  async unbindOAuthIdentity(username: string): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          "DELETE FROM oauth_identities WHERE provider = 'linuxdo' AND username = ? AND auto_created = 0",
+        )
+        .run(normalizeUsername(username)).changes > 0
+    );
+  }
+  async updateOAuthProviderUsername(id: string, name: string): Promise<void> {
+    this.db
+      .prepare(
+        "UPDATE oauth_identities SET provider_username = ? WHERE provider = 'linuxdo' AND provider_user_id = ?",
+      )
+      .run(name, id);
+  }
+
   async registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void> {
     const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
@@ -2549,6 +2828,7 @@ export class LocalSqliteStorage implements IStorage {
         Date.now(),
         nickname,
         userGroups,
+        identity,
       );
     } catch (error) {
       if (isSqliteUniqueConstraintError(error)) {
@@ -2565,9 +2845,19 @@ export class LocalSqliteStorage implements IStorage {
     now: number,
     nickname?: string,
     userGroups?: string[],
+    identity?: OAuthIdentity,
   ): void {
     this.db.transaction(() => {
-      this.stmts.registerUser.run(username, hashedPassword);
+      // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
+      this.stmts.registerUser.run(username, hashedPassword, identity ? 0 : 1);
+      if (identity)
+        this.db.prepare(OAUTH_INSERT).run(
+          ...oauthIdentityParams({
+            ...identity,
+            username,
+            autoCreated: true,
+          }),
+        );
       this.stmts.recordUserLogin.run(username, now);
       this.insertUserProfile(username, nickname);
       new SqliteUserAccessStore(this.db).put({
@@ -2598,10 +2888,57 @@ export class LocalSqliteStorage implements IStorage {
     return Boolean(this.stmts.checkUserExist.get(username));
   }
 
-  async changePassword(userName: string, newPassword: string): Promise<void> {
+  async isPasswordSet(userName: string): Promise<boolean> {
+    const row = this.db
+      .prepare('SELECT password_set FROM users WHERE username = ?')
+      .get(normalizeUsername(userName)) as { password_set: number } | undefined;
+    return Boolean(row?.password_set);
+  }
+
+  async changePassword(
+    userName: string,
+    newPassword: string,
+    admin = false,
+    currentPassword?: string | null,
+  ): Promise<boolean> {
     const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
-    this.stmts.updatePassword.run(hashed, username);
+    const old = this.db
+      .prepare('SELECT password, password_set FROM users WHERE username = ?')
+      .get(username) as { password: string; password_set: number } | undefined;
+    if (!old) return false;
+    if (currentPassword !== undefined) {
+      if (
+        old.password_set &&
+        (!currentPassword ||
+          !(await verifyPassword(currentPassword, old.password)).match)
+      )
+        return false;
+    }
+    if (admin && (await verifyPassword(newPassword, old.password)).match)
+      return true;
+    this.db
+      .transaction(() => {
+        const result = this.db
+          .prepare(
+            'UPDATE users SET password = ?, password_set = 1 WHERE username = ? AND password = ?',
+          )
+          .run(hashed, username, old.password);
+        if (!result.changes) throw new Error('密码已变化，请重试');
+        if (admin) {
+          const event = noticeInsert(
+            'sqlite',
+            username,
+            `password:${old.password}`,
+            'account-change',
+            'password-changed',
+            {},
+          );
+          this.db.prepare(event.sql).run(...event.params);
+        }
+      })
+      .immediate();
+    return true;
   }
 
   async deleteUser(
@@ -2614,10 +2951,6 @@ export class LocalSqliteStorage implements IStorage {
 
   async getUserAccess(username: string) {
     return new SqliteUserAccessStore(this.db).get(username);
-  }
-
-  async getAllUserAccess() {
-    return new SqliteUserAccessStore(this.db).all();
   }
 
   async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
@@ -2704,6 +3037,9 @@ export class LocalSqliteStorage implements IStorage {
           'UPDATE video_review_replies SET reply_to = NULL WHERE reply_to = ?',
         )
         .run(targetUser);
+      this.db
+        .prepare('DELETE FROM oauth_identities WHERE username = ?')
+        .run(targetUser);
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
       this.stmts.deleteFavoritesByUser.run(targetUser);
@@ -2713,8 +3049,20 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.stmts.deleteSearchHistoryByUser.run(targetUser);
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM playback_watch_buckets WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM watch_history WHERE username = ?')
+        .run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_notice_events WHERE recipient_username = ?')
+        .run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
+        .run(targetUser);
       this.stmts.deleteLoginActivityByUser.run(targetUser);
       this.db
         .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
@@ -2748,6 +3096,65 @@ export class LocalSqliteStorage implements IStorage {
       result[row.username] = Number(row.last_login_at);
     }
     return result;
+  }
+
+  async listAnnouncements(limit: number): Promise<SiteAnnouncement[]> {
+    const rows = this.db
+      .prepare(ANNOUNCEMENT_LIST_SQL)
+      .all(limit) as AnnouncementRow[];
+    return rows.map(readAnnouncement);
+  }
+
+  async countAnnouncements(): Promise<number> {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS total FROM announcements')
+      .get() as { total: number };
+    return row.total;
+  }
+
+  async getPublishedAnnouncements(
+    options: Parameters<IStorage['getPublishedAnnouncements']>[0],
+  ): Promise<SiteAnnouncement[]> {
+    const { sql, params } = publishedAnnouncementQuery(options);
+    const rows = this.db.prepare(sql).all(...params) as AnnouncementRow[];
+    return rows.map(readAnnouncement);
+  }
+
+  async getAnnouncement(id: string): Promise<SiteAnnouncement | null> {
+    const row = this.db
+      .prepare('SELECT * FROM announcements WHERE id = ?')
+      .get(id) as AnnouncementRow | undefined;
+    return row ? readAnnouncement(row) : null;
+  }
+
+  async createAnnouncement(announcement: SiteAnnouncement): Promise<void> {
+    this.db
+      .prepare(ANNOUNCEMENT_INSERT_SQL)
+      .run(
+        announcement.id,
+        announcement.content,
+        announcement.createdAt,
+        announcement.updatedAt,
+        announcement.publishedAt,
+      );
+  }
+
+  async updateAnnouncement(
+    id: string,
+    patch: Parameters<IStorage['updateAnnouncement']>[1],
+  ): Promise<SiteAnnouncement | null> {
+    const { sql, params } = announcementUpdateQuery(id, patch);
+    const row = this.db.prepare(`${sql} RETURNING *`).get(...params) as
+      | AnnouncementRow
+      | undefined;
+    return row ? readAnnouncement(row) : null;
+  }
+
+  async deleteAnnouncement(id: string): Promise<boolean> {
+    return (
+      this.db.prepare('DELETE FROM announcements WHERE id = ?').run(id)
+        .changes > 0
+    );
   }
 
   private get invites() {
@@ -2894,10 +3301,37 @@ export class LocalSqliteStorage implements IStorage {
           )
         )
           return false;
+        const noticeAccess = new SqliteUserAccessStore(this.db);
+        const noticeUsers = configPermissionsChanged(current, config)
+          ? (
+              this.db
+                .prepare('SELECT username FROM user_access ORDER BY username')
+                .all() as { username: string }[]
+            ).flatMap((row) => {
+              const user = noticeAccess.get(row.username);
+              return user
+                ? [{ user, key: accessPermissionsKey(user, current) }]
+                : [];
+            })
+          : [];
         const removed = removedAccessReferences(current, config);
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
         for (const source of removed.sources) access.removeSource(source);
+        for (const { user, key } of noticeUsers) {
+          const next = noticeAccess.get(user.username);
+          if (next && key !== accessPermissionsKey(next, config)) {
+            const event = noticeInsert(
+              'sqlite',
+              user.username,
+              `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
+              'account-change',
+              'permissions-changed',
+              {},
+            );
+            this.db.prepare(event.sql).run(...event.params);
+          }
+        }
         stateStore.prune(current, config);
         for (const [key, count] of Object.entries(state?.liveCounts || {})) {
           if (config.LiveConfig?.some((live) => live.key === key))
@@ -2915,20 +3349,6 @@ export class LocalSqliteStorage implements IStorage {
   async getAllUsers(): Promise<string[]> {
     const rows = this.stmts.getAllUsers.all() as { username: string }[];
     return [...new Set(rows.map((row) => normalizeUsername(row.username)))];
-  }
-
-  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
-    const rows = this.stmts.getAllUsersWithPasswords.all() as {
-      username: string;
-      password: string;
-    }[];
-    const result: { [username: string]: string } = {};
-    for (const row of rows) {
-      if (row.username && row.password) {
-        result[normalizeUsername(row.username)] = row.password;
-      }
-    }
-    return result;
   }
 
   async getUserMessageState(userName: string): Promise<UserMessageState> {
@@ -3208,80 +3628,198 @@ export class LocalSqliteStorage implements IStorage {
     );
   }
 
-  async getPlaybackSessions(
+  async saveWatchSessionReport(
     userName: string,
-    query: PlaybackSessionQuery = {},
-  ): Promise<PlaybackSession[]> {
+    session: PlaybackSession,
+    buckets: PlaybackWatchBucket[],
+    history?: WatchHistoryWrite,
+  ): Promise<string | null> {
     const username = normalizeUsername(userName);
+    return this.db
+      .transaction(() => {
+        const existing = this.db
+          .prepare(
+            'SELECT username, watch_seconds FROM playback_sessions WHERE id = ?',
+          )
+          .get(session.id) as
+          | { username: string; watch_seconds: number }
+          | undefined;
+        if (existing && existing.username !== username) return null;
+        if (
+          !buckets.some((bucket) => bucket.watch_ms > 0) &&
+          !this.db
+            .prepare(
+              'SELECT 1 FROM playback_watch_buckets WHERE username = ? AND session_id = ? AND watch_ms > 0 LIMIT 1',
+            )
+            .get(username, session.id)
+        )
+          return null;
+        this.db
+          .prepare(
+            `INSERT INTO playback_sessions (
+        id, username, source, video_id, episode_index, title, source_name, cover, year,
+        started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at, measurement_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 2)
+      ON CONFLICT(id) DO UPDATE SET ended_at = MAX(ended_at, excluded.ended_at),
+        last_position = excluded.last_position, total_time = excluded.total_time,
+        title = excluded.title, source_name = excluded.source_name, cover = excluded.cover, year = excluded.year,
+        updated_at = MAX(updated_at, excluded.updated_at), measurement_version = 2
+      WHERE playback_sessions.username = excluded.username`,
+          )
+          .run(
+            session.id,
+            username,
+            session.source,
+            session.video_id,
+            session.episode_index,
+            session.title,
+            session.source_name,
+            session.cover,
+            session.year,
+            session.started_at,
+            session.ended_at,
+            session.last_position,
+            session.total_time,
+            session.created_at,
+            session.updated_at,
+          );
+        const putBucket = this.db
+          .prepare(`INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
+        VALUES (?, ?, ?, ?) ON CONFLICT(username, session_id, bucket_start) DO UPDATE SET watch_ms = MAX(watch_ms, excluded.watch_ms)`);
+        for (const bucket of buckets)
+          putBucket.run(username, session.id, bucket.start, bucket.watch_ms);
+        const total = this.db
+          .prepare(
+            'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+          )
+          .get(username, session.id) as { total: number };
+        this.db
+          .prepare(
+            'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
+          )
+          .run(Math.floor(total.total / 1000), session.id, username);
+        if (!history || total.total <= 0) return null;
+        const values = [
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.episode_index,
+          history.total_episodes,
+          history.group_label ?? null,
+          history.group_index ?? null,
+          history.group_total ?? null,
+          session.last_position,
+          session.total_time,
+          session.updated_at,
+        ];
+        if (history.id) {
+          const result = this.db
+            .prepare(
+              `UPDATE watch_history SET title = ?, source_name = ?, cover = ?, year = ?,
+          episode_index = ?, total_episodes = ?, group_label = ?, group_index = ?, group_total = ?,
+          position = ?, duration = ?, last_watched_at = ? WHERE username = ? AND id = ? AND source = ? AND video_id = ?`,
+            )
+            .run(
+              ...values,
+              username,
+              history.id,
+              session.source,
+              session.video_id,
+            );
+          return result.changes ? history.id : null;
+        }
+        this.db
+          .prepare(
+            `INSERT INTO watch_history (
+        title, source_name, cover, year, episode_index, total_episodes, group_label, group_index, group_total,
+        position, duration, last_watched_at, username, id, source, video_id, first_watched_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(username, source, video_id) DO UPDATE SET
+        title = excluded.title, source_name = excluded.source_name, cover = excluded.cover, year = excluded.year,
+        episode_index = excluded.episode_index, total_episodes = excluded.total_episodes, group_label = excluded.group_label,
+        group_index = excluded.group_index, group_total = excluded.group_total, position = excluded.position,
+        duration = excluded.duration, last_watched_at = excluded.last_watched_at`,
+          )
+          .run(
+            ...values,
+            username,
+            randomUUID(),
+            session.source,
+            session.video_id,
+            session.started_at,
+          );
+        return (
+          this.db
+            .prepare(
+              'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
+            )
+            .get(username, session.source, session.video_id) as { id: string }
+        ).id;
+      })
+      .immediate();
+  }
+
+  async getWatchHistoryPage(
+    userName: string,
+    query: WatchHistoryQuery,
+  ): Promise<WatchHistoryEntry[]> {
     const conditions = ['username = ?'];
-    const params: Array<string | number> = [username];
-
-    if (Number.isFinite(query.since)) {
-      conditions.push('started_at >= ?');
-      params.push(query.since as number);
+    const params: (string | number)[] = [normalizeUsername(userName)];
+    if (query.cursor) {
+      conditions.push(
+        '(last_watched_at < ? OR (last_watched_at = ? AND id < ?))',
+      );
+      params.push(
+        query.cursor.lastWatchedAt,
+        query.cursor.lastWatchedAt,
+        query.cursor.id,
+      );
     }
-
-    if (Number.isFinite(query.cursor)) {
-      conditions.push('started_at < ?');
-      params.push(query.cursor as number);
-    }
-
     const keyword = normalizePlaybackSearchKeyword(query.keyword);
     if (keyword) {
-      const likePattern = buildPlaybackSearchLikePattern(keyword);
-      conditions.push(
-        "(title LIKE ? ESCAPE '!' OR source_name LIKE ? ESCAPE '!' OR year LIKE ? ESCAPE '!' OR video_id LIKE ? ESCAPE '!')",
-      );
-      params.push(likePattern, likePattern, likePattern, likePattern);
+      conditions.push("title LIKE ? ESCAPE '!'");
+      params.push(buildPlaybackSearchLikePattern(keyword));
     }
-
-    const limit = Math.min(Math.max(Math.floor(query.limit ?? 100), 1), 500);
-    params.push(limit);
-
+    params.push(query.limit);
     const rows = this.db
       .prepare(
-        `SELECT
-          id, source, video_id, episode_index, title, source_name, cover, year,
-          started_at, ended_at, watch_seconds, last_position, total_time,
-          created_at, updated_at
-        FROM playback_sessions
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY started_at DESC
-        LIMIT ?`,
+        `SELECT id, source, video_id, title, source_name, cover, year, episode_index,
+      total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+      FROM watch_history WHERE ${conditions.join(' AND ')} ORDER BY last_watched_at DESC, id DESC LIMIT ?`,
       )
-      .all(...params) as PlaybackSession[];
-
-    return rows;
+      .all(...params) as WatchHistoryEntry[];
+    return rows.map((row) => ({
+      ...row,
+      group_label: row.group_label ?? undefined,
+      group_index: row.group_index ?? undefined,
+      group_total: row.group_total ?? undefined,
+    }));
   }
 
-  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
-    const username = normalizeUsername(userName);
-    const rows = this.db
-      .prepare(
-        `SELECT
-          id, source, video_id, episode_index, title, source_name, cover, year,
-          started_at, ended_at, watch_seconds, last_position, total_time,
-          created_at, updated_at
-        FROM playback_sessions
-        WHERE username = ?
-        ORDER BY started_at DESC`,
-      )
-      .all(username) as PlaybackSession[];
-
-    return rows;
-  }
-
-  async deletePlaybackSession(userName: string, id: string): Promise<void> {
-    const username = normalizeUsername(userName);
-    this.stmts.deletePlaybackSession.run(username, id);
+  async deleteWatchHistoryEntry(userName: string, id: string): Promise<void> {
+    this.db
+      .prepare('DELETE FROM watch_history WHERE username = ? AND id = ?')
+      .run(normalizeUsername(userName), id);
   }
 
   async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
     const cutoff = Number.isFinite(updatedBefore)
       ? Math.max(0, Math.floor(updatedBefore))
       : 0;
-    const result = this.stmts.deletePlaybackSessionsBefore.run(cutoff);
-    return Number(result.changes || 0);
+    return this.db
+      .transaction(() => {
+        this.db
+          .prepare(
+            `DELETE FROM playback_watch_buckets WHERE session_id IN
+        (SELECT id FROM playback_sessions WHERE updated_at < ?)`,
+          )
+          .run(cutoff);
+        return Number(
+          this.stmts.deletePlaybackSessionsBefore.run(cutoff).changes,
+        );
+      })
+      .immediate();
   }
 
   async getPlaybackWatchTotals(
@@ -3308,6 +3846,23 @@ export class LocalSqliteStorage implements IStorage {
     };
   }
 
+  async getPlaybackSourceUsage(
+    start: number,
+    end: number,
+    userName?: string,
+  ): Promise<PlaybackSourceUsage[]> {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return [];
+    const personal = userName !== undefined;
+    const params = personal
+      ? [normalizeUsername(userName), start, end]
+      : [start, end];
+    const rows = this.db
+      .prepare(sourceUsageSql(personal))
+      .all(...params) as PlaybackSourceUsageRow[];
+    return aggregateSourceUsage(rows);
+  }
+
   async getPlaybackPeriodSessions(
     userName: string,
     start: number,
@@ -3318,11 +3873,51 @@ export class LocalSqliteStorage implements IStorage {
       return [];
     return this.db
       .prepare(
-        `SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds
+        `SELECT source, video_id, episode_index, title, cover, year, started_at, ended_at, watch_seconds
         FROM playback_sessions
         WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0`,
       )
       .all(username, start, end) as PlaybackPeriodSession[];
+  }
+
+  async hasPlaybackAnnualActivity(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<boolean> {
+    const row = this.db
+      .prepare(ANNUAL_MESSAGE_EXISTS_SQL)
+      .get(normalizeUsername(userName), start, end);
+    return !!row;
+  }
+
+  async getPlaybackAnnualData(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<PlaybackAnnualData> {
+    const username = normalizeUsername(userName);
+    const earliest = this.db.prepare(ANNUAL_EARLIEST_SQL).get(username) as
+      | { started_at: number }
+      | undefined;
+    const earliestStartedAt = earliest?.started_at ?? null;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return { sessions: [], buckets: [], earliestStartedAt };
+    const sessions = this.db
+      .prepare(ANNUAL_SESSIONS_SQL)
+      .all(
+        username,
+        end,
+        start,
+        username,
+        start,
+        end,
+        username,
+      ) as PlaybackAnnualData['sessions'];
+    const buckets = this.db
+      .prepare(ANNUAL_BUCKETS_SQL)
+      .all(username, start, end) as PlaybackAnnualData['buckets'];
+    return { sessions, buckets, earliestStartedAt };
   }
 
   async recordSourceHealthSearchBatch(
@@ -3430,7 +4025,7 @@ export class LocalSqliteStorage implements IStorage {
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
     const source = input.source.trim().slice(0, 191);
     if (!source) return;
-    const routeMode = input.routeMode === 'server' ? 'server' : 'browser';
+    const routeMode = SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode];
     const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
     const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
     const successIncrement = input.success ? 1 : 0;
@@ -3474,11 +4069,16 @@ export class LocalSqliteStorage implements IStorage {
 
     return rows
       .filter(
-        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+        (row) =>
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
       )
       .map((row) => ({
         source: row.source,
-        routeMode: row.route_mode as SourceRouteStatsItem['routeMode'],
+        routeMode:
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server
+            ? 'server'
+            : 'browser',
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
@@ -3501,7 +4101,11 @@ export class LocalSqliteStorage implements IStorage {
 
     return rows
       .filter(
-        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+        (row) =>
+          row.route_mode === 'browser' ||
+          row.route_mode === 'server' ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
       )
       .map((row) => ({
         source: row.source,
@@ -3510,207 +4114,5 @@ export class LocalSqliteStorage implements IStorage {
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
-  }
-
-  async clearAllData(): Promise<void> {
-    const clear = this.db.transaction(() => {
-      this.db.exec(`
-        DELETE FROM user_group_members;
-        DELETE FROM user_access;
-        DELETE FROM users;
-        DELETE FROM play_records;
-        DELETE FROM favorites;
-        DELETE FROM video_reviews;
-        DELETE FROM user_danmaku;
-        DELETE FROM user_profiles;
-        DELETE FROM user_follows;
-        DELETE FROM video_review_likes;
-        DELETE FROM video_review_reports;
-        DELETE FROM video_review_replies;
-        DELETE FROM video_review_reply_reports;
-        DELETE FROM search_history;
-        DELETE FROM skip_configs;
-        DELETE FROM playback_sessions;
-        DELETE FROM admin_config;
-        DELETE FROM source_route_stats;
-        DELETE FROM source_health_search;
-        DELETE FROM source_health_play;
-        DELETE FROM user_message_state;
-        DELETE FROM user_login_activity;
-        DELETE FROM invite_code_usage;
-        DELETE FROM invite_codes;
-        DELETE FROM config_subscription;
-        DELETE FROM live_source_state;
-        DELETE FROM user_danmaku_episodes;
-        DELETE FROM user_danmaku_settings;
-        DELETE FROM shared_cache;
-      `);
-    });
-
-    clear();
-    console.log(`SQLite 数据库已清空: ${this.dbPath}`);
-  }
-
-  async replaceAllData(data: StorageImportData): Promise<void> {
-    const searchHistoryLimit = normalizeRuntimeParam(
-      'SearchHistoryLimit',
-      data.adminConfig?.SiteConfig?.SearchHistoryLimit,
-    );
-    const replace = this.db.transaction((snapshot: StorageImportData) => {
-      this.db.exec(`
-        DELETE FROM user_group_members;
-        DELETE FROM user_access;
-        DELETE FROM users;
-        DELETE FROM play_records;
-        DELETE FROM favorites;
-        DELETE FROM video_reviews;
-        DELETE FROM user_danmaku;
-        DELETE FROM user_profiles;
-        DELETE FROM user_follows;
-        DELETE FROM video_review_likes;
-        DELETE FROM video_review_reports;
-        DELETE FROM video_review_replies;
-        DELETE FROM video_review_reply_reports;
-        DELETE FROM search_history;
-        DELETE FROM skip_configs;
-        DELETE FROM playback_sessions;
-        DELETE FROM admin_config;
-        DELETE FROM source_route_stats;
-        DELETE FROM source_health_search;
-        DELETE FROM source_health_play;
-        DELETE FROM user_message_state;
-        DELETE FROM user_login_activity;
-        DELETE FROM invite_code_usage;
-        DELETE FROM invite_codes;
-        DELETE FROM config_subscription;
-        DELETE FROM live_source_state;
-        DELETE FROM user_danmaku_episodes;
-        DELETE FROM user_danmaku_settings;
-        DELETE FROM shared_cache;
-      `);
-
-      const inviteCodes = importedInviteCodes(
-        snapshot.adminConfig.UserConfig?.InviteCodes,
-        snapshot.inviteCodeUsage,
-      );
-      const storedConfig = JSON.parse(
-        JSON.stringify(snapshot.adminConfig),
-      ) as AdminConfig;
-      if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
-      new SqliteConfigStateStore(this.db).saveSubscription(
-        subscriptionFromConfig(storedConfig),
-      );
-      stripConfigState(storedConfig);
-      this.stmts.setAdminConfig.run(JSON.stringify(storedConfig));
-      const insertInvite = this.db.prepare(INVITE_INSERT_SQL);
-      for (const item of inviteCodes) insertInvite.run(...inviteValues(item));
-
-      const insertRouteStat = this.db.prepare(
-        `INSERT INTO source_route_stats (
-          source, route_mode, bucket_date, success_count, failure_count, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
-      );
-      const routeStatUpdatedAt = Date.now();
-      for (const stat of snapshot.sourceRouteStats) {
-        insertRouteStat.run(
-          stat.source,
-          stat.routeMode,
-          stat.bucketDate,
-          stat.successCount,
-          stat.failureCount,
-          routeStatUpdatedAt,
-        );
-      }
-
-      for (const [userName, passwordHash] of Object.entries(snapshot.users)) {
-        const username = assertValidUsernameFormat(userName);
-        this.stmts.registerUser.run(username, passwordHash);
-      }
-
-      for (const [userName, userData] of Object.entries(snapshot.userData)) {
-        const username = assertValidUsernameFormat(userName);
-        if (userData.messageState) {
-          this.stmts.setUserMessageState.run(
-            username,
-            JSON.stringify(userData.messageState),
-          );
-        }
-        if (typeof userData.danmakuEnabled === 'boolean') {
-          this.stmts.setDanmakuEnabledPreference.run(
-            username,
-            userData.danmakuEnabled ? 1 : 0,
-          );
-        }
-        if (typeof userData.lastLoginAt === 'number') {
-          this.stmts.recordUserLogin.run(username, userData.lastLoginAt);
-        }
-        for (const [key, record] of Object.entries(userData.playRecords)) {
-          this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
-        }
-
-        for (const [key, favorite] of Object.entries(userData.favorites)) {
-          this.stmts.setFavorite.run(
-            username,
-            key,
-            JSON.stringify(favorite),
-            ...favoriteProjection(key, JSON.stringify(favorite)),
-          );
-        }
-
-        for (const item of userData.userDanmaku ?? []) {
-          this.db
-            .prepare(USER_DANMAKU_INSERT)
-            .run(...userDanmakuValues({ ...item, username }));
-        }
-        for (const review of userData.videoReviews ?? []) {
-          this.stmts.setVideoReview.run(
-            username,
-            review.title_norm,
-            review.year,
-            JSON.stringify(review),
-            review.is_public ? 1 : 0,
-            review.updated_at,
-          );
-        }
-
-        userData.searchHistory
-          .slice(0, searchHistoryLimit)
-          .forEach((keyword, index) => {
-            this.stmts.insertSearchHistory.run(username, keyword, index);
-          });
-
-        for (const [key, config] of Object.entries(userData.skipConfigs)) {
-          this.stmts.setSkipConfig.run(username, key, JSON.stringify(config));
-        }
-
-        for (const session of Object.values(userData.playbackSessions)) {
-          this.stmts.setPlaybackSession.run(
-            session.id,
-            username,
-            session.source,
-            session.video_id,
-            session.episode_index,
-            session.title,
-            session.source_name,
-            session.cover,
-            session.year,
-            session.started_at,
-            session.ended_at,
-            session.watch_seconds,
-            session.last_position,
-            session.total_time,
-            session.created_at,
-            session.updated_at,
-          );
-        }
-      }
-
-      this.importSocialData(snapshot);
-      new SqliteUserAccessStore(this.db).migrate();
-      this.backfillMissingLoginActivity();
-      this.backfillUserProfiles();
-    });
-
-    replace(data);
   }
 }

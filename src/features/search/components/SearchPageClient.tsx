@@ -1,10 +1,12 @@
 'use client';
 
-import { SearchX } from 'lucide-react';
+import { AlertCircle, SearchX } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import { useAuthSession } from '@/components/AuthProvider';
+import LoadErrorState from '@/components/LoadErrorState';
 import PageLayout from '@/components/PageLayout';
 import SearchBox from '@/components/SearchBox';
 import SearchResultFilter from '@/components/SearchResultFilter';
@@ -36,6 +38,7 @@ import {
   SEARCH_RESULTS_CONTAINER_CLASS,
 } from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import type { SearchFailedSource } from '@/lib/search-failed-sources';
 
 const DEFAULT_FILTER_STATE: FilterState = {
   source: 'all',
@@ -81,8 +84,47 @@ function SearchEmptyState({ text }: { text: string }) {
   );
 }
 
+function SearchFailedSourcesNotice({
+  sources,
+  retrying,
+  onRetry,
+}: {
+  sources: SearchFailedSource[];
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const names = sources.map((source) => source.name).join('、');
+  return (
+    <div
+      role='status'
+      className='mb-4 flex items-center gap-2.5 rounded-xl bg-amber-500/10 py-2 pl-3.5 pr-2 text-[13px] text-amber-700 dark:text-amber-300'
+    >
+      <AlertCircle aria-hidden='true' className='h-4 w-4 shrink-0' />
+      <span className='min-w-0 flex-1 truncate' title={names}>
+        {sources.length} 个源搜索失败
+        <span className='ml-2 text-amber-700/70 dark:text-amber-300/70'>
+          {names}
+        </span>
+      </span>
+      <button
+        type='button'
+        onClick={onRetry}
+        disabled={retrying}
+        className='flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 font-medium hover:bg-amber-500/15 disabled:cursor-default disabled:hover:bg-transparent'
+      >
+        {retrying && <Spinner className='h-3.5 w-3.5' />}
+        {retrying ? '重试中' : '重试'}
+      </button>
+    </div>
+  );
+}
+
 function AuthenticatedSearchPageClient() {
   const router = useRouter();
+  const { session } = useAuthSession();
+  const canManageSources =
+    session.status === 'authenticated' &&
+    (session.role === 'owner' || session.role === 'admin');
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
   const activeSearchQuery = useMemo(
@@ -105,6 +147,8 @@ function AuthenticatedSearchPageClient() {
   const [viewMode, setViewMode] = useSearchViewMode(activeSearchQuery);
 
   const {
+    error,
+    retry,
     isLoading,
     setIsLoading,
     showResults,
@@ -112,6 +156,9 @@ function AuthenticatedSearchPageClient() {
     searchResults,
     totalSources,
     completedSources,
+    failedSources,
+    retryingFailed,
+    retryFailedSources,
     useFluidSearch,
   } = useSearchExecution({
     searchParams,
@@ -146,6 +193,18 @@ function AuthenticatedSearchPageClient() {
     setFilterAll(createDefaultFilterState());
     setFilterAgg(createDefaultFilterState());
   }, [activeSearchQuery]);
+
+  const searchSettled = !isLoading && !error;
+  const allSourcesFailed =
+    searchSettled &&
+    searchResults.length === 0 &&
+    totalSources > 0 &&
+    failedSources.length >= totalSources;
+  const showFailedSourcesNotice =
+    canManageSources &&
+    searchSettled &&
+    failedSources.length > 0 &&
+    !allSourcesFailed;
 
   const aggregate = viewMode === 'agg';
   const resultCount = aggregate
@@ -216,6 +275,9 @@ function AuthenticatedSearchPageClient() {
         )}
       </div>
 
+      {showResults && error && (
+        <LoadErrorState message={error} onRetry={retry} />
+      )}
       {showResults ? (
         <>
           <div data-nav-subbar className={SEARCH_DESKTOP_BAR_CLASS}>
@@ -250,9 +312,21 @@ function AuthenticatedSearchPageClient() {
           </div>
 
           <div className={SEARCH_RESULTS_CONTAINER_CLASS}>
+            {showFailedSourcesNotice && (
+              <SearchFailedSourcesNotice
+                sources={failedSources}
+                retrying={retryingFailed}
+                onRetry={retryFailedSources}
+              />
+            )}
             {searchResults.length === 0 ? (
-              isLoading ? (
+              isLoading || (allSourcesFailed && retryingFailed) ? (
                 <SearchResultsLoading />
+              ) : error ? null : allSourcesFailed ? (
+                <LoadErrorState
+                  message='搜索失败'
+                  onRetry={retryFailedSources}
+                />
               ) : (
                 <SearchEmptyState text='未找到相关结果' />
               )

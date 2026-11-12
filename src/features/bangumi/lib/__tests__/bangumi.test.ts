@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { setImmediate } from 'node:timers';
 
 const proxyEnvKeys = [
   'HTTPS_PROXY',
@@ -30,6 +31,19 @@ const calendarPayload = [
     ],
   },
 ];
+
+function calendarPayloadWithId(id: number) {
+  return [
+    {
+      ...calendarPayload[0],
+      items: [{ ...calendarPayload[0].items[0], id }],
+    },
+  ];
+}
+
+function flushBackground() {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
 
 type MockRequest = EventEmitter & {
   destroy: jest.Mock;
@@ -155,25 +169,62 @@ describe('getBangumiCalendarData', () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps stale Bangumi calendar data available for home rendering', async () => {
+  it('shares one upstream request between concurrent callers', async () => {
+    const requestMock = mockHttpsRequest([calendarPayload]);
+    const { getBangumiCalendarData } = await loadBangumiModule();
+
+    const [first, second] = await Promise.all([
+      getBangumiCalendarData(),
+      getBangumiCalendarData(),
+    ]);
+
+    expect(first).toBe(second);
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves stale data immediately and refreshes it in the background', async () => {
     const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1000);
-    mockHttpsRequest([calendarPayload]);
-    const { getBangumiCalendarData, getCachedBangumiCalendarData } =
-      await loadBangumiModule();
+    const requestMock = mockHttpsRequest([
+      calendarPayload,
+      calendarPayloadWithId(2),
+    ]);
+    const { getBangumiCalendarData } = await loadBangumiModule();
 
     await getBangumiCalendarData();
 
     nowSpy.mockReturnValue(1000 + 6 * 60 * 60 * 1000 + 1);
-    expect(getCachedBangumiCalendarData()).toBeUndefined();
-    expect(
-      getCachedBangumiCalendarData({ allowStale: true })?.[0].items[0].id,
-    ).toBe(1);
+    const stale = await getBangumiCalendarData();
+    expect(stale[0].items[0].id).toBe(1);
+    expect(requestMock).toHaveBeenCalledTimes(2);
 
-    nowSpy.mockReturnValue(1000 + 24 * 60 * 60 * 1000 + 1);
-    expect(getCachedBangumiCalendarData({ allowStale: true })).toBeUndefined();
+    await flushBackground();
+    const refreshed = await getBangumiCalendarData();
+    expect(refreshed[0].items[0].id).toBe(2);
+    expect(requestMock).toHaveBeenCalledTimes(2);
   });
 
-  it('uses stale Bangumi calendar data when refresh fails', async () => {
+  it('keeps stale data when the background refresh fails', async () => {
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const requestMock = mockHttpsRequest([
+      calendarPayload,
+      new Error('network failed'),
+      new Error('network failed'),
+    ]);
+    const { getBangumiCalendarData } = await loadBangumiModule();
+
+    await getBangumiCalendarData();
+
+    nowSpy.mockReturnValue(1000 + 6 * 60 * 60 * 1000 + 1);
+    await getBangumiCalendarData({ timeoutMs: 1000 });
+    await flushBackground();
+    const data = await getBangumiCalendarData({ timeoutMs: 1000 });
+    await flushBackground();
+
+    expect(data[0].items[0].id).toBe(1);
+    expect(requestMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('drops data past the maximum age and reloads it', async () => {
     const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1000);
     const requestMock = mockHttpsRequest([
       calendarPayload,
@@ -183,10 +234,27 @@ describe('getBangumiCalendarData', () => {
 
     await getBangumiCalendarData();
 
-    nowSpy.mockReturnValue(1000 + 6 * 60 * 60 * 1000 + 1);
-    const data = await getBangumiCalendarData({ timeoutMs: 1000 });
-
-    expect(data[0].items[0].id).toBe(1);
+    nowSpy.mockReturnValue(1000 + 24 * 60 * 60 * 1000 + 1);
+    await expect(getBangumiCalendarData({ timeoutMs: 1000 })).rejects.toThrow(
+      'network failed',
+    );
     expect(requestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache calendars without any items', async () => {
+    const emptyPayload = [{ weekday: { en: 'Sun' }, items: [] }];
+    const requestMock = mockHttpsRequest([
+      emptyPayload,
+      emptyPayload,
+      calendarPayload,
+    ]);
+    const { getBangumiCalendarData } = await loadBangumiModule();
+
+    const empty = await getBangumiCalendarData();
+    const data = await getBangumiCalendarData();
+
+    expect(empty[0].items).toHaveLength(0);
+    expect(data[0].items[0].id).toBe(1);
+    expect(requestMock).toHaveBeenCalledTimes(3);
   });
 });

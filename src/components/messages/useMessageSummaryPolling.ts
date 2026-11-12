@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useVisibilityPolling } from '@/hooks/useVisibilityPolling';
 import {
-  readNotifiedMessageRevision,
-  writeNotifiedMessageRevision,
-} from '@/lib/local-preferences';
+  readNotifiedMessageAt,
+  writeNotifiedMessageAt,
+} from '@/lib/message-notification-preference';
 import { UserMessageSummary } from '@/lib/message-types';
 import { getMessageSummary } from '@/lib/messages.client';
 
@@ -18,6 +18,7 @@ const EXTERNAL_REFRESH_DEBOUNCE_MS = 400;
 interface MessageSummaryPollingOptions {
   authenticated: boolean;
   username?: string;
+  isPanelOpen: () => boolean;
   onRevisionChanged: () => void;
   onNotify: (text: string) => void;
 }
@@ -32,12 +33,39 @@ export function useMessageSummaryPolling({
   authenticated,
   username,
   onRevisionChanged,
+  isPanelOpen,
   onNotify,
 }: MessageSummaryPollingOptions): MessageSummaryPolling {
   const [summary, setSummary] = useState<UserMessageSummary | null>(null);
   const summaryRef = useRef<UserMessageSummary | null>(null);
   const onRevisionChangedRef = useRef(onRevisionChanged);
   const onNotifyRef = useRef(onNotify);
+  const notifiedAtRef = useRef(0);
+  const requestSequence = useRef(0);
+  const appliedSequence = useRef(0);
+  const accountRef = useRef(username);
+  accountRef.current = username;
+
+  const notifyLatest = useCallback(
+    (next: UserMessageSummary) => {
+      if (
+        !username ||
+        accountRef.current !== username ||
+        document.visibilityState !== 'visible' ||
+        !document.hasFocus()
+      )
+        return;
+      const baseline = Math.max(
+        notifiedAtRef.current,
+        readNotifiedMessageAt(username),
+      );
+      if (!next.latestUnread || next.latestUnreadAt <= baseline) return;
+      notifiedAtRef.current = next.latestUnreadAt;
+      writeNotifiedMessageAt(username, next.latestUnreadAt);
+      if (!isPanelOpen()) onNotifyRef.current(buildToastText(next));
+    },
+    [username, isPanelOpen],
+  );
 
   useEffect(() => {
     onRevisionChangedRef.current = onRevisionChanged;
@@ -47,26 +75,20 @@ export function useMessageSummaryPolling({
   const refreshSummary = useCallback(
     async (mode: RefreshMode) => {
       if (!authenticated || !username) return;
+      const sequence = ++requestSequence.current;
       try {
         const nextSummary = await getMessageSummary();
+        if (
+          accountRef.current !== username ||
+          sequence < appliedSequence.current
+        )
+          return;
+        appliedSequence.current = sequence;
         const previous = summaryRef.current;
         summaryRef.current = nextSummary;
         setSummary(nextSummary);
 
-        const baselineRevision =
-          mode === 'mount'
-            ? readNotifiedMessageRevision(username)
-            : previous?.revision;
-        const notifiable = mode === 'mount' || mode === 'poll';
-        if (
-          notifiable &&
-          nextSummary.unreadCount > 0 &&
-          nextSummary.revision !== baselineRevision &&
-          nextSummary.unreadCount >= (previous?.unreadCount ?? 0)
-        ) {
-          onNotifyRef.current(buildToastText(nextSummary, previous, mode));
-        }
-        writeNotifiedMessageRevision(username, nextSummary.revision);
+        notifyLatest(nextSummary);
 
         // local 刷新的列表已本地更新，无需通知重载
         if (mode !== 'local' && previous?.revision !== nextSummary.revision) {
@@ -76,7 +98,7 @@ export function useMessageSummaryPolling({
         console.warn('刷新消息摘要失败:', error);
       }
     },
-    [authenticated, username],
+    [authenticated, username, notifyLatest],
   );
 
   const setSummaryDirectly = useCallback((next: UserMessageSummary | null) => {
@@ -85,13 +107,24 @@ export function useMessageSummaryPolling({
   }, []);
 
   useEffect(() => {
-    if (!authenticated) {
-      summaryRef.current = null;
-      setSummary(null);
-      return;
-    }
+    notifiedAtRef.current = 0;
+    summaryRef.current = null;
+    setSummary(null);
+    if (!authenticated) return;
     void refreshSummary('mount');
   }, [authenticated, refreshSummary]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (summaryRef.current) notifyLatest(summaryRef.current);
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [notifyLatest]);
 
   useVisibilityPolling({
     enabled: authenticated,

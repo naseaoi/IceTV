@@ -1,3 +1,8 @@
+import { showToast } from '@/lib/toast';
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useDanmakuPreference } from './useDanmakuPreference';
@@ -66,4 +71,16 @@ describe('useDanmakuPreference', () => {
     });
     expect(localStorage.getItem('danmakuEnabled')).toBeNull();
   });
+});
+
+it('账号同步失败保留本机开关并提示', async () => {
+  global.fetch = jest.fn().mockResolvedValue({ ok: false });
+  const { result } = renderHook(() => useDanmakuPreference(false));
+  act(() => result.current.onEnabledChange(true));
+  await waitFor(() =>
+    expect(showToast).toHaveBeenCalledWith('弹幕开关未能同步到账号', 'error', {
+      key: 'danmaku-preference-sync',
+    }),
+  );
+  expect(result.current.enabledRef.current).toBe(true);
 });

@@ -40,6 +40,8 @@ export async function withUpstreamTask<T>(
 export interface UpstreamGuardOptions extends UpstreamResourceContext {
   signal?: AbortSignal | null;
   store?: SharedResourceStore;
+  // 经代理出口时按出口分别冷却，单个出口被限流不拖累其他出口
+  cooldownScope?: string;
 }
 
 export async function withUpstreamResponse(
@@ -53,7 +55,10 @@ export async function withUpstreamResponse(
   const scope =
     kind === 'probe' ? 'probe' : kind === 'metadata' ? 'metadata' : 'media';
   const store = options.store ?? (await sharedResourceStore());
-  await checkUpstreamCooldown(store, host);
+  const cooldownKey = options.cooldownScope
+    ? `${host}@${options.cooldownScope}`
+    : host;
+  await checkUpstreamCooldown(store, cooldownKey);
   const token = randomUUID();
   const leases: string[] = [];
   const abortController = new AbortController();
@@ -84,9 +89,7 @@ export async function withUpstreamResponse(
       clearInterval(heartbeat);
       clearTimeout(deadline);
       options.signal?.removeEventListener('abort', abortFromParent);
-      releasePromise = Promise.all(
-        leases.map((key) => store.release(key, token).catch(() => {})),
-      ).then(() => {});
+      releasePromise = store.releaseLeases(leases, token).catch(() => {});
     }
     return releasePromise;
   }
@@ -109,25 +112,19 @@ export async function withUpstreamResponse(
     void abort(options.signal?.reason ?? new Error('Request aborted'));
   }
 
-  async function acquire(
+  const resources: Array<{ key: string; limit: number; status: 429 | 503 }> =
+    [];
+  function addDimension(
     dimension: string,
     identity: string,
     limit: number,
     status: 429 | 503 = 503,
   ) {
-    const key = resourceKey(`connections:${scope}:${dimension}`, identity);
-    const now = Date.now();
-    const admission = await store
-      .acquire(key, token, limit, now, now + LEASE_MS)
-      .catch(() => {
-        throw new ResourceLimitError();
-      });
-    if (!admission.allowed)
-      throw new ResourceLimitError(
-        status,
-        kind === 'probe' ? 2 : admission.retryAfterMs / 1000,
-      );
-    leases.push(key);
+    resources.push({
+      key: resourceKey(`connections:${scope}:${dimension}`, identity),
+      limit,
+      status,
+    });
   }
 
   async function reserveBytes(bytes: number) {
@@ -149,11 +146,24 @@ export async function withUpstreamResponse(
     if (options.signal?.aborted)
       throw options.signal.reason ?? new Error('Request aborted');
     options.signal?.addEventListener('abort', abortFromParent, { once: true });
-    await acquire('global', 'all', policy.globalConcurrency);
-    await acquire('host', host, policy.hostConcurrency);
-    if (kind === 'live') await acquire('live', 'all', policy.liveConcurrency);
+    addDimension('global', 'all', policy.globalConcurrency);
+    addDimension('host', host, policy.hostConcurrency);
+    if (kind === 'live') addDimension('live', 'all', policy.liveConcurrency);
     if (options.identity && kind !== 'metadata')
-      await acquire('user', options.identity, policy.userConcurrency, 429);
+      addDimension('user', options.identity, policy.userConcurrency, 429);
+    const now = Date.now();
+    const admission = await store
+      .acquireLeases(resources, token, now, now + LEASE_MS)
+      .catch(() => {
+        throw new ResourceLimitError();
+      });
+    if (!admission.allowed)
+      throw new ResourceLimitError(
+        resources.find(({ key }) => key === admission.rejectedKey)?.status ??
+          503,
+        kind === 'probe' ? 2 : admission.retryAfterMs / 1000,
+      );
+    leases.push(...resources.map(({ key }) => key));
     await consumeSharedQuota(
       store,
       resourceKey(`rpm:${scope}:global`, 'all'),
@@ -171,11 +181,13 @@ export async function withUpstreamResponse(
       renewing = true;
       try {
         const now = Date.now();
-        const renewed = await Promise.all(
-          leases.map((key) => store.renew(key, token, now, now + LEASE_MS)),
+        const renewed = await store.renewLeases(
+          leases,
+          token,
+          now,
+          now + LEASE_MS,
         );
-        if (renewed.some((owned) => !owned))
-          await abort(new ResourceLimitError());
+        if (!renewed) await abort(new ResourceLimitError());
       } catch {
         await abort(new ResourceLimitError());
       } finally {
@@ -200,7 +212,7 @@ export async function withUpstreamResponse(
       response.status === 429 ||
       (response.status === 503 && response.headers.has('retry-after'))
     ) {
-      const cooling = recordUpstreamCooldown(store, host, response);
+      const cooling = recordUpstreamCooldown(store, cooldownKey, response);
       await response.body?.cancel().catch(() => {});
       terminated = true;
       await release();

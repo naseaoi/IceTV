@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AdminDialog from '@/features/admin/components/AdminDialog';
@@ -11,6 +11,7 @@ interface UserGroupOption {
 
 interface ConfigureUserGroupDialogProps {
   isOpen: boolean;
+  error?: string;
   username: string;
   selectedGroup: string;
   userGroups: UserGroupOption[];
@@ -22,6 +23,7 @@ interface ConfigureUserGroupDialogProps {
 
 export function ConfigureUserGroupDialog({
   isOpen,
+  error,
   username,
   selectedGroup,
   userGroups,
@@ -37,6 +39,11 @@ export function ConfigureUserGroupDialog({
       onClose={onClose}
       panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='mb-6'>
         <div className='rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20'>
           <div className='mb-2 flex items-center space-x-2'>

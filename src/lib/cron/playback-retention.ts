@@ -14,12 +14,12 @@ export async function cleanupPlaybackSessions(): Promise<void> {
   const deleted = await db.deletePlaybackSessionsBefore(cutoff);
   if (deleted > 0) {
     console.log(
-      `播放统计清理完成：删除 ${deleted} 条超过 ${retentionDays} 天且未更新的会话`,
+      `播放统计清理完成：删除 ${deleted} 条超过 ${retentionDays} 天且未更新的会话及其时间桶`,
     );
   }
 }
 
-function readPlaybackStatsRetentionDays(): number {
+export function readPlaybackStatsRetentionDays(): number {
   const parsed = Number.parseInt(
     process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS || '',
     10,

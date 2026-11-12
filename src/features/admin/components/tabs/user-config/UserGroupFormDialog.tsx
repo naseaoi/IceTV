@@ -20,6 +20,7 @@ export const EMPTY_USER_GROUP_DRAFT: UserGroupDraft = {
 interface UserGroupFormDialogProps {
   mode: 'add' | 'edit';
   isOpen: boolean;
+  error?: string;
   value: UserGroupDraft;
   onChange: (next: UserGroupDraft) => void;
   sources: DataSource[];
@@ -32,6 +33,7 @@ interface UserGroupFormDialogProps {
 export function UserGroupFormDialog({
   mode,
   isOpen,
+  error,
   value,
   onChange,
   sources,
@@ -52,6 +54,11 @@ export function UserGroupFormDialog({
       onClose={onClose}
       panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='space-y-6'>
         {isAdd && (
           <div>

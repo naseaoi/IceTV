@@ -104,6 +104,9 @@ importers:
       sharp:
         specifier: 0.34.5
         version: 0.34.5
+      undici:
+        specifier: ^7.30.2
+        version: 7.30.2
     devDependencies:
       '@commitlint/cli':
         specifier: ^16.3.0
@@ -189,9 +192,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-      undici:
-        specifier: ^8.5.0
-        version: 8.5.0
 
 packages:
 
@@ -4002,9 +4002,9 @@ packages:
   undici-types@7.8.0:
     resolution: {integrity: sha512-9UJ2xGDvQ43tYyVMpuHlsgApydB8ZKfVYTsLDhXkFL/6gfkp+U8xTGdh8pMJv1SpZna0zxG1DwsKZsreLbXBxw==}
 
-  undici@8.5.0:
-    resolution: {integrity: sha512-xamtWoB1EshgjpmlXd7GGm2VfdDtw1+rD8uhry8pSNW3If6S8E0m2T2+orSKeZXEn/aPJMviCpDBA65WJt8zhg==}
-    engines: {node: '>=22.19.0'}
+  undici@7.30.2:
+    resolution: {integrity: sha512-mLyPQnHwUxaM/rideoK/+KL8DaAJLRl4aBCfmX444aCSLnIaomqPLtNRe2jdCYcsk5wZzXrDIQC8ZeYNRAYyIA==}
+    engines: {node: '>=20.18.1'}
 
   universalify@0.2.0:
     resolution: {integrity: sha512-CJ1QgKmNg3CwvAv/kOFmtnEN05f0D/cn9QntgNOQlQF9dgvVTHj3t+8JPdjqawCHk7V/KA+fbUqzZ9XWhcqPUg==}
@@ -8608,7 +8608,7 @@ snapshots:
 
   undici-types@7.8.0: {}
 
-  undici@8.5.0: {}
+  undici@7.30.2: {}
 
   universalify@0.2.0: {}
 

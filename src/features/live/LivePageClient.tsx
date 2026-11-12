@@ -2,7 +2,14 @@
 
 import '@/features/live/types';
 
-import { AlertTriangle, CheckCircle2, RefreshCw, Tv } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CirclePause,
+  Play,
+  RefreshCw,
+  Tv,
+} from 'lucide-react';
 import { ReactNode, Suspense, useMemo, useRef } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
@@ -129,21 +136,50 @@ export function LivePlayerOverlay({
   unsupportedType,
   isVideoLoading,
   playbackFailed,
+  relayPaused = false,
   onRetry,
+  inactivityStopped,
+  onResume,
 }: {
   unsupportedType: string | null;
   isVideoLoading: boolean;
   playbackFailed: boolean;
+  relayPaused?: boolean;
   onRetry: () => void;
+  inactivityStopped: boolean;
+  onResume: () => void;
 }) {
   return (
     <>
+      {inactivityStopped && (
+        <PlayerStateOverlay
+          zClassName='z-[600]'
+          icon={<CirclePause />}
+          tone='neutral'
+          title='直播已暂停'
+          message='长时间未操作，已停止播放。'
+        >
+          <button
+            type='button'
+            onClick={onResume}
+            className={PLAYER_OVERLAY_PRIMARY_BUTTON_CLASS}
+          >
+            <Play className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
+            继续观看
+          </button>
+        </PlayerStateOverlay>
+      )}
+
       {playbackFailed && (
         <PlayerStateOverlay
           zClassName='z-[600]'
           icon={<AlertTriangle />}
-          title='直播流加载失败'
-          message='可以重试，或切换其他频道。'
+          title={relayPaused ? '服务器中转已暂停' : '直播流加载失败'}
+          message={
+            relayPaused
+              ? '该频道无法直连播放，可切换其他频道。'
+              : '可以重试，或切换其他频道。'
+          }
         >
           <button
             type='button'
@@ -191,16 +227,23 @@ function AuthenticatedLivePageClient() {
     groupContainerRef,
   });
 
-  const { artPlayerRef, cleanupPlayer, playbackFailed, retryPlayback } =
-    useLivePlayer({
-      videoUrl: sources.videoUrl,
-      currentChannel: sources.currentChannel,
-      currentSourceRef: sources.currentSourceRef,
-      loading: sources.loading,
-      artRef,
-      setIsVideoLoading: sources.setIsVideoLoading,
-      setUnsupportedType: sources.setUnsupportedType,
-    });
+  const {
+    artPlayerRef,
+    cleanupPlayer,
+    playbackFailed,
+    relayPaused,
+    retryPlayback,
+    inactivityStopped,
+    resumeAfterInactivity,
+  } = useLivePlayer({
+    videoUrl: sources.videoUrl,
+    currentChannel: sources.currentChannel,
+    currentSourceRef: sources.currentSourceRef,
+    loading: sources.loading,
+    artRef,
+    setIsVideoLoading: sources.setIsVideoLoading,
+    setUnsupportedType: sources.setUnsupportedType,
+  });
 
   cleanupPlayerRef.current = cleanupPlayer;
   usePlayerKeyboard({ artPlayerRef, mode: 'live' });
@@ -263,7 +306,10 @@ function AuthenticatedLivePageClient() {
           unsupportedType={sources.unsupportedType}
           isVideoLoading={sources.isVideoLoading}
           playbackFailed={playbackFailed}
+          relayPaused={relayPaused}
           onRetry={retryPlayback}
+          inactivityStopped={inactivityStopped}
+          onResume={resumeAfterInactivity}
         />
       }
       rightPanel={
@@ -279,6 +325,8 @@ function AuthenticatedLivePageClient() {
           liveSources={sources.liveSources}
           epgData={sources.epgData}
           isEpgLoading={sources.isEpgLoading}
+          epgError={sources.epgError}
+          retryEpg={sources.retryEpg}
           favorited={favorited}
           handleToggleFavorite={handleToggleFavorite}
           groupContainerRef={groupContainerRef}

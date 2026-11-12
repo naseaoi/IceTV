@@ -4,6 +4,7 @@ import { applyPlayRecordStateUpdates } from '@/lib/db.client';
 import { fetchWithAuth } from '@/lib/db.client.internal';
 import { DEFAULT_MESSAGE_PAGE_LIMIT } from '@/lib/message-page';
 import {
+  AnnouncementHistoryPage,
   MessageNotificationKind,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
@@ -11,10 +12,17 @@ import {
   UserMessageSummary,
 } from '@/lib/message-types';
 
+function messageTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 export async function getMessageSummary(): Promise<UserMessageSummary> {
-  const response = await fetchWithAuth('/api/messages?view=summary', {
-    cache: 'no-store',
-  });
+  const response = await fetchWithAuth(
+    `/api/messages?view=summary&tz=${encodeURIComponent(messageTimeZone())}`,
+    {
+      cache: 'no-store',
+    },
+  );
   return response.json() as Promise<UserMessageSummary>;
 }
 
@@ -23,6 +31,7 @@ export async function getMessagePage(
 ): Promise<UserMessagePage> {
   const params = new URLSearchParams({
     limit: String(DEFAULT_MESSAGE_PAGE_LIMIT),
+    tz: messageTimeZone(),
   });
   if (cursor) params.set('cursor', cursor);
   const response = await fetchWithAuth(`/api/messages?${params.toString()}`, {
@@ -31,14 +40,27 @@ export async function getMessagePage(
   return response.json() as Promise<UserMessagePage>;
 }
 
+export async function getAnnouncementHistoryPage(
+  cursor?: string | null,
+): Promise<AnnouncementHistoryPage> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const response = await fetchWithAuth(`/api/messages/announcements${query}`, {
+    cache: 'no-store',
+  });
+  return response.json() as Promise<AnnouncementHistoryPage>;
+}
+
 export async function readMessage(
   messageId: string,
 ): Promise<ReadUserMessageResult> {
-  const response = await fetchWithAuth('/api/messages', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'read', messageId }),
-  });
+  const response = await fetchWithAuth(
+    `/api/messages?tz=${encodeURIComponent(messageTimeZone())}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'read', messageId }),
+    },
+  );
   const result = (await response.json()) as ReadUserMessageResult;
   if (result.updatedRecord) {
     applyPlayRecordStateUpdates({
@@ -49,11 +71,14 @@ export async function readMessage(
 }
 
 export async function readAllMessages(): Promise<ReadAllUserMessagesResult> {
-  const response = await fetchWithAuth('/api/messages', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'read-all' }),
-  });
+  const response = await fetchWithAuth(
+    `/api/messages?tz=${encodeURIComponent(messageTimeZone())}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'read-all' }),
+    },
+  );
   const result = (await response.json()) as ReadAllUserMessagesResult;
   applyPlayRecordStateUpdates(result.updatedRecords);
   return result;

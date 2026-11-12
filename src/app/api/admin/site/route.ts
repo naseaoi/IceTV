@@ -1,9 +1,7 @@
-import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
 import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
@@ -34,14 +32,13 @@ export async function POST(request: NextRequest) {
       LiveAccess,
       DefaultAggregateSearch,
       EnableOptimization,
-      LiveDirectConnect,
       AutoSwitchSource,
+      UpstreamProxyPoolSegments,
       EnableDanmaku,
       EnableUserDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
-      BangumiDataSource,
       DoubanImageProxyType,
       SourceCoverProxyMode,
       DisableYellowFilter,
@@ -57,14 +54,13 @@ export async function POST(request: NextRequest) {
       LiveAccess?: 'all' | 'groups';
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
-      LiveDirectConnect: boolean;
       AutoSwitchSource?: boolean;
+      UpstreamProxyPoolSegments?: boolean;
       EnableDanmaku?: boolean;
       EnableUserDanmaku?: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
-      BangumiDataSource?: string;
       DoubanImageProxyType: string;
       SourceCoverProxyMode?: string;
       DisableYellowFilter: boolean;
@@ -82,17 +78,16 @@ export async function POST(request: NextRequest) {
       typeof EnableLiveEntry !== 'boolean' ||
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
-      typeof LiveDirectConnect !== 'boolean' ||
       (AutoSwitchSource !== undefined &&
         typeof AutoSwitchSource !== 'boolean') ||
+      (UpstreamProxyPoolSegments !== undefined &&
+        typeof UpstreamProxyPoolSegments !== 'boolean') ||
       (EnableDanmaku !== undefined && typeof EnableDanmaku !== 'boolean') ||
       (EnableUserDanmaku !== undefined &&
         typeof EnableUserDanmaku !== 'boolean') ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
-      (BangumiDataSource !== undefined &&
-        typeof BangumiDataSource !== 'string') ||
       typeof DoubanImageProxyType !== 'string' ||
       (SourceCoverProxyMode !== undefined &&
         typeof SourceCoverProxyMode !== 'string') ||
@@ -128,11 +123,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (
-      DoubanProxyType === 'custom' ||
-      BangumiDataSource === 'custom' ||
-      DoubanImageProxyType === 'custom'
-    ) {
+    if (DoubanProxyType === 'custom' || DoubanImageProxyType === 'custom') {
       return NextResponse.json(
         { error: '站点配置不支持自定义代理，请在本地设置中配置' },
         { status: 400 },
@@ -152,8 +143,6 @@ export async function POST(request: NextRequest) {
 
     invalidateConfigCache();
     const adminConfig = await getConfig();
-    const announcementChanged =
-      adminConfig.SiteConfig.Announcement !== Announcement;
 
     // 更新缓存中的站点设置
     adminConfig.SiteConfig = {
@@ -164,29 +153,22 @@ export async function POST(request: NextRequest) {
           ? SiteIcon
           : adminConfig.SiteConfig.SiteIcon || '',
       Announcement,
-      AnnouncementVersion: announcementChanged
-        ? randomUUID()
-        : adminConfig.SiteConfig.AnnouncementVersion,
-      AnnouncementPublishedAt: announcementChanged
-        ? Date.now()
-        : adminConfig.SiteConfig.AnnouncementPublishedAt,
       FooterText,
       EnableLiveEntry,
       LiveAccess: LiveAccess ?? adminConfig.SiteConfig.LiveAccess,
       DefaultAggregateSearch,
       EnableOptimization,
-      LiveDirectConnect,
       AutoSwitchSource:
         AutoSwitchSource ?? adminConfig.SiteConfig.AutoSwitchSource,
+      UpstreamProxyPoolSegments:
+        UpstreamProxyPoolSegments ??
+        adminConfig.SiteConfig.UpstreamProxyPoolSegments,
       EnableDanmaku: EnableDanmaku ?? adminConfig.SiteConfig.EnableDanmaku,
       EnableUserDanmaku:
         EnableUserDanmaku ?? adminConfig.SiteConfig.EnableUserDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType: normalizeSiteDoubanProxyType(DoubanProxyType),
-      BangumiDataSource: normalizeSiteBangumiDataSource(
-        BangumiDataSource || adminConfig.SiteConfig.BangumiDataSource,
-      ),
       DoubanImageProxyType:
         normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(

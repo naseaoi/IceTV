@@ -19,6 +19,7 @@ import {
 } from '@/lib/profile.client';
 import { showToast } from '@/lib/toast';
 import type { UserProfileView } from '@/lib/types';
+import { DisplayableError } from '@/lib/user-facing-error';
 
 jest.mock('@/components/PageLayout', () => ({
   __esModule: true,
@@ -56,6 +57,7 @@ const profile: UserProfileView = {
   publicReviewCount: 0,
   favoriteCount: 0,
   libraryVisibility: 0,
+  recap: null,
 };
 beforeEach(() => {
   jest.clearAllMocks();
@@ -90,7 +92,7 @@ it('关注失败回滚计数与按钮，并展示服务端错误', async () => {
   fireEvent.click(await screen.findByRole('button', { name: '关注' }));
   expect(screen.getByRole('button', { name: '已关注' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '3 粉丝' })).toBeInTheDocument();
-  await act(async () => reject(new Error('关注失败')));
+  await act(async () => reject(new DisplayableError('关注失败')));
   expect(screen.getByRole('button', { name: '关注' })).toBeEnabled();
   expect(screen.getByRole('button', { name: '2 粉丝' })).toBeInTheDocument();
   expect(screen.getByRole('alert')).toHaveTextContent('关注失败');

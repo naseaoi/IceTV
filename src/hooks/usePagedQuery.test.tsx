@@ -212,7 +212,7 @@ it('loadMore failure keeps data and can be retried', async () => {
   expect(result.current.data?.items).toEqual([{ id: 'a' }]);
   expect(result.current.loadingMore).toBe(false);
   expect(result.current.error).not.toBeNull();
-  act(() => result.current.loadMore());
+  act(() => result.current.retry());
   await resolve(2, page(['b']));
   expect(result.current.data?.items).toHaveLength(2);
   expect(result.current.error).toBeNull();

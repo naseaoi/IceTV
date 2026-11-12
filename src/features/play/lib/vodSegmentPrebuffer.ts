@@ -28,9 +28,19 @@ type VodSegmentPrebufferInput = {
 type VodSegmentPrebufferOptions = {
   fetcher?: VodSegmentFetcher;
   getCurrentTime: () => number;
+  getForwardBufferSeconds: () => number;
+  isSaveData?: () => boolean;
   isServerProxy: () => boolean;
   sourceKey: string;
 };
+
+function readSaveData(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const connection = (
+    navigator as Navigator & { connection?: { saveData?: boolean } }
+  ).connection;
+  return connection?.saveData === true;
+}
 
 export type VodSegmentPrebufferResult = {
   attempted: number;
@@ -108,10 +118,17 @@ function selectPrebufferUrls(
 export function createVodSegmentPrebufferController({
   fetcher = (url, init) => fetch(url, init),
   getCurrentTime,
+  getForwardBufferSeconds,
+  isSaveData = readSaveData,
   isServerProxy,
   sourceKey,
 }: VodSegmentPrebufferOptions) {
   const policy = resolveVodSegmentPrebufferPolicy(sourceKey);
+  // 播放器自身缓冲到预缓冲窗口起点后才发请求，首片和当前集缓冲不足时不抢带宽
+  const canFetch = () =>
+    !!policy &&
+    !isSaveData() &&
+    getForwardBufferSeconds() >= policy.lookaheadSeconds;
   let disposed = false;
   let fragments: VodSegmentFragment[] | null = null;
   let activeRequests = 0;
@@ -137,6 +154,7 @@ export function createVodSegmentPrebufferController({
       resolveIdle();
       return;
     }
+    if (!canFetch()) return;
 
     while (
       activeRequests < (policy?.concurrency ?? 0) &&
@@ -169,7 +187,7 @@ export function createVodSegmentPrebufferController({
     if (disposed || isServerProxy() || !fragments) {
       return false;
     }
-    if (!policy) {
+    if (!policy || !canFetch()) {
       return false;
     }
     const urls = selectPrebufferUrls(
@@ -211,7 +229,11 @@ export function createVodSegmentPrebufferController({
     return schedule();
   };
 
-  const handlePlaybackProgress = (): boolean => schedule();
+  const handlePlaybackProgress = (): boolean => {
+    if (schedule()) return true;
+    pump();
+    return false;
+  };
 
   const waitForIdle = (): Promise<VodSegmentPrebufferResult> => {
     if (activeRequests === 0 && queuedUrls.length === 0) {

@@ -1,13 +1,11 @@
 import type { BangumiCalendarData } from './bangumi';
-import { toBangumiCoverProxyUrl } from './bangumi-cover-url';
+import { toBangumiCoverDirectUrl } from './bangumi-cover-url';
 
 export function selectBangumiCardCover(
   images: BangumiCalendarData['items'][number]['images'],
 ): string {
-  const optimizedLargeCover = toBangumiCoverProxyUrl(images.large);
-
   return (
-    optimizedLargeCover ||
+    toBangumiCoverDirectUrl(images.large) ||
     images.large ||
     images.common ||
     images.medium ||
@@ -110,4 +108,10 @@ function readNumber(record: Record<string, unknown>, key: string): number {
 
 function isPresent<T>(value: T | null): value is T {
   return value !== null;
+}
+
+export function isUsableBangumiCalendarData(
+  data: BangumiCalendarData[],
+): boolean {
+  return data.some((item) => item.items.length > 0);
 }

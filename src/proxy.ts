@@ -8,6 +8,7 @@ import {
   isSecureRequest,
   shouldRefreshSession,
 } from '@/lib/auth.server';
+import { clearListCountCookiesOnResponse } from '@/lib/list-count-cookies';
 import {
   getConfiguredAuthSigningSecret,
   verifyAuthSignature,
@@ -30,6 +31,7 @@ function clearAuthCookies(response: NextResponse, request: NextRequest): void {
     ...clearOptions,
     httpOnly: false,
   });
+  clearListCountCookiesOnResponse(response);
 }
 
 function setAuthCookies(

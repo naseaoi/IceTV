@@ -7,7 +7,12 @@ import {
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { getOptionalActiveUser } from '@/lib/api-auth';
+import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
+import {
+  isServerRelayPaused,
+  serverRelayPausedResponse,
+} from '@/lib/host-traffic.server';
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
@@ -18,7 +23,6 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
-import { scheduleSourceDirectProbe } from '@/lib/source-route-capability.server';
 import {
   UrlValidationError,
   validateProxyUrlForRequest,
@@ -45,6 +49,7 @@ async function handleGet(request: NextRequest) {
   const forceServer = searchParams.get('forceServer') === 'true';
   const source = getProxySourceKey(searchParams);
   const isLive = searchParams.get('icetv-live') === '1';
+  const warmOnly = !isLive && request.headers.get('x-icetv-warm-only') === '1';
   const proxyMode = getPlaybackProxyMode(allowCORS, forceServer);
   const userAction = searchParams.get('icetv-switch');
   const userInitiated = searchParams.get('icetv-user-switch') === '1';
@@ -87,12 +92,26 @@ async function handleGet(request: NextRequest) {
     });
   }
 
+  // 直连模式只代取清单、分片由浏览器直连，暂停时照常放行
+  if (proxyMode === 'server-proxy' && (await isServerRelayPaused())) {
+    return serverRelayPausedResponse();
+  }
+
   const quotaFailure = await requireServerProxyQuota(
     'vod-m3u8',
     request,
     authorization.via === 'session' ? authorization.username : undefined,
   );
   if (quotaFailure) return quotaFailure;
+
+  const identity =
+    authorization.via === 'session'
+      ? `user:${authorization.username}`
+      : `ip:${getClientIp(request)}`;
+
+  const proxyPoolStickyKey = isLive
+    ? undefined
+    : authorization.proxyPoolStickyKey;
 
   if (isLive) {
     const config = await getConfigForRead();
@@ -134,8 +153,9 @@ async function handleGet(request: NextRequest) {
     });
   }
 
-  const ua = await resolveProxyUserAgent(source);
   const skipCache = isLive || isSignedM3U8Url(validation.url);
+  if (warmOnly && skipCache) return warmOnlyResponse();
+  const ua = await resolveProxyUserAgent(source);
 
   try {
     // 查询 VOD 清单缓存（fresh/stale 皆命中；stale 命中时触发后台刷新）
@@ -144,15 +164,16 @@ async function handleGet(request: NextRequest) {
       const { value, fresh } = cached;
       if (!fresh) {
         // 软过期：后台刷新，不阻塞当前响应
-        void refreshM3U8Cache(validation.url, ua, source, isLive);
+        void refreshM3U8Cache(
+          validation.url,
+          ua,
+          source,
+          isLive,
+          identity,
+          proxyPoolStickyKey,
+        );
       }
-      scheduleSourceDirectProbe({
-        source,
-        playlistContent: value.content,
-        playlistUrl: value.finalUrl || validation.url,
-        referer: request.headers.get('referer'),
-        userAgent: ua,
-      });
+      if (warmOnly) return warmOnlyResponse();
       const modifiedContent = await getRewrittenM3U8Content(
         value,
         validation.url,
@@ -162,6 +183,7 @@ async function handleGet(request: NextRequest) {
         source,
         isLive,
         !skipCache,
+        proxyPoolStickyKey,
       );
 
       const headers = new Headers();
@@ -187,21 +209,15 @@ async function handleGet(request: NextRequest) {
       isLive,
       skipCache,
       {
+        identity,
+        proxyPoolStickyKey,
         startedAt,
         proxyMode,
         userAction,
         userInitiated,
       },
     );
-    if (!isLive) {
-      scheduleSourceDirectProbe({
-        source,
-        playlistContent: loaded.content,
-        playlistUrl: loaded.finalUrl || validation.url,
-        referer: request.headers.get('referer'),
-        userAgent: ua,
-      });
-    }
+    if (warmOnly) return warmOnlyResponse();
     const modifiedContent = await getRewrittenM3U8Content(
       loaded,
       validation.url,
@@ -211,6 +227,7 @@ async function handleGet(request: NextRequest) {
       source,
       isLive,
       !skipCache,
+      proxyPoolStickyKey,
     );
     const headers = new Headers();
     headers.set('Content-Type', loaded.contentType);
@@ -252,6 +269,13 @@ async function handleGet(request: NextRequest) {
       status: diagnostic.status,
     });
   }
+}
+
+function warmOnlyResponse(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
 
 function getPlaybackProxyMode(

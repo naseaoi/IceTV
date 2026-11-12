@@ -3,9 +3,9 @@
 import type Database from 'better-sqlite3';
 
 import { IMPORT_ADMIN_CONFIG } from '@/lib/__tests__/__fixtures__/import-admin-config';
+import { resetMysqlTestData } from '@/lib/__tests__/__fixtures__/mysql-test-data';
 import { configSelfCheck } from '@/lib/config';
 import { stripConfigState, subscriptionFromConfig } from '@/lib/config-state';
-import { parseImportData } from '@/lib/data-import';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import type { AdminConfig } from '@/types/admin';
@@ -27,6 +27,43 @@ function legacyConfig(): AdminConfig {
     },
     LiveConfig: [{ ...source, channelNumber: 12 }],
   };
+}
+
+async function assertSubscriptionFailureState(
+  storage: Pick<
+    LocalSqliteStorage,
+    'setAdminConfig' | 'getConfigSubscription' | 'compareAndSetAdminConfig'
+  >,
+) {
+  const config = stripConfigState(legacyConfig());
+  await storage.setAdminConfig(config);
+  const expected = await storage.getConfigSubscription();
+  const failed = {
+    ...expected,
+    ConfigSubscribtion: {
+      ...expected.ConfigSubscribtion,
+      FailureSince: '2026-11-10T00:00:00Z',
+    },
+  };
+  expect(
+    await storage.compareAndSetAdminConfig(config, config, {
+      subscription: { expected, next: failed },
+    }),
+  ).toBe(true);
+  expect(await storage.getConfigSubscription()).toEqual(failed);
+  expect(
+    await storage.compareAndSetAdminConfig(config, config, {
+      subscription: { expected, next: expected },
+    }),
+  ).toBe(false);
+  expect(
+    await storage.compareAndSetAdminConfig(config, config, {
+      subscription: { expected: failed, next: expected },
+    }),
+  ).toBe(true);
+  expect(
+    (await storage.getConfigSubscription()).ConfigSubscribtion.FailureSince,
+  ).toBeUndefined();
 }
 
 describe('config state storage', () => {
@@ -119,31 +156,8 @@ describe('config state storage', () => {
     expect(await storage.getConfigSubscription()).toEqual(next);
   });
 
-  it('round trips legacy backup shape, strips derived counts, and clears both tables', async () => {
-    const legacy = legacyConfig();
-    const backup = { data: { adminConfig: legacy, users: {}, userData: {} } };
-    const parsed = await parseImportData(backup);
-    await storage.replaceAllData(parsed.snapshot);
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    const stored = (await storage.getAdminConfig())!;
-    expect(stored.ConfigFile).toBeUndefined();
-    expect(stored.ConfigSubscribtion).toBeUndefined();
-    expect(stored.LiveConfig?.[0].channelNumber).toBeUndefined();
-    const exported = { ...stored, ...(await storage.getConfigSubscription()) };
-    const roundTrip = await parseImportData({
-      data: { adminConfig: exported, users: {}, userData: {} },
-    });
-    await storage.replaceAllData(roundTrip.snapshot);
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    await storage.setLiveSourceChannelCount(source, 2);
-    await storage.clearAllData();
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    expect((await storage.getConfigSubscription()).ConfigFile).toBe('');
+  it('round trips failure state and fences stale successful refreshes', async () => {
+    await assertSubscriptionFailureState(storage);
   });
 
   it('runtime self-check strips compatibility fields', () => {
@@ -166,10 +180,15 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
   });
   afterAll(async () => pool.end());
 
+  it('round trips failure state and fences stale successful refreshes', async () => {
+    await resetMysqlTestData(storage);
+    await assertSubscriptionFailureState(storage);
+  });
+
   it('migrates idempotently and fences concurrent subscription/config writes', async () => {
     const { MysqlConfigStateStore } =
       await import('@/lib/mysql-config-state-store');
-    await storage.clearAllData();
+    await resetMysqlTestData(storage);
     const legacy = legacyConfig();
     await storage.setAdminConfig(legacy);
     const connection = await pool.getConnection();
@@ -213,25 +232,36 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
     await storage.setLiveSourceChannelCount(source, 99);
     expect(await storage.getLiveSourceChannelCounts()).toEqual({});
   });
+});
 
-  it('restores subscription inside replace transaction and clears derived state', async () => {
-    const legacy = legacyConfig();
-    await storage.replaceAllData({
-      adminConfig: legacy,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    expect(
-      (await storage.getAdminConfig())?.ConfigSubscribtion,
-    ).toBeUndefined();
-    await storage.clearAllData();
-    expect((await storage.getConfigSubscription()).ConfigFile).toBe('');
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
+it('LinuxDo 设置自检保留合法值并恢复无效默认值', () => {
+  const config = legacyConfig();
+  config.UserConfig.LinuxDo = { Enabled: true, MinTrustLevel: 4 };
+  expect(configSelfCheck(config).UserConfig.LinuxDo).toEqual({
+    Enabled: true,
+    MinTrustLevel: 4,
   });
+  config.UserConfig.LinuxDo = {
+    Enabled: 'true',
+    MinTrustLevel: 9,
+  } as unknown as NonNullable<AdminConfig['UserConfig']['LinuxDo']>;
+  config.UserConfig.LinuxDoConfigured = true;
+  expect(configSelfCheck(config).UserConfig.LinuxDo).toEqual({
+    Enabled: false,
+    MinTrustLevel: 1,
+  });
+  expect(config.UserConfig.LinuxDoConfigured).toBeUndefined();
+});
+
+it('分片代理池开关自检保留布尔值并剔除仅响应字段', () => {
+  const config = legacyConfig();
+  config.SiteConfig.UpstreamProxyPoolSegments = true;
+  config.SiteConfig.UpstreamProxyPoolConfigured = true;
+  const checked = configSelfCheck(config).SiteConfig;
+  expect(checked.UpstreamProxyPoolSegments).toBe(true);
+  expect(checked.UpstreamProxyPoolConfigured).toBeUndefined();
+  config.SiteConfig.UpstreamProxyPoolSegments = 'on' as unknown as boolean;
+  expect(configSelfCheck(config).SiteConfig.UpstreamProxyPoolSegments).toBe(
+    false,
+  );
 });

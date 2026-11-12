@@ -123,7 +123,7 @@ function buildLogoBufferResponse(
 
   const headers = new Headers();
   headers.set('Content-Type', contentType);
-  headers.set('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+  headers.set('Cache-Control', 'private, max-age=86400');
 
   return new Response(bufferToArrayBuffer(imageData), {
     status: 200,

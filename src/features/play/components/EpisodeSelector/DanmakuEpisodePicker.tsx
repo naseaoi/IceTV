@@ -4,6 +4,7 @@ import { Check, ChevronLeft, ChevronRight, LocateFixed } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+import LoadErrorState from '@/components/LoadErrorState';
 import Spinner from '@/components/Spinner';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import {
@@ -22,6 +23,8 @@ import {
   readDanmakuEpisodeSearchTitle,
 } from '@/lib/local-preferences';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
+import { showToast } from '@/lib/toast';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 const USER_SCROLL_IDLE_MS = 2000;
 const PROGRAMMATIC_SCROLL_MS = 800;
@@ -47,22 +50,18 @@ async function fetchCandidates(
   keyword: string,
   offset = 0,
 ): Promise<{ candidates: DanmakuMatchCandidate[]; hasMore: boolean }> {
-  try {
-    const response = await fetch(
-      `/api/danmaku/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}`,
-    );
-    if (!response.ok) return { candidates: [], hasMore: false };
-    const data = (await response.json()) as {
-      candidates?: DanmakuMatchCandidate[];
-      hasMore?: boolean;
-    };
-    return {
-      candidates: Array.isArray(data.candidates) ? data.candidates : [],
-      hasMore: data.hasMore === true,
-    };
-  } catch {
-    return { candidates: [], hasMore: false };
-  }
+  const response = await fetch(
+    `/api/danmaku/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}`,
+  );
+  if (!response.ok) throw new Error('Danmaku search failed');
+  const data = (await response.json()) as {
+    candidates?: DanmakuMatchCandidate[];
+    hasMore?: boolean;
+  };
+  return {
+    candidates: Array.isArray(data.candidates) ? data.candidates : [],
+    hasMore: data.hasMore === true,
+  };
 }
 
 export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
@@ -78,6 +77,18 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
   const [hasMoreCandidates, setHasMoreCandidates] = useState(false);
   const [boundEpisodeId, setBoundEpisodeId] = useState<number | null>(null);
   const [openedSource, setOpenedSource] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pendingRef = useRef(false);
+  const generationRef = useRef(0);
+  useEffect(
+    () => () => {
+      generationRef.current += 1;
+      pendingRef.current = false;
+    },
+    [],
+  );
+  const failedMore = useRef(false);
+  const searchedKeyword = useRef('');
   const autoSearchedRef = useRef('');
   const autoOpenedRef = useRef(false);
 
@@ -185,25 +196,54 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
 
   const runSearch = useCallback(async (target: string) => {
     const trimmed = target.trim();
-    if (!trimmed) return;
+    if (!trimmed || pendingRef.current) return;
+    pendingRef.current = true;
+    failedMore.current = false;
+    const generation = generationRef.current;
     setLoading(true);
-    const results = await fetchCandidates(trimmed);
-    setCandidates(results.candidates);
-    setHasMoreCandidates(results.hasMore);
-    setOpenedSource(null);
-    autoOpenedRef.current = false;
-    setLoading(false);
+    setError(null);
+    try {
+      const results = await fetchCandidates(trimmed);
+      if (generation !== generationRef.current) return;
+      searchedKeyword.current = trimmed;
+      setCandidates(results.candidates);
+      setHasMoreCandidates(results.hasMore);
+      setOpenedSource(null);
+      autoOpenedRef.current = false;
+    } catch (error) {
+      if (generation === generationRef.current && !isAbortError(error))
+        setError(getErrorMessage(error, '加载失败'));
+    } finally {
+      if (generation === generationRef.current) {
+        pendingRef.current = false;
+        setLoading(false);
+      }
+    }
   }, []);
 
   const loadMore = useCallback(async () => {
-    const trimmed = keyword.trim();
-    if (loading || !hasMoreCandidates || !trimmed) return;
+    const trimmed = searchedKeyword.current;
+    if (pendingRef.current || !hasMoreCandidates || !trimmed) return;
+    pendingRef.current = true;
+    failedMore.current = true;
+    const generation = generationRef.current;
     setLoading(true);
-    const results = await fetchCandidates(trimmed, candidates.length);
-    setCandidates((current) => [...current, ...results.candidates]);
-    setHasMoreCandidates(results.hasMore);
-    setLoading(false);
-  }, [candidates.length, hasMoreCandidates, keyword, loading]);
+    setError(null);
+    try {
+      const results = await fetchCandidates(trimmed, candidates.length);
+      if (generation !== generationRef.current) return;
+      setCandidates((current) => [...current, ...results.candidates]);
+      setHasMoreCandidates(results.hasMore);
+    } catch (error) {
+      if (generation === generationRef.current && !isAbortError(error))
+        setError(getErrorMessage(error, '加载失败'));
+    } finally {
+      if (generation === generationRef.current) {
+        pendingRef.current = false;
+        setLoading(false);
+      }
+    }
+  }, [candidates.length, hasMoreCandidates]);
 
   // 已绑定的集所在源只在搜索后自动展开一次，否则「返回源列表」会被立刻撤销
   useEffect(() => {
@@ -218,6 +258,8 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
     const initial =
       (scopeKey && readDanmakuEpisodeSearchTitle(scopeKey)) || searchTitle;
     if (!initial || autoSearchedRef.current === initial) return;
+    generationRef.current += 1;
+    pendingRef.current = false;
     autoSearchedRef.current = initial;
     setKeyword(initial);
     void runSearch(initial);
@@ -225,7 +267,18 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
 
   const handleSelect = useCallback(
     async (episodeId: number) => {
-      await persistEpisodeId(source, videoId, episodeIndex, episodeId, keyword);
+      if (
+        !(await persistEpisodeId(
+          source,
+          videoId,
+          episodeIndex,
+          episodeId,
+          keyword,
+        ))
+      ) {
+        showToast('弹幕绑定未能保存，请重试', 'error');
+        return;
+      }
       setBoundEpisodeId(episodeId);
       onBindingChange?.();
     },
@@ -233,7 +286,10 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
   );
 
   const handleClear = useCallback(async () => {
-    await clearPersistedEpisodeId(source, videoId, episodeIndex);
+    if (!(await clearPersistedEpisodeId(source, videoId, episodeIndex))) {
+      showToast('弹幕绑定未能清除，请重试', 'error');
+      return;
+    }
     setBoundEpisodeId(null);
     onBindingChange?.();
   }, [source, videoId, episodeIndex, onBindingChange]);
@@ -327,6 +383,14 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
         </div>
       )}
 
+      {error && !loading && (
+        <LoadErrorState
+          message={error}
+          onRetry={() =>
+            void (failedMore.current ? loadMore() : runSearch(keyword))
+          }
+        />
+      )}
       <div className='flex gap-2'>
         <input
           type='text'
@@ -371,7 +435,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
           style={getVerticalScrollMaskStyle(hasTopFade, hasBottomFade)}
           className='flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pb-1'
         >
-          {candidates.length === 0 && !loading && (
+          {candidates.length === 0 && !loading && !error && (
             <div className='px-2 py-6 text-center text-[13px] text-gray-400 dark:text-gray-500'>
               {keyword ? '未找到匹配结果' : '输入关键词搜索番剧'}
             </div>

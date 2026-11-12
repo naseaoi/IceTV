@@ -10,6 +10,7 @@ import MessagePanel from '@/components/messages/MessagePanel';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
 import {
   fetchMessageSettings,
+  getAnnouncementHistoryPage,
   saveMessageSettings,
 } from '@/lib/messages.client';
 import { fetchPublicReview } from '@/lib/video-reviews.client';
@@ -51,7 +52,11 @@ jest.mock('@/lib/video-reviews.client', () => ({
 }));
 jest.mock('@/lib/messages.client', () => ({
   fetchMessageSettings: jest.fn(),
+  getAnnouncementHistoryPage: jest.fn(),
   saveMessageSettings: jest.fn(),
+}));
+jest.mock('@/components/SiteProvider', () => ({
+  useSite: () => ({ announcement: '本站仅提供信息检索' }),
 }));
 
 const messagePage: UserMessagePage = {
@@ -373,13 +378,12 @@ it('保存失败时提示并恢复为服务端设置', async () => {
     fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
   });
   await act(async () => {
-    fireEvent.click(screen.getByRole('switch', { name: '追更更新' }));
+    fireEvent.click(screen.getByRole('switch', { name: '追更与收藏更新' }));
   });
   expect(screen.getByRole('alert')).toHaveTextContent('保存失败，请重试');
-  expect(screen.getByRole('switch', { name: '追更更新' })).toHaveAttribute(
-    'aria-checked',
-    'true',
-  );
+  expect(
+    screen.getByRole('switch', { name: '追更与收藏更新' }),
+  ).toHaveAttribute('aria-checked', 'true');
 });
 
 it('子视图中 Escape 先返回列表，再次 Escape 才关闭面板', async () => {
@@ -416,4 +420,137 @@ it('同一批次内连续切换多个开关时按最新状态提交', async () =
     'aria-checked',
     'false',
   );
+});
+
+it('公告视图显示站点须知与历史公告，可加载更多', async () => {
+  const history = jest.mocked(getAnnouncementHistoryPage);
+  history
+    .mockResolvedValueOnce({
+      items: [
+        {
+          id: 'announcement:2000:b',
+          type: 'announcement',
+          content: '新增弹幕功能',
+          createdAt: 2_000,
+        },
+      ],
+      nextCursor: '2000:b',
+    })
+    .mockResolvedValueOnce({
+      items: [
+        {
+          id: 'announcement:1000:a',
+          type: 'announcement',
+          content: '首次上线',
+          createdAt: 1_000,
+        },
+      ],
+      nextCursor: null,
+    });
+  renderPanel();
+
+  fireEvent.click(screen.getByRole('button', { name: '查看公告' }));
+  expect(screen.getByRole('heading', { name: '公告' })).toBeInTheDocument();
+  expect(screen.getByText('本站仅提供信息检索')).toBeInTheDocument();
+  expect(await screen.findByText('新增弹幕功能')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+  expect(await screen.findByText('首次上线')).toBeInTheDocument();
+  expect(history).toHaveBeenLastCalledWith('2000:b');
+  expect(
+    screen.queryByRole('button', { name: '加载更多' }),
+  ).not.toBeInTheDocument();
+});
+
+it('没有历史公告时加载中与加载后都不显示历史公告标题', async () => {
+  let resolveHistory: (page: {
+    items: never[];
+    nextCursor: null;
+  }) => void = () => undefined;
+  jest.mocked(getAnnouncementHistoryPage).mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveHistory = resolve;
+    }),
+  );
+  renderPanel();
+
+  fireEvent.click(screen.getByRole('button', { name: '查看公告' }));
+  expect(screen.getByText('本站仅提供信息检索')).toBeInTheDocument();
+  expect(
+    screen.queryByRole('heading', { name: '历史公告' }),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    resolveHistory({ items: [], nextCursor: null });
+  });
+  expect(
+    screen.queryByRole('heading', { name: '历史公告' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText('本站仅提供信息检索')).toBeInTheDocument();
+});
+
+it('opens an annual report link and marks its system message read', () => {
+  const message: UserMessage = {
+    id: 'annual-report:2026',
+    type: 'annual-report',
+    year: 2026,
+    createdAt: Date.now(),
+  };
+  const onRead = jest.fn().mockResolvedValue(undefined);
+  const onClose = jest.fn();
+  renderPanel({
+    page: { items: [message], total: 1, nextCursor: null },
+    onRead,
+    onClose,
+  });
+  const link = screen.getByRole('link', {
+    name: /你的 2026 年度观影报告已生成/,
+  });
+  expect(link).toHaveAttribute('href', '/recap/2026');
+  fireEvent.click(link);
+  expect(onRead).toHaveBeenCalledWith(message);
+  expect(onClose).toHaveBeenCalled();
+});
+
+it('opens a followed annual recap through its opaque profile link and marks it read', () => {
+  const message: UserMessage = {
+    type: 'follow-recap',
+    id: 'follow-recap:AbCdEf012345:2025:1000',
+    author: {
+      profileId: 'AbCdEf012345',
+      nickname: '报告作者',
+      avatarSeed: null,
+    },
+    year: 2025,
+    at: 1000,
+    createdAt: 1000,
+  };
+  const onRead = jest.fn().mockResolvedValue(undefined);
+  renderPanel({
+    page: { items: [message], total: 1, nextCursor: null },
+    onRead,
+  });
+  const link = screen.getByRole('link', {
+    name: /报告作者.*公开了 2025 年度报告/,
+  });
+  expect(link).toHaveAttribute('href', '/u/AbCdEf012345/recap/2025');
+  fireEvent.click(link);
+  expect(onRead).toHaveBeenCalledWith(message);
+});
+
+it('管理通知使用普通消息项展示并仅提供已读，不跳转已删除内容', () => {
+  const message: UserMessage = {
+    id: 'user-notice:1000:00000000-0000-4000-8000-000000000001',
+    type: 'content-moderated',
+    action: 'delete-reply',
+    payload: { title: '作品', contentType: 'reply', count: 2 },
+    createdAt: 1000,
+  };
+  const props = renderPanel({
+    page: { items: [message], total: 1, nextCursor: null },
+  });
+  const text = screen.getByText('你在《作品》的2 条回复已被管理员删除');
+  expect(text.closest('a')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '标记为已读' }));
+  expect(props.onRead).toHaveBeenCalledWith(message);
 });

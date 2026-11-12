@@ -234,6 +234,7 @@ it('视频源全选和取消全选只影响可见行，并保留隐藏行的选�
 });
 
 it('直播源刷新完成后通过轻提示反馈', async () => {
+  jest.mocked(adminPost).mockResolvedValueOnce({ refreshed: 2, failed: [] });
   const refreshConfig = jest.fn().mockResolvedValue(undefined);
   render(<LiveSourceConfig config={config} refreshConfig={refreshConfig} />);
   await act(async () => {
@@ -248,3 +249,70 @@ it('直播源刷新完成后通过轻提示反馈', async () => {
   expect(showToast).toHaveBeenCalledWith('直播源已刷新', 'success');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+it.each([
+  [
+    { refreshed: 1, failed: [{ key: 'b', name: '乙' }] },
+    '已刷新 1 个直播源，1 个失败：乙',
+    'error',
+  ],
+  [
+    { refreshed: 0, failed: [{ key: 'b', name: '乙' }] },
+    '已刷新 0 个直播源，1 个失败：乙',
+    'error',
+  ],
+  [
+    { refreshed: 0, failed: [], liveDisabled: true },
+    '直播未开启，已跳过刷新',
+    'info',
+  ],
+])('直播刷新按结果反馈 %#', async (result, message, type) => {
+  jest.mocked(adminPost).mockResolvedValueOnce(result);
+  render(<LiveSourceConfig config={config} refreshConfig={jest.fn()} />);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '刷新直播源' }));
+  });
+  expect(showToast).toHaveBeenCalledTimes(1);
+  expect(showToast).toHaveBeenCalledWith(message, type);
+});
+
+it.each(cases)(
+  '$label排序保存中禁用拖拽并忽略拖动',
+  async ({ Component, label, firstId, secondId }) => {
+    let resolve!: (value: Record<string, unknown>) => void;
+    jest.mocked(adminPost).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    await act(async () => {
+      render(<Component config={config} refreshConfig={jest.fn()} />);
+    });
+    act(() =>
+      mockOnDragEnd({
+        active: { id: firstId },
+        over: { id: secondId },
+      } as DragEndEvent),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存排序' }));
+    });
+    expect(screen.getByRole('button', { name: '保存中...' })).toBeDisabled();
+    expect(useSortable).toHaveBeenLastCalledWith(
+      expect.objectContaining({ disabled: true }),
+    );
+    const list = screen.getByRole('list', { name: `${label}列表` });
+    const before = list.textContent;
+    act(() =>
+      mockOnDragEnd({
+        active: { id: secondId },
+        over: { id: firstId },
+      } as DragEndEvent),
+    );
+    expect(list.textContent).toBe(before);
+    await act(async () => {
+      resolve({});
+    });
+  },
+);

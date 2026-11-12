@@ -46,6 +46,7 @@ jest.mock('@/lib/db', () => ({
 }));
 
 import { handleAdminUserAction } from '@/features/admin/services/userActions';
+import { ConfigConflictError } from '@/lib/config';
 import { db } from '@/lib/db';
 
 function makeConfig(usernames: string[]): AdminConfig {
@@ -435,5 +436,63 @@ describe('邀请码后台数据库写入', () => {
     expect(options.includeExhausted).toBe(true);
     expect(options.expiredBefore).toBeGreaterThanOrEqual(before);
     expect(mockSaveConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe('LinuxDo 后台注册设置', () => {
+  beforeEach(() => {
+    process.env.LINUXDO_CLIENT_ID = 'test-client';
+    process.env.LINUXDO_CLIENT_SECRET = 'test-secret';
+    mockGetConfig.mockResolvedValue(makeConfig([]));
+  });
+  it('按配置身份写入并在冲突重试前重新失效缓存', async () => {
+    const config = makeConfig([]);
+    mockGetConfig.mockResolvedValue(config);
+    mockSaveConfig.mockRejectedValueOnce(new ConfigConflictError());
+    const result = await handleAdminUserAction({
+      operatorUsername: 'owner',
+      operatorRole: 'owner',
+      body: {
+        action: 'setLinuxDo',
+        linuxDo: { Enabled: true, MinTrustLevel: 3 },
+      },
+    });
+    expect(result.body).toEqual({ ok: true });
+    expect(config.UserConfig.LinuxDo).toEqual({
+      Enabled: true,
+      MinTrustLevel: 3,
+    });
+    expect(mockSaveConfig).toHaveBeenLastCalledWith(config);
+    expect(callOrder).toEqual([
+      'invalidateConfigCache',
+      'getConfig',
+      'invalidateConfigCache',
+      'getConfig',
+    ]);
+  });
+  it.each([
+    null,
+    { Enabled: 'true', MinTrustLevel: 1 },
+    { Enabled: true, MinTrustLevel: 5 },
+    { Enabled: true, MinTrustLevel: 1.5 },
+  ])('拒绝无效设置 %o', async (linuxDo) => {
+    const result = await handleAdminUserAction({
+      operatorUsername: 'owner',
+      operatorRole: 'owner',
+      body: { action: 'setLinuxDo', linuxDo },
+    });
+    expect(result.status).toBe(400);
+    expect(mockSaveConfig).not.toHaveBeenCalled();
+  });
+  it('缺凭证时允许关闭而拒绝开启', async () => {
+    delete process.env.LINUXDO_CLIENT_SECRET;
+    const act = (Enabled: boolean) =>
+      handleAdminUserAction({
+        operatorUsername: 'owner',
+        operatorRole: 'owner',
+        body: { action: 'setLinuxDo', linuxDo: { Enabled, MinTrustLevel: 1 } },
+      });
+    expect((await act(true)).status).toBe(400);
+    expect((await act(false)).body).toEqual({ ok: true });
   });
 });

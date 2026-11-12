@@ -60,6 +60,8 @@ export interface Favorite {
   metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
+  update_baseline_episodes?: number;
+  update_detected_at?: number;
   watch_status?: FavoriteWatchStatus;
   watched_at?: number;
 }
@@ -102,6 +104,7 @@ export interface PublicUserRef {
 }
 
 export interface UserProfileView extends PublicUserRef {
+  recap: { year: number } | null;
   isSelf: boolean;
   isFollowing: boolean;
   followerCount: number;
@@ -247,12 +250,6 @@ export interface FavoritePageItem {
   playRecord?: PlayRecord;
 }
 
-export interface FavoritePage {
-  items: FavoritePageItem[];
-  total: number;
-  nextCursor: string | null;
-}
-
 export interface PlaybackSession {
   id: string;
   source: string;
@@ -283,8 +280,58 @@ export interface PlaybackWatchTotals {
   periodWatchSeconds: number;
 }
 
+// 一个用户在一个源的一部作品只有一条，记录最后观看的集与位置；删除后不影响观看统计
+export interface WatchHistoryEntry {
+  id: string;
+  source: string;
+  video_id: string;
+  title: string;
+  source_name: string;
+  cover: string;
+  year: string;
+  // 从 1 开始
+  episode_index: number;
+  total_episodes: number;
+  group_label?: string;
+  // 组内集数，从 1 开始
+  group_index?: number;
+  group_total?: number;
+  // 秒
+  position: number;
+  duration: number;
+  first_watched_at: number;
+  last_watched_at: number;
+}
+
+export interface WatchHistoryCursor {
+  lastWatchedAt: number;
+  id: string;
+}
+
+export interface WatchHistoryQuery {
+  limit: number;
+  cursor?: WatchHistoryCursor;
+  keyword?: string;
+}
+
+// 写入历史时随会话上报的附加信息；id 缺省表示按 (source, video_id) 新建或取回
+export interface WatchHistoryWrite {
+  id?: string;
+  total_episodes: number;
+  group_label?: string;
+  group_index?: number;
+  group_total?: number;
+}
+
+// 会话在一个 15 分钟 UTC 对齐时间桶内的累计有效观看毫秒数
+export interface PlaybackWatchBucket {
+  start: number;
+  watch_ms: number;
+}
+
 export type PlaybackPeriodSession = Pick<
   PlaybackSession,
+  | 'episode_index'
   | 'source'
   | 'video_id'
   | 'title'
@@ -294,6 +341,17 @@ export type PlaybackPeriodSession = Pick<
   | 'ended_at'
   | 'watch_seconds'
 >;
+
+export type PlaybackAnnualSession = PlaybackPeriodSession &
+  Pick<PlaybackSession, 'id' | 'source_name' | 'episode_index'> & {
+    measurement_version: 1 | 2;
+  };
+
+export interface PlaybackAnnualData {
+  sessions: PlaybackAnnualSession[];
+  buckets: { session_id: string; bucket_start: number; watch_ms: number }[];
+  earliestStartedAt: number | null;
+}
 
 export interface SourceHealthSearchDelta {
   source: string;
@@ -323,6 +381,12 @@ export interface SourcePlayReporterSummary {
 
 export type SourceRouteMode = 'browser' | 'server';
 
+// 数据库存储键隔离全程线路口径，API 仍使用 browser / server。
+export const SOURCE_ROUTE_STAT_STORAGE_MODES = {
+  browser: 'browser-v2',
+  server: 'server-v2',
+} as const;
+
 export interface SourceRouteStatInput {
   source: string;
   routeMode: SourceRouteMode;
@@ -340,17 +404,15 @@ export interface SourceRouteStatsItem {
 // 源站路由统计原始行（按天粒度）
 export interface SourceRouteStatsBucket {
   source: string;
-  routeMode: SourceRouteMode;
+  routeMode:
+    | SourceRouteMode
+    | (typeof SOURCE_ROUTE_STAT_STORAGE_MODES)[SourceRouteMode];
   bucketDate: string;
   successCount: number;
   failureCount: number;
 }
 
-export interface StorageUserImportData {
-  playRecords: { [key: string]: PlayRecord };
-  favorites: { [key: string]: Favorite };
-  videoReviews?: VideoReview[];
-  userDanmaku?: Omit<StoredUserDanmaku, 'username'>[];
+export interface UserSocialData {
   profile?: UserProfile;
   follows?: { followee: string; created_at: number }[];
   likes?: {
@@ -377,15 +439,12 @@ export interface StorageUserImportData {
     detail: string;
     created_at: number;
   }[];
-  searchHistory: string[];
-  skipConfigs: { [key: string]: SkipConfig };
-  playbackSessions: { [key: string]: PlaybackSession };
-  messageState?: UserMessageState;
-  danmakuEnabled?: boolean;
-  lastLoginAt?: number;
 }
 
 export interface UserMessageStateUpdate {
+  userNotice?: { id: string; createdAt: number };
+  userNoticeReadAt?: number;
+  annualReportReadYear?: number;
   notificationSettings?: {
     mutedKinds: import('@/lib/message-types').MessageNotificationKind[];
     now: number;
@@ -394,7 +453,8 @@ export interface UserMessageStateUpdate {
   newFollowerReadAt?: number;
   reviewLike?: { id: string; createdAt: number };
   reviewLikeReadAt?: number;
-  announcement?: { id: string; previousId?: string };
+  announcement?: { id: string; createdAt: number };
+  announcementReadAt?: number;
   followReview?: { id: string; createdAt: number };
   reviewReply?: { id: string; createdAt: number };
   reviewReplyReadAt?: number;
@@ -402,25 +462,21 @@ export interface UserMessageStateUpdate {
 }
 
 export interface UserMessageState {
+  userNoticeReadAt?: number;
+  userNoticeReadIds?: string[];
+  annualReportReadYear?: number;
   mutedKinds?: import('@/lib/message-types').MessageNotificationKind[];
   newFollowerReadAt?: number;
   newFollowerReadIds?: string[];
   reviewLikeReadAt?: number;
   reviewLikeReadIds?: string[];
-  readAnnouncementId?: string;
+  announcementReadAt?: number;
+  announcementReadIds?: string[];
   reviewReplyReadAt?: number;
   reviewReplyReadIds?: string[];
   // 关注动态已读水位，之前的视为已读；水位之后单独已读的消息 id 记在列表里
   followReviewReadAt?: number;
   followReviewReadIds?: string[];
-}
-
-export interface StorageImportData {
-  adminConfig: AdminConfig;
-  users: { [username: string]: string };
-  userData: { [username: string]: StorageUserImportData };
-  sourceRouteStats: SourceRouteStatsBucket[];
-  inviteCodeUsage: { [code: string]: number };
 }
 
 export interface SharedCacheRecord {
@@ -430,8 +486,36 @@ export interface SharedCacheRecord {
   leaseUntil: number;
 }
 
+export interface SiteAnnouncement {
+  id: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+  publishedAt: number | null;
+}
+
 // 存储接口
 export interface IStorage {
+  getAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecap'];
+  getAnnualRecapYears: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecapYears'];
+  saveAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['saveAnnualRecap'];
+  deleteAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['deleteAnnualRecap'];
+  getFollowRecapMessages: import('@/lib/annual-recap-storage').AnnualRecapStorage['getFollowRecapMessages'];
+  getFollowRecapMessageCount: import('@/lib/annual-recap-storage').AnnualRecapStorage['getFollowRecapMessageCount'];
+  listAnnouncements(limit: number): Promise<SiteAnnouncement[]>;
+  countAnnouncements(): Promise<number>;
+  getPublishedAnnouncements(options: {
+    since?: number;
+    before?: { publishedAt: number; id: string };
+    limit: number;
+  }): Promise<SiteAnnouncement[]>;
+  getAnnouncement(id: string): Promise<SiteAnnouncement | null>;
+  createAnnouncement(announcement: SiteAnnouncement): Promise<void>;
+  updateAnnouncement(
+    id: string,
+    patch: { content?: string; publishedAt?: number | null; updatedAt: number },
+  ): Promise<SiteAnnouncement | null>;
+  deleteAnnouncement(id: string): Promise<boolean>;
   addUserDanmaku(item: StoredUserDanmaku): Promise<void>;
   getUserDanmaku(
     episodeKey: string,
@@ -444,6 +528,10 @@ export interface IStorage {
   readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
+  getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>>;
   setPlayRecord(
     userName: string,
     key: string,
@@ -468,6 +556,7 @@ export interface IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage>;
   getUnreadTrackingPlayRecordPage(
     userName: string,
@@ -480,9 +569,22 @@ export interface IStorage {
     records: Record<string, PlayRecord>,
   ): Promise<void>;
   deletePlayRecord(userName: string, key: string): Promise<void>;
+  deletePlayRecords(userName: string, keys: string[]): Promise<void>;
   deleteAllPlayRecords(userName: string): Promise<void>;
 
   // 收藏相关
+  getFavoriteUpdateMessagePage(
+    userName: string,
+    limit: number,
+    before?: import('@/lib/message-cursor.server').MessageCursor | null,
+  ): Promise<
+    import('@/features/favorites/lib/favorite-tracking').FavoriteMessagePage
+  >;
+  readFavoriteUpdate(
+    userName: string,
+    key: string,
+    episodes: number,
+  ): Promise<void>;
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
   saveMergedFavorite(
@@ -514,13 +616,6 @@ export interface IStorage {
     limit: number,
     cursorKey?: string,
   ): Promise<MetadataRecordPage<Favorite>>;
-  getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive?: boolean,
-  ): Promise<FavoritePage>;
   getFavoriteLibraryPage(
     userName: string,
     query: import('@/features/favorites/lib/library-query').FavoriteLibraryQuery,
@@ -701,27 +796,42 @@ export interface IStorage {
     readIds: string[],
     now: number,
   ): Promise<number>;
-  getUserSocialData(
-    username: string,
-  ): Promise<
-    Pick<
-      StorageUserImportData,
-      'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
-    >
-  >;
+  getUserSocialData(username: string): Promise<UserSocialData>;
 
   // 用户相关
+  getOAuthIdentity(
+    providerUserId: string,
+  ): Promise<import('@/lib/oauth-identity').OAuthIdentity | null>;
+  getUserOAuthIdentity(
+    username: string,
+  ): Promise<import('@/lib/oauth-identity').OAuthIdentity | null>;
+  bindOAuthIdentity(
+    identity: import('@/lib/oauth-identity').OAuthIdentity,
+  ): Promise<import('@/lib/oauth-identity').OAuthBindResult>;
+  unbindOAuthIdentity(username: string): Promise<boolean>;
+  updateOAuthProviderUsername(
+    providerUserId: string,
+    providerUsername: string,
+  ): Promise<void>;
   registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）
   checkUserExist(userName: string): Promise<boolean>;
+  // 第三方自动建号后尚未设置过密码时为 false
+  isPasswordSet(userName: string): Promise<boolean>;
   // 修改用户密码
-  changePassword(userName: string, newPassword: string): Promise<void>;
+  changePassword(
+    userName: string,
+    newPassword: string,
+    admin?: boolean,
+    currentPassword?: string | null,
+  ): Promise<boolean>;
   // 删除用户（包括密码、搜索历史、播放记录、收藏夹）
   deleteUser(
     userName: string,
@@ -730,7 +840,6 @@ export interface IStorage {
   getUserAccess(
     username: string,
   ): Promise<import('@/lib/user-access').UserAccess | null>;
-  getAllUserAccess(): Promise<import('@/lib/user-access').UserAccess[]>;
   updateUserAccess(
     usernames: string[],
     patch: import('@/lib/user-access').UserAccessPatch,
@@ -769,8 +878,18 @@ export interface IStorage {
     state?: ConfigStateUpdate,
   ): Promise<boolean>;
   getAllUsers(): Promise<string[]>;
-  getAllUsersWithPasswords(): Promise<{ [username: string]: string }>;
 
+  getUserNoticeMessages(
+    ...args: Parameters<
+      import('@/lib/user-notice-storage').UserNoticeStorage['messages']
+    >
+  ): Promise<import('@/lib/user-notice').UserNoticeMessage[]>;
+  getUserNoticeCount(
+    ...args: Parameters<
+      import('@/lib/user-notice-storage').UserNoticeStorage['count']
+    >
+  ): Promise<number>;
+  purgeUserNotices(before: number): Promise<number>;
   getUserMessageState(userName: string): Promise<UserMessageState>;
   setUserMessageState(userName: string, state: UserMessageState): Promise<void>;
   updateUserMessageState(
@@ -827,22 +946,44 @@ export interface IStorage {
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
 
   setPlaybackSession(userName: string, session: PlaybackSession): Promise<void>;
-  getPlaybackSessions(
+  saveWatchSessionReport(
     userName: string,
-    query?: PlaybackSessionQuery,
-  ): Promise<PlaybackSession[]>;
-  getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]>;
-  deletePlaybackSession(userName: string, id: string): Promise<void>;
+    session: PlaybackSession,
+    buckets: PlaybackWatchBucket[],
+    history?: WatchHistoryWrite,
+  ): Promise<string | null>;
+  getWatchHistoryPage(
+    userName: string,
+    query: WatchHistoryQuery,
+  ): Promise<WatchHistoryEntry[]>;
+  deleteWatchHistoryEntry(userName: string, id: string): Promise<void>;
   deletePlaybackSessionsBefore(updatedBefore: number): Promise<number>;
   getPlaybackWatchTotals(
     userName: string,
     since: number,
   ): Promise<PlaybackWatchTotals>;
+  getPlaybackSourceUsage(
+    start: number,
+    end: number,
+    userName?: string,
+  ): Promise<
+    import('@/features/playback-stats/lib/source-usage').PlaybackSourceUsage[]
+  >;
   getPlaybackPeriodSessions(
     userName: string,
     start: number,
     end: number,
   ): Promise<PlaybackPeriodSession[]>;
+  hasPlaybackAnnualActivity(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<boolean>;
+  getPlaybackAnnualData(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<PlaybackAnnualData>;
   recordSourceHealthSearchBatch(rows: SourceHealthSearchDelta[]): Promise<void>;
   recordSourcePlayReport(input: SourcePlayReportInput): Promise<void>;
   getSourceHealthSearchDaily(
@@ -898,10 +1039,6 @@ export interface IStorage {
     userName: string,
     enabled: boolean,
   ): Promise<void>;
-
-  // 数据清理相关
-  clearAllData(): Promise<void>;
-  replaceAllData(data: StorageImportData): Promise<void>;
 }
 
 // 搜索结果数据结构

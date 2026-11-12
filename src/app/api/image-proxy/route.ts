@@ -8,6 +8,12 @@ import {
   resizeCoverImage,
 } from '@/lib/cover-image-resize';
 import { loadResizedCoverImage } from '@/lib/cover-image-resize-cache.server';
+import {
+  isHostLevelImageStatus,
+  isImageHostCoolingDown,
+  recordImageHostFailure,
+  recordImageHostReachable,
+} from '@/lib/image-proxy-host-health.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import { getUpstreamFailureStatus } from '@/lib/proxy-diagnostics';
 import {
@@ -18,10 +24,14 @@ import {
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import {
+  type ServerProxyKind,
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
-import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import {
+  ResourceLimitError,
+  resourceLimitResponse,
+} from '@/lib/server-resource-errors';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -45,32 +55,68 @@ class ImageOriginError extends Error {
   }
 }
 
+// 冷却期内直接判失败，不回源也不重复记失败日志
+class ImageHostCoolingDownError extends ImageOriginError {
+  constructor() {
+    super('host-cooldown');
+    this.name = 'ImageHostCoolingDownError';
+  }
+}
+
+function getImageHostname(url: string): string {
+  return new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+}
+
+function isDoubanImageHost(hostname: string): boolean {
+  return hostname === 'doubanio.com' || hostname.endsWith('.doubanio.com');
+}
+
 async function fetchImageOrigin(
   url: string,
   method: 'GET' | 'HEAD',
   timeoutMs: number,
 ): Promise<{ response: Response; contentType: string }> {
   const target = new URL(url);
-  const hostname = target.hostname.toLowerCase().replace(/\.$/, '');
-  const isDoubanImage =
-    hostname === 'doubanio.com' || hostname.endsWith('.doubanio.com');
-  const response = await fetchWithUrlGuard(url, {
-    method,
-    // 重定向沿用初始图床的来源，避免把跳转后的 CDN 当作来源站点
-    headers: {
-      ...ORIGIN_FETCH_HEADERS,
-      Referer: isDoubanImage
-        ? 'https://movie.douban.com/'
-        : `${target.origin}/`,
-    },
-    skipInitialValidation: true,
-    timeoutMs,
-  });
+  const hostname = getImageHostname(url);
+  if (isImageHostCoolingDown(hostname)) {
+    throw new ImageHostCoolingDownError();
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithUrlGuard(url, {
+      method,
+      // 重定向沿用初始图床的来源，避免把跳转后的 CDN 当作来源站点
+      headers: {
+        ...ORIGIN_FETCH_HEADERS,
+        Referer: isDoubanImageHost(hostname)
+          ? 'https://movie.douban.com/'
+          : `${target.origin}/`,
+      },
+      skipInitialValidation: true,
+      timeoutMs,
+    });
+  } catch (error) {
+    // 本站资源额度与地址校验失败与源站可用性无关
+    if (
+      !(error instanceof ResourceLimitError) &&
+      !(error instanceof UrlValidationError)
+    ) {
+      recordImageHostFailure(hostname);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
+    if (isHostLevelImageStatus(response.status)) {
+      recordImageHostFailure(hostname);
+    } else {
+      recordImageHostReachable(hostname);
+    }
     await response.body?.cancel().catch(() => {});
     throw new ImageOriginError(response.status);
   }
+  recordImageHostReachable(hostname);
 
   const contentType = response.headers.get('content-type');
   if (!contentType?.toLowerCase().startsWith('image/')) {
@@ -116,8 +162,13 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
+  const proxyKind: ServerProxyKind = isDoubanImageHost(
+    getImageHostname(validation.url),
+  )
+    ? 'douban-image'
+    : 'source-cover';
   const quotaFailure = await requireServerProxyQuota(
-    'douban-image',
+    proxyKind,
     request,
     authorization.via === 'session' ? authorization.username : undefined,
   );
@@ -208,18 +259,20 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     const busy = resourceLimitResponse(error);
     if (busy) return busy;
     if (error instanceof ImageOriginError) {
-      recordServerProxyFailure('douban-image', error.reason);
+      if (!(error instanceof ImageHostCoolingDownError)) {
+        recordServerProxyFailure(proxyKind, error.reason);
+      }
       return NextResponse.json({ error: error.message }, { status: 502 });
     }
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
-      recordServerProxyFailure('douban-image', error);
+      recordServerProxyFailure(proxyKind, error);
       return NextResponse.json({ error: error.message }, { status: 413 });
     }
 
-    recordServerProxyFailure('douban-image', error);
+    recordServerProxyFailure(proxyKind, error);
     return NextResponse.json(
       { error: 'Error fetching image' },
       { status: getUpstreamFailureStatus(error) },
@@ -231,11 +284,8 @@ function createImageProxyCacheHeaders(): Headers {
   const headers = new Headers();
   headers.set(
     'Cache-Control',
-    'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
+    'private, max-age=2592000, stale-while-revalidate=86400',
   );
-  headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
-  headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
-  headers.set('Netlify-Vary', 'query');
   return headers;
 }
 

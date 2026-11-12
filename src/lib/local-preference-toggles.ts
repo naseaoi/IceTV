@@ -5,34 +5,28 @@ import {
   readDefaultAutoSwitchSource,
   readDefaultEnableOptimization,
   readDefaultFluidSearch,
-  readDefaultLiveDirectConnect,
   readEnableOptimization,
   readFluidSearch,
-  readLiveDirectConnect,
   resetAggregateSearch,
   resetAutoSwitchSource,
   resetEnableOptimization,
   resetFluidSearch,
-  resetLiveDirectConnect,
   writeAggregateSearch,
   writeAutoSwitchSource,
   writeEnableOptimization,
   writeFluidSearch,
-  writeLiveDirectConnect,
 } from '@/lib/local-preferences';
 
 export type LocalPreferenceToggleId =
   | 'defaultAggregateSearch'
   | 'enableOptimization'
   | 'fluidSearch'
-  | 'liveDirectConnect'
   | 'autoSwitchSource';
 
 export type LocalPreferenceToggleSiteConfigKey =
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'FluidSearch'
-  | 'LiveDirectConnect'
   | 'AutoSwitchSource';
 
 export type LocalPreferenceToggleState = Record<
@@ -47,8 +41,8 @@ type LocalPreferenceToggleDefinition = {
   description: string;
   readValue: () => boolean;
   readDefaultValue: () => boolean;
-  writeValue: (value: boolean) => void;
-  resetValue: () => void;
+  writeValue: (value: boolean) => boolean;
+  resetValue: () => boolean;
 };
 
 export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[] =
@@ -84,16 +78,6 @@ export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[]
       resetValue: resetFluidSearch,
     },
     {
-      id: 'liveDirectConnect',
-      siteConfigKey: 'LiveDirectConnect',
-      title: 'IPTV 视频浏览器直连',
-      description: '开启时直播媒体请求由浏览器直连源站',
-      readValue: readLiveDirectConnect,
-      readDefaultValue: readDefaultLiveDirectConnect,
-      writeValue: writeLiveDirectConnect,
-      resetValue: resetLiveDirectConnect,
-    },
-    {
       id: 'autoSwitchSource',
       siteConfigKey: 'AutoSwitchSource',
       title: '播放失败自动换源',
@@ -120,7 +104,7 @@ export function readLocalPreferenceToggleDefaultState(): LocalPreferenceToggleSt
 }
 
 export function resetAllLocalPreferenceToggles() {
-  localPreferenceToggleDefinitions.forEach((definition) => {
-    definition.resetValue();
-  });
+  return localPreferenceToggleDefinitions
+    .map((definition) => definition.resetValue())
+    .every(Boolean);
 }

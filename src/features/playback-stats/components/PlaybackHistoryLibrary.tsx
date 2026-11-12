@@ -6,10 +6,14 @@ import { useMemo, useState } from 'react';
 
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import {
+  LIBRARY_DANGER_BUTTON_CLASS,
   LIBRARY_PILL_BUTTON_CLASS,
+  LIBRARY_STICKY_TOOLBAR_CLASS,
+  LIBRARY_TOOLBAR_BUTTON_CLASS as TOOLBAR_BUTTON_CLASS,
   LibraryEmptySkeleton,
   LibraryEmptyState,
 } from '@/components/LibraryPage';
+import LoadErrorState from '@/components/LoadErrorState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import SkeletonText from '@/components/SkeletonText';
@@ -19,22 +23,23 @@ import {
   usePlaybackHistoryPlaceholder,
   usePlayHistorySession,
 } from '@/features/playback-stats/hooks/usePlaybackHistory';
-import { groupPlaybackSessionsByDay } from '@/features/playback-stats/lib/history';
+import { groupWatchHistoryByDay } from '@/features/playback-stats/lib/history';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 
 const GROUP_TITLE_TEXT_CLASS = 'mb-3 text-sm font-medium';
 
-const TOOLBAR_BUTTON_CLASS =
-  'inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm text-gray-600 transition hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white';
-
-export function PlaybackHistoryGridSkeleton({ count }: { count?: number }) {
-  const placeholder = usePlaybackHistoryPlaceholder();
+export function PlaybackHistoryGridSkeleton({
+  initialCount,
+}: {
+  initialCount?: number;
+}) {
+  const placeholder = usePlaybackHistoryPlaceholder(initialCount);
   const groups = placeholder.snapshot
-    ? groupPlaybackSessionsByDay(placeholder.snapshot.items).map(
-        (group) => group.sessions.length,
+    ? groupWatchHistoryByDay(placeholder.snapshot.items).map(
+        (group) => group.entries.length,
       )
-    : [count ?? placeholder.count];
+    : [placeholder.count];
   if (groups.length === 0 || groups.every((size) => size === 0))
     return <LibraryEmptySkeleton />;
   return (
@@ -56,47 +61,47 @@ export function PlaybackHistoryGridSkeleton({ count }: { count?: number }) {
   );
 }
 
-export function PlaybackHistoryPageSkeleton() {
-  const { snapshot } = usePlaybackHistoryPlaceholder();
+export function PlaybackHistoryPageSkeleton({
+  initialCount,
+}: {
+  initialCount?: number;
+}) {
+  const { count } = usePlaybackHistoryPlaceholder(initialCount);
   return (
     <>
       <div className='mb-4 flex items-center gap-2 py-3'>
         <div className='skeleton h-9 w-full rounded-full sm:w-72' />
-        {(!snapshot || snapshot.items.length > 0) && (
+        {count > 0 && (
           <div className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full' />
         )}
       </div>
-      <PlaybackHistoryGridSkeleton />
+      <PlaybackHistoryGridSkeleton initialCount={initialCount} />
     </>
   );
 }
 
 function PlaybackHistoryGroupGrid({
-  sessions,
+  entries,
   selectedIds,
   ...cardProps
 }: {
-  sessions: PlaybackSession[];
+  entries: WatchHistoryEntry[];
   selectedIds: Set<string>;
 } & Omit<
   React.ComponentProps<typeof HistoryPosterCard>,
-  'session' | 'selected'
+  'entry' | 'selected'
 >) {
   const containerRef = useListLayoutMotion<HTMLDivElement>(
-    sessions.map((session) => String(session.id)),
+    entries.map((entry) => entry.id),
   );
   return (
     <div ref={containerRef} className={`relative ${POSTER_GRID_CLASS}`}>
-      {sessions.map((session) => (
-        <div
-          key={session.id}
-          data-list-motion-key={String(session.id)}
-          className='w-full'
-        >
+      {entries.map((entry) => (
+        <div key={entry.id} data-list-motion-key={entry.id} className='w-full'>
           <HistoryPosterCard
             {...cardProps}
-            session={session}
-            selected={selectedIds.has(session.id)}
+            entry={entry}
+            selected={selectedIds.has(entry.id)}
           />
         </div>
       ))}
@@ -104,26 +109,32 @@ function PlaybackHistoryGroupGrid({
   );
 }
 
-export function PlaybackHistoryLibrary() {
+export function PlaybackHistoryLibrary({
+  initialSkeletonCount,
+}: {
+  initialSkeletonCount?: number;
+}) {
   const {
     items,
     loading,
-    skeletonCount,
     loadingMore,
+    error,
+    retry,
     refreshing,
     searchText,
     setSearchText,
     searchKeyword,
     hasMore,
     loadMore,
-    removeSessions,
+    removeEntries,
   } = usePlaybackHistory();
+  const placeholder = usePlaybackHistoryPlaceholder(initialSkeletonCount);
   const { playHistoryItem, prefetchPlayPage } = usePlayHistorySession();
   const [editing, setEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const groups = useMemo(() => groupPlaybackSessionsByDay(items), [items]);
+  const groups = useMemo(() => groupWatchHistoryByDay(items), [items]);
   const allSelected = items.length > 0 && selectedIds.size === items.length;
 
   const exitEditing = () => {
@@ -131,11 +142,11 @@ export function PlaybackHistoryLibrary() {
     setSelectedIds(new Set());
   };
 
-  const toggleSelected = (session: PlaybackSession) => {
+  const toggleSelected = (entry: WatchHistoryEntry) => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (next.has(session.id)) next.delete(session.id);
-      else next.add(session.id);
+      if (next.has(entry.id)) next.delete(entry.id);
+      else next.add(entry.id);
       return next;
     });
   };
@@ -147,14 +158,19 @@ export function PlaybackHistoryLibrary() {
   };
 
   const deleteSelected = async () => {
-    await removeSessions(Array.from(selectedIds));
+    const removed = await removeEntries(Array.from(selectedIds));
+    if (removed < selectedIds.size) throw new Error('删除未完成');
     setConfirmOpen(false);
     exitEditing();
   };
 
   let content: React.ReactNode;
   if (loading) {
-    content = <PlaybackHistoryGridSkeleton count={skeletonCount} />;
+    content = (
+      <PlaybackHistoryGridSkeleton initialCount={initialSkeletonCount} />
+    );
+  } else if (error && items.length === 0) {
+    content = <LoadErrorState message={error} onRetry={retry} />;
   } else if (items.length === 0) {
     content = searchKeyword ? (
       <LibraryEmptyState
@@ -196,13 +212,14 @@ export function PlaybackHistoryLibrary() {
               {group.label}
             </h3>
             <PlaybackHistoryGroupGrid
-              sessions={group.sessions}
+              entries={group.entries}
               selectable={editing}
               selectedIds={selectedIds}
               onActivate={editing ? toggleSelected : playHistoryItem}
               onPrefetch={prefetchPlayPage}
               onDelete={async (item) => {
-                await removeSessions([item.id]);
+                if ((await removeEntries([item.id])) === 0)
+                  throw new Error('删除未完成');
               }}
             />
           </section>
@@ -226,7 +243,7 @@ export function PlaybackHistoryLibrary() {
 
   return (
     <>
-      <div className='z-20 -mx-4 mb-4 flex items-center gap-2 bg-gray-50 px-4 py-3 dark:bg-gray-950 sm:-mx-8 sm:px-8 md:sticky md:top-16 xl:-mx-12 xl:px-12'>
+      <div className={LIBRARY_STICKY_TOOLBAR_CLASS}>
         {editing ? (
           <>
             <span className='text-sm text-gray-500 dark:text-gray-400'>
@@ -248,7 +265,7 @@ export function PlaybackHistoryLibrary() {
                 type='button'
                 disabled={selectedIds.size === 0}
                 onClick={() => setConfirmOpen(true)}
-                className='inline-flex h-9 items-center rounded-full bg-red-500 px-4 text-sm font-medium text-white transition hover:bg-red-600 disabled:pointer-events-none disabled:opacity-40'
+                className={LIBRARY_DANGER_BUTTON_CLASS}
               >
                 删除
               </button>
@@ -286,28 +303,31 @@ export function PlaybackHistoryLibrary() {
                 </button>
               )}
             </label>
-            {loading ? (
-              <div
-                aria-hidden='true'
-                className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
-              />
-            ) : (
-              items.length > 0 && (
-                <button
-                  type='button'
-                  onClick={() => setEditing(true)}
-                  className={`${TOOLBAR_BUTTON_CLASS} ml-auto`}
-                >
-                  编辑
-                </button>
-              )
-            )}
+            {loading
+              ? placeholder.count > 0 && (
+                  <div
+                    aria-hidden='true'
+                    className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
+                  />
+                )
+              : items.length > 0 && (
+                  <button
+                    type='button'
+                    onClick={() => setEditing(true)}
+                    className={`${TOOLBAR_BUTTON_CLASS} ml-auto`}
+                  >
+                    编辑
+                  </button>
+                )}
           </>
         )}
       </div>
 
       {content}
 
+      {error && items.length > 0 && (
+        <LoadErrorState message={error} onRetry={retry} />
+      )}
       <ConfirmModal
         isOpen={confirmOpen}
         title={`删除 ${selectedIds.size} 条观看记录？`}

@@ -12,6 +12,7 @@ import {
 
 interface CleanupInactiveUsersDialogProps {
   isOpen: boolean;
+  error?: string;
   inactiveDays: number;
   candidates: { count: number; confirmation: string } | null;
   isScanning: boolean;
@@ -24,6 +25,7 @@ interface CleanupInactiveUsersDialogProps {
 
 export function CleanupInactiveUsersDialog({
   isOpen,
+  error,
   inactiveDays,
   candidates,
   isScanning,
@@ -37,6 +39,11 @@ export function CleanupInactiveUsersDialog({
   return (
     <>
       <AdminDialog isOpen={isOpen} title='清理不活跃用户' onClose={onClose}>
+        {error && (
+          <p role='alert' className='mb-3 text-sm text-red-600'>
+            {error}
+          </p>
+        )}
         <div className='flex flex-wrap items-center gap-3'>
           <label htmlFor='cleanup-inactive-days'>不活跃天数超过</label>
           <input

@@ -5,6 +5,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -29,6 +30,10 @@ const CLOSE_ANIMATION_MS = 130;
 
 // 叠放的弹窗按打开顺序入栈，Esc 只关闭最上层
 const openShells: symbol[] = [];
+
+// 同一次提交里一个弹窗直接卸载、另一个弹窗打开（如从资料切到修改密码）时，
+// 新弹窗沿用已有的压暗，不先消失再淡入
+let backdropHandoff = false;
 
 // 不经 ModalShell 的自绘浮层用它避让 Esc，让叠在上面的弹窗先关闭
 export function hasOpenModalShell() {
@@ -67,6 +72,9 @@ export default function ModalShell({
   initialFocusRef,
 }: ModalShellProps) {
   const { mounted, visible } = usePresence(isOpen, CLOSE_ANIMATION_MS);
+  const [backdropHeld, setBackdropHeld] = useState(false);
+  const backdropOpen = isOpen && (visible || backdropHeld);
+  const backdropOpenRef = useRef(false);
   const overlayRef = useRef<HTMLDivElement>(null);
   // 冻结 children 快照：关闭动画期间仍显示关闭前的内容，
   // 避免调用方同步清空数据导致"文字先消失、面板后淡出"的视觉割裂。
@@ -75,7 +83,32 @@ export default function ModalShell({
     childrenSnapshot.current = children;
   }
 
-  useBodyScrollLock(mounted);
+  useBodyScrollLock(mounted || backdropHeld);
+
+  useLayoutEffect(() => {
+    backdropOpenRef.current = backdropOpen;
+  });
+
+  // 卸载清理先于新挂载的布局副作用执行，微任务在本次提交结束后才清掉标记
+  useLayoutEffect(
+    () => () => {
+      if (!backdropOpenRef.current) return;
+      backdropHandoff = true;
+      queueMicrotask(() => {
+        backdropHandoff = false;
+      });
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setBackdropHeld(false);
+    } else if (backdropHandoff) {
+      backdropHandoff = false;
+      setBackdropHeld(true);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -102,7 +135,7 @@ export default function ModalShell({
     };
   }, [isOpen]);
 
-  if (!mounted) {
+  if (!mounted && !backdropHeld) {
     return null;
   }
 
@@ -120,7 +153,7 @@ export default function ModalShell({
     >
       <div
         aria-hidden='true'
-        data-open={visible}
+        data-open={backdropOpen}
         className={`motion-backdrop absolute inset-0 ${backdropClassName}`}
       />
       <div

@@ -3,6 +3,14 @@ import net from 'net';
 
 import { isDevProxyActive } from '@/lib/dev-proxy';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { UpstreamCooldownError } from '@/lib/server-resource-errors';
+import {
+  fetchViaUpstreamRoute,
+  getUpstreamRoutes,
+  isUpstreamNetworkFailure,
+  reportUpstreamRouteFailure,
+  reportUpstreamRouteSuccess,
+} from '@/lib/upstream-proxy-pool.server';
 import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
 import type { UpstreamResourceContext } from '@/lib/upstream-resource-policy';
 
@@ -24,6 +32,8 @@ type GuardedFetchInit = RequestInit & {
   skipInitialValidation?: boolean;
   timeoutMs?: number;
   resourceContext?: UpstreamResourceContext;
+  useProxyPool?: boolean;
+  proxyPoolStickyKey?: string;
 };
 
 type DnsCacheEntry = {
@@ -100,6 +110,8 @@ export async function fetchWithUrlGuard(
     skipInitialValidation = false,
     timeoutMs,
     resourceContext,
+    useProxyPool = true,
+    proxyPoolStickyKey,
     ...fetchInit
   } = init;
   let currentUrl = raw;
@@ -124,15 +136,13 @@ export async function fetchWithUrlGuard(
     );
     let response: Response;
     try {
-      response = await withUpstreamResponse(
+      response = await loadUpstream(
         validation.url,
-        (signal) =>
-          fetch(validation.url, {
-            ...fetchInit,
-            redirect: 'manual',
-            signal,
-          }),
-        { ...resourceContext, signal: abortState.signal },
+        fetchInit,
+        resourceContext,
+        abortState.signal,
+        useProxyPool,
+        proxyPoolStickyKey,
       );
     } finally {
       abortState.cleanup();
@@ -159,6 +169,49 @@ export async function fetchWithUrlGuard(
   }
 
   throw new UrlValidationError('Too many redirects');
+}
+
+// 换出口只发生在拿到响应之前；节点网络失败或对该站处于冷却时顺延到下一个出口
+async function loadUpstream(
+  url: string,
+  fetchInit: RequestInit,
+  resourceContext: UpstreamResourceContext | undefined,
+  signal: AbortSignal,
+  useProxyPool: boolean,
+  proxyPoolStickyKey?: string,
+): Promise<Response> {
+  const routes = getUpstreamRoutes(
+    proxyPoolStickyKey ?? resourceContext?.identity,
+    useProxyPool,
+  );
+  for (let index = 0; ; index++) {
+    const route = routes[index];
+    try {
+      const response = await withUpstreamResponse(
+        url,
+        (guardSignal) =>
+          fetchViaUpstreamRoute(route, url, {
+            ...fetchInit,
+            redirect: 'manual',
+            signal: guardSignal,
+          }),
+        {
+          ...resourceContext,
+          signal,
+          cooldownScope: route.proxyUrl ? route.id : undefined,
+        },
+      );
+      reportUpstreamRouteSuccess(route);
+      return response;
+    } catch (error) {
+      const proxyFailed =
+        Boolean(route.proxyUrl) && isUpstreamNetworkFailure(error);
+      if (proxyFailed) reportUpstreamRouteFailure(route);
+      const retryable = proxyFailed || error instanceof UpstreamCooldownError;
+      if (!retryable || signal.aborted || index + 1 >= routes.length)
+        throw error;
+    }
+  }
 }
 
 export function clearUrlGuardDnsCacheForTests(): void {

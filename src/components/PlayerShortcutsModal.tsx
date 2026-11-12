@@ -19,6 +19,7 @@ import {
   setPlayerShortcutsSuspended,
   writePlayerShortcuts,
 } from '@/lib/player-shortcuts';
+import { showToast } from '@/lib/toast';
 
 const MODIFIER_KEYS = new Set(['Shift', 'Alt', 'Control', 'Meta']);
 
@@ -130,7 +131,12 @@ export default function PlayerShortcutsModal({
   }, [showResetConfirm]);
 
   const handleSave = useCallback(() => {
-    writePlayerShortcuts(draft);
+    if (!writePlayerShortcuts(draft)) {
+      showToast('快捷键未能保存，请重试', 'error', {
+        key: 'local-preference-save',
+      });
+      return;
+    }
     setIsOpen(false);
     setRecording(null);
   }, [draft]);

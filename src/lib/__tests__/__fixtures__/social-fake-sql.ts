@@ -5,7 +5,10 @@ export type SocialFakeState = {
   social: Record<string, Row[]>;
   users: Map<string, string>;
   userAccess: Map<string, Row>;
-  videoReviews: Map<string, { username: string; review: VideoReview }>;
+  videoReviews: Map<
+    string,
+    { username: string; review: VideoReview; first_published_at: number | null }
+  >;
 };
 
 export function executeSocial(
@@ -13,6 +16,50 @@ export function executeSocial(
   params: unknown[],
   state: SocialFakeState,
 ): number | undefined {
+  if (sql.startsWith('INSERT INTO user_annual_recaps')) {
+    const rows = (state.social.user_annual_recaps ??= []);
+    const existing = rows.find(
+      (row) => row.username === params[0] && row.year === params[1],
+    );
+    const row = {
+      username: params[0],
+      year: params[1],
+      time_zone: params[2],
+      hide_rhythm: params[3],
+      report_json: params[4],
+      published_at: existing?.published_at ?? params[5],
+      updated_at: params[6],
+    };
+    if (existing) Object.assign(existing, row);
+    else rows.push(row);
+    return 1;
+  }
+  if (sql.startsWith('UPDATE user_annual_recaps')) {
+    const row = (state.social.user_annual_recaps ?? []).find(
+      (row) =>
+        row.username === params[4] &&
+        row.year === params[5] &&
+        row.published_at === params[6] &&
+        row.updated_at === params[7],
+    );
+    if (!row) return 0;
+    Object.assign(row, {
+      time_zone: params[0],
+      hide_rhythm: params[1],
+      report_json: params[2],
+      updated_at: params[3],
+    });
+    return 1;
+  }
+  if (sql.startsWith('DELETE FROM user_annual_recaps')) {
+    const rows = state.social.user_annual_recaps ?? [];
+    state.social.user_annual_recaps = rows.filter(
+      (row) =>
+        row.username !== params[0] ||
+        (params.length > 1 && row.year !== params[1]),
+    );
+    return rows.length - state.social.user_annual_recaps.length;
+  }
   const table =
     /(?:INTO|UPDATE|FROM) (user_profiles|user_follows|video_review_likes|video_review_reports|video_review_replies|video_review_reply_reports)\b/.exec(
       sql,
@@ -33,7 +80,6 @@ export function executeSocial(
   if (sql.startsWith('DELETE')) {
     const before = rows.length;
     state.social[table] = rows.filter((row) => {
-      if (!sql.includes(' WHERE ')) return false;
       if (table === 'user_profiles') return row.username !== params[0];
       if (sql.includes(' OR '))
         return (
@@ -88,10 +134,10 @@ export function executeSocial(
       row = {
         username: params[0],
         profile_id: params[1],
-        nickname: params.length === 3 ? null : params[2],
-        nickname_norm: params.length === 3 ? null : params[3],
-        avatar_seed: params.length === 3 ? null : params[4],
-        favorites_public: params.length === 3 ? 0 : params[5],
+        nickname: null,
+        nickname_norm: null,
+        avatar_seed: null,
+        favorites_public: 0,
         updated_at: params[params.length - 1],
       };
       if (
@@ -103,36 +149,25 @@ export function executeSocial(
       )
         return 0;
     } else if (table === 'user_follows') {
-      row = sql.includes('SELECT')
-        ? { follower: params[0], followee: params[2], created_at: params[1] }
-        : { follower: params[0], followee: params[1], created_at: params[2] };
-      if (
-        sql.includes('SELECT') &&
-        !state.social.user_profiles.some((p) => p.username === row.followee)
-      )
+      row = { follower: params[0], followee: params[2], created_at: params[1] };
+      if (!state.social.user_profiles.some((p) => p.username === row.followee))
         return 0;
     } else {
       const report = table === 'video_review_reports';
-      const selecting = sql.includes('SELECT');
       const offset = report ? 4 : 2;
-      const target = selecting
-        ? params.slice(offset, offset + 3)
-        : params.slice(0, 3);
-      if (
-        selecting &&
-        !state.videoReviews.get(JSON.stringify(target))?.review.is_public
-      )
+      const target = params.slice(offset, offset + 3);
+      if (!state.videoReviews.get(JSON.stringify(target))?.review.is_public)
         return 0;
       row = {
         author: target[0],
         title_norm: target[1],
         year: target[2],
-        [report ? 'reporter' : 'liker']: selecting ? params[0] : params[3],
-        created_at: selecting ? params[offset - 1] : params[report ? 6 : 4],
+        [report ? 'reporter' : 'liker']: params[0],
+        created_at: params[offset - 1],
       };
       if (report) {
-        row.reason = params[selecting ? 1 : 4];
-        row.detail = params[selecting ? 2 : 5];
+        row.reason = params[1];
+        row.detail = params[2];
       }
     }
     const keys =
@@ -172,6 +207,15 @@ export function querySocial(
   params: unknown[],
   state: SocialFakeState,
 ): Row[] | undefined {
+  if (sql.includes('FROM user_annual_recaps WHERE')) {
+    return (state.social.user_annual_recaps ?? [])
+      .filter(
+        (row) =>
+          row.username === params[0] &&
+          (params.length === 1 || row.year === params[1]),
+      )
+      .sort((a, b) => b.year - a.year);
+  }
   if (
     sql.startsWith('SHOW INDEX FROM user_follows') ||
     sql.startsWith('SHOW INDEX FROM video_review_likes')
@@ -375,8 +419,8 @@ export function querySocial(
             (row) =>
               row.username === f.followee &&
               row.review.is_public &&
-              row.review.updated_at > f.created_at &&
-              row.review.updated_at > Number(params[1]),
+              (row.first_published_at ?? 0) > f.created_at &&
+              (row.first_published_at ?? 0) > Number(params[1]),
           )
           .flatMap((row) => {
             const p = profiles.find((p) => p.username === row.username);
@@ -384,6 +428,7 @@ export function querySocial(
               ? [
                   {
                     ...row.review,
+                    first_published_at: row.first_published_at ?? 0,
                     username: row.username,
                     review_json: JSON.stringify(row.review),
                     profile_id: p.profile_id,
@@ -399,40 +444,50 @@ export function querySocial(
       const target = params.slice(offset, offset + 4);
       rows = rows.filter(
         (row) =>
-          ![row.profile_id, row.title_norm, row.year, row.updated_at].every(
-            (part, index) => part === target[index],
-          ),
+          ![
+            row.profile_id,
+            row.title_norm,
+            row.year,
+            row.first_published_at,
+          ].every((part, index) => part === target[index]),
       );
       offset += 4;
     }
     if (sql.includes(' AND p.profile_id = ?')) {
       const target = params.slice(offset, offset + 4);
       rows = rows.filter((row) =>
-        [row.profile_id, row.title_norm, row.year, row.updated_at].every(
-          (part, index) => part === target[index],
-        ),
+        [
+          row.profile_id,
+          row.title_norm,
+          row.year,
+          row.first_published_at,
+        ].every((part, index) => part === target[index]),
       );
       offset += 4;
     }
-    if (sql.includes('AND (v.updated_at < ?')) {
+    if (sql.includes('AND (v.first_published_at < ?')) {
       const time = Number(params[offset]);
       const target = params.slice(offset + 2, offset + 5).map(String);
       rows = rows.filter(
         (row) =>
-          row.updated_at < time ||
-          (row.updated_at === time &&
+          row.first_published_at < time ||
+          (row.first_published_at === time &&
             compareTuple([row.profile_id, row.title_norm, row.year], target) <
               0),
       );
-    } else if (sql.includes(' AND v.updated_at <= ?'))
-      rows = rows.filter((row) => row.updated_at <= Number(params[offset]));
-    else if (sql.includes(' AND v.updated_at < ?'))
-      rows = rows.filter((row) => row.updated_at < Number(params[offset]));
+    } else if (sql.includes(' AND v.first_published_at <= ?'))
+      rows = rows.filter(
+        (row) => row.first_published_at <= Number(params[offset]),
+      );
+    else if (sql.includes(' AND v.first_published_at < ?'))
+      rows = rows.filter(
+        (row) => row.first_published_at < Number(params[offset]),
+      );
     if (sql.startsWith('SELECT COUNT(*)')) return [{ count: rows.length }];
     return rows
       .sort(
         (a, b) =>
-          b.updated_at - a.updated_at ||
+          b.first_published_at - a.first_published_at ||
           -compareTuple(
             [a.profile_id, a.title_norm, a.year],
             [b.profile_id, b.title_norm, b.year],

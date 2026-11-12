@@ -4,24 +4,21 @@ import { useEffect, useState } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
 import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
-import type { SourceRouteCapabilities } from '@/lib/source-route-capability.server';
 import type { SourceRouteStatsItem } from '@/lib/types';
 
 export const SOURCE_INSIGHT_DAYS = 7;
 
 export interface SourceInsights {
   routeStats: SourceRouteStatsItem[];
-  capabilities: SourceRouteCapabilities;
   health: Map<string, SourceHealthReportItem>;
 }
 
 const EMPTY_INSIGHTS: SourceInsights = {
   routeStats: [],
-  capabilities: {},
   health: new Map(),
 };
 
-// 线路检测与源站质量两路独立读取，任一失败只清空该部分
+// 线路统计与源站质量两路独立读取，任一失败只清空该部分
 export function useSourceInsights(
   reloadKey: unknown,
   enabled = true,
@@ -37,7 +34,6 @@ export function useSourceInsights(
 
     adminGet<{
       stats: SourceRouteStatsItem[];
-      capabilities?: SourceRouteCapabilities;
     }>(
       `/api/admin/source-route-stats?days=${SOURCE_INSIGHT_DAYS}`,
       '读取路由统计失败',
@@ -45,12 +41,11 @@ export function useSourceInsights(
       .then((payload) =>
         update({
           routeStats: payload.stats || [],
-          capabilities: payload.capabilities || {},
         }),
       )
       .catch((error) => {
         console.warn('读取路由统计失败:', error);
-        update({ routeStats: [], capabilities: {} });
+        update({ routeStats: [] });
       });
     adminGet<{ items: SourceHealthReportItem[] }>(
       `/api/admin/source-health?days=${SOURCE_INSIGHT_DAYS}`,
@@ -74,4 +69,44 @@ export function useSourceInsights(
   }, [reloadKey, enabled]);
 
   return insights;
+}
+
+export const SOURCE_USAGE_DAYS = 30;
+
+export interface SourceUsageItem {
+  source: string;
+  sourceName: string;
+  watchSeconds: number;
+  userCount: number;
+  workCount: number;
+}
+
+// 全站观看汇总按天变化，进入页面读一次即可，不随配置保存重新读取
+export function useSourceUsage(enabled = true): Map<string, SourceUsageItem> {
+  const [usage, setUsage] = useState<Map<string, SourceUsageItem>>(
+    () => new Map(),
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    adminGet<{ items: SourceUsageItem[] }>(
+      `/api/admin/source-usage?days=${SOURCE_USAGE_DAYS}`,
+      '读取源使用统计失败',
+    )
+      .then((payload) => {
+        if (cancelled) return;
+        setUsage(
+          new Map((payload.items || []).map((item) => [item.source, item])),
+        );
+      })
+      .catch((error) => {
+        console.warn('读取源使用统计失败:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+
+  return usage;
 }

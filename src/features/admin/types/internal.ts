@@ -2,15 +2,14 @@ export interface SiteConfig {
   SiteName: string;
   SiteIcon: string; // 站点图标 URL（外部链接或 /api/admin/site-icon 本地路径）
   Announcement: string;
-  AnnouncementVersion?: string;
-  AnnouncementPublishedAt?: number;
   FooterText: string;
   EnableLiveEntry: boolean;
   LiveAccess: 'all' | 'groups';
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
-  LiveDirectConnect: boolean;
   AutoSwitchSource: boolean;
+  UpstreamProxyPoolSegments: boolean;
+  UpstreamProxyPoolConfigured?: boolean;
   EnableDanmaku: boolean;
   EnableUserDanmaku: boolean;
   DanmakuEpisodeLimit: number;
@@ -20,20 +19,17 @@ export interface SiteConfig {
   VodPageTimeoutSeconds: number;
   VodFragmentTimeoutSeconds: number;
   PlaybackHistoryPageSize: number;
-  PlaybackHistoryLimit: number;
   SearchHistoryLimit: number;
   SearchRequestTimeoutSeconds: number;
   SourceFailureCooldownSeconds: number;
   ContinueWatchingLimit: number;
   CoverImageCacheSize: number;
   SourceCoverProxyMode: 'auto' | 'browser' | 'server';
-  DataImportPlaybackSessionsLimit: number;
   LivePrecheckTimeoutSeconds: number;
   ProxyRequestTimeoutSeconds: number;
   ImageProxyTimeoutSeconds: number;
   UpstreamSearchConcurrency: number;
   DoubanProxyType: string;
-  BangumiDataSource: string;
   DoubanImageProxyType: string;
   DisableYellowFilter: boolean;
   FluidSearch: boolean;

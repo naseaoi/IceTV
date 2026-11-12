@@ -16,17 +16,20 @@ export type ProxyAuthorizationResult =
   | {
       authorized: true;
       via: 'signature';
+      proxyPoolStickyKey?: string;
     }
   | {
       authorized: true;
       via: 'session';
       username: string;
+      proxyPoolStickyKey?: string;
     }
   | {
       authorized: false;
       response: NextResponse;
     };
 
+const STICKY_PARAM = 'icetv-sticky';
 const SIGNATURE_PARAM = 'icetv-signature';
 const EXPIRES_PARAM = 'icetv-expires';
 const SIGNATURE_TTL_MS = 10 * 60 * 1000;
@@ -40,9 +43,10 @@ async function signProxyTarget(
   purpose: ProxySignaturePurpose,
   targetUrl: string,
   expiresAt: number = getProxySignatureExpiresAt(),
+  proxyPoolStickyKey?: string,
 ): Promise<{ expiresAt: number; signature: string }> {
   const signature = await generateSignature(
-    getProxySignaturePayload(purpose, targetUrl, expiresAt),
+    getProxySignaturePayload(purpose, targetUrl, expiresAt, proxyPoolStickyKey),
     getAuthSigningSecret(),
   );
 
@@ -53,8 +57,16 @@ export async function appendProxySignature(
   params: URLSearchParams,
   purpose: ProxySignaturePurpose,
   targetUrl: string,
+  proxyPoolStickyKey?: string,
 ): Promise<void> {
-  const { expiresAt, signature } = await signProxyTarget(purpose, targetUrl);
+  params.delete(STICKY_PARAM);
+  if (proxyPoolStickyKey) params.set(STICKY_PARAM, proxyPoolStickyKey);
+  const { expiresAt, signature } = await signProxyTarget(
+    purpose,
+    targetUrl,
+    undefined,
+    proxyPoolStickyKey,
+  );
   params.set(EXPIRES_PARAM, String(expiresAt));
   params.set(SIGNATURE_PARAM, signature);
 }
@@ -66,6 +78,9 @@ export async function verifyProxySignature(
   now: number = Date.now(),
 ): Promise<boolean> {
   const signature = searchParams.get(SIGNATURE_PARAM) || '';
+  const proxyPoolStickyKey = searchParams.get(STICKY_PARAM);
+  if (proxyPoolStickyKey !== null && !SIGNATURE_RE.test(proxyPoolStickyKey))
+    return false;
   const expiresAt = Number.parseInt(searchParams.get(EXPIRES_PARAM) || '', 10);
 
   if (
@@ -78,7 +93,12 @@ export async function verifyProxySignature(
 
   try {
     return await verifySignature(
-      getProxySignaturePayload(purpose, targetUrl, expiresAt),
+      getProxySignaturePayload(
+        purpose,
+        targetUrl,
+        expiresAt,
+        proxyPoolStickyKey ?? undefined,
+      ),
       signature,
       getAuthSigningSecret(),
     );
@@ -104,7 +124,13 @@ export async function resolveProxyAuthorization(
 ): Promise<ProxyAuthorizationResult> {
   const { searchParams } = new URL(request.url);
   if (await verifyProxySignature(searchParams, purpose, targetUrl)) {
-    return { authorized: true, via: 'signature' };
+    return {
+      authorized: true,
+      via: 'signature',
+      ...(searchParams.has(STICKY_PARAM)
+        ? { proxyPoolStickyKey: searchParams.get(STICKY_PARAM)! }
+        : {}),
+    };
   }
 
   const { isGuardFailure, requireActiveUser } = await import('@/lib/api-auth');
@@ -120,6 +146,15 @@ export async function resolveProxyAuthorization(
     authorized: true,
     via: 'session',
     username: guardResult.username,
+    ...(['m3u8', 'key', 'segment'].includes(purpose) &&
+    searchParams.get('icetv-live') !== '1'
+      ? {
+          proxyPoolStickyKey: await generateSignature(
+            JSON.stringify(['proxy-pool-sticky-v1', guardResult.username]),
+            getAuthSigningSecret(),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -127,11 +162,14 @@ function getProxySignaturePayload(
   purpose: ProxySignaturePurpose,
   targetUrl: string,
   expiresAt: number,
+  proxyPoolStickyKey?: string,
 ): string {
   return JSON.stringify([
     purpose,
     normalizeProxySignatureTarget(targetUrl),
     expiresAt,
+    // 保留旧签名载荷；新上下文与目的、目标和有效期一起验签。
+    ...(proxyPoolStickyKey ? [proxyPoolStickyKey] : []),
   ]);
 }
 

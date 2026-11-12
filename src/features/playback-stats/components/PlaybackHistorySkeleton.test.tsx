@@ -1,9 +1,12 @@
 import { render } from '@testing-library/react';
 
 import { PlaybackHistoryGridSkeleton } from '@/features/playback-stats/components/PlaybackHistoryLibrary';
-import { PlaybackHistoryPreviewSkeleton } from '@/features/playback-stats/components/PlaybackHistoryPreview';
+import {
+  HISTORY_PREVIEW_EMPTY_CLASS,
+  PlaybackHistoryPreviewSkeleton,
+} from '@/features/playback-stats/components/PlaybackHistoryPreview';
 import { usePlaybackHistoryPlaceholder } from '@/features/playback-stats/hooks/usePlaybackHistory';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 
 jest.mock('@/features/playback-stats/hooks/usePlaybackHistory', () => ({
   usePlaybackHistoryPlaceholder: jest.fn(),
@@ -19,8 +22,8 @@ jest.mock('@/components/ScrollableRow', () => ({
 
 const sessions = Array.from({ length: 6 }, (_, index) => ({
   id: String(index),
-  started_at: Date.now() - (index < 2 ? 0 : 86400000),
-})) as PlaybackSession[];
+  last_watched_at: Date.now() - (index < 2 ? 0 : 86400000),
+})) as WatchHistoryEntry[];
 
 it('历史列表按已有缓存的日期分区和六条数量占位', () => {
   jest.mocked(usePlaybackHistoryPlaceholder).mockReturnValue({
@@ -32,7 +35,7 @@ it('历史列表按已有缓存的日期分区和六条数量占位', () => {
   expect(container.querySelectorAll('.grid')).toHaveLength(2);
 });
 
-it('预览数量按请求页大小限制缓存，空缓存保留空态高度', () => {
+it('预览按已知条数占位，已知为空时与空状态共用留白', () => {
   jest.mocked(usePlaybackHistoryPlaceholder).mockReturnValue({
     count: 3,
     snapshot: { items: sessions, nextCursor: null },
@@ -41,13 +44,15 @@ it('预览数量按请求页大小限制缓存，空缓存保留空态高度', (
   expect(container.querySelectorAll('.aspect-\\[2\\/3\\]')).toHaveLength(3);
   jest
     .mocked(usePlaybackHistoryPlaceholder)
-    .mockReturnValue({ count: 10, snapshot: { items: [], nextCursor: null } });
+    .mockReturnValue({ count: 0, snapshot: { items: [], nextCursor: null } });
   rerender(<PlaybackHistoryPreviewSkeleton />);
   expect(container.querySelectorAll('.aspect-\\[2\\/3\\]')).toHaveLength(0);
-  expect(container.firstElementChild).toHaveClass('h-[68px]');
+  expect(container.firstElementChild).toHaveClass(
+    ...HISTORY_PREVIEW_EMPTY_CLASS.split(' '),
+  );
 });
 
-it('未知数量采用实际请求页大小，而不是固定十二个', () => {
+it('无快照时按计数占位', () => {
   jest
     .mocked(usePlaybackHistoryPlaceholder)
     .mockReturnValue({ count: 7, snapshot: null });

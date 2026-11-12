@@ -1,5 +1,6 @@
 'use client';
 
+import { Flame } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   type CSSProperties,
@@ -16,13 +17,27 @@ import {
   POSTER_CARD_TITLE_ROW_CLASS,
 } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
+import { RecapEntryLink } from '@/features/annual-report/components/RecapEntryLink';
 import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
 import {
+  HOUR_STRIP_AXIS_CLASS,
+  HOUR_STRIP_CELLS_CLASS,
+  HOUR_STRIP_CLASS,
+  METRIC_CLASS,
+  METRIC_LABEL_CLASS,
+  METRIC_NUMBER_CLASS,
+  METRIC_ROW_CLASS,
+  METRIC_UNIT_CLASS,
+  METRIC_VALUE_CLASS,
   PlaybackStatsSkeleton,
   STATS_CARD_CLASS,
   STATS_COLUMN_CLASS,
   STATS_LAYOUT_CLASS,
   StatsHeading,
+  WEEK_CHART_CLASS,
+  WEEK_DAY_CLASS,
+  WEEK_LABEL_CLASS,
+  WEEK_TRACK_CLASS,
 } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
 import {
   getCachedPlaybackPeriodSnapshot,
@@ -38,6 +53,7 @@ import {
   INDICATOR_TARGET_ATTR,
   useSlidingIndicator,
 } from '@/hooks/useSlidingIndicator';
+import { openAnnualReportYear } from '@/lib/annual-report-window';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -74,27 +90,61 @@ function formatDuration(seconds: number): string {
     .join(' ');
 }
 
+// 海报副标题较窄：剧集带集数，时长只取一个单位
+function formatTopWorkSubtitle(work: PlaybackTopWork): string {
+  const minutes = Math.floor(Math.max(0, work.watchSeconds) / 60);
+  if (!(work.episodeCount > 1)) return formatDuration(work.watchSeconds);
+  const time =
+    minutes >= 60 ? `${Math.floor(minutes / 60)} 小时` : `${minutes} 分钟`;
+  return `${work.episodeCount} 集 · ${time}`;
+}
+
 function formatDayLabel(key: string): string {
   const [, month, day] = key.split('-');
   return `${Number(month)}月${Number(day)}日`;
 }
 
-function Metric({ label, seconds }: { label: string; seconds: number }) {
+const METRIC_TONE = {
+  primary: {
+    label:
+      'bg-brand-500/10 text-brand-600 dark:bg-brand-400/15 dark:text-brand-300',
+    number: 'text-gray-900 dark:text-gray-50',
+  },
+  secondary: {
+    label: 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400',
+    number: 'text-gray-700 dark:text-gray-300',
+  },
+} as const;
+
+function Metric({
+  label,
+  seconds,
+  variant,
+}: {
+  label: string;
+  seconds: number;
+  variant: keyof typeof METRIC_TONE;
+}) {
+  const tone = METRIC_TONE[variant];
   return (
-    <div className='min-w-0'>
-      <p className='text-[13px] text-gray-500 dark:text-gray-400'>{label}</p>
-      <p className='mt-1 flex items-baseline gap-0.5 whitespace-nowrap text-gray-900 dark:text-gray-50'>
+    <div className={METRIC_CLASS}>
+      <span className={`${METRIC_LABEL_CLASS} ${tone.label}`}>{label}</span>
+      <span className={METRIC_VALUE_CLASS}>
         {durationParts(seconds).map(([value, unit]) => (
           <span key={unit} className='flex items-baseline gap-0.5'>
-            <span className='text-[28px] font-semibold tabular-nums leading-none tracking-tight'>
+            <span
+              className={`${METRIC_NUMBER_CLASS[variant]} tabular-nums ${tone.number}`}
+            >
               {value}
             </span>
-            <span className='mr-1 text-[13px] text-gray-500 dark:text-gray-400'>
+            <span
+              className={`${METRIC_UNIT_CLASS} text-gray-500 dark:text-gray-400`}
+            >
               {unit}
             </span>
           </span>
         ))}
-      </p>
+      </span>
     </div>
   );
 }
@@ -114,7 +164,7 @@ function WeekChart({
   const highlightKey = selectedKey ?? today;
 
   return (
-    <div className='grid flex-1 grid-cols-7 gap-1.5'>
+    <div className={WEEK_CHART_CLASS}>
       {buckets.map((bucket, index) => {
         const future = bucket.key > today;
         const highlighted = bucket.key === highlightKey;
@@ -129,30 +179,28 @@ function WeekChart({
             onClick={() =>
               onSelect(bucket.key === selectedKey ? null : bucket.key)
             }
-            className='group flex min-w-0 flex-col items-center gap-2 focus:outline-none'
+            className={`group ${WEEK_DAY_CLASS} focus:outline-none`}
           >
-            <span className='flex h-20 w-full items-end justify-center md:h-auto md:min-h-20 md:flex-1'>
-              {bucket.watchSeconds > 0 ? (
+            <span
+              className={`${WEEK_TRACK_CLASS} transition-colors group-focus-visible:ring-2 group-focus-visible:ring-brand-500/60 ${
+                future
+                  ? 'bg-gray-100/50 dark:bg-white/[0.02]'
+                  : 'bg-gray-100 group-hover:bg-gray-200/70 dark:bg-white/[0.04] dark:group-hover:bg-white/[0.07]'
+              }`}
+            >
+              {bucket.watchSeconds > 0 && (
                 <span
-                  className={`w-full max-w-[28px] rounded-md transition-colors ${
+                  className={`w-full rounded-md transition-colors ${
                     highlighted
                       ? 'bg-brand-500 dark:bg-brand-400'
-                      : 'bg-gray-200 group-hover:bg-gray-300 dark:bg-white/[0.12] dark:group-hover:bg-white/20'
+                      : 'bg-brand-500/25 group-hover:bg-brand-500/40 dark:bg-brand-400/25 dark:group-hover:bg-brand-400/40'
                   }`}
-                  style={{ height: `${Math.max(8, ratio * 100)}%` }}
-                />
-              ) : (
-                <span
-                  className={`h-1 w-full max-w-[28px] rounded-full ${
-                    highlighted
-                      ? 'bg-brand-500/40'
-                      : 'bg-gray-200/70 dark:bg-white/[0.06]'
-                  }`}
+                  style={{ height: `${ratio * 100}%`, minHeight: 6 }}
                 />
               )}
             </span>
             <span
-              className={`text-xs ${
+              className={`${WEEK_LABEL_CLASS} ${
                 highlighted
                   ? 'font-medium text-gray-900 dark:text-gray-100'
                   : future
@@ -165,6 +213,68 @@ function WeekChart({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+const HOUR_AXIS_MARKS = [0, 6, 12, 18, 24];
+
+function HourStrip({ hours }: { hours: number[] }) {
+  const max = Math.max(...hours);
+  const peak = max > 0 ? hours.indexOf(max) : -1;
+  return (
+    <div
+      className={HOUR_STRIP_CLASS}
+      role='img'
+      aria-label={
+        peak >= 0 ? `最常在 ${peak} 点到 ${peak + 1} 点观看` : '暂无观看时段'
+      }
+    >
+      <div className={HOUR_STRIP_CELLS_CLASS}>
+        {hours.map((seconds, hour) => {
+          const ratio = max > 0 ? seconds / max : 0;
+          return (
+            <span
+              key={hour}
+              title={`${hour}:00–${hour + 1}:00 · ${formatDuration(seconds)}`}
+              className={`min-w-0 flex-1 rounded-[3px] ${
+                seconds > 0
+                  ? 'bg-brand-500 dark:bg-brand-400'
+                  : 'bg-gray-100 dark:bg-white/[0.06]'
+              }`}
+              style={
+                seconds > 0 && hour !== peak
+                  ? { opacity: 0.18 + ratio * 0.6 }
+                  : undefined
+              }
+            />
+          );
+        })}
+      </div>
+      <div
+        aria-hidden='true'
+        className={`${HOUR_STRIP_AXIS_CLASS} text-gray-400 dark:text-gray-500`}
+      >
+        {HOUR_AXIS_MARKS.map((hour, index) => (
+          <span
+            key={hour}
+            className={`absolute ${
+              index === 0
+                ? 'left-0'
+                : index === HOUR_AXIS_MARKS.length - 1
+                  ? 'right-0'
+                  : '-translate-x-1/2'
+            }`}
+            style={
+              index > 0 && index < HOUR_AXIS_MARKS.length - 1
+                ? { left: `${(hour / 24) * 100}%` }
+                : undefined
+            }
+          >
+            {hour}点
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -187,7 +297,7 @@ function TopWorkCard({
       videoId={work.videoId}
       year={work.year}
       rank={rank}
-      subtitle={formatDuration(work.watchSeconds)}
+      subtitle={formatTopWorkSubtitle(work)}
       ariaLabel={`播放 ${work.title}`}
       onPlay={() => onOpen(work)}
     />
@@ -388,27 +498,52 @@ export function PlaybackStatsPanel() {
   }
 
   const selected = stats.buckets.find((bucket) => bucket.key === selectedKey);
+  const reportYear = openAnnualReportYear(stats.date);
+  // 会话缓存里可能是新增字段前的旧快照
+  const streak = stats.currentStreak ?? 0;
+  const hours =
+    stats.hours?.length === 24 ? stats.hours : Array<number>(24).fill(0);
 
   return (
     <div className={STATS_LAYOUT_CLASS}>
       <section className={STATS_COLUMN_CLASS}>
-        <StatsHeading title='观看统计' />
+        <StatsHeading title='观看统计'>
+          <div className='flex items-center gap-3'>
+            {streak >= 2 && (
+              <span className='inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400'>
+                <Flame className='h-3.5 w-3.5 text-brand-500 dark:text-brand-300' />
+                连续{' '}
+                <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
+                  {streak}
+                </span>{' '}
+                天
+              </span>
+            )}
+            {reportYear !== null && (
+              <RecapEntryLink href={`/recap/${reportYear}`} year={reportYear} />
+            )}
+          </div>
+        </StatsHeading>
         <div className={STATS_CARD_CLASS}>
-          <div className='flex flex-wrap gap-x-8 gap-y-3'>
+          <div className={METRIC_ROW_CLASS}>
             <Metric
+              variant='primary'
               label={selected ? formatDayLabel(selected.key) : '本周'}
               seconds={selected ? selected.watchSeconds : stats.watchSeconds}
             />
-            <Metric label='累计' seconds={stats.lifetimeWatchSeconds} />
-          </div>
-          <div className='mt-5 flex min-w-0 flex-1 flex-col'>
-            <WeekChart
-              buckets={stats.buckets}
-              today={stats.date}
-              selectedKey={selectedKey}
-              onSelect={setSelectedKey}
+            <Metric
+              variant='secondary'
+              label='累计'
+              seconds={stats.lifetimeWatchSeconds}
             />
           </div>
+          <WeekChart
+            buckets={stats.buckets}
+            today={stats.date}
+            selectedKey={selectedKey}
+            onSelect={setSelectedKey}
+          />
+          <HourStrip hours={hours} />
         </div>
       </section>
       <TopWorks week={stats} />

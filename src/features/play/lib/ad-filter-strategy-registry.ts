@@ -1,21 +1,14 @@
-export type ServerAdFilterSignal =
+export type AdFilterSignal =
   | 'extinf-pattern'
   | 'local-duration-shift'
   | 'host-anomaly'
   | 'periodic-duration-profile'
-  | 'short-edge-blocks'
-  | 'bitrate-fallback';
-
-export type AdFilterExecution = 'client' | 'server';
+  | 'short-edge-blocks';
 
 export interface SourceAdFilterStrategy {
   id: string;
-  version: number;
-  execution: AdFilterExecution;
-  server?: {
-    signals: readonly ServerAdFilterSignal[];
-    timeline: 'preserve' | 'continuous-periodic';
-  };
+  signals: readonly AdFilterSignal[];
+  timeline: 'preserve' | 'continuous-periodic';
 }
 
 const SOURCE_AD_FILTER_STRATEGIES: Readonly<
@@ -23,19 +16,14 @@ const SOURCE_AD_FILTER_STRATEGIES: Readonly<
 > = {
   rycj: {
     id: 'rycj-periodic-blocks',
-    version: 4,
-    execution: 'server',
-    server: {
-      signals: [
-        'extinf-pattern',
-        'local-duration-shift',
-        'host-anomaly',
-        'periodic-duration-profile',
-        'short-edge-blocks',
-        'bitrate-fallback',
-      ],
-      timeline: 'continuous-periodic',
-    },
+    signals: [
+      'extinf-pattern',
+      'local-duration-shift',
+      'host-anomaly',
+      'periodic-duration-profile',
+      'short-edge-blocks',
+    ],
+    timeline: 'continuous-periodic',
   },
 };
 
@@ -49,24 +37,4 @@ export function getSourceAdFilterStrategy(
 
 export function getRegisteredAdFilterSources(): string[] {
   return Object.keys(SOURCE_AD_FILTER_STRATEGIES);
-}
-
-export function shouldFilterAdsOnClient(sourceKey: string): boolean {
-  return getSourceAdFilterStrategy(sourceKey)?.execution !== 'server';
-}
-
-export function shouldRunServerAdFilter(
-  sourceKey: string | null | undefined,
-): boolean {
-  const strategy = getSourceAdFilterStrategy(sourceKey);
-  return strategy?.execution === 'server' && !!strategy.server;
-}
-
-export function getAdFilterCacheNamespace(
-  sourceKey: string | null | undefined,
-): string {
-  const normalized = sourceKey?.trim().toLowerCase() || 'unknown';
-  const strategy = getSourceAdFilterStrategy(normalized);
-  if (!strategy) return `${normalized}:raw@1`;
-  return `${normalized}:${strategy.id}@${strategy.version}`;
 }

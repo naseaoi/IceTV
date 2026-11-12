@@ -16,7 +16,7 @@ import {
 } from '@/features/play/hooks/usePlayProgress';
 import { PLAY_CHECKPOINT_KEY } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { getAllPlayRecords, savePlayRecord } from '@/lib/db.client';
+import { getPlayRecordsByKeys, savePlayRecord } from '@/lib/db.client';
 import { savePlayIntent } from '@/lib/play-intent';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 
@@ -25,7 +25,7 @@ jest.mock('@/lib/db.client', () => ({
   generateStorageKey: jest.fn(
     (source: string, id: string) => `${source}+${id}`,
   ),
-  getAllPlayRecords: jest.fn(),
+  getPlayRecordsByKeys: jest.fn(),
   savePlayRecord: jest.fn(),
 }));
 
@@ -526,8 +526,8 @@ describe('usePlayProgress helpers', () => {
 });
 
 describe('usePlayProgress 历史恢复与起播握手', () => {
-  const mockedGetAllPlayRecords = getAllPlayRecords as jest.MockedFunction<
-    typeof getAllPlayRecords
+  const mockedGetAllPlayRecords = getPlayRecordsByKeys as jest.MockedFunction<
+    typeof getPlayRecordsByKeys
   >;
   const detail: SearchResult = {
     id: 'id-a',
@@ -578,6 +578,7 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
       historyRestoreGateRef: { current: gate },
     };
     const setCurrentEpisodeIndex = jest.fn();
+    const onRestoreEpisodeChange = jest.fn();
     const cleanupPlayer = jest.fn();
     const view = renderHook(
       ({ currentDetail }: { currentDetail: SearchResult }) =>
@@ -589,11 +590,12 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
           currentEpisodeIndex: episodeIndex,
           detail: currentDetail,
           setCurrentEpisodeIndex,
+          onRestoreEpisodeChange,
           cleanupPlayer,
         }),
       { initialProps: { currentDetail: detail } },
     );
-    return { ...view, refs, setCurrentEpisodeIndex };
+    return { ...view, refs, setCurrentEpisodeIndex, onRestoreEpisodeChange };
   }
 
   // 只冲刷微任务不推进计时器，放行只可能来自历史恢复的信号
@@ -655,18 +657,43 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     expect(mockedGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
+  it('历史等待超时后迟到换集，在更新集索引前开启新播放意图', async () => {
+    let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = new Promise((resolve) => {
+      resolveRecords = resolve;
+    });
+    const { refs, setCurrentEpisodeIndex, onRestoreEpisodeChange } =
+      renderHistoryRestore(gate);
+    const released = trackRelease(gate);
+    await act(async () => jest.advanceTimersByTime(1_000));
+    expect(released).toHaveBeenCalledTimes(1);
+    expect(onRestoreEpisodeChange).not.toHaveBeenCalled();
+    onRestoreEpisodeChange.mockImplementation(() => {
+      expect(refs.currentEpisodeIndexRef.current).toBe(0);
+      expect(setCurrentEpisodeIndex).not.toHaveBeenCalled();
+    });
+    resolveRecords({ [recordKey]: recordAtEpisode9 });
+    await flushMicrotasks();
+    expect(onRestoreEpisodeChange).toHaveBeenCalledTimes(1);
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledWith(8);
+    expect(refs.resumeTimeRef.current).toBe(600);
+  });
+
   it('当前集已是续播的集时不再换集，续播时间照样写入', async () => {
     mockedGetAllPlayRecords.mockResolvedValue({
       [recordKey]: recordAtEpisode9,
     });
     const gate = createHistoryRestoreGate();
-    const { refs, setCurrentEpisodeIndex } = renderHistoryRestore(gate, 8);
+    const { refs, setCurrentEpisodeIndex, onRestoreEpisodeChange } =
+      renderHistoryRestore(gate, 8);
     const released = trackRelease(gate);
 
     await flushMicrotasks();
 
     expect(released).toHaveBeenCalledTimes(1);
     expect(setCurrentEpisodeIndex).not.toHaveBeenCalled();
+    expect(onRestoreEpisodeChange).not.toHaveBeenCalled();
     expect(refs.resumeTimeRef.current).toBe(600);
     expect(refs.resumeModeRef.current).toBe('history');
   });

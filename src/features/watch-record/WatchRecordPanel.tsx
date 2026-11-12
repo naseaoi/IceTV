@@ -31,6 +31,7 @@ import {
 } from '@/lib/db.client';
 import { showToast } from '@/lib/toast';
 import type { Favorite, FavoriteWatchStatus, VideoReview } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 import { REVIEW_CONTENT_MAX_LENGTH } from '@/lib/video-reviews';
 import {
@@ -300,68 +301,82 @@ function WatchRecordForm({
       if (successMessage) showToast(successMessage, 'success');
       onDirtyChange(false);
       onDone();
-    } catch {
-      setError('保存失败，请重试');
+    } catch (error) {
+      if (!isAbortError(error))
+        setError(getErrorMessage(error, '保存失败，请重试'));
       setSaving(false);
+      throw error;
     }
   };
 
   const save = () =>
-    run(async () => {
-      let inList = Boolean(entry);
-      if (statusDirty) {
-        const status = choice === 'auto' ? null : choice;
-        const watchedAt =
-          choice === 'completed'
-            ? (fromDateInputValue(watchedDate) ?? Date.now())
-            : undefined;
-        if (entry) {
-          await batchFavorites({
-            action: 'set-status',
-            target: { keys: [entry.key] },
-            watchStatus: status,
-            ...(watchedAt !== undefined ? { watchedAt } : {}),
-          });
-        } else if (status) {
-          await saveFavorite(
-            target.source,
-            target.id,
-            buildFavorite({
-              watch_status: status,
-              ...(watchedAt !== undefined ? { watched_at: watchedAt } : {}),
-            }),
-          );
-          inList = true;
+    run(
+      async () => {
+        let inList = Boolean(entry);
+        if (statusDirty) {
+          const status = choice === 'auto' ? null : choice;
+          const watchedAt =
+            choice === 'completed'
+              ? (fromDateInputValue(watchedDate) ?? Date.now())
+              : undefined;
+          if (entry) {
+            await batchFavorites({
+              action: 'set-status',
+              target: { keys: [entry.key] },
+              watchStatus: status,
+              ...(watchedAt !== undefined ? { watchedAt } : {}),
+            });
+          } else if (status) {
+            await saveFavorite(
+              target.source,
+              target.id,
+              buildFavorite({
+                watch_status: status,
+                ...(watchedAt !== undefined ? { watched_at: watchedAt } : {}),
+              }),
+            );
+            inList = true;
+          }
         }
-      }
-      if (!reviewDirty) return;
-      if (reviewEmpty) {
-        if (review)
-          await deleteVideoReview(review.title, review.year, review.title_norm);
-        return;
-      }
-      await saveVideoReview({
-        title: target.title,
-        year,
-        cover: target.cover,
-        douban_id: target.doubanId ?? 0,
-        source_key: catalog ? '' : generateStorageKey(target.source, target.id),
-        rating,
-        content: trimmed,
-        is_public: isPublic,
-        spoiler,
-      });
-      // 评价独立于收藏：作品不在片单时一并加入，状态由评分自动推导
-      if (!inList) {
-        await saveFavorite(target.source, target.id, buildFavorite());
-      }
-    }, '观看记录已保存');
+        if (!reviewDirty) return;
+        if (reviewEmpty) {
+          if (review)
+            await deleteVideoReview(
+              review.title,
+              review.year,
+              review.title_norm,
+            );
+          return;
+        }
+        await saveVideoReview({
+          title: target.title,
+          year,
+          cover: target.cover,
+          douban_id: target.doubanId ?? 0,
+          source_key: catalog
+            ? ''
+            : generateStorageKey(target.source, target.id),
+          rating,
+          content: trimmed,
+          is_public: isPublic,
+          spoiler,
+        });
+        // 评价独立于收藏：作品不在片单时一并加入，状态由评分自动推导
+        if (!inList) {
+          await saveFavorite(target.source, target.id, buildFavorite());
+        }
+      },
+      target.feedback?.watchStateVisible ? undefined : '观看记录已保存',
+    );
 
   const removeEntry = () =>
-    run(async () => {
-      const parsed = entry && parseStorageKey(entry.key);
-      if (parsed) await deleteFavorite(parsed.source, parsed.id);
-    });
+    run(
+      async () => {
+        const parsed = entry && parseStorageKey(entry.key);
+        if (parsed) await deleteFavorite(parsed.source, parsed.id);
+      },
+      target.feedback?.favoriteVisible ? undefined : '已移出片单',
+    );
 
   return (
     <>
@@ -369,7 +384,7 @@ function WatchRecordForm({
         className='min-h-0 flex-1 space-y-4 overflow-y-auto px-5 pb-5'
         onSubmit={(event) => {
           event.preventDefault();
-          if (canSave) void save();
+          if (canSave) void save().catch(() => {});
         }}
       >
         <section>
@@ -488,7 +503,7 @@ function WatchRecordForm({
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                   event.preventDefault();
-                  if (canSave) void save();
+                  if (canSave) void save().catch(() => {});
                 }
               }}
               className={`block w-full resize-none border-0 bg-gray-900/[0.04] px-3.5 pb-6 pt-3 text-sm leading-relaxed text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:placeholder:text-gray-500 dark:focus:bg-gray-900 ${CONTENT_FIELD_CLASS}`}
@@ -520,7 +535,7 @@ function WatchRecordForm({
         <button
           type='button'
           disabled={!canSave}
-          onClick={() => void save()}
+          onClick={() => void save().catch(() => {})}
           className={SAVE_BUTTON_CLASS}
         >
           {saving && <Spinner className='h-3 w-3' />}
@@ -537,7 +552,6 @@ function WatchRecordForm({
         confirmText='移出'
         onCancel={() => setConfirmRemove(false)}
         onConfirm={async () => {
-          setConfirmRemove(false);
           await removeEntry();
         }}
       />

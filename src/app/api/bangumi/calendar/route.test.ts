@@ -9,6 +9,7 @@ type CalendarRouteModule = typeof import('./route');
 function createRequest(url: string): NextRequest {
   return {
     nextUrl: new URL(url),
+    headers: new Headers(),
   } as NextRequest;
 }
 
@@ -18,34 +19,25 @@ async function loadRoute(getBangumiCalendarData: jest.Mock) {
   jest.doMock('@/features/bangumi/lib/bangumi', () => ({
     getBangumiCalendarData,
   }));
-  jest.doMock('@/lib/api-auth', () => ({
-    requireActiveUser: jest
-      .fn()
-      .mockResolvedValue({ username: 'demo', isOwner: false, role: 'user' }),
-    isGuardFailure: (result: object) => 'response' in result,
-  }));
   return require('./route') as CalendarRouteModule;
 }
 
 describe('bangumi calendar route', () => {
   afterEach(() => {
     jest.dontMock('@/features/bangumi/lib/bangumi');
-    jest.dontMock('@/lib/api-auth');
     jest.restoreAllMocks();
   });
 
-  it('returns 400 for unsupported source', async () => {
-    const getBangumiCalendarData = jest.fn();
+  it('returns calendar data with a shareable cache header', async () => {
+    const getBangumiCalendarData = jest.fn().mockResolvedValue([]);
     const { GET } = await loadRoute(getBangumiCalendarData);
 
     const response = await GET(
-      createRequest('http://localhost/api/bangumi/calendar?source=client'),
+      createRequest('http://localhost/api/bangumi/calendar'),
     );
-    const payload = await response.json();
 
-    expect(response.status).toBe(400);
-    expect(payload).toEqual({ error: '不支持的 Bangumi 数据源' });
-    expect(getBangumiCalendarData).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toMatch(/^public,/);
   });
 
   it('returns 502 when calendar loading fails', async () => {

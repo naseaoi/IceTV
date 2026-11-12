@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { waitForSharedLoad } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getCachedDetail } from '@/lib/detail-cache';
 import { searchFirstPageFromApi } from '@/lib/downstream';
+import { isGirigiriSource } from '@/lib/downstream-sources/giri';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { isXgcartoonSource } from '@/lib/downstream-sources/xgcartoon';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
   type SourceHealthTier,
+  SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
   SOURCE_HEALTH_TIER_PRIORITY,
 } from '@/lib/source-quality-policy';
-import {
-  getSourceRouteCapabilities,
-  resolveSourceRoute,
-} from '@/lib/source-route-capability.server';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
 
@@ -23,6 +24,7 @@ export const runtime = 'nodejs';
 const QUICK_SOURCE_LIMIT = 10;
 const QUICK_SOURCE_CONCURRENCY = 4;
 const QUICK_DETAIL_LIMIT_PER_SOURCE = 2;
+const QUICK_SOURCE_TIMEOUT_MS = 20_000;
 // 中转源先解析出可播详情时，最多再等这么久让同等健康度的直连源完成，省下分片中转流量
 const QUICK_RELAY_GRACE_MS = 1_500;
 
@@ -59,10 +61,9 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
-  const [availableSites, sourceHealthTiers, capabilities] = await Promise.all([
-    getAvailableApiSites(guardResult.username, config),
+  const [availableSites, sourceHealthTiers] = await Promise.all([
+    getAvailableApiSites(guardResult.username, config, guardResult.userAccess),
     getSourceHealthTiers(),
-    getSourceRouteCapabilities(),
   ]);
   const proxyModes = new Map(
     config.SourceConfig.map((source) => [source.key, source.proxyMode]),
@@ -71,26 +72,32 @@ export async function GET(request: NextRequest) {
     availableSites.map((site) => ({
       ...site,
       healthRank: healthRank(sourceHealthTiers.get(site.key)),
-      relay:
-        resolveSourceRoute(proxyModes.get(site.key), capabilities, site.key) ===
-        'server',
+      relay: proxyModes.get(site.key) === 'server',
     })),
   ).slice(0, QUICK_SOURCE_LIMIT);
   const controller = new AbortController();
+  const cancel = () => controller.abort(request.signal.reason);
+  if (request.signal.aborted) cancel();
+  else request.signal.addEventListener('abort', cancel, { once: true });
 
-  const payload = await resolveQuickPlayableSource({
-    apiSites: quickSites,
-    query,
-    year,
-    searchType,
-    disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-    signal: controller.signal,
-    onResolved: () => controller.abort(),
-  });
+  try {
+    const payload = await resolveQuickPlayableSource({
+      apiSites: quickSites,
+      query,
+      year,
+      searchType,
+      disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+      signal: controller.signal,
+      onResolved: () => controller.abort(),
+    });
 
-  return NextResponse.json(payload, {
-    headers: { 'Cache-Control': 'private, no-store' },
-  });
+    return NextResponse.json(payload, {
+      headers: { 'Cache-Control': 'private, no-store' },
+    });
+  } finally {
+    request.signal.removeEventListener('abort', cancel);
+    controller.abort();
+  }
 }
 
 async function resolveQuickPlayableSource({
@@ -110,7 +117,7 @@ async function resolveQuickPlayableSource({
   signal: AbortSignal;
   onResolved: () => void;
 }): Promise<QuickSearchPayload> {
-  if (apiSites.length === 0) {
+  if (signal.aborted || apiSites.length === 0) {
     return { detail: null, sources: [], searchedSources: 0 };
   }
 
@@ -128,13 +135,30 @@ async function resolveQuickPlayableSource({
       if (settled) return;
       settled = true;
       if (graceTimer) clearTimeout(graceTimer);
-      if (detail) onResolved();
+      signal.removeEventListener('abort', cancel);
+      onResolved();
+      if (detail) {
+        const site = apiSites.find(
+          (candidate) => candidate.key === detail.source,
+        );
+        // quick 快照不写入详情缓存；仅为胜者补全详情，避免输家继续回源。
+        if (
+          site &&
+          sources.includes(detail) &&
+          canStartFromSearch(site, detail)
+        ) {
+          void getCachedDetail(site, detail.id).catch(() => undefined);
+        }
+      }
       resolve({
         detail,
         sources: mergeQuickSources(detail ? [detail, ...sources] : sources),
         searchedSources,
       });
     };
+
+    const cancel = () => finish(null);
+    signal.addEventListener('abort', cancel, { once: true });
 
     const hasPendingDirectPeer = (relaySite: QuickSite) =>
       apiSites.some(
@@ -174,14 +198,24 @@ async function resolveQuickPlayableSource({
         running += 1;
         searchedSources += 1;
 
-        searchQuickSite({
-          site,
-          query,
-          year,
-          searchType,
-          disableYellowFilter,
+        const budget = createTimedAbortController(
           signal,
-        })
+          site.healthRank === healthRank('offline')
+            ? SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS
+            : QUICK_SOURCE_TIMEOUT_MS,
+        );
+        waitForSharedLoad(
+          () =>
+            searchQuickSite({
+              site,
+              query,
+              year,
+              searchType,
+              disableYellowFilter,
+              signal: budget.signal,
+            }),
+          budget.signal,
+        )
           .then((result) => {
             if (settled) return;
             sources.push(...result.sources);
@@ -189,6 +223,7 @@ async function resolveQuickPlayableSource({
           })
           .catch(() => undefined)
           .finally(() => {
+            budget.cleanup();
             running -= 1;
             completed.add(siteIndex);
             if (settled) return;
@@ -242,8 +277,15 @@ async function searchQuickSite({
     },
   );
 
+  const immediate = matchedSources.find((source) =>
+    canStartFromSearch(site, source),
+  );
+  if (immediate) return { detail: immediate, sources: matchedSources };
+
   for (const source of matchedSources.slice(0, QUICK_DETAIL_LIMIT_PER_SOURCE)) {
-    const playable = await fetchPlayableDetail(site, source);
+    if (signal.aborted) return { detail: null, sources: [] };
+    const playable = await fetchPlayableDetail(site, source, signal);
+    if (signal.aborted) return { detail: null, sources: [] };
     if (playable) {
       return { detail: playable, sources: matchedSources };
     }
@@ -255,12 +297,45 @@ async function searchQuickSite({
   };
 }
 
+function canStartFromSearch(site: ApiSite, source: SearchResult): boolean {
+  if (
+    isGirigiriSource(site) ||
+    isXgcartoonSource(site) ||
+    !source.id ||
+    source.source !== site.key ||
+    !source.title?.trim() ||
+    !source.source_name?.trim() ||
+    !source.poster?.trim() ||
+    !/^\d{4}$/.test(source.year) ||
+    source.episode_groups?.length ||
+    source.related_sources?.length ||
+    source.variant_label ||
+    !source.episodes?.length ||
+    source.episodes_titles?.length !== source.episodes.length ||
+    source.episodes_titles.some((title) => !title.trim())
+  ) {
+    return false;
+  }
+  return source.episodes.every((episode) => {
+    try {
+      const url = new URL(episode);
+      return (
+        (url.protocol === 'https:' || url.protocol === 'http:') &&
+        /\.(?:m3u8|mp4)$/i.test(url.pathname)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function fetchPlayableDetail(
   site: ApiSite,
   source: SearchResult,
+  signal: AbortSignal,
 ): Promise<SearchResult | null> {
   try {
-    const detail = await getCachedDetail(site, source.id);
+    const detail = await getCachedDetail(site, source.id, signal);
     if (!detail.episodes || detail.episodes.length === 0) return null;
     return {
       ...source,

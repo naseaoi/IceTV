@@ -328,7 +328,7 @@ describe('useLivePlayer playback failure', () => {
       buildLiveM3u8ProxyUrl({
         rawUrl: nextChannel.url,
         sourceKey: source.key,
-        route: 'server',
+        route: 'browser',
       }),
     );
     expect(result.current.playbackFailed).toBe(false);
@@ -356,5 +356,134 @@ describe('useLivePlayer playback failure', () => {
     );
     expect(retriedHls.recoverMediaError).toHaveBeenCalledTimes(1);
     expect(result.current.playbackFailed).toBe(false);
+  });
+});
+
+describe('useLivePlayer automatic route', () => {
+  let mediaSpies: jest.SpyInstance[] = [];
+  let hostIndex = 0;
+
+  beforeEach(() => {
+    MockArtplayer.instances = [];
+    MockHls.instances = [];
+    mediaSpies = [
+      jest
+        .spyOn(HTMLMediaElement.prototype, 'play')
+        .mockImplementation(() => Promise.resolve()),
+      jest
+        .spyOn(HTMLMediaElement.prototype, 'pause')
+        .mockImplementation(() => {}),
+      jest
+        .spyOn(HTMLMediaElement.prototype, 'load')
+        .mockImplementation(() => {}),
+      jest.spyOn(console, 'error').mockImplementation(() => {}),
+      jest.spyOn(console, 'debug').mockImplementation(() => {}),
+    ];
+  });
+
+  afterEach(() => {
+    cleanup();
+    mediaSpies.forEach((spy) => spy.mockRestore());
+  });
+
+  // 回落记忆按主机保存在本标签页，每个用例用独立主机互不影响
+  function renderFreshChannel() {
+    hostIndex += 1;
+    const freshChannel = {
+      ...channel,
+      url: `https://direct-${hostIndex}.example/live.m3u8`,
+    };
+    const setIsVideoLoading = jest.fn();
+    const hook = renderHook(() =>
+      useLivePlayer({
+        videoUrl: freshChannel.url,
+        currentChannel: freshChannel,
+        currentSourceRef: { current: source },
+        loading: false,
+        artRef: { current: document.createElement('div') },
+        setIsVideoLoading,
+        setUnsupportedType: jest.fn(),
+      }),
+    );
+    return { ...hook, freshChannel };
+  }
+
+  function routeUrl(rawUrl: string, route: 'browser' | 'server') {
+    return buildLiveM3u8ProxyUrl({ rawUrl, sourceKey: source.key, route });
+  }
+
+  function emitNetworkError(hls: MockHls, url: string, fatal = false) {
+    act(() => {
+      hls.emit(MockHls.Events.ERROR, {
+        type: MockHls.ErrorTypes.NETWORK_ERROR,
+        details: 'fragLoadError',
+        fatal,
+        frag: { sn: 1, type: 'main', url },
+      });
+    });
+  }
+
+  it('falls back to the server when a direct request fails before playback', async () => {
+    const { freshChannel } = renderFreshChannel();
+    const { player, hls } = await waitForPlayer(1);
+    expect(player.option.url).toBe(routeUrl(freshChannel.url, 'browser'));
+
+    emitNetworkError(hls, 'https://cdn.example/seg-1.ts');
+
+    await waitFor(() =>
+      expect((player as unknown as { switch?: string }).switch).toBe(
+        routeUrl(freshChannel.url, 'server'),
+      ),
+    );
+  });
+
+  it('keeps the direct route for transient errors after direct playback works', async () => {
+    const { freshChannel } = renderFreshChannel();
+    const { player, hls } = await waitForPlayer(1);
+
+    act(() => {
+      hls.emit(MockHls.Events.FRAG_LOADED, { frag: { sn: 1, type: 'main' } });
+    });
+    emitNetworkError(hls, 'https://cdn.example/seg-2.ts');
+
+    expect((player as unknown as { switch?: string }).switch).toBeUndefined();
+    expect(player.option.url).toBe(routeUrl(freshChannel.url, 'browser'));
+  });
+
+  it('does not treat failures of proxied requests as direct failures', async () => {
+    renderFreshChannel();
+    const { player, hls } = await waitForPlayer(1);
+
+    emitNetworkError(
+      hls,
+      `${window.location.origin}/api/proxy/m3u8?url=https%3A%2F%2Fx`,
+    );
+
+    expect((player as unknown as { switch?: string }).switch).toBeUndefined();
+  });
+
+  it('stops with a relay-paused failure instead of retrying', async () => {
+    const { result } = renderFreshChannel();
+    const { hls } = await waitForPlayer(1);
+
+    act(() => {
+      hls.emit(MockHls.Events.ERROR, {
+        type: MockHls.ErrorTypes.NETWORK_ERROR,
+        details: 'fragLoadError',
+        fatal: false,
+        frag: {
+          sn: 1,
+          type: 'main',
+          url: `${window.location.origin}/api/proxy/segment?url=x`,
+        },
+        networkDetails: {
+          getResponseHeader: (name: string) =>
+            name === 'x-icetv-relay-paused' ? '1' : null,
+        },
+      });
+    });
+
+    expect(result.current.playbackFailed).toBe(true);
+    expect(result.current.relayPaused).toBe(true);
   });
 });

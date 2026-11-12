@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isSecureRequest } from '@/lib/auth.server';
+import { clearListCountCookiesOnResponse } from '@/lib/list-count-cookies';
 
 export const runtime = 'nodejs';
 
@@ -25,6 +26,8 @@ export async function POST(req: NextRequest) {
     httpOnly: false,
     secure,
   });
+
+  clearListCountCookiesOnResponse(response);
 
   return response;
 }

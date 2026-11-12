@@ -1,15 +1,12 @@
 'use client';
 
-import {
-  dedupePlaybackSessionsByTitle,
-  filterPlaybackHistorySessions,
-} from '@/features/playback-stats/lib/history';
 import type {
   PlaybackHistoryResponse,
   PlaybackPeriodStats,
   PlaybackPeriodType,
 } from '@/features/playback-stats/types';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { writeListCountCookie } from '@/lib/list-count-cookies';
 
 const PLAYBACK_HISTORY_PAGE_SIZE = 10;
 
@@ -28,6 +25,14 @@ let playbackHistoryCache: {
   data: PlaybackHistoryResponse;
 } | null = null;
 
+function setPlaybackHistoryCache(
+  username: string,
+  data: PlaybackHistoryResponse,
+): void {
+  playbackHistoryCache = { username, data };
+  writeListCountCookie('history_count', data.items.length);
+}
+
 export function getCachedPlaybackPeriodSnapshot(
   type: PlaybackPeriodType,
   date?: string,
@@ -40,20 +45,8 @@ export function getCachedPlaybackPeriodSnapshot(
 
 export function getCachedPlaybackHistorySnapshot(): PlaybackHistoryResponse | null {
   const username = getAuthInfoFromBrowserCookie()?.username;
-  const snapshot =
-    username && playbackHistoryCache?.username === username
-      ? playbackHistoryCache.data
-      : null;
-  return snapshot
-    ? {
-        items: dedupePlaybackSessionsByTitle(
-          filterPlaybackHistorySessions(snapshot.items),
-          {
-            mergeWatchSeconds: true,
-          },
-        ),
-        nextCursor: snapshot.nextCursor,
-      }
+  return username && playbackHistoryCache?.username === username
+    ? playbackHistoryCache.data
     : null;
 }
 
@@ -62,30 +55,16 @@ export function cachePlaybackHistorySnapshot(
 ): void {
   const username = getAuthInfoFromBrowserCookie()?.username;
   if (!username) return;
-  playbackHistoryCache = {
-    username,
-    data: {
-      items: dedupePlaybackSessionsByTitle(
-        filterPlaybackHistorySessions(snapshot.items),
-        {
-          mergeWatchSeconds: true,
-        },
-      ),
-      nextCursor: snapshot.nextCursor,
-    },
-  };
+  setPlaybackHistoryCache(username, snapshot);
 }
 
 export function removePlaybackHistorySnapshotItem(id: string): void {
   const username = getAuthInfoFromBrowserCookie()?.username;
   if (!username || playbackHistoryCache?.username !== username) return;
-  playbackHistoryCache = {
-    username,
-    data: {
-      items: playbackHistoryCache.data.items.filter((item) => item.id !== id),
-      nextCursor: playbackHistoryCache.data.nextCursor,
-    },
-  };
+  setPlaybackHistoryCache(username, {
+    items: playbackHistoryCache.data.items.filter((item) => item.id !== id),
+    nextCursor: playbackHistoryCache.data.nextCursor,
+  });
 }
 
 export async function getPlaybackPeriodStats(
@@ -112,7 +91,7 @@ export async function getPlaybackPeriodStats(
 }
 
 export async function getPlaybackHistory(
-  cursor?: number,
+  cursor?: string,
   keyword?: string,
   limit = PLAYBACK_HISTORY_PAGE_SIZE,
 ): Promise<PlaybackHistoryResponse> {
@@ -123,7 +102,7 @@ export async function getPlaybackHistory(
   const params = new URLSearchParams({
     limit: String(limit),
   });
-  if (cursor) params.set('cursor', String(cursor));
+  if (cursor) params.set('cursor', cursor);
   if (keyword) params.set('q', keyword);
 
   const response = await fetch(`/api/playback-stats/history?${params}`, {

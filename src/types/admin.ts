@@ -1,5 +1,7 @@
+import type { TrafficSettings } from '@/lib/host-traffic';
+
 export interface AdminConfig {
-  // 仅后台响应、迁移与备份兼容；运行时配置由 configSelfCheck 剥离。
+  // 仅后台响应与旧数据迁移；运行时配置由 configSelfCheck 剥离。
   ConfigSubscribtion: {
     URL: string;
     AutoUpdate: boolean;
@@ -11,34 +13,28 @@ export interface AdminConfig {
     SiteName: string;
     SiteIcon: string;
     Announcement: string;
-    AnnouncementVersion?: string;
-    AnnouncementPublishedAt?: number;
     FooterText: string;
     EnableLiveEntry: boolean;
     LiveAccess?: 'all' | 'groups';
     DefaultAggregateSearch: boolean;
     EnableOptimization: boolean;
-    LiveDirectConnect: boolean;
     AutoSwitchSource: boolean;
     SearchDownstreamMaxPage: number;
     SiteInterfaceCacheTime: number;
     VodPageTimeoutSeconds: number;
     VodFragmentTimeoutSeconds: number;
     PlaybackHistoryPageSize: number;
-    PlaybackHistoryLimit: number;
     SearchHistoryLimit: number;
     SearchRequestTimeoutSeconds: number;
     SourceFailureCooldownSeconds: number;
     ContinueWatchingLimit: number;
     CoverImageCacheSize: number;
     SourceCoverProxyMode?: 'auto' | 'browser' | 'server';
-    DataImportPlaybackSessionsLimit: number;
     LivePrecheckTimeoutSeconds: number;
     ProxyRequestTimeoutSeconds: number;
     ImageProxyTimeoutSeconds: number;
     UpstreamSearchConcurrency: number;
     DoubanProxyType: string;
-    BangumiDataSource: string;
     DoubanImageProxyType: string;
     DisableYellowFilter: boolean;
     FluidSearch: boolean;
@@ -46,6 +42,11 @@ export interface AdminConfig {
     EnableUserDanmaku: boolean;
     DanmakuEpisodeLimit: number;
     DanmakuRequestTimeoutSeconds: number;
+    UpstreamProxyPoolSegments?: boolean;
+    // 仅后台响应：服务端是否配置了 UPSTREAM_PROXY_POOL
+    UpstreamProxyPoolConfigured?: boolean;
+    // 仅后台响应：公告条数，供骨架按实际行数占位
+    AnnouncementCount?: number;
   };
   UserConfig: {
     TotalUsers?: number;
@@ -58,6 +59,8 @@ export interface AdminConfig {
     }[];
     OpenRegister?: boolean;
     RequireInviteCode?: boolean;
+    LinuxDo?: LinuxDoLoginSettings;
+    LinuxDoConfigured?: boolean;
     DefaultUserGroup?: string;
     inviteCodeCount?: number;
     activeInviteCodeCount?: number;
@@ -100,13 +103,21 @@ export interface AdminConfig {
     ua?: string;
     epg?: string;
     from: 'config' | 'custom';
-    // 仅响应与旧备份兼容，真相源是 live_source_state。
+    // 仅后台响应与旧数据迁移，真相源是 live_source_state。
     channelNumber?: number;
     disabled?: boolean;
   }[];
+  TrafficConfig?: TrafficSettings;
 }
 
 export interface AdminConfigResult {
   Role: 'owner' | 'admin';
   Config: AdminConfig;
+}
+
+export type LinuxDoTrustLevel = 0 | 1 | 2 | 3 | 4;
+
+export interface LinuxDoLoginSettings {
+  Enabled: boolean;
+  MinTrustLevel: LinuxDoTrustLevel;
 }

@@ -9,6 +9,15 @@ function createFragments(count: number) {
   }));
 }
 
+const HEALTHY_BUFFER = 30;
+
+function okFetcher(requestedUrls: string[] = []) {
+  return jest.fn(async (url: string) => {
+    requestedUrls.push(url);
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  });
+}
+
 describe('VOD segment prebuffer', () => {
   it('prefetches a bounded xigua 720p window after the playback head', async () => {
     const requestedUrls: string[] = [];
@@ -22,6 +31,8 @@ describe('VOD segment prebuffer', () => {
     const controller = createVodSegmentPrebufferController({
       fetcher,
       getCurrentTime: () => 40,
+      getForwardBufferSeconds: () => HEALTHY_BUFFER,
+      isSaveData: () => false,
       isServerProxy: () => false,
       sourceKey: 'xigua',
     });
@@ -52,6 +63,8 @@ describe('VOD segment prebuffer', () => {
     const controller = createVodSegmentPrebufferController({
       fetcher,
       getCurrentTime: () => currentTime,
+      getForwardBufferSeconds: () => HEALTHY_BUFFER,
+      isSaveData: () => false,
       isServerProxy: () => false,
       sourceKey: 'xigua',
     });
@@ -77,6 +90,8 @@ describe('VOD segment prebuffer', () => {
     const baseOptions = {
       fetcher,
       getCurrentTime: () => 0,
+      getForwardBufferSeconds: () => HEALTHY_BUFFER,
+      isSaveData: () => false,
       isServerProxy: () => false,
       sourceKey: 'xigua',
     };
@@ -130,6 +145,8 @@ describe('VOD segment prebuffer', () => {
     const controller = createVodSegmentPrebufferController({
       fetcher,
       getCurrentTime: () => 0,
+      getForwardBufferSeconds: () => HEALTHY_BUFFER,
+      isSaveData: () => false,
       isServerProxy: () => false,
       sourceKey: 'xigua',
     });
@@ -161,6 +178,8 @@ describe('VOD segment prebuffer', () => {
     const controller = createVodSegmentPrebufferController({
       fetcher,
       getCurrentTime: () => 0,
+      getForwardBufferSeconds: () => HEALTHY_BUFFER,
+      isSaveData: () => false,
       isServerProxy: () => false,
       sourceKey: 'xigua',
     });
@@ -177,5 +196,86 @@ describe('VOD segment prebuffer', () => {
       attempted: 7,
       succeeded: 0,
     });
+  });
+
+  it('播放器缓冲到预缓冲窗口起点前不发请求，之后随进度开始', async () => {
+    let forwardBuffer = 0;
+    const fetcher = okFetcher();
+    const controller = createVodSegmentPrebufferController({
+      fetcher,
+      getCurrentTime: () => 0,
+      getForwardBufferSeconds: () => forwardBuffer,
+      isSaveData: () => false,
+      isServerProxy: () => false,
+      sourceKey: 'xigua',
+    });
+
+    expect(
+      controller.handleLevelLoaded({
+        fragments: createFragments(50),
+        levelHeight: 720,
+      }),
+    ).toBe(false);
+    expect(controller.handlePlaybackProgress()).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    forwardBuffer = 12;
+    expect(controller.handlePlaybackProgress()).toBe(true);
+    await expect(controller.waitForIdle()).resolves.toEqual({
+      attempted: 18,
+      succeeded: 18,
+    });
+  });
+
+  it('缓冲回落时停止补发队列，恢复后继续', async () => {
+    let forwardBuffer = HEALTHY_BUFFER;
+    const requestedUrls: string[] = [];
+    const fetcher = okFetcher(requestedUrls);
+    const controller = createVodSegmentPrebufferController({
+      fetcher,
+      getCurrentTime: () => 0,
+      getForwardBufferSeconds: () => forwardBuffer,
+      isSaveData: () => false,
+      isServerProxy: () => false,
+      sourceKey: 'xigua',
+    });
+    controller.handleLevelLoaded({
+      fragments: createFragments(50),
+      levelHeight: 720,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+
+    forwardBuffer = 2;
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+
+    forwardBuffer = HEALTHY_BUFFER;
+    controller.handlePlaybackProgress();
+    await expect(controller.waitForIdle()).resolves.toEqual({
+      attempted: 18,
+      succeeded: 18,
+    });
+    expect(new Set(requestedUrls).size).toBe(18);
+  });
+
+  it('省流量模式下不预缓冲', () => {
+    const fetcher = okFetcher();
+    const controller = createVodSegmentPrebufferController({
+      fetcher,
+      getCurrentTime: () => 0,
+      getForwardBufferSeconds: () => HEALTHY_BUFFER,
+      isSaveData: () => true,
+      isServerProxy: () => false,
+      sourceKey: 'xigua',
+    });
+    expect(
+      controller.handleLevelLoaded({
+        fragments: createFragments(50),
+        levelHeight: 720,
+      }),
+    ).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

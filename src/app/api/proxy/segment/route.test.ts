@@ -3,10 +3,12 @@
 import type Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
 
+import { resolveProxyUserAgent } from '@/app/api/proxy/utils';
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import { isServerRelayPaused } from '@/lib/host-traffic.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
@@ -15,9 +17,17 @@ jest.mock('@/lib/config', () => ({
   getConfigForRead: jest.fn(async () => ({ SiteConfig: {} })),
 }));
 jest.mock('@/lib/api-auth', () => ({ getOptionalActiveUser: jest.fn() }));
+jest.mock('@/lib/host-traffic.server', () => ({
+  isServerRelayPaused: jest.fn(async () => false),
+  serverRelayPausedResponse: jest.requireActual('@/lib/host-traffic.server')
+    .serverRelayPausedResponse,
+}));
 jest.mock('@/app/api/proxy/utils', () => ({
-  getProxySourceKey: () => null,
-  resolveProxyUserAgent: async () => 'IceTV Test',
+  getProxySourceKey: jest.requireActual('@/app/api/proxy/utils')
+    .getProxySourceKey,
+  resolveProxyUserAgent: jest.fn(
+    jest.requireActual('@/app/api/proxy/utils').resolveProxyUserAgent,
+  ),
 }));
 jest.mock('@/lib/proxy-auth', () => ({
   resolveProxyAuthorization: jest.fn(async () => ({
@@ -35,16 +45,23 @@ jest.mock('@/lib/url-guard', () => ({
   validateProxyUrlForRequest: (url: string) => mockValidateProxyUrl(url),
   fetchWithUrlGuard: (
     url: string,
-    init: { signal: AbortSignal; resourceContext: object },
-  ) =>
-    require('@/lib/upstream-resource-guard.server').withUpstreamResponse(
+    init: {
+      signal: AbortSignal;
+      resourceContext: object;
+      useProxyPool: boolean;
+    },
+  ) => {
+    mockFetchOptions(init);
+    return require('@/lib/upstream-resource-guard.server').withUpstreamResponse(
       url,
       mockOrigin,
       { ...init.resourceContext, signal: init.signal },
-    ),
+    );
+  },
 }));
 
 const mockOrigin = jest.fn();
+const mockFetchOptions = jest.fn();
 const mockValidateProxyUrl = jest.fn();
 installStreamPolyfills();
 const { GET } =
@@ -69,6 +86,7 @@ describe('segment shared resource integration', () => {
       username: 'test-user',
     });
     (getOptionalActiveUser as jest.Mock).mockReset();
+    (isServerRelayPaused as jest.Mock).mockResolvedValue(false);
     storage = new LocalSqliteStorage(':memory:');
     jest
       .spyOn(db, 'getSharedResourceStore')
@@ -92,6 +110,76 @@ describe('segment shared resource integration', () => {
     else process.env.UPSTREAM_MEDIA_USER_CONCURRENCY = originalLimit;
     (storage as unknown as { db: Database.Database }).db.close();
   });
+
+  it.each([false, true])(
+    'reads config once and shares it with relay, UA and timeout (live=%s)',
+    async (live) => {
+      const config = {
+        SiteConfig: {
+          EnableLiveEntry: true,
+          LiveAccess: 'all',
+          ProxyRequestTimeoutSeconds: 17,
+        },
+        LiveConfig: [{ key: 'custom', ua: 'Custom UA' }],
+      };
+      (getConfigForRead as jest.Mock).mockClear().mockResolvedValue(config);
+      (resolveProxyUserAgent as jest.Mock).mockClear();
+      (isServerRelayPaused as jest.Mock).mockClear();
+      mockFetchOptions.mockClear();
+      const mediaRequest = request();
+      Object.assign(mediaRequest, {
+        url: `${mediaRequest.url}&source=custom&icetv-live=${live ? '1' : '0'}`,
+      });
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+      expect(getConfigForRead).toHaveBeenCalledTimes(1);
+      expect(isServerRelayPaused).toHaveBeenCalledWith(config);
+      expect(resolveProxyUserAgent).toHaveBeenCalledWith('custom', config);
+      expect(mockFetchOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timeoutMs: 17_000,
+          headers: expect.objectContaining({ 'User-Agent': 'Custom UA' }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    [false, true, true],
+    [false, false, false],
+    [false, undefined, false],
+    [true, true, false],
+  ])(
+    'routes segments through the upstream pool only for VOD when enabled (live=%s, toggle=%s)',
+    async (isLive, segmentsToggle, expected) => {
+      (getConfigForRead as jest.Mock).mockResolvedValue({
+        SiteConfig: {
+          EnableLiveEntry: true,
+          LiveAccess: 'all',
+          UpstreamProxyPoolSegments: segmentsToggle,
+        },
+      });
+      mockFetchOptions.mockClear();
+      const mediaRequest = request();
+      Object.assign(mediaRequest, {
+        url: `${mediaRequest.url}&icetv-live=${isLive ? '1' : '0'}`,
+      });
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe(
+        isLive
+          ? 'no-cache'
+          : 'private, max-age=3600, stale-while-revalidate=300',
+      );
+      await response.arrayBuffer();
+      expect(mockFetchOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          useProxyPool: expected,
+        }),
+      );
+    },
+  );
 
   it.each(['session', 'signature'])(
     'denies live segments without a granting group (%s)',
@@ -143,6 +231,14 @@ describe('segment shared resource integration', () => {
     expect(response.status).toBe(200);
     expect(getOptionalActiveUser).toHaveBeenCalledWith(liveRequest);
     await response.body!.cancel();
+  });
+
+  it('rejects relayed segments without contacting the origin while relay is paused', async () => {
+    (isServerRelayPaused as jest.Mock).mockResolvedValue(true);
+    const response = await GET(request());
+    expect(response.status).toBe(503);
+    expect(response.headers.get('x-icetv-relay-paused')).toBe('1');
+    expect(mockOrigin).not.toHaveBeenCalled();
   });
 
   it('retains 404 for disabled live segments', async () => {

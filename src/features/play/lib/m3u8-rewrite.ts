@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { appendProxySignature } from '@/lib/proxy-auth';
 import { createSwrCache } from '@/lib/server-cache';
-import { isSourceCorsCapable } from '@/lib/source-capability';
 import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 
 export type M3U8RewriteEntry = {
@@ -26,11 +25,13 @@ const SEGMENT_URI_TAG_PREFIXES = [
 ] as const;
 const KEY_URI_TAG_PREFIXES = ['#EXT-X-KEY:', '#EXT-X-SESSION-KEY:'] as const;
 
+const rewriteBudget = getServerCacheBudget('proxy-m3u8-rewrite');
+const rewriteInflight = new Map<string, Promise<string>>();
 const m3u8RewriteCache = createSwrCache<string>({
   name: 'proxy-m3u8-rewrite',
   freshMs: 30_000,
   staleMs: 30_000,
-  ...getServerCacheBudget('proxy-m3u8-rewrite'),
+  ...rewriteBudget,
 });
 
 export async function getRewrittenM3U8Content(
@@ -42,6 +43,7 @@ export async function getRewrittenM3U8Content(
   source: string | null,
   isLive: boolean,
   cacheable: boolean,
+  proxyPoolStickyKey?: string,
 ): Promise<string> {
   const cacheKey =
     cacheable &&
@@ -55,6 +57,7 @@ export async function getRewrittenM3U8Content(
           forceServer,
           source,
           isLive,
+          proxyPoolStickyKey,
         )
       : null;
 
@@ -63,9 +66,11 @@ export async function getRewrittenM3U8Content(
     if (cached) {
       return cached.value;
     }
+    const pending = rewriteInflight.get(cacheKey);
+    if (pending) return pending;
   }
 
-  const modifiedContent = await rewriteM3U8Content(
+  const task = rewriteM3U8Content(
     entry.content,
     getBaseUrl(entry.finalUrl),
     req,
@@ -73,13 +78,21 @@ export async function getRewrittenM3U8Content(
     forceServer,
     source,
     isLive,
-  );
+    proxyPoolStickyKey,
+  ).then((content) => {
+    if (cacheKey) m3u8RewriteCache.set(cacheKey, content);
+    return content;
+  });
 
-  if (cacheKey) {
-    m3u8RewriteCache.set(cacheKey, modifiedContent);
-  }
-
-  return modifiedContent;
+  // 只限制合并登记；满额的新键沿用独立改写，既有键仍共享在途任务。
+  if (!cacheKey || rewriteInflight.size >= rewriteBudget.maxSize) return task;
+  const pending = task.finally(() => {
+    if (rewriteInflight.get(cacheKey) === pending) {
+      rewriteInflight.delete(cacheKey);
+    }
+  });
+  rewriteInflight.set(cacheKey, pending);
+  return pending;
 }
 
 function getM3U8RewriteCacheKey(
@@ -90,6 +103,7 @@ function getM3U8RewriteCacheKey(
   forceServer: boolean,
   source: string | null,
   isLive: boolean,
+  proxyPoolStickyKey?: string,
 ): string {
   const requestUrl = new URL(req.url);
   const refererProtocol = getRequestProtocol(req);
@@ -104,6 +118,7 @@ function getM3U8RewriteCacheKey(
     forceServer ? 'force' : 'auto',
     source || '',
     isLive ? 'live' : 'vod',
+    proxyPoolStickyKey || '',
     requestUrl.searchParams.get('icetv-switch') || '',
     requestUrl.searchParams.get('icetv-user-switch') || '',
   ].join('\0');
@@ -129,6 +144,7 @@ async function rewriteM3U8Content(
   forceServer: boolean,
   source: string | null,
   isLive: boolean,
+  proxyPoolStickyKey?: string,
 ): Promise<string> {
   const protocol = getRequestProtocol(req);
   const host = req.headers.get('host');
@@ -136,9 +152,7 @@ async function rewriteM3U8Content(
   const requestSearchParams = new URL(req.url).searchParams;
   const switchAction = requestSearchParams.get('icetv-switch');
   const userSwitch = requestSearchParams.get('icetv-user-switch');
-  const corsCapable =
-    !isLive && source ? isSourceCorsCapable(source) === true : false;
-  const effectiveAllowCors = !forceServer && (allowCORS || corsCapable);
+  const effectiveAllowCors = !forceServer && allowCORS;
   const nestedPlaylistRoute: Record<string, string> = forceServer
     ? { forceServer: 'true' }
     : allowCORS
@@ -178,7 +192,7 @@ async function rewriteM3U8Content(
       if (userSwitch) {
         params.set('icetv-user-switch', userSwitch);
       }
-      await appendProxySignature(params, path, targetUrl);
+      await appendProxySignature(params, path, targetUrl, proxyPoolStickyKey);
       return `${proxyBase}/${path}?${params.toString()}`;
     })();
 

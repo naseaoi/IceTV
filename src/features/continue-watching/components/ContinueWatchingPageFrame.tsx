@@ -1,50 +1,38 @@
-import { History } from 'lucide-react';
+'use client';
+
 import type { ReactNode } from 'react';
 
-import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
+import {
+  LIBRARY_STICKY_TOOLBAR_CLASS,
+  LibraryEmptySkeleton,
+} from '@/components/LibraryPage';
+import { LibraryFilterChip } from '@/components/LibraryToolbar';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import SkeletonText from '@/components/SkeletonText';
-import {
-  CONTINUE_WATCHING_GRID_CLASS,
-  CONTINUE_WATCHING_GRID_ITEM_CLASS,
-} from '@/features/continue-watching/lib/layout';
+import { CONTINUE_WATCHING_GRID_CLASS } from '@/features/continue-watching/lib/layout';
 
-// 路由骨架与真实页面共用外壳，total 为 null 时显示计数占位
+// 路由骨架与真实页面共用外壳，切换时标题、工具栏与网格位置不跳动
 export function ContinueWatchingPageFrame({
-  total,
-  action,
+  toolbar,
   children,
 }: {
-  total: number | null;
-  action?: ReactNode;
+  toolbar: ReactNode;
   children: ReactNode;
 }) {
   return (
     <PageLayout
-      activePath='/'
+      activePath='/continue-watching'
       mobileHeader={{ title: '继续观看', showBack: true }}
     >
-      <div className='overflow-visible pb-2 pt-4 md:pt-8'>
+      <div className='pb-10 pt-1 md:pt-5'>
         <div className={PAGE_CONTAINER_CLASS}>
-          <div className='mb-6 flex items-center justify-between'>
-            <h1 className='hidden items-center gap-2 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:flex'>
-              <History className='h-6 w-6 text-orange-500' />
+          {/* 标题与筛选同一行并一起吸顶；窄屏标题在顶栏，这一行只剩筛选 */}
+          <div className={LIBRARY_STICKY_TOOLBAR_CLASS}>
+            <h1 className='hidden shrink-0 text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 md:mr-4 md:block'>
               继续观看
             </h1>
-            <div className='flex flex-1 items-center justify-between gap-4 sm:flex-none sm:justify-end'>
-              {total === null ? (
-                <SkeletonText
-                  className='text-sm'
-                  barClassName='h-4 w-16 rounded'
-                />
-              ) : (
-                <span className='text-sm text-gray-500 dark:text-gray-400'>
-                  {total} 部记录
-                </span>
-              )}
-              {action}
-            </div>
+            {toolbar}
           </div>
           {children}
         </div>
@@ -54,14 +42,34 @@ export function ContinueWatchingPageFrame({
 }
 
 export function ContinueWatchingGridSkeleton({ count }: { count: number }) {
+  if (count === 0) return <LibraryEmptySkeleton />;
   return (
-    <div className={CONTINUE_WATCHING_GRID_CLASS}>
-      {Array.from({ length: count || 8 }).map((_, index) => (
-        <HomePosterCardSkeleton
-          key={index}
-          className={CONTINUE_WATCHING_GRID_ITEM_CLASS}
-        />
+    <div aria-hidden='true' className={CONTINUE_WATCHING_GRID_CLASS}>
+      {Array.from({ length: count }, (_, index) => (
+        <ContinueWatchingCardSkeleton key={index} fluid />
       ))}
     </div>
+  );
+}
+
+export function ContinueWatchingToolbarSkeleton({ count }: { count: number }) {
+  return (
+    <>
+      <div aria-hidden='true' inert className='flex'>
+        <LibraryFilterChip
+          label='全部'
+          count={0}
+          active
+          loading
+          onClick={() => undefined}
+        />
+      </div>
+      {count > 0 && (
+        <div
+          aria-hidden='true'
+          className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
+        />
+      )}
+    </>
   );
 }

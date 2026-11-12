@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import PublicReviewContent from '@/components/PublicReviewContent';
 import type { PublicReviewReply, PublicVideoReview } from '@/lib/types';
+import { DisplayableError } from '@/lib/user-facing-error';
 import {
   deleteReviewReply,
   fetchReviewReplies,
@@ -60,7 +61,7 @@ it('点赞乐观更新，失败时恢复原有计数', async () => {
   expect(like).toHaveAttribute('aria-pressed', 'true');
   expect(like).toHaveTextContent('3');
   expect(like).toBeDisabled();
-  await act(async () => reject(new Error('点赞失败')));
+  await act(async () => reject(new DisplayableError('点赞失败')));
   expect(like).toHaveAttribute('aria-pressed', 'false');
   expect(like).toHaveTextContent('2');
   expect(screen.getByRole('alert')).toHaveTextContent('点赞失败');

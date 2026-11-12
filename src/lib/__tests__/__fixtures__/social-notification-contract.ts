@@ -2,10 +2,67 @@ import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract'
 import { messageSortKey } from '@/lib/message-cursor.server';
 import type { IStorage } from '@/lib/types';
 
+export async function assertFirstPublishedReview(
+  storage: IStorage,
+  prefix: string,
+) {
+  const author = `${prefix}-first-author`,
+    reader = `${prefix}-first-reader`;
+  await storage.ensureUserProfile(author);
+  await storage.ensureUserProfile(reader);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    await storage.setUserFollow(reader, author, true);
+    await storage.setVideoReview(author, {
+      ...videoReview,
+      is_public: false,
+      updated_at: 2000,
+    });
+    expect(await storage.getFollowReviewMessageCount(reader, 0, [], 3000)).toBe(
+      0,
+    );
+    await storage.setVideoReview(author, { ...videoReview, updated_at: 3000 });
+    const [first] = await storage.getFollowReviewMessages(reader, 0, [], 3000);
+    expect(first.createdAt).toBe(3000);
+    for (const patch of [
+      { content: '编辑', updated_at: 4000 },
+      { rating: 9, updated_at: 5000 },
+      { is_public: false, updated_at: 6000 },
+      { is_public: true, updated_at: 7000 },
+    ]) {
+      await storage.setVideoReview(author, { ...videoReview, ...patch });
+      expect(
+        await storage.getFollowReviewMessageCount(reader, 0, [first.id], 8000),
+      ).toBe(0);
+      expect(
+        await storage.getFollowReviewMessageCount(reader, 3000, [], 8000),
+      ).toBe(0);
+      const messages = await storage.getFollowReviewMessages(
+        reader,
+        0,
+        [],
+        8000,
+      );
+      if (patch.is_public === false) expect(messages).toEqual([]);
+      else expect(messages).toMatchObject([{ id: first.id, createdAt: 3000 }]);
+    }
+    await storage.setUserFollow(reader, author, false);
+    clock.mockReturnValue(7500);
+    await storage.setUserFollow(reader, author, true);
+    await storage.setVideoReview(author, { ...videoReview, updated_at: 9000 });
+    expect(
+      await storage.getFollowReviewMessageCount(reader, 0, [], 10000),
+    ).toBe(0);
+  } finally {
+    clock.mockRestore();
+  }
+}
+
 export async function assertSocialNotifications(
   storage: IStorage,
   prefix: string,
 ) {
+  await assertFirstPublishedReview(storage, prefix);
   const author = `${prefix}-author`,
     a = `${prefix}-a`,
     b = `${prefix}-b`;

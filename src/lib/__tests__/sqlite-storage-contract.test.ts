@@ -1,6 +1,19 @@
 /** @jest-environment node */
 
+import {
+  assertAnnualRecapMessages,
+  assertAnnualRecapStorage,
+} from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import {
+  assertBatchDeletePlayRecords,
+  assertBatchReadPlayRecords,
+  assertUpdatedPlayRecordPage,
+} from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
+import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
+import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
@@ -12,9 +25,21 @@ import type {
   SkipConfig,
   SourceRouteStatsItem,
 } from '../types';
+import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+it('批量读取隔离用户并省略缺失键', async () => {
+  await assertBatchReadPlayRecords(new LocalSqliteStorage(':memory:'));
+});
+
+it('公开年度报告存储与关注消息契约', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  await assertAnnualRecapStorage(storage);
+  await assertAnnualRecapMessages(storage);
+});
 
 describe('SQLite 邀请码批量事务契约', () => {
   inviteCodeBatchContract(() => new LocalSqliteStorage(':memory:'));
@@ -31,7 +56,6 @@ const adminConfig: AdminConfig = {
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
     EnableUserDanmaku: false,
@@ -39,7 +63,6 @@ const adminConfig: AdminConfig = {
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    BangumiDataSource: 'server',
     DoubanImageProxyType: 'direct',
     DisableYellowFilter: false,
     FluidSearch: true,
@@ -110,7 +133,6 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 describe('sqlite storage contract', () => {
   it('rolls back the complete health search batch on a later row failure', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -141,7 +163,6 @@ describe('sqlite storage contract', () => {
 
   it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -201,7 +222,6 @@ describe('sqlite storage contract', () => {
 
   it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-    await storage.clearAllData();
     const report = {
       source: ' alpha ',
       bucketDate: '2026-01-02',
@@ -247,34 +267,7 @@ describe('sqlite storage contract', () => {
     expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
       [],
     );
-    const seed = async () => {
-      await storage.recordSourcePlayReport(report);
-      await storage.recordSourceHealthSearchBatch([
-        {
-          source: 'alpha',
-          bucketDate: '2026-01-02',
-          okCount: 1,
-          emptyCount: 0,
-          errorCount: 0,
-          latencyMsSum: 1,
-          latencySamples: 1,
-        },
-      ]);
-    };
-    await seed();
-    await storage.clearAllData();
-    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
-    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
-      [],
-    );
-    await seed();
-    await storage.replaceAllData({
-      adminConfig: adminConfig,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
+    await storage.purgeSourceHealthBefore('2026-01-04');
     expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       [],
@@ -291,13 +284,25 @@ describe('sqlite storage contract', () => {
     await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
     await storage.setUserMessageState('demo-user', {
-      readAnnouncementId: 'announcement:v1',
+      announcementReadIds: ['announcement:5000:v1'],
     });
     await storage.setDanmakuEnabledPreference('demo-user', true);
     await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
+    await expect(
+      storage.getPlayRecord('other-user', 'source+1'),
+    ).resolves.toBeNull();
+    await expect(
+      storage.getPlayRecord('demo-user', 'source+missing'),
+    ).resolves.toBeNull();
+    await expect(
+      storage.getFavorite('other-user', 'source+1'),
+    ).resolves.toBeNull();
+    await expect(
+      storage.getSkipConfig('other-user', 'source', '1'),
+    ).resolves.toBeNull();
     await expect(storage.checkUserExist('demo-user')).resolves.toBe(true);
     await expect(
       storage.getPlayRecord('demo-user', 'source+1'),
@@ -308,15 +313,31 @@ describe('sqlite storage contract', () => {
     await expect(
       storage.getSkipConfig('demo-user', 'source', '1'),
     ).resolves.toEqual(skipConfig);
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
-      playbackSession,
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        source: playbackSession.source,
+        watch_seconds: playbackSession.watch_seconds,
+      }),
     ]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
       'first',
       'second',
     ]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
-      readAnnouncementId: 'announcement:v1',
+      announcementReadIds: ['announcement:5000:v1'],
+    });
+    await storage.updateUserMessageState('demo-user', {
+      announcementReadAt: 5000,
+    });
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      announcementReadAt: 5000,
+      announcementReadIds: [],
     });
     await expect(
       storage.getDanmakuEnabledPreference('demo-user'),
@@ -337,7 +358,13 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({});
     await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({});
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
     await expect(
@@ -356,51 +383,6 @@ describe('sqlite storage contract', () => {
     const activeAt = await storage.getUserLastLogin('fresh-user');
     expect(activeAt).not.toBeNull();
     expect(activeAt as number).toBeGreaterThanOrEqual(before);
-  });
-
-  it('导入快照后为缺活跃记录的用户补齐', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const before = Date.now();
-
-    await storage.replaceAllData({
-      adminConfig,
-      users: { 'legacy-user': 'hash' },
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
-
-    const activeAt = await storage.getUserLastLogin('legacy-user');
-    expect(activeAt).not.toBeNull();
-    expect(activeAt as number).toBeGreaterThanOrEqual(before);
-  });
-
-  it('导入搜索历史按配置上限保留，而非硬编码 20', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const keywords = Array.from({ length: 40 }, (_, i) => `kw-${i}`);
-
-    await storage.replaceAllData({
-      adminConfig: {
-        ...adminConfig,
-        SiteConfig: { ...adminConfig.SiteConfig, SearchHistoryLimit: 30 },
-      },
-      users: { 'demo-user': 'hash' },
-      userData: {
-        'demo-user': {
-          playRecords: {},
-          favorites: {},
-          searchHistory: keywords,
-          skipConfigs: {},
-          playbackSessions: {},
-        },
-      },
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
-
-    await expect(storage.getSearchHistory('demo-user')).resolves.toEqual(
-      keywords.slice(0, 30),
-    );
   });
 
   it('原子占用邀请码名额，超出上限即失败', async () => {
@@ -548,34 +530,12 @@ describe('sqlite storage contract', () => {
     await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
   });
 
-  it('searches playback sessions before applying the page limit', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const recentSession: PlaybackSession = {
-      ...playbackSession,
-      id: 'session_recent',
-      title: 'Recent Show',
-      started_at: 3000,
-    };
-    const matchedSession: PlaybackSession = {
-      ...playbackSession,
-      id: 'session_matched',
-      video_id: 'hidden-video',
-      title: 'Hidden Gem',
-      started_at: 2000,
-    };
-    const otherUserSession: PlaybackSession = {
-      ...matchedSession,
-      id: 'session_other_user',
-      started_at: 4000,
-    };
+  it('筛选分页与追更计数及客户端判定保持一致', async () => {
+    await assertUpdatedPlayRecordPage(new LocalSqliteStorage(':memory:'));
+  });
 
-    await storage.setPlaybackSession('demo-user', recentSession);
-    await storage.setPlaybackSession('demo-user', matchedSession);
-    await storage.setPlaybackSession('other-user', otherUserSession);
-
-    await expect(
-      storage.getPlaybackSessions('demo-user', { limit: 1, keyword: 'hidden' }),
-    ).resolves.toEqual([matchedSession]);
+  it('批量删除隔离用户并同步影响追更计数', async () => {
+    await assertBatchDeletePlayRecords(new LocalSqliteStorage(':memory:'));
   });
 
   it('paginates play records by save time', async () => {
@@ -613,7 +573,7 @@ describe('sqlite storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
-  it('paginates favorites with matching play progress', async () => {
+  it('收藏库按指定条数分页并关联播放进度', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     for (const [key, saveTime] of [
       ['source+old', 1000],
@@ -631,13 +591,17 @@ describe('sqlite storage contract', () => {
       index: 4,
     });
 
-    const firstPage = await storage.getFavoritePage('demo-user', 2);
-    const secondPage = await storage.getFavoritePage(
-      'demo-user',
-      2,
-      2000,
-      'source+middle',
-    );
+    const query = {
+      query: '',
+      filter: 'all',
+      sort: 'saved',
+      limit: 2,
+    } as const;
+    const firstPage = await storage.getFavoriteLibraryPage('demo-user', query);
+    const secondPage = await storage.getFavoriteLibraryPage('demo-user', {
+      ...query,
+      cursor: firstPage.nextCursor,
+    });
 
     expect(firstPage.items.map((item) => item.key)).toEqual([
       'source+new',
@@ -646,13 +610,14 @@ describe('sqlite storage contract', () => {
     expect(firstPage.items[1]?.playRecord?.index).toBe(4);
     expect(firstPage).toMatchObject({
       total: 3,
-      nextCursor: '2000|source+middle',
+      libraryTotal: 3,
+      nextCursor: expect.any(String),
     });
     expect(secondPage.items.map((item) => item.key)).toEqual(['source+old']);
     expect(secondPage.nextCursor).toBeNull();
   });
 
-  it('filters live favorites before paging and traverses tied timestamps without gaps', async () => {
+  it('个人主页收藏库排除直播后分页，库总数仍包含直播', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     for (const [key, origin] of [
       ['source+z', 'live'],
@@ -668,29 +633,37 @@ describe('sqlite storage contract', () => {
         save_time: 1000,
       });
     }
-    const first = await storage.getFavoritePage(
-      'public-user',
-      2,
-      undefined,
-      undefined,
-      false,
-    );
-    const second = await storage.getFavoritePage(
-      'public-user',
-      2,
-      1000,
-      'source+c',
-      false,
-    );
+    const query = {
+      query: '',
+      filter: 'all',
+      sort: 'saved',
+      limit: 2,
+      profileScope: 'public',
+    } as const;
+    const first = await storage.getFavoriteLibraryPage('public-user', query);
+    const second = await storage.getFavoriteLibraryPage('public-user', {
+      ...query,
+      cursor: first.nextCursor,
+    });
     expect(first.items.map((item) => item.key)).toEqual([
       'source+e',
       'source+c',
     ]);
     expect(first.total).toBe(3);
-    expect(first.nextCursor).toBe('1000|source+c');
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.libraryTotal).toBe(6);
     expect(second.items.map((item) => item.key)).toEqual(['source+b']);
     expect(second.nextCursor).toBeNull();
-    expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
+    expect(
+      (
+        await storage.getFavoriteLibraryPage('public-user', {
+          query: '',
+          filter: 'all',
+          sort: 'saved',
+          limit: 10,
+        })
+      ).total,
+    ).toBe(6);
   });
 
   it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
@@ -851,95 +824,6 @@ describe('sqlite storage contract', () => {
     ).resolves.toEqual(concurrentFavorite);
   });
 
-  it('replaces all data from an import snapshot', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const passwordHash =
-      '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
-
-    await storage.replaceAllData({
-      adminConfig,
-      users: {
-        'demo-user': passwordHash,
-      },
-      userData: {
-        'demo-user': {
-          playRecords: { 'source+1': playRecord },
-          favorites: { 'source+1': favorite },
-          searchHistory: ['first', 'second'],
-          skipConfigs: { 'source+1': skipConfig },
-          playbackSessions: { [playbackSession.id]: playbackSession },
-          messageState: { readAnnouncementId: 'announcement:v1' },
-          danmakuEnabled: false,
-          lastLoginAt: 1700000000000,
-        },
-      },
-      sourceRouteStats: [
-        {
-          source: 'source-a',
-          routeMode: 'browser',
-          bucketDate: '2026-01-08',
-          successCount: 3,
-          failureCount: 1,
-        },
-      ],
-      inviteCodeUsage: { 'invite-a': 3 },
-    });
-
-    // 没有对应邀请码定义的旧用量行不导入。
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
-    const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
-    delete expectedConfig.UserConfig.Users;
-    delete expectedConfig.ConfigFile;
-    delete expectedConfig.ConfigSubscribtion;
-    await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
-    await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
-    await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
-      'demo-user': passwordHash,
-    });
-    await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({
-      'source+1': playRecord,
-    });
-    await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({
-      'source+1': favorite,
-    });
-    await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
-      'first',
-      'second',
-    ]);
-    await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({
-      'source+1': skipConfig,
-    });
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
-      playbackSession,
-    ]);
-    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
-      readAnnouncementId: 'announcement:v1',
-    });
-    await expect(
-      storage.getDanmakuEnabledPreference('demo-user'),
-    ).resolves.toBe(false);
-    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
-      1700000000000,
-    );
-    await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
-      {
-        source: 'source-a',
-        routeMode: 'browser',
-        bucketDate: '2026-01-08',
-        successCount: 3,
-        failureCount: 1,
-      },
-    ]);
-    await expect(storage.getSourceRouteStats('2026-01-01')).resolves.toEqual([
-      {
-        source: 'source-a',
-        routeMode: 'browser',
-        successCount: 3,
-        failureCount: 1,
-      },
-    ]);
-  });
-
   it('作品状态与显式开关的组合决定追更查询并保留导出字段', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const records: Record<string, PlayRecord> = {};
@@ -996,43 +880,6 @@ describe('sqlite storage contract', () => {
     expect(page.nextCursor).toBeNull();
   });
 
-  it('keeps legacy short usernames when replacing data', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-
-    await storage.replaceAllData({
-      adminConfig,
-      users: { abc: 'legacy-password-hash', admin: 'admin-password-hash' },
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
-
-    await expect(storage.getAllUsers()).resolves.toEqual(['abc', 'admin']);
-  });
-
-  it('returns all playback sessions without page limit', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const total = 510;
-
-    for (let index = 0; index < total; index += 1) {
-      await storage.setPlaybackSession('demo-user', {
-        ...playbackSession,
-        id: `session_bulk_${index}`,
-        started_at: 1000 + index,
-      });
-    }
-
-    const limited = await storage.getPlaybackSessions('demo-user', {
-      limit: 10000,
-    });
-    const all = await storage.getAllPlaybackSessions('demo-user');
-
-    expect(limited).toHaveLength(500);
-    expect(all).toHaveLength(total);
-    expect(all[0].id).toBe(`session_bulk_${total - 1}`);
-    expect(all[total - 1].id).toBe('session_bulk_0');
-  });
-
   it('按最后更新时间清理过期播放统计会话', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 
@@ -1048,14 +895,26 @@ describe('sqlite storage contract', () => {
     });
 
     await expect(storage.deletePlaybackSessionsBefore(1500)).resolves.toBe(1);
-    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
-      expect.objectContaining({ id: 'session_recent' }),
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ watch_seconds: playbackSession.watch_seconds }),
     ]);
+  });
+
+  it('历史与桶统计双后端契约', async () => {
+    await assertWatchHistoryContract(new LocalSqliteStorage(':memory:'));
   });
 
   it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await assertPlaybackPeriodRange(storage);
+    await assertStatsReuse(storage);
+    await assertPlaybackAnnualData(storage);
   });
 
   it('returns null when admin config is absent', async () => {
@@ -1065,13 +924,7 @@ describe('sqlite storage contract', () => {
 
   it('throws instead of rebuilding when admin config is corrupt', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-    await storage.replaceAllData({
-      adminConfig,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
+    await storage.setAdminConfig(adminConfig);
 
     (
       storage as unknown as {
@@ -1082,6 +935,64 @@ describe('sqlite storage contract', () => {
       .run('{not-valid-json');
 
     await expect(storage.getAdminConfig()).rejects.toThrow();
+  });
+
+  it('isolates current route semantics while retaining and purging both versions', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'server',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    const database = (
+      storage as unknown as {
+        db: {
+          prepare: (sql: string) => { run: (...values: unknown[]) => void };
+        };
+      }
+    ).db;
+    for (const mode of ['browser', 'server']) {
+      database
+        .prepare(
+          'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run('versioned', mode, '2026-01-08', 99, 99, 1);
+    }
+    expect(await storage.getSourceRouteStats('2026-01-01')).toEqual(
+      expect.arrayContaining([
+        {
+          source: 'versioned',
+          routeMode: 'browser',
+          successCount: 1,
+          failureCount: 0,
+        },
+        {
+          source: 'versioned',
+          routeMode: 'server',
+          successCount: 0,
+          failureCount: 1,
+        },
+      ]),
+    );
+    expect(await storage.getSourceRouteStats('2026-01-01')).toHaveLength(2);
+    expect(
+      (await storage.getAllSourceRouteStatBuckets()).map(
+        (row) => row.routeMode,
+      ),
+    ).toEqual(
+      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
+    );
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
   });
 
   it('aggregates source route stats by date and mode', async () => {
@@ -1234,11 +1145,11 @@ describe('sqlite social username migration', () => {
 });
 
 describe('sqlite video review contract', () => {
-  videoReviewContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
+  videoReviewContract(() => new LocalSqliteStorage(':memory:'));
 });
 
 describe('sqlite user danmaku contract', () => {
-  userDanmakuContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
+  userDanmakuContract(() => new LocalSqliteStorage(':memory:'));
 });
 
 test('normalizes legacy danmaku usernames even without a users row', async () => {
@@ -1248,9 +1159,98 @@ test('normalizes legacy danmaku usernames even without a users row', async () =>
     migrateLegacyUsernameCasing(): void;
   };
   internal.db
-    .prepare('INSERT INTO user_danmaku VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .prepare(
+      'INSERT INTO user_danmaku (id, episode_key, username, time_ms, text, mode, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
     .run('legacy-id', 'dandan:1', 'Alice', 0, 'text', 0, '#ffffff', 1);
   internal.migrateLegacyUsernameCasing();
   expect((await storage.getAllUserDanmaku('alice'))[0].username).toBe('alice');
   internal.db.close();
+});
+
+describe('SQLite OAuth 身份契约', () => {
+  oauthIdentityContract(() => new LocalSqliteStorage(':memory:'));
+});
+
+describe('SQLite announcements', () => {
+  announcementContract(() => new LocalSqliteStorage(':memory:'));
+});
+
+it('merges annual recap username casing and retains the latest snapshot', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const internal = storage as unknown as {
+    db: import('better-sqlite3').Database;
+    migrateLegacyUsernameCasing(): void;
+  };
+  try {
+    const insert = internal.db.prepare(
+      'INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    insert.run('Alice', 2025, 'UTC', 1, '{}', 100, 300);
+    insert.run('alice', 2025, 'UTC', 0, '{}', 50, 200);
+    insert.run('OnlyRecap', 2024, 'UTC', 1, '{}', 100, 300);
+    internal.migrateLegacyUsernameCasing();
+    expect(await storage.getAnnualRecap('alice', 2025)).toMatchObject({
+      hideRhythm: true,
+      publishedAt: 100,
+      updatedAt: 300,
+    });
+    expect(await storage.getAnnualRecapYears('onlyrecap')).toEqual([2024]);
+    expect(
+      internal.db
+        .prepare('SELECT username FROM user_annual_recaps ORDER BY username')
+        .all(),
+    ).toEqual([{ username: 'alice' }, { username: 'onlyrecap' }]);
+  } finally {
+    internal.db.close();
+  }
+});
+
+describe('SQLite 管理通知契约', () => {
+  userNoticeContract(() => new LocalSqliteStorage(':memory:'));
+});
+
+it('通知写入失败回滚评价删除，用户名合并迁移通知并解决幂等冲突', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const raw = (storage as unknown as { db: import('better-sqlite3').Database })
+    .db;
+  const { videoReview } =
+    await import('@/lib/__tests__/__fixtures__/video-review-contract');
+  await storage.setVideoReview('alice', videoReview);
+  raw.exec(
+    "CREATE TRIGGER fail_notice BEFORE INSERT ON user_notice_events BEGIN SELECT RAISE(ABORT, 'notice failed'); END",
+  );
+  await expect(
+    storage.deleteVideoReview(
+      'alice',
+      videoReview.title_norm,
+      videoReview.year,
+      true,
+    ),
+  ).rejects.toThrow('notice failed');
+  expect(
+    await storage.getVideoReview(
+      'alice',
+      videoReview.title_norm,
+      videoReview.year,
+    ),
+  ).not.toBeNull();
+  raw.exec('DROP TRIGGER fail_notice');
+  await storage.deleteVideoReview(
+    'alice',
+    videoReview.title_norm,
+    videoReview.year,
+    true,
+  );
+  raw
+    .prepare('UPDATE user_notice_events SET recipient_username = ?')
+    .run('Alice');
+  (
+    storage as unknown as { migrateLegacyUsernameCasing(): void }
+  ).migrateLegacyUsernameCasing();
+  expect(await storage.getUserNoticeCount('alice', 0, [], Date.now())).toBe(1);
+  expect(
+    raw.prepare('SELECT recipient_username FROM user_notice_events').get(),
+  ).toEqual({ recipient_username: 'alice' });
+  raw.close();
 });

@@ -1,3 +1,24 @@
+export function createThrottledMaintenance(intervalMs: number) {
+  let lastStartedAt = -Infinity;
+  let running = false;
+  return (task: () => Promise<void>): void => {
+    const now = Date.now();
+    if (running || now - lastStartedAt < intervalMs) return;
+    running = true;
+    lastStartedAt = now;
+    // 下一轮事件循环才执行，避免 SQLite 同步清理占住当前响应链。
+    const timer = setTimeout(() => {
+      void Promise.resolve()
+        .then(task)
+        .catch(() => {})
+        .finally(() => {
+          running = false;
+        });
+    }, 0);
+    timer.unref?.();
+  };
+}
+
 export async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   concurrency: number,
@@ -31,6 +52,26 @@ export async function runWithConcurrency<T>(
 
   await Promise.all(Array.from({ length: limit }, () => worker()));
   return results;
+}
+
+// 取消只结束当前消费者的等待，共享加载继续完成并填充缓存。
+export async function waitForSharedLoad<T>(
+  loader: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return loader();
+  if (signal.aborted) throw signal.reason;
+
+  let onAbort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([loader(), cancelled]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 export function withTimeout<T>(

@@ -20,11 +20,13 @@ import {
   SECTION_TITLE_TEXT_CLASS,
 } from '@/components/section-header';
 import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
+import { isUsableBangumiCalendarData } from '@/features/bangumi/lib/bangumi-normalize';
 import {
+  getBangumiWeekdayItems,
   getCurrentWeekday,
-  primeDefaultDoubanFeedViewCache,
-} from '@/features/douban/hooks/useDoubanFeed';
+} from '@/features/douban/lib/feed-query';
+import { seedDefaultFeedPreview } from '@/features/douban/lib/feed-store';
+import { DOUBAN_PAGE_SIZE } from '@/features/douban/lib/grid-layout';
 import { HomeInitialData } from '@/features/home/lib/home.types';
 import {
   mergeHomeInitialDataWithClientSnapshot,
@@ -137,12 +139,6 @@ function RecommendationSection({
   );
 }
 
-function hasUsableBangumiCalendarData(
-  data: HomeInitialData['bangumiCalendarData'],
-): boolean {
-  return data.some((item) => item.items.length > 0);
-}
-
 export default function HomeClient({
   initialData,
   continueWatchingSkeletonCount = 0,
@@ -206,6 +202,7 @@ export default function HomeClient({
           kind: 'movie',
           category: '热门',
           type: '全部',
+          pageLimit: DOUBAN_PAGE_SIZE,
         });
 
         if (!cancelled && moviesData.code === 200 && moviesData.list.length) {
@@ -232,6 +229,7 @@ export default function HomeClient({
           kind: 'tv',
           category: 'tv',
           type: 'tv',
+          pageLimit: DOUBAN_PAGE_SIZE,
         });
 
         if (!cancelled && tvShowsData.code === 200 && tvShowsData.list.length) {
@@ -258,6 +256,7 @@ export default function HomeClient({
           kind: 'tv',
           category: 'show',
           type: 'show',
+          pageLimit: DOUBAN_PAGE_SIZE,
         });
 
         if (
@@ -286,7 +285,7 @@ export default function HomeClient({
       try {
         const bangumiData = await GetBangumiCalendarData();
 
-        if (!cancelled && hasUsableBangumiCalendarData(bangumiData)) {
+        if (!cancelled && isUsableBangumiCalendarData(bangumiData)) {
           setBangumiCalendarData(bangumiData);
           setSectionUnavailable('bangumiCalendar', false);
           finishLoading('bangumiCalendar');
@@ -329,26 +328,14 @@ export default function HomeClient({
   );
 
   const todayAnimes = useMemo(() => {
-    const items =
-      bangumiCalendarData.find((item) => item.weekday.en === currentWeekday)
-        ?.items || [];
-
-    return items.map((anime) => ({
-      id: anime.id.toString(),
-      title: anime.name_cn || anime.name,
-      poster: selectBangumiCardCover(anime.images),
-      rate: anime.rating?.score?.toFixed(1) || '',
-      year: anime.air_date?.split('-')?.[0] || '',
-    }));
+    return getBangumiWeekdayItems(bangumiCalendarData, currentWeekday) ?? [];
   }, [bangumiCalendarData, currentWeekday]);
 
   useEffect(() => {
-    primeDefaultDoubanFeedViewCache('movie', hotMovies);
-    primeDefaultDoubanFeedViewCache('tv', hotTvShows);
-    primeDefaultDoubanFeedViewCache('show', hotVarietyShows);
-    primeDefaultDoubanFeedViewCache('anime', todayAnimes, {
-      selectedWeekday: currentWeekday,
-    });
+    seedDefaultFeedPreview('movie', hotMovies);
+    seedDefaultFeedPreview('tv', hotTvShows);
+    seedDefaultFeedPreview('show', hotVarietyShows);
+    seedDefaultFeedPreview('anime', todayAnimes, currentWeekday);
   }, [currentWeekday, hotMovies, hotTvShows, hotVarietyShows, todayAnimes]);
 
   useEffect(() => {
@@ -356,7 +343,7 @@ export default function HomeClient({
       hotMovies.length > 0 &&
       hotTvShows.length > 0 &&
       hotVarietyShows.length > 0 &&
-      hasUsableBangumiCalendarData(bangumiCalendarData);
+      isUsableBangumiCalendarData(bangumiCalendarData);
 
     if (
       routeFallback ||

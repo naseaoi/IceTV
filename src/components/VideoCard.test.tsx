@@ -192,7 +192,7 @@ describe('VideoCard 多源聚合搜索结果', () => {
   });
 });
 
-it('收藏菜单等待二次确认和删除成功后才反馈', async () => {
+it('收藏列表取消收藏等待确认，移除后不重复提示', async () => {
   jest.clearAllMocks();
   render(
     <CardInteractionProvider>
@@ -209,7 +209,7 @@ it('收藏菜单等待二次确认和删除成功后才反馈', async () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消收藏' }));
   });
   expect(deleteFavorite).toHaveBeenCalledWith('src', '1');
-  expect(showToast).toHaveBeenCalledWith('已取消收藏', 'success');
+  expect(showToast).not.toHaveBeenCalled();
 });
 
 it('心形收藏按钮保持静默', async () => {

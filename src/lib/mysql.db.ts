@@ -1,8 +1,10 @@
 import 'server-only';
 
+import { randomUUID } from 'crypto';
 import type {
   ExecuteValues,
   PoolConnection,
+  ResultSetHeader,
   RowDataPacket,
 } from 'mysql2/promise';
 import mysql from 'mysql2/promise';
@@ -14,6 +16,11 @@ import {
   adminUserPage,
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
+import {
+  favoriteMessageQueries,
+  favoriteMessagesFromRows,
+  favoriteReadStatement,
+} from '@/features/favorites/lib/favorite-tracking';
 import {
   applyFavoriteStatus,
   batchSelection,
@@ -36,34 +43,43 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type PlaybackSourceUsage,
+  type PlaybackSourceUsageRow,
+  aggregateSourceUsage,
+  sourceUsageSql,
+} from '@/features/playback-stats/lib/source-usage';
+import {
+  type AnnouncementRow,
+  ANNOUNCEMENT_INSERT_SQL,
+  ANNOUNCEMENT_LIST_SQL,
+  announcementUpdateQuery,
+  publishedAnnouncementQuery,
+  readAnnouncement,
+} from '@/lib/announcement-storage';
+import {
   type ConfigStateUpdate,
   type ConfigSubscription,
   sameSubscription,
-  stripConfigState,
-  subscriptionFromConfig,
 } from '@/lib/config-state';
 import {
   type InviteCodePurge,
   type InviteCodeQuery,
-  importedInviteCodes,
-  INVITE_INSERT_SQL,
-  inviteValues,
 } from '@/lib/invite-code-storage';
 import { MysqlConfigStateStore } from '@/lib/mysql-config-state-store';
 import { MysqlInviteCodeStore } from '@/lib/mysql-invite-code-store';
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
 import { MysqlUserAccessStore } from '@/lib/mysql-user-access';
 import {
-  REPLY_INSERT,
-  REPLY_REPORT_INSERT,
-  replyValues,
-} from '@/lib/review-reply-storage';
-import {
-  importedProfileValues,
-  ReviewSocialStorage,
-  SOCIAL_TABLES,
-  socialSchema,
-} from '@/lib/review-social-storage';
+  type OAuthBindResult,
+  type OAuthIdentity,
+  isOAuthDuplicate,
+  OAUTH_INSERT,
+  OAUTH_SCHEMA,
+  oauthIdentityParams,
+  readOAuthIdentity,
+} from '@/lib/oauth-identity';
+import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
+import { ReviewSocialStorage, socialSchema } from '@/lib/review-social-storage';
 import {
   canManageUserAccess,
   removedAccessReferences,
@@ -72,7 +88,6 @@ import {
 import {
   StoredUserDanmaku,
   storedUserDanmaku,
-  USER_DANMAKU_COLUMNS,
   USER_DANMAKU_INSERT,
   USER_DANMAKU_PROJECTION,
   userDanmakuPageSql,
@@ -80,6 +95,17 @@ import {
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
+  accessPermissionsKey,
+  configPermissionsChanged,
+} from '@/lib/user-notice';
+import {
+  type NoticeMutation,
+  noticeInsert,
+  NoticeModeration,
+  userNoticeSchema,
+  UserNoticeStorage,
+} from '@/lib/user-notice-storage';
 import {
   publicReview,
   reviewPage,
@@ -91,26 +117,37 @@ import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import {
+  ANNUAL_BUCKETS_SQL,
+  ANNUAL_EARLIEST_SQL,
+  ANNUAL_MESSAGE_EXISTS_SQL,
+  ANNUAL_SESSIONS_SQL,
+} from './playback-annual-storage';
+import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
-import { normalizeRuntimeParam } from './runtime-params';
 import { getMySqlConnectionUrl } from './storage-type';
-import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
+import {
+  buildShelvedPlayRecordWhere,
+  buildTrackingSql,
+  MYSQL_TRACKING_DIALECT,
+} from './tracking-sql';
 import {
   AdminVideoReviewPage,
   Favorite,
-  FavoritePage,
   IStorage,
   MetadataRecordPage,
+  PlaybackAnnualData,
   PlaybackPeriodSession,
   PlaybackSession,
-  PlaybackSessionQuery,
+  PlaybackWatchBucket,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
   SharedCacheRecord,
+  SiteAnnouncement,
   SkipConfig,
+  SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
   SourcePlayReporterSummary,
@@ -118,10 +155,12 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
-  StorageImportData,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
+  WatchHistoryEntry,
+  WatchHistoryQuery,
+  WatchHistoryWrite,
   WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
@@ -233,35 +272,6 @@ function buildTrackingPlayRecordPage(
   };
 }
 
-function buildFavoritePage(
-  rows: JsonRow[],
-  total: number,
-  limit: number,
-): FavoritePage {
-  const items = rows.slice(0, limit).flatMap((row) => {
-    if (!row.favorite_key || !row.favorite_json) return [];
-    const favorite = parseJsonValue<Favorite>(row.favorite_json);
-    if (!favorite) return [];
-    const playRecord = parseJsonValue<PlayRecord>(row.record_json);
-    return [
-      {
-        key: row.favorite_key,
-        favorite,
-        ...(playRecord ? { playRecord } : {}),
-      },
-    ];
-  });
-  const lastItem = items.at(-1);
-  return {
-    items,
-    total,
-    nextCursor:
-      rows.length > limit && lastItem
-        ? `${lastItem.favorite.save_time}|${lastItem.key}`
-        : null,
-  };
-}
-
 function buildMetadataRecordPage<T>(
   rows: JsonRow[],
   limit: number,
@@ -358,58 +368,6 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
   };
 }
 
-const IMPORT_BATCH_ROWS = 200;
-const MYSQL_MAX_PLACEHOLDERS = 60000;
-
-function createRowBatcher(
-  connection: PoolConnection,
-  table: string,
-  columns: string[],
-) {
-  const buffer: ExecuteValues[][] = [];
-  const columnList = columns.join(', ');
-  const rowPlaceholder = `(${columns.map(() => '?').join(', ')})`;
-  const maxRows = Math.max(
-    1,
-    Math.min(
-      IMPORT_BATCH_ROWS,
-      Math.floor(MYSQL_MAX_PLACEHOLDERS / columns.length),
-    ),
-  );
-
-  async function flush(): Promise<void> {
-    if (buffer.length === 0) return;
-    const chunk = buffer.splice(0, buffer.length);
-    await connection.execute(
-      `INSERT INTO ${table} (${columnList}) VALUES ${chunk
-        .map(() => rowPlaceholder)
-        .join(', ')}`,
-      chunk.flat(),
-    );
-  }
-
-  return {
-    async add(row: ExecuteValues[]): Promise<void> {
-      buffer.push(row);
-      if (buffer.length >= maxRows) await flush();
-    },
-    flush,
-  };
-}
-
-async function insertRowsInBatches(
-  connection: PoolConnection,
-  table: string,
-  columns: string[],
-  rows: Iterable<ExecuteValues[]>,
-): Promise<void> {
-  const batcher = createRowBatcher(connection, table, columns);
-  for (const row of rows) {
-    await batcher.add(row);
-  }
-  await batcher.flush();
-}
-
 type JsonRow = RowDataPacket & {
   record_json?: string;
   favorite_json?: string;
@@ -481,12 +439,15 @@ export class MySqlStorage implements IStorage {
 
   private async initializeSchema(): Promise<void> {
     const statements = [
+      OAUTH_SCHEMA + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
+      ...userNoticeSchema('mysql'),
       ...socialSchema('mysql'),
       ...userDanmakuSchema('mysql'),
       ...userAccessSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(191) NOT NULL PRIMARY KEY,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        password_set TINYINT NOT NULL DEFAULT 1
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS play_records (
         username VARCHAR(191) NOT NULL,
@@ -525,7 +486,7 @@ export class MySqlStorage implements IStorage {
         PRIMARY KEY (username, config_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS playback_sessions (
-        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        id VARCHAR(80) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
         username VARCHAR(191) NOT NULL,
         source VARCHAR(191) NOT NULL,
         video_id VARCHAR(255) NOT NULL,
@@ -564,6 +525,14 @@ export class MySqlStorage implements IStorage {
       `CREATE TABLE IF NOT EXISTS live_source_state (
         source_key VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
         channel_number BIGINT NOT NULL, updated_at BIGINT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS announcements (
+        id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        published_at BIGINT NULL,
+        KEY idx_announcements_published (published_at, id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS invite_codes (
         code VARCHAR(191) NOT NULL PRIMARY KEY,
@@ -651,7 +620,43 @@ export class MySqlStorage implements IStorage {
     for (const statement of statements) {
       await this.pool.execute(statement);
     }
+    const [userColumns] = await this.pool.query<RowDataPacket[]>(
+      "SHOW COLUMNS FROM users LIKE 'password_set'",
+    );
+    // 存量第三方自动建号的账号只有随机密码，迁移时标为未设密，用户可直接首次设置
+    if (!userColumns.length) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE users ADD COLUMN password_set TINYINT NOT NULL DEFAULT 1',
+        );
+        await this.pool.execute(
+          'UPDATE users SET password_set = 0 WHERE username IN (SELECT username FROM oauth_identities WHERE auto_created = 1)',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    await new MysqlConfigStateStore(this.pool).migrateSchema();
 
+    for (const [name, size] of [
+      ['title', 191],
+      ['year', 16],
+    ] as const) {
+      const [columns] = await this.pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM user_danmaku LIKE '${name}'`,
+      );
+      if (!columns.length) {
+        try {
+          await this.pool.execute(
+            `ALTER TABLE user_danmaku ADD COLUMN ${name} VARCHAR(${size}) NOT NULL DEFAULT ''`,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+            throw error;
+        }
+      }
+    }
     const [columns] = await this.pool.query<RowDataPacket[]>(
       "SHOW COLUMNS FROM user_profiles LIKE 'avatar_seed'",
     );
@@ -690,6 +695,9 @@ export class MySqlStorage implements IStorage {
         if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
       }
     }
+    await this.migratePlaybackSchema();
+    await this.migrateReviewFirstPublished();
+    await this.migrateWatchHistory();
     await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
     await this.backfillUserProfiles();
@@ -706,6 +714,161 @@ export class MySqlStorage implements IStorage {
       accessConnection.release();
     }
     await this.invites.migrate();
+  }
+
+  private async migrateReviewFirstPublished(): Promise<void> {
+    const [columns] = await this.pool.query<RowDataPacket[]>(
+      'SHOW COLUMNS FROM video_reviews',
+    );
+    if (!columns.some((column) => column.Field === 'first_published_at')) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE video_reviews ADD COLUMN first_published_at BIGINT NULL',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['review_first_published_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['review_first_published_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        await connection.execute(
+          'UPDATE video_reviews SET first_published_at = updated_at WHERE first_published_at IS NULL',
+        );
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'review_first_published_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  private async migratePlaybackSchema(): Promise<void> {
+    const [columns] = await this.pool.query<RowDataPacket[]>(
+      'SHOW COLUMNS FROM playback_sessions',
+    );
+    if (!columns.some((column) => column.Field === 'measurement_version')) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE playback_sessions ADD COLUMN measurement_version INT NOT NULL DEFAULT 1',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    // 旧表 id 只有 64 字符；接口接受 80，身份键统一逐字匹配。
+    if (
+      columns.some(
+        (column) => column.Field === 'id' && column.Type === 'varchar(64)',
+      )
+    )
+      await this.pool.execute(
+        'ALTER TABLE playback_sessions MODIFY id VARCHAR(80) COLLATE utf8mb4_bin NOT NULL',
+      );
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS storage_migrations (
+      name VARCHAR(191) PRIMARY KEY, completed_at BIGINT NOT NULL
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS playback_watch_buckets (
+      username VARCHAR(191) NOT NULL, session_id VARCHAR(80) NOT NULL, bucket_start BIGINT NOT NULL,
+      watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
+      KEY idx_watch_buckets_user_time(username, bucket_start)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS watch_history (
+      username VARCHAR(191) NOT NULL, id VARCHAR(80) NOT NULL, source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL,
+      title VARCHAR(255) NOT NULL, source_name VARCHAR(255) NOT NULL, cover TEXT NOT NULL, year VARCHAR(32) NOT NULL,
+      episode_index INT NOT NULL, total_episodes INT NOT NULL,
+      group_label VARCHAR(255), group_index INT, group_total INT,
+      position DOUBLE NOT NULL, duration DOUBLE NOT NULL,
+      first_watched_at BIGINT NOT NULL, last_watched_at BIGINT NOT NULL,
+      PRIMARY KEY(username, id), UNIQUE KEY idx_watch_history_work(username, source, video_id),
+      KEY idx_watch_history_page(username, last_watched_at, id)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+  }
+
+  private async migrateWatchHistory(): Promise<void> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      // 标记行同时作为多实例迁移锁；回填和完成状态原子提交。
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['watch_history_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['watch_history_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        const [rows] = await connection.query<
+          RowDataPacket[]
+        >(`SELECT ranked.*, p.record_json FROM (
+          SELECT s.*, MIN(started_at) OVER (PARTITION BY username, BINARY source, BINARY video_id) AS first_watched_at,
+            ROW_NUMBER() OVER (PARTITION BY username, BINARY source, BINARY video_id ORDER BY updated_at DESC, BINARY id DESC) AS row_num
+          FROM playback_sessions s WHERE watch_seconds > 0
+        ) ranked LEFT JOIN play_records p ON p.username = ranked.username AND BINARY p.record_key = BINARY CONCAT(ranked.source, '+', ranked.video_id)
+        WHERE ranked.row_num = 1`);
+        for (const row of rows) {
+          let record: Partial<PlayRecord> = {};
+          try {
+            record = JSON.parse(row.record_json || '{}') ?? {};
+          } catch {
+            // 无效旧记录不阻塞迁移。
+          }
+          await connection.execute(
+            `INSERT INTO watch_history (
+            username, id, source, video_id, title, source_name, cover, year, episode_index,
+            total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id`,
+            [
+              row.username,
+              randomUUID(),
+              row.source,
+              row.video_id,
+              row.title,
+              row.source_name,
+              row.cover,
+              row.year,
+              row.episode_index,
+              record.total_episodes || Math.max(1, Number(row.episode_index)),
+              record.group_label ?? null,
+              record.group_index ?? null,
+              record.group_total ?? null,
+              row.last_position,
+              row.total_time,
+              row.first_watched_at,
+              row.updated_at,
+            ],
+          );
+        }
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'watch_history_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   private async migrateFavoriteProjection(): Promise<void> {
@@ -821,6 +984,25 @@ export class MySqlStorage implements IStorage {
       [username, key],
     );
     return parseJsonValue<PlayRecord>(rows[0]?.record_json);
+  }
+
+  async getPlayRecordsByKeys(
+    userName: string,
+    keys: string[],
+  ): Promise<Record<string, PlayRecord>> {
+    const uniqueKeys = [...new Set(keys)];
+    if (!uniqueKeys.length) return {};
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      [normalizeUsername(userName), ...uniqueKeys],
+    );
+    const result: Record<string, PlayRecord> = {};
+    for (const row of rows) {
+      const record = parseJsonValue<PlayRecord>(row.record_json);
+      if (record && row.record_key) result[row.record_key] = record;
+    }
+    return result;
   }
 
   async setPlayRecord(
@@ -949,35 +1131,47 @@ export class MySqlStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated' | 'shelved',
   ): Promise<PlayRecordPage> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const saveTimeExpression =
       "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED)";
     const hasCursor = cursorTime !== undefined && !!cursorKey;
+    const updatedWhere =
+      filter === 'updated'
+        ? ` AND ${MYSQL_UNREAD_TRACKING_WHERE}`
+        : filter === 'shelved'
+          ? ` AND ${buildShelvedPlayRecordWhere(MYSQL_TRACKING_DIALECT)}`
+          : '';
+    const params =
+      filter === 'shelved'
+        ? [username, Date.now() - SHELVED_PLAY_RECORD_AGE_MS]
+        : [username];
     const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT record_key, record_json
            FROM play_records
-           WHERE username = ?
+           WHERE username = ?${updatedWhere}
              AND (${saveTimeExpression} < ?
                OR (${saveTimeExpression} = ? AND record_key < ?))
            ORDER BY ${saveTimeExpression} DESC, record_key DESC
            LIMIT ?`
         : `SELECT record_key, record_json
            FROM play_records
-           WHERE username = ?
+           WHERE username = ?${updatedWhere}
            ORDER BY ${saveTimeExpression} DESC, record_key DESC
            LIMIT ?`,
       hasCursor
-        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
-        : [username, limit + 1],
+        ? [...params, cursorTime, cursorTime, cursorKey, limit + 1]
+        : [...params, limit + 1],
     );
     const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
-    >('SELECT COUNT(*) AS count FROM play_records WHERE username = ?', [
-      username,
-    ]);
+    >(
+      `SELECT COUNT(*) AS count FROM play_records WHERE username = ?${updatedWhere}`,
+      params,
+    );
     const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildPlayRecordPage(rows, countRows[0]?.count || 0, limit);
   }
@@ -1031,11 +1225,58 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    await this.ensureInitialized();
+    const uniqueKeys = [...new Set(keys)];
+    await this.pool.execute(
+      `DELETE FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      [normalizeUsername(userName), ...uniqueKeys],
+    );
+  }
+
   async deleteAllPlayRecords(userName: string): Promise<void> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     await this.pool.execute('DELETE FROM play_records WHERE username = ?', [
       username,
+    ]);
+  }
+
+  async getFavoriteUpdateMessagePage(
+    userName: string,
+    limit: number,
+    before?: import('@/lib/message-cursor.server').MessageCursor | null,
+  ) {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const sql = favoriteMessageQueries('mysql', username, limit, before);
+    const [[rows], [counts]] = await Promise.all([
+      this.pool.query<
+        (RowDataPacket & { favorite_key: string; favorite_json: string })[]
+      >(sql.page, sql.params),
+      this.pool.query<(RowDataPacket & { count: number })[]>(sql.count, [
+        username,
+      ]),
+    ]);
+    return {
+      items: favoriteMessagesFromRows(rows),
+      total: Number(counts[0]?.count ?? 0),
+    };
+  }
+
+  async readFavoriteUpdate(
+    userName: string,
+    key: string,
+    episodes: number,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(favoriteReadStatement('mysql'), [
+      episodes,
+      normalizeUsername(userName),
+      key,
+      episodes,
+      episodes,
     ]);
   }
 
@@ -1262,60 +1503,6 @@ export class MySqlStorage implements IStorage {
     return buildMetadataFavoritePage(rows, pageLimit);
   }
 
-  async getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive = true,
-  ): Promise<FavoritePage> {
-    await this.ensureInitialized();
-    const username = normalizeUsername(userName);
-    const saveTimeExpression =
-      "CAST(JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.save_time')) AS UNSIGNED)";
-    const hasCursor = cursorTime !== undefined && !!cursorKey;
-    const rowsQuery = this.pool.query<JsonRow[]>(
-      hasCursor
-        ? `SELECT f.favorite_key, f.favorite_json, p.record_json
-           FROM favorites f
-           LEFT JOIN play_records p
-             ON p.username = f.username AND p.record_key = f.favorite_key
-           WHERE f.username = ?
-             AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})
-             AND (${saveTimeExpression} < ?
-               OR (${saveTimeExpression} = ? AND f.favorite_key < ?))
-           ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
-           LIMIT ?`
-        : `SELECT f.favorite_key, f.favorite_json, p.record_json
-           FROM favorites f
-           LEFT JOIN play_records p
-             ON p.username = f.username AND p.record_key = f.favorite_key
-           WHERE f.username = ?
-             AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})
-           ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
-           LIMIT ?`,
-      hasCursor
-        ? [
-            username,
-            Number(includeLive),
-            cursorTime,
-            cursorTime,
-            cursorKey,
-            limit + 1,
-          ]
-        : [username, Number(includeLive), limit + 1],
-    );
-    const countQuery = this.pool.query<
-      Array<RowDataPacket & { count: number }>
-    >(
-      `SELECT COUNT(*) AS count FROM favorites
-       WHERE username = ? AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})`,
-      [username, Number(includeLive)],
-    );
-    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
-    return buildFavoritePage(rows, countRows[0]?.count || 0, limit);
-  }
-
   async getFavoriteLibraryPage(userName: string, query: FavoriteLibraryQuery) {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
@@ -1409,6 +1596,42 @@ export class MySqlStorage implements IStorage {
     return this.socialFor().isNicknameAvailable(...args);
   }
 
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    await this.ensureInitialized();
+    return this.socialFor().getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    await this.ensureInitialized();
+    return this.socialFor().getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    await this.ensureInitialized();
+    return this.socialFor().saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    await this.ensureInitialized();
+    return this.socialFor().deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    await this.ensureInitialized();
+    return this.socialFor().getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    await this.ensureInitialized();
+    return this.socialFor().getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -1486,38 +1709,83 @@ export class MySqlStorage implements IStorage {
     return this.socialFor().getFollowReviewMessages(...args);
   }
 
+  private async runNoticeMutation(mutation: NoticeMutation): Promise<number> {
+    return this.withTransaction(async (connection) => {
+      let step = mutation.next();
+      while (!step.done) {
+        const statement = step.value;
+        const rows = statement.read
+          ? ((
+              await connection.query(
+                statement.sql,
+                statement.params as ExecuteValues,
+              )
+            )[0] as Record<string, unknown>[])
+          : (await connection.execute(
+              statement.sql,
+              statement.params as ExecuteValues,
+            ),
+            []);
+        step = mutation.next(rows);
+      }
+      return step.value;
+    });
+  }
+
+  private get notices() {
+    return new UserNoticeStorage({
+      dialect: 'mysql' as const,
+      rows: async <T>(sql: string, params: unknown[] = []) =>
+        (await this.pool.query(sql, params as ExecuteValues))[0] as T[],
+      run: async (sql: string, params: unknown[] = []) =>
+        (
+          (
+            await this.pool.execute(sql, params as ExecuteValues)
+          )[0] as import('mysql2/promise').ResultSetHeader
+        ).affectedRows,
+    });
+  }
+  async getUserNoticeMessages(
+    ...args: Parameters<IStorage['getUserNoticeMessages']>
+  ) {
+    await this.ensureInitialized();
+    return this.notices.messages(...args);
+  }
+  async getUserNoticeCount(
+    ...args: Parameters<IStorage['getUserNoticeCount']>
+  ) {
+    await this.ensureInitialized();
+    return this.notices.count(...args);
+  }
+  async purgeUserNotices(before: number): Promise<number> {
+    await this.ensureInitialized();
+    return (
+      (
+        await this.pool.execute(
+          'DELETE FROM user_notice_events WHERE created_at <= ?',
+          [before],
+        )
+      )[0] as import('mysql2/promise').ResultSetHeader
+    ).affectedRows;
+  }
+
   async deleteReviewReply(
     id: string,
     username: string,
     admin = false,
   ): Promise<boolean> {
-    return this.withTransaction(async (connection) => {
-      const [result] = await connection.execute<
-        import('mysql2/promise').ResultSetHeader
-      >(
-        'DELETE FROM video_review_replies WHERE id = ? AND (? = 1 OR username = ?)',
-        [id, admin ? 1 : 0, normalizeUsername(username)],
-      );
-      if (result.affectedRows)
-        await connection.execute(
-          'DELETE FROM video_review_reply_reports WHERE reply_id = ?',
-          [id],
-        );
-      return result.affectedRows > 0;
-    });
+    return (
+      (await this.runNoticeMutation(
+        new NoticeModeration('mysql').reply(id, username, admin),
+      )) > 0
+    );
   }
   async moderateReplyReports(
     id: string,
     action: 'dismiss' | 'delete-reply',
   ): Promise<void> {
-    if (action === 'delete-reply') {
-      await this.deleteReviewReply(id, '', true);
-      return;
-    }
-    await this.ensureInitialized();
-    await this.pool.execute(
-      'DELETE FROM video_review_reply_reports WHERE reply_id = ?',
-      [id],
+    await this.runNoticeMutation(
+      new NoticeModeration('mysql').reply(id, '', true, action),
     );
   }
 
@@ -1641,15 +1909,7 @@ export class MySqlStorage implements IStorage {
     return rows.map(storedUserDanmaku);
   }
   async deleteUserDanmakuBatch(ids: string[]): Promise<number> {
-    if (!ids.length) return 0;
-    await this.ensureInitialized();
-    const [result] = await this.pool.execute<
-      import('mysql2/promise').ResultSetHeader
-    >(
-      `DELETE FROM user_danmaku WHERE id IN (${ids.map(() => '?').join(',')})`,
-      ids,
-    );
-    return result.affectedRows;
+    return this.runNoticeMutation(new NoticeModeration('mysql').danmaku(ids));
   }
 
   async getVideoReview(
@@ -1670,8 +1930,9 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     await this.pool.execute(
       `INSERT INTO video_reviews
-      (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      (username, title_norm, year, review_json, is_public, updated_at, first_published_at) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE review_json = JSON_SET(VALUES(review_json), '$.created_at', JSON_EXTRACT(review_json, '$.created_at')),
+      first_published_at = COALESCE(first_published_at, VALUES(first_published_at)),
       is_public = VALUES(is_public), updated_at = VALUES(updated_at)`,
       [
         normalizeUsername(userName),
@@ -1680,6 +1941,7 @@ export class MySqlStorage implements IStorage {
         JSON.stringify(review),
         review.is_public ? 1 : 0,
         review.updated_at,
+        review.is_public ? review.updated_at : null,
       ],
     );
   }
@@ -1690,67 +1952,25 @@ export class MySqlStorage implements IStorage {
     year: string,
     publicOnly = false,
   ): Promise<void> {
-    await this.withTransaction(async (connection) => {
-      const target = [normalizeUsername(userName), titleNorm, year];
-      const [result] = await connection.execute<
-        import('mysql2/promise').ResultSetHeader
-      >(REVIEW_SQL.delete, [...target, publicOnly ? 1 : 0]);
-      if (result.affectedRows) {
-        await connection.execute(
-          'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
-          target,
-        );
-        await connection.execute(
-          'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
-          target,
-        );
-      }
-      if (result.affectedRows)
-        for (const table of ['video_review_likes', 'video_review_reports'])
-          await connection.execute(
-            `DELETE FROM ${table} WHERE author = ? AND title_norm = ? AND year = ?`,
-            target,
-          );
-    });
+    await this.runNoticeMutation(
+      new NoticeModeration('mysql').review(
+        userName,
+        titleNorm,
+        year,
+        'delete-review',
+        publicOnly,
+      ),
+    );
   }
-
   async moderateReviewReports(
     author: string,
     title: string,
     year: string,
     action: 'dismiss' | 'mark-spoiler' | 'delete-review',
   ): Promise<void> {
-    await this.withTransaction(async (connection) => {
-      const target = [normalizeUsername(author), title, year];
-      const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1 FOR UPDATE',
-        target,
-      );
-      if (!rows.length) return;
-      if (action === 'delete-review') {
-        await connection.execute(REVIEW_SQL.delete, [...target, 1]);
-        await connection.execute(
-          'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
-          target,
-        );
-        await connection.execute(
-          'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
-          target,
-        );
-        await connection.execute(
-          'DELETE FROM video_review_likes WHERE author = ? AND title_norm = ? AND year = ?',
-          target,
-        );
-      } else if (action === 'mark-spoiler')
-        await connection.execute(
-          "UPDATE video_reviews SET review_json = JSON_SET(review_json, '$.spoiler', CAST('true' AS JSON)) WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1",
-          target,
-        );
-      await connection.execute(
-        'DELETE FROM video_review_reports WHERE author = ? AND title_norm = ? AND year = ?',
-        target,
-      );
-    });
+    await this.runNoticeMutation(
+      new NoticeModeration('mysql').review(author, title, year, action, true),
+    );
   }
 
   async getMyVideoReviewPage(
@@ -1835,20 +2055,83 @@ export class MySqlStorage implements IStorage {
     return reviewPage(await this.socialFor().enrichReviews(rows));
   }
 
+  async getOAuthIdentity(id: string) {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND provider_user_id = ?",
+      [id],
+    );
+    return readOAuthIdentity(rows[0]);
+  }
+  async getUserOAuthIdentity(username: string) {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND username = ?",
+      [normalizeUsername(username)],
+    );
+    return readOAuthIdentity(rows[0]);
+  }
+  async bindOAuthIdentity(identity: OAuthIdentity): Promise<OAuthBindResult> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(identity.username);
+    try {
+      return await this.withTransaction(async (connection) => {
+        const [users] = await connection.query<RowDataPacket[]>(
+          'SELECT username FROM users WHERE username = ? FOR UPDATE',
+          [username],
+        );
+        if (!users.length) return 'user_missing' as const;
+        await connection.execute(
+          OAUTH_INSERT,
+          oauthIdentityParams({ ...identity, username, autoCreated: false }),
+        );
+        return 'bound' as const;
+      });
+    } catch (error) {
+      if (!isOAuthDuplicate(error)) throw error;
+      const existing = await this.getOAuthIdentity(identity.providerUserId);
+      if (existing)
+        return existing.username === username ? 'bound' : 'identity_taken';
+      return 'user_bound';
+    }
+  }
+  async unbindOAuthIdentity(username: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      "DELETE FROM oauth_identities WHERE provider = 'linuxdo' AND username = ? AND auto_created = 0",
+      [normalizeUsername(username)],
+    );
+    return result.affectedRows > 0;
+  }
+  async updateOAuthProviderUsername(id: string, name: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      "UPDATE oauth_identities SET provider_username = ? WHERE provider = 'linuxdo' AND provider_user_id = ?",
+      [name, id],
+    );
+  }
+
   async registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void> {
     await this.ensureInitialized();
     const username = assertValidUsernameFormat(userName);
     const hashed = await hashPassword(password);
     await this.withTransaction(async (connection) => {
+      // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
       await connection.execute(
-        'INSERT INTO users (username, password) VALUES (?, ?)',
-        [username, hashed],
+        'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)',
+        [username, hashed, identity ? 0 : 1],
       );
+      if (identity)
+        await connection.execute(
+          OAUTH_INSERT,
+          oauthIdentityParams({ ...identity, username, autoCreated: true }),
+        );
       await connection.execute(
         'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
         [username, Date.now()],
@@ -1902,14 +2185,61 @@ export class MySqlStorage implements IStorage {
     return rows.length > 0;
   }
 
-  async changePassword(userName: string, newPassword: string): Promise<void> {
+  async isPasswordSet(userName: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT password_set FROM users WHERE username = ? LIMIT 1',
+      [normalizeUsername(userName)],
+    );
+    return Boolean(Number(rows[0]?.password_set ?? 0));
+  }
+
+  async changePassword(
+    userName: string,
+    newPassword: string,
+    admin = false,
+    currentPassword?: string | null,
+  ): Promise<boolean> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
-    await this.pool.execute(
-      'UPDATE users SET password = ? WHERE username = ?',
-      [hashed, username],
-    );
+    return this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT password, password_set FROM users WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      if (!rows.length) return false;
+      if (currentPassword !== undefined) {
+        if (
+          Number(rows[0].password_set) !== 0 &&
+          (!currentPassword ||
+            !(await verifyPassword(currentPassword, String(rows[0].password)))
+              .match)
+        )
+          return false;
+      }
+      if (
+        admin &&
+        (await verifyPassword(newPassword, String(rows[0].password))).match
+      )
+        return true;
+      await connection.execute(
+        'UPDATE users SET password = ?, password_set = 1 WHERE username = ?',
+        [hashed, username],
+      );
+      if (admin) {
+        const event = noticeInsert(
+          'mysql',
+          username,
+          `password:${rows[0].password}`,
+          'account-change',
+          'password-changed',
+          {},
+        );
+        await connection.execute(event.sql, event.params);
+      }
+      return true;
+    });
   }
 
   async deleteUser(
@@ -1923,11 +2253,6 @@ export class MySqlStorage implements IStorage {
   async getUserAccess(username: string) {
     await this.ensureInitialized();
     return new MysqlUserAccessStore(this.pool).get(username);
-  }
-
-  async getAllUserAccess() {
-    await this.ensureInitialized();
-    return new MysqlUserAccessStore(this.pool).all();
   }
 
   async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
@@ -2037,6 +2362,10 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM favorites WHERE username = ?', [
         username,
       ]);
+      await connection.execute(
+        'DELETE FROM oauth_identities WHERE username = ?',
+        [username],
+      );
       await connection.execute('DELETE FROM user_danmaku WHERE username = ?', [
         username,
       ]);
@@ -2050,8 +2379,23 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM skip_configs WHERE username = ?', [
         username,
       ]);
+      await connection.execute('DELETE FROM watch_history WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute(
+        'DELETE FROM playback_watch_buckets WHERE username = ?',
+        [username],
+      );
       await connection.execute(
         'DELETE FROM playback_sessions WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_annual_recaps WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_notice_events WHERE recipient_username = ?',
         [username],
       );
       await connection.execute(
@@ -2108,6 +2452,78 @@ export class MySqlStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async listAnnouncements(limit: number): Promise<SiteAnnouncement[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
+      ANNOUNCEMENT_LIST_SQL,
+      [limit],
+    );
+    return rows.map(readAnnouncement);
+  }
+
+  async countAnnouncements(): Promise<number> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & { total: number | string })[]
+    >('SELECT COUNT(*) AS total FROM announcements');
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  async getPublishedAnnouncements(
+    options: Parameters<IStorage['getPublishedAnnouncements']>[0],
+  ): Promise<SiteAnnouncement[]> {
+    await this.ensureInitialized();
+    const { sql, params } = publishedAnnouncementQuery(options);
+    const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
+      sql,
+      params,
+    );
+    return rows.map(readAnnouncement);
+  }
+
+  async getAnnouncement(id: string): Promise<SiteAnnouncement | null> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
+      'SELECT * FROM announcements WHERE id = ?',
+      [id],
+    );
+    return rows[0] ? readAnnouncement(rows[0]) : null;
+  }
+
+  async createAnnouncement(announcement: SiteAnnouncement): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(ANNOUNCEMENT_INSERT_SQL, [
+      announcement.id,
+      announcement.content,
+      announcement.createdAt,
+      announcement.updatedAt,
+      announcement.publishedAt,
+    ]);
+  }
+
+  async updateAnnouncement(
+    id: string,
+    patch: Parameters<IStorage['updateAnnouncement']>[1],
+  ): Promise<SiteAnnouncement | null> {
+    const { sql, params } = announcementUpdateQuery(id, patch);
+    return this.withTransaction(async (connection) => {
+      await connection.execute(sql, params);
+      const [rows] = await connection.query<
+        (RowDataPacket & AnnouncementRow)[]
+      >('SELECT * FROM announcements WHERE id = ?', [id]);
+      return rows[0] ? readAnnouncement(rows[0]) : null;
+    });
+  }
+
+  async deleteAnnouncement(id: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      'DELETE FROM announcements WHERE id = ?',
+      [id],
+    );
+    return result.affectedRows > 0;
   }
 
   private get invites() {
@@ -2288,10 +2704,36 @@ export class MySqlStorage implements IStorage {
         )
       )
         return false;
+      const noticeAccess = new MysqlUserAccessStore(connection, true);
+      const [noticeRows] = configPermissionsChanged(current, config)
+        ? await connection.query<RowDataPacket[]>(
+            'SELECT username FROM user_access ORDER BY username FOR UPDATE',
+          )
+        : [[]];
+      const noticeUsers = [];
+      for (const row of noticeRows) {
+        const user = await noticeAccess.get(String(row.username));
+        if (user && current)
+          noticeUsers.push({ user, key: accessPermissionsKey(user, current) });
+      }
       const removed = removedAccessReferences(current, config);
       const access = new MysqlUserAccessStore(connection, true);
       for (const group of removed.groups) await access.removeGroup(group);
       for (const source of removed.sources) await access.removeSource(source);
+      for (const { user, key } of noticeUsers) {
+        const next = await noticeAccess.get(user.username);
+        if (next && key !== accessPermissionsKey(next, config)) {
+          const event = noticeInsert(
+            'mysql',
+            user.username,
+            `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
+            'account-change',
+            'permissions-changed',
+            {},
+          );
+          await connection.execute(event.sql, event.params);
+        }
+      }
       await stateStore.prune(current, config);
       for (const [key, count] of Object.entries(state?.liveCounts || {})) {
         if (config.LiveConfig?.some((live) => live.key === key))
@@ -2318,20 +2760,6 @@ export class MySqlStorage implements IStorage {
       .filter(Boolean)
       .map((username) => normalizeUsername(username as string));
     return [...new Set(usernames)];
-  }
-
-  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
-    await this.ensureInitialized();
-    const [rows] = await this.pool.query<JsonRow[]>(
-      'SELECT username, password FROM users ORDER BY username ASC',
-    );
-    const result: { [username: string]: string } = {};
-    for (const row of rows) {
-      if (row.username && row.password) {
-        result[normalizeUsername(row.username as string)] = row.password;
-      }
-    }
-    return result;
   }
 
   async getUserMessageState(userName: string): Promise<UserMessageState> {
@@ -2668,21 +3096,20 @@ export class MySqlStorage implements IStorage {
         total_time, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        username = VALUES(username),
-        source = VALUES(source),
-        video_id = VALUES(video_id),
-        episode_index = VALUES(episode_index),
-        title = VALUES(title),
-        source_name = VALUES(source_name),
-        cover = VALUES(cover),
-        year = VALUES(year),
-        started_at = VALUES(started_at),
-        ended_at = VALUES(ended_at),
-        watch_seconds = VALUES(watch_seconds),
-        last_position = VALUES(last_position),
-        total_time = VALUES(total_time),
-        created_at = VALUES(created_at),
-        updated_at = VALUES(updated_at)`,
+        source = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(source), source),
+        video_id = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(video_id), video_id),
+        episode_index = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(episode_index), episode_index),
+        title = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(title), title),
+        source_name = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(source_name), source_name),
+        cover = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(cover), cover),
+        year = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(year), year),
+        started_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(started_at), started_at),
+        ended_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(ended_at), ended_at),
+        watch_seconds = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(watch_seconds), watch_seconds),
+        last_position = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(last_position), last_position),
+        total_time = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(total_time), total_time),
+        created_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(created_at), created_at),
+        updated_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(updated_at), updated_at)`,
       [
         session.id,
         username,
@@ -2704,124 +3131,222 @@ export class MySqlStorage implements IStorage {
     );
   }
 
-  async getPlaybackSessions(
+  async saveWatchSessionReport(
     userName: string,
-    query: PlaybackSessionQuery = {},
-  ): Promise<PlaybackSession[]> {
-    await this.ensureInitialized();
+    session: PlaybackSession,
+    buckets: PlaybackWatchBucket[],
+    history?: WatchHistoryWrite,
+  ): Promise<string | null> {
     const username = normalizeUsername(userName);
-    const conditions = ['username = ?'];
-    const params: Array<string | number> = [username];
-
-    if (Number.isFinite(query.since)) {
-      conditions.push('started_at >= ?');
-      params.push(query.since as number);
-    }
-
-    if (Number.isFinite(query.cursor)) {
-      conditions.push('started_at < ?');
-      params.push(query.cursor as number);
-    }
-
-    const keyword = normalizePlaybackSearchKeyword(query.keyword);
-    if (keyword) {
-      const likePattern = buildPlaybackSearchLikePattern(keyword);
-      conditions.push(
-        "(title LIKE ? ESCAPE '!' OR source_name LIKE ? ESCAPE '!' OR year LIKE ? ESCAPE '!' OR video_id LIKE ? ESCAPE '!')",
+    return this.withTransaction(async (connection) => {
+      if (!buckets.some((bucket) => bucket.watch_ms > 0)) {
+        const [existing] = await connection.query<RowDataPacket[]>(
+          'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+          [session.id],
+        );
+        if (existing[0]?.username !== username) return null;
+        const [totals] = await connection.query<RowDataPacket[]>(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+          [username, session.id],
+        );
+        if (!Number(totals[0]?.total)) return null;
+      }
+      await connection.execute(
+        `INSERT INTO playback_sessions (
+        id, username, source, video_id, episode_index, title, source_name, cover, year,
+        started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at, measurement_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 2)
+      ON DUPLICATE KEY UPDATE id = id`,
+        [
+          session.id,
+          username,
+          session.source,
+          session.video_id,
+          session.episode_index,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.started_at,
+          session.ended_at,
+          session.last_position,
+          session.total_time,
+          session.created_at,
+          session.updated_at,
+        ],
       );
-      params.push(likePattern, likePattern, likePattern, likePattern);
-    }
-
-    const limit = Math.min(Math.max(Math.floor(query.limit ?? 100), 1), 500);
-    params.push(limit);
-
-    const [rows] = await this.pool.query<JsonRow[]>(
-      `SELECT
-        id, source, video_id, episode_index, title, source_name, cover, year,
-        started_at, ended_at, watch_seconds, last_position, total_time,
-        created_at, updated_at
-      FROM playback_sessions
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY started_at DESC
-      LIMIT ?`,
-      params,
-    );
-
-    return rows
-      .filter((row) => row.id)
-      .map((row) => ({
-        id: row.id || '',
-        source: row.source || '',
-        video_id: row.video_id || '',
-        episode_index: Number(row.episode_index || 0),
-        title: row.title || '',
-        source_name: row.source_name || '',
-        cover: row.cover || '',
-        year: row.year || '',
-        started_at: Number(row.started_at || 0),
-        ended_at: Number(row.ended_at || 0),
-        watch_seconds: Number(row.watch_seconds || 0),
-        last_position: Number(row.last_position || 0),
-        total_time: Number(row.total_time || 0),
-        created_at: Number(row.created_at || 0),
-        updated_at: Number(row.updated_at || 0),
-      }));
+      const [owners] = await connection.query<RowDataPacket[]>(
+        'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+        [session.id],
+      );
+      if (owners[0]?.username !== username) return null;
+      await connection.execute(
+        `UPDATE playback_sessions SET ended_at = GREATEST(ended_at, ?), last_position = ?, total_time = ?,
+        title = ?, source_name = ?, cover = ?, year = ?, updated_at = GREATEST(updated_at, ?), measurement_version = 2
+        WHERE id = ? AND username = ?`,
+        [
+          session.ended_at,
+          session.last_position,
+          session.total_time,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.updated_at,
+          session.id,
+          username,
+        ],
+      );
+      for (const bucket of buckets)
+        await connection.execute(
+          `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
+        VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE watch_ms = GREATEST(watch_ms, VALUES(watch_ms))`,
+          [username, session.id, bucket.start, bucket.watch_ms],
+        );
+      const [totals] = await connection.query<RowDataPacket[]>(
+        'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+        [username, session.id],
+      );
+      const total = Number(totals[0]?.total || 0);
+      await connection.execute(
+        'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
+        [Math.floor(total / 1000), session.id, username],
+      );
+      if (!history || total <= 0) return null;
+      const values = [
+        session.title,
+        session.source_name,
+        session.cover,
+        session.year,
+        session.episode_index,
+        history.total_episodes,
+        history.group_label ?? null,
+        history.group_index ?? null,
+        history.group_total ?? null,
+        session.last_position,
+        session.total_time,
+        session.updated_at,
+      ];
+      if (history.id) {
+        const [rows] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM watch_history WHERE username = ? AND id = ? AND source = ? AND video_id = ? FOR UPDATE',
+          [username, history.id, session.source, session.video_id],
+        );
+        if (!rows.length) return null;
+        await connection.execute(
+          `UPDATE watch_history SET title = ?, source_name = ?, cover = ?, year = ?,
+          episode_index = ?, total_episodes = ?, group_label = ?, group_index = ?, group_total = ?,
+          position = ?, duration = ?, last_watched_at = ? WHERE username = ? AND id = ? AND source = ? AND video_id = ?`,
+          [...values, username, history.id, session.source, session.video_id],
+        );
+        return history.id;
+      }
+      await connection.execute(
+        `INSERT INTO watch_history (
+        title, source_name, cover, year, episode_index, total_episodes, group_label, group_index, group_total,
+        position, duration, last_watched_at, username, id, source, video_id, first_watched_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year),
+        episode_index = VALUES(episode_index), total_episodes = VALUES(total_episodes), group_label = VALUES(group_label),
+        group_index = VALUES(group_index), group_total = VALUES(group_total), position = VALUES(position),
+        duration = VALUES(duration), last_watched_at = VALUES(last_watched_at)`,
+        [
+          ...values,
+          username,
+          randomUUID(),
+          session.source,
+          session.video_id,
+          session.started_at,
+        ],
+      );
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
+        [username, session.source, session.video_id],
+      );
+      return String(rows[0].id);
+    });
   }
 
-  async deletePlaybackSession(userName: string, id: string): Promise<void> {
+  async getWatchHistoryPage(
+    userName: string,
+    query: WatchHistoryQuery,
+  ): Promise<WatchHistoryEntry[]> {
     await this.ensureInitialized();
-    const username = normalizeUsername(userName);
+    const conditions = ['username = ?'];
+    const params: (string | number)[] = [normalizeUsername(userName)];
+    if (query.cursor) {
+      conditions.push(
+        '(last_watched_at < ? OR (last_watched_at = ? AND id < ?))',
+      );
+      params.push(
+        query.cursor.lastWatchedAt,
+        query.cursor.lastWatchedAt,
+        query.cursor.id,
+      );
+    }
+    const keyword = normalizePlaybackSearchKeyword(query.keyword);
+    if (keyword) {
+      conditions.push("LOWER(title) LIKE LOWER(?) ESCAPE '!'");
+      params.push(buildPlaybackSearchLikePattern(keyword));
+    }
+    params.push(query.limit);
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT id, source, video_id, title, source_name, cover, year, episode_index,
+      total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+      FROM watch_history WHERE ${conditions.join(' AND ')} ORDER BY last_watched_at DESC, id DESC LIMIT ?`,
+      params,
+    );
+    return rows.map((row) => ({
+      id: String(row.id),
+      source: String(row.source),
+      video_id: String(row.video_id),
+      title: String(row.title),
+      source_name: String(row.source_name),
+      cover: String(row.cover),
+      year: String(row.year),
+      episode_index: Number(row.episode_index),
+      total_episodes: Number(row.total_episodes),
+      group_label: row.group_label ?? undefined,
+      group_index:
+        row.group_index == null ? undefined : Number(row.group_index),
+      group_total:
+        row.group_total == null ? undefined : Number(row.group_total),
+      position: Number(row.position),
+      duration: Number(row.duration),
+      first_watched_at: Number(row.first_watched_at),
+      last_watched_at: Number(row.last_watched_at),
+    }));
+  }
+
+  async deleteWatchHistoryEntry(userName: string, id: string): Promise<void> {
+    await this.ensureInitialized();
     await this.pool.execute(
-      'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
-      [username, id],
+      'DELETE FROM watch_history WHERE username = ? AND id = ?',
+      [normalizeUsername(userName), id],
     );
   }
 
   async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
-    await this.ensureInitialized();
     const cutoff = Number.isFinite(updatedBefore)
       ? Math.max(0, Math.floor(updatedBefore))
       : 0;
-    const [result] = await this.pool.execute(
-      'DELETE FROM playback_sessions WHERE updated_at < ?',
-      [cutoff],
-    );
-    return Number((result as { affectedRows?: number }).affectedRows || 0);
-  }
-
-  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
-    await this.ensureInitialized();
-    const username = normalizeUsername(userName);
-    const [rows] = await this.pool.query<JsonRow[]>(
-      `SELECT
-        id, source, video_id, episode_index, title, source_name, cover, year,
-        started_at, ended_at, watch_seconds, last_position, total_time,
-        created_at, updated_at
-      FROM playback_sessions
-      WHERE username = ?
-      ORDER BY started_at DESC`,
-      [username],
-    );
-
-    return rows
-      .filter((row) => row.id)
-      .map((row) => ({
-        id: row.id || '',
-        source: row.source || '',
-        video_id: row.video_id || '',
-        episode_index: Number(row.episode_index || 0),
-        title: row.title || '',
-        source_name: row.source_name || '',
-        cover: row.cover || '',
-        year: row.year || '',
-        started_at: Number(row.started_at || 0),
-        ended_at: Number(row.ended_at || 0),
-        watch_seconds: Number(row.watch_seconds || 0),
-        last_position: Number(row.last_position || 0),
-        total_time: Number(row.total_time || 0),
-        created_at: Number(row.created_at || 0),
-        updated_at: Number(row.updated_at || 0),
-      }));
+    return this.withTransaction(async (connection) => {
+      // 锁定待删会话，阻止并发心跳在删桶和删会话之间续写。
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM playback_sessions WHERE updated_at < ? FOR UPDATE',
+        [cutoff],
+      );
+      for (const row of rows) {
+        await connection.execute(
+          'DELETE FROM playback_watch_buckets WHERE session_id = ?',
+          [row.id],
+        );
+        await connection.execute('DELETE FROM playback_sessions WHERE id = ?', [
+          row.id,
+        ]);
+      }
+      return rows.length;
+    });
   }
 
   async getPlaybackWatchTotals(
@@ -2849,6 +3374,24 @@ export class MySqlStorage implements IStorage {
     };
   }
 
+  async getPlaybackSourceUsage(
+    start: number,
+    end: number,
+    userName?: string,
+  ): Promise<PlaybackSourceUsage[]> {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return [];
+    const personal = userName !== undefined;
+    const params = personal
+      ? [normalizeUsername(userName), start, end]
+      : [start, end];
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & PlaybackSourceUsageRow)[]
+    >(sourceUsageSql(personal), params);
+    return aggregateSourceUsage(rows);
+  }
+
   async getPlaybackPeriodSessions(
     userName: string,
     start: number,
@@ -2859,12 +3402,13 @@ export class MySqlStorage implements IStorage {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
       return [];
     const [rows] = await this.pool.query<JsonRow[]>(
-      `SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds
+      `SELECT source, video_id, episode_index, title, cover, year, started_at, ended_at, watch_seconds
         FROM playback_sessions
         WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0`,
       [username, start, end],
     );
     return rows.map((row) => ({
+      episode_index: Number(row.episode_index),
       source: row.source || '',
       video_id: row.video_id || '',
       title: row.title || '',
@@ -2874,6 +3418,73 @@ export class MySqlStorage implements IStorage {
       ended_at: Number(row.ended_at),
       watch_seconds: Number(row.watch_seconds),
     }));
+  }
+
+  async hasPlaybackAnnualActivity(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(ANNUAL_MESSAGE_EXISTS_SQL, [
+      normalizeUsername(userName),
+      start,
+      end,
+    ]);
+    return rows.length > 0;
+  }
+
+  async getPlaybackAnnualData(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<PlaybackAnnualData> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [earliest] = await this.pool.query<JsonRow[]>(ANNUAL_EARLIEST_SQL, [
+      username,
+    ]);
+    const earliestStartedAt = earliest.length
+      ? Number(earliest[0].started_at)
+      : null;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return { sessions: [], buckets: [], earliestStartedAt };
+    const [rows] = await this.pool.query<JsonRow[]>(ANNUAL_SESSIONS_SQL, [
+      username,
+      end,
+      start,
+      username,
+      start,
+      end,
+      username,
+    ]);
+    const [bucketRows] = await this.pool.query<JsonRow[]>(ANNUAL_BUCKETS_SQL, [
+      username,
+      start,
+      end,
+    ]);
+    return {
+      sessions: rows.map((row) => ({
+        id: row.id || '',
+        source: row.source || '',
+        video_id: row.video_id || '',
+        title: row.title || '',
+        source_name: row.source_name || '',
+        cover: row.cover || '',
+        year: row.year || '',
+        episode_index: Number(row.episode_index),
+        started_at: Number(row.started_at),
+        ended_at: Number(row.ended_at),
+        watch_seconds: Number(row.watch_seconds),
+        measurement_version: Number(row.measurement_version) as 1 | 2,
+      })),
+      buckets: bucketRows.map((row) => ({
+        session_id: row.session_id,
+        bucket_start: Number(row.bucket_start),
+        watch_ms: Number(row.watch_ms),
+      })),
+      earliestStartedAt,
+    };
   }
 
   async recordSourceHealthSearchBatch(
@@ -3003,7 +3614,7 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const source = input.source.trim().slice(0, 191);
     if (!source) return;
-    const routeMode = input.routeMode === 'server' ? 'server' : 'browser';
+    const routeMode = SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode];
     const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
     const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
     const successIncrement = input.success ? 1 : 0;
@@ -3046,11 +3657,16 @@ export class MySqlStorage implements IStorage {
 
     return rows
       .filter(
-        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+        (row) =>
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
       )
       .map((row) => ({
         source: row.source || '',
-        routeMode: row.route_mode as SourceRouteStatsItem['routeMode'],
+        routeMode:
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server
+            ? 'server'
+            : 'browser',
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
@@ -3074,7 +3690,11 @@ export class MySqlStorage implements IStorage {
 
     return rows
       .filter(
-        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+        (row) =>
+          row.route_mode === 'browser' ||
+          row.route_mode === 'server' ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
       )
       .map((row) => ({
         source: row.source || '',
@@ -3083,353 +3703,5 @@ export class MySqlStorage implements IStorage {
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
-  }
-
-  async clearAllData(): Promise<void> {
-    await this.withTransaction(async (connection) => {
-      await connection.execute('DELETE FROM user_group_members');
-      await connection.execute('DELETE FROM user_access');
-      await connection.execute('DELETE FROM users');
-      await connection.execute('DELETE FROM play_records');
-      await connection.execute('DELETE FROM favorites');
-      await connection.execute('DELETE FROM video_reviews');
-      await connection.execute('DELETE FROM user_danmaku');
-      for (const table of SOCIAL_TABLES)
-        await connection.execute(`DELETE FROM ${table}`);
-      await connection.execute('DELETE FROM search_history');
-      await connection.execute('DELETE FROM skip_configs');
-      await connection.execute('DELETE FROM playback_sessions');
-      await connection.execute('DELETE FROM admin_config');
-      await connection.execute('DELETE FROM source_route_stats');
-      await connection.execute('DELETE FROM source_health_search');
-      await connection.execute('DELETE FROM source_health_play');
-      await connection.execute('DELETE FROM user_message_state');
-      await connection.execute('DELETE FROM user_login_activity');
-      await connection.execute('DELETE FROM invite_code_usage');
-      await connection.execute('DELETE FROM invite_codes');
-      await connection.execute('DELETE FROM config_subscription');
-      await connection.execute('DELETE FROM live_source_state');
-      await connection.execute('DELETE FROM user_danmaku_episodes');
-      await connection.execute('DELETE FROM user_danmaku_settings');
-      await connection.execute('DELETE FROM shared_cache');
-    });
-  }
-
-  private async importSocialData(
-    connection: PoolConnection,
-    snapshot: StorageImportData,
-  ): Promise<void> {
-    const ids = new Set<string>();
-    const names = new Set<string>();
-    for (const [username, data] of Object.entries(snapshot.userData)) {
-      await connection.execute(
-        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        importedProfileValues(
-          username,
-          data.profile,
-          ids,
-          names,
-        ) as ExecuteValues,
-      );
-      for (const row of data.replies ?? [])
-        await connection.execute(
-          REPLY_INSERT,
-          replyValues(username, row) as ExecuteValues,
-        );
-      for (const row of data.replyReports ?? [])
-        await connection.execute(REPLY_REPORT_INSERT, [
-          row.reply_id,
-          normalizeUsername(username),
-          row.reason,
-          row.detail,
-          row.created_at,
-        ]);
-      for (const row of data.follows ?? [])
-        await connection.execute(
-          'INSERT IGNORE INTO user_follows (follower, followee, created_at) VALUES (?, ?, ?)',
-          [
-            normalizeUsername(username),
-            normalizeUsername(row.followee),
-            row.created_at,
-          ],
-        );
-      for (const row of data.likes ?? [])
-        await connection.execute(
-          'INSERT IGNORE INTO video_review_likes (author, title_norm, year, liker, created_at) VALUES (?, ?, ?, ?, ?)',
-          [
-            normalizeUsername(row.author),
-            row.title_norm,
-            row.year,
-            normalizeUsername(username),
-            row.created_at,
-          ],
-        );
-      for (const row of data.reports ?? [])
-        await connection.execute(
-          'INSERT INTO video_review_reports (author, title_norm, year, reporter, reason, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE reason = VALUES(reason), detail = VALUES(detail), created_at = VALUES(created_at)',
-          [
-            normalizeUsername(row.author),
-            row.title_norm,
-            row.year,
-            normalizeUsername(username),
-            row.reason,
-            row.detail,
-            row.created_at,
-          ],
-        );
-    }
-  }
-
-  async replaceAllData(data: StorageImportData): Promise<void> {
-    const searchHistoryLimit = normalizeRuntimeParam(
-      'SearchHistoryLimit',
-      data.adminConfig?.SiteConfig?.SearchHistoryLimit,
-    );
-    await this.withTransaction(async (connection) => {
-      await connection.execute('DELETE FROM user_group_members');
-      await connection.execute('DELETE FROM user_access');
-      await connection.execute('DELETE FROM users');
-      await connection.execute('DELETE FROM play_records');
-      await connection.execute('DELETE FROM favorites');
-      await connection.execute('DELETE FROM video_reviews');
-      await connection.execute('DELETE FROM user_danmaku');
-      for (const table of SOCIAL_TABLES)
-        await connection.execute(`DELETE FROM ${table}`);
-      await connection.execute('DELETE FROM search_history');
-      await connection.execute('DELETE FROM skip_configs');
-      await connection.execute('DELETE FROM playback_sessions');
-      await connection.execute('DELETE FROM admin_config');
-      await connection.execute('DELETE FROM source_route_stats');
-      await connection.execute('DELETE FROM source_health_search');
-      await connection.execute('DELETE FROM source_health_play');
-      await connection.execute('DELETE FROM user_message_state');
-      await connection.execute('DELETE FROM user_login_activity');
-      await connection.execute('DELETE FROM invite_code_usage');
-      await connection.execute('DELETE FROM invite_codes');
-      await connection.execute('DELETE FROM config_subscription');
-      await connection.execute('DELETE FROM live_source_state');
-      await connection.execute('DELETE FROM user_danmaku_episodes');
-      await connection.execute('DELETE FROM user_danmaku_settings');
-      await connection.execute('DELETE FROM shared_cache');
-
-      const inviteCodes = importedInviteCodes(
-        data.adminConfig.UserConfig?.InviteCodes,
-        data.inviteCodeUsage,
-      );
-      const storedConfig = JSON.parse(
-        JSON.stringify(data.adminConfig),
-      ) as AdminConfig;
-      if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
-      await new MysqlConfigStateStore(connection).saveSubscription(
-        subscriptionFromConfig(storedConfig),
-      );
-      stripConfigState(storedConfig);
-      await connection.execute(
-        'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
-        [JSON.stringify(storedConfig)],
-      );
-      for (const item of inviteCodes)
-        await connection.execute(INVITE_INSERT_SQL, inviteValues(item));
-
-      const routeStatUpdatedAt = Date.now();
-      await insertRowsInBatches(
-        connection,
-        'source_route_stats',
-        [
-          'source',
-          'route_mode',
-          'bucket_date',
-          'success_count',
-          'failure_count',
-          'updated_at',
-        ],
-        data.sourceRouteStats.map((stat) => [
-          stat.source,
-          stat.routeMode,
-          stat.bucketDate,
-          stat.successCount,
-          stat.failureCount,
-          routeStatUpdatedAt,
-        ]),
-      );
-
-      await insertRowsInBatches(
-        connection,
-        'users',
-        ['username', 'password'],
-        Object.entries(data.users).map(([userName, passwordHash]) => [
-          assertValidUsernameFormat(userName),
-          passwordHash,
-        ]),
-      );
-
-      const messageStates = createRowBatcher(connection, 'user_message_state', [
-        'username',
-        'state_json',
-      ]);
-      const danmakuSettings = createRowBatcher(
-        connection,
-        'user_danmaku_settings',
-        ['username', 'enabled'],
-      );
-      const loginActivities = createRowBatcher(
-        connection,
-        'user_login_activity',
-        ['username', 'last_login_at'],
-      );
-      const playRecords = createRowBatcher(connection, 'play_records', [
-        'username',
-        'record_key',
-        'record_json',
-      ]);
-      const favorites = createRowBatcher(connection, 'favorites', [
-        'username',
-        'favorite_key',
-        'favorite_json',
-        ...FAVORITE_PROJECTION_COLUMNS,
-      ]);
-      const userDanmaku = createRowBatcher(
-        connection,
-        'user_danmaku',
-        USER_DANMAKU_COLUMNS,
-      );
-      const videoReviews = createRowBatcher(connection, 'video_reviews', [
-        'username',
-        'title_norm',
-        'year',
-        'review_json',
-        'is_public',
-        'updated_at',
-      ]);
-      const searchHistories = createRowBatcher(connection, 'search_history', [
-        'username',
-        'keyword',
-        'sort_index',
-      ]);
-      const skipConfigs = createRowBatcher(connection, 'skip_configs', [
-        'username',
-        'config_key',
-        'config_json',
-      ]);
-      const playbackSessions = createRowBatcher(
-        connection,
-        'playback_sessions',
-        [
-          'id',
-          'username',
-          'source',
-          'video_id',
-          'episode_index',
-          'title',
-          'source_name',
-          'cover',
-          'year',
-          'started_at',
-          'ended_at',
-          'watch_seconds',
-          'last_position',
-          'total_time',
-          'created_at',
-          'updated_at',
-        ],
-      );
-
-      for (const [userName, userData] of Object.entries(data.userData)) {
-        const username = assertValidUsernameFormat(userName);
-
-        if (userData.messageState) {
-          await messageStates.add([
-            username,
-            JSON.stringify(userData.messageState),
-          ]);
-        }
-
-        if (typeof userData.danmakuEnabled === 'boolean') {
-          await danmakuSettings.add([
-            username,
-            userData.danmakuEnabled ? 1 : 0,
-          ]);
-        }
-
-        if (typeof userData.lastLoginAt === 'number') {
-          await loginActivities.add([username, userData.lastLoginAt]);
-        }
-
-        for (const [key, record] of Object.entries(userData.playRecords)) {
-          await playRecords.add([username, key, JSON.stringify(record)]);
-        }
-
-        for (const [key, favorite] of Object.entries(userData.favorites)) {
-          await favorites.add([
-            username,
-            key,
-            JSON.stringify(favorite),
-            ...favoriteProjection(key, JSON.stringify(favorite)),
-          ]);
-        }
-
-        for (const item of userData.userDanmaku ?? []) {
-          await userDanmaku.add(userDanmakuValues({ ...item, username }));
-        }
-        for (const review of userData.videoReviews ?? []) {
-          await videoReviews.add([
-            username,
-            review.title_norm,
-            review.year,
-            JSON.stringify(review),
-            review.is_public ? 1 : 0,
-            review.updated_at,
-          ]);
-        }
-        const searchHistory = userData.searchHistory.slice(
-          0,
-          searchHistoryLimit,
-        );
-        for (let index = 0; index < searchHistory.length; index++) {
-          await searchHistories.add([username, searchHistory[index], index]);
-        }
-
-        for (const [key, config] of Object.entries(userData.skipConfigs)) {
-          await skipConfigs.add([username, key, JSON.stringify(config)]);
-        }
-
-        for (const session of Object.values(userData.playbackSessions)) {
-          await playbackSessions.add([
-            session.id,
-            username,
-            session.source,
-            session.video_id,
-            session.episode_index,
-            session.title,
-            session.source_name,
-            session.cover,
-            session.year,
-            session.started_at,
-            session.ended_at,
-            session.watch_seconds,
-            session.last_position,
-            session.total_time,
-            session.created_at,
-            session.updated_at,
-          ]);
-        }
-      }
-
-      await messageStates.flush();
-      await danmakuSettings.flush();
-      await loginActivities.flush();
-      await playRecords.flush();
-      await favorites.flush();
-      await videoReviews.flush();
-      await userDanmaku.flush();
-      await searchHistories.flush();
-      await skipConfigs.flush();
-      await playbackSessions.flush();
-
-      await this.importSocialData(connection, data);
-      await new MysqlUserAccessStore(connection, true).migrate();
-      await this.backfillMissingLoginActivity(connection);
-      await this.backfillUserProfiles(connection);
-    });
   }
 }

@@ -31,6 +31,7 @@ describe('search snapshot cache', () => {
         results: [createResult(String(index))],
         totalSources: 1,
         completedSources: 1,
+        failedSources: [],
         useFluidSearch: true,
       });
     }
@@ -40,6 +41,7 @@ describe('search snapshot cache', () => {
       results: [createResult('12')],
       totalSources: 1,
       completedSources: 1,
+      failedSources: [],
       useFluidSearch: true,
     });
 

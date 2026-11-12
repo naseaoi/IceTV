@@ -9,6 +9,7 @@ import ProfileAvatar from '@/components/ProfileAvatar';
 import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { FollowList } from '@/features/profile/FollowList';
+import { rememberMyReviewCount } from '@/lib/my-review-count';
 import { getUserProfile } from '@/lib/profile.client';
 import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
 import { fetchMyVideoReviewCount } from '@/lib/video-reviews.client';
@@ -97,6 +98,7 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
             followers: profile.followerCount,
           };
           knownStats.set(profileId, next);
+          rememberMyReviewCount(profileId, count);
           setStats(next);
         })
         .catch(() => {
@@ -199,7 +201,12 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
         type={list}
         onClose={() => setList(null)}
       />
-      {editing && <ProfilePanel onClose={() => setEditing(false)} />}
+      {editing && (
+        <ProfilePanel
+          showSuccessToast={false}
+          onClose={() => setEditing(false)}
+        />
+      )}
     </section>
   );
 }

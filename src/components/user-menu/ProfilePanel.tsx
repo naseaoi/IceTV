@@ -14,16 +14,20 @@ import {
 } from '@/components/modals/modal-styles';
 import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import Select from '@/components/Select';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
 import { showToast } from '@/lib/toast';
 import type { LibraryVisibility } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import {
   createAvatarSeed,
   NICKNAME_MAX_LENGTH,
   validateNickname,
 } from '@/lib/user-profile';
+
+import { LinuxDoBindingTile } from './LinuxDoBindingTile';
 
 const AVATAR_CANDIDATE_COUNT = 5;
 
@@ -42,16 +46,24 @@ export function ProfileForm({
   onSaved,
   onClose,
   onChangePassword,
+  showSuccessToast = true,
 }: {
   required?: boolean;
   onSaved?: () => void;
   onClose?: () => void;
   onChangePassword?: () => void;
+  showSuccessToast?: boolean;
 }) {
   const { session, refreshSession } = useAuthSession();
   const profileId = session.status === 'authenticated' ? session.profileId : '';
   const allowReserved =
     session.status === 'authenticated' && session.role === 'owner';
+  const runtimeConfig = useRuntimeConfig();
+  const showLinuxDoBinding =
+    !required &&
+    runtimeConfig.LINUXDO_LOGIN &&
+    session.status === 'authenticated' &&
+    session.role !== 'owner';
   const [saved, setSaved] = useState<SavedProfile>(() => ({
     nickname:
       session.status === 'authenticated' ? (session.nickname ?? '') : '',
@@ -131,10 +143,11 @@ export function ProfileForm({
           : {}),
       });
       await refreshSession();
-      showToast('个人资料已保存', 'success');
+      if (showSuccessToast) showToast('个人资料已保存', 'success');
       onSaved?.();
     } catch (error) {
-      setError((error as Error).message);
+      if (!isAbortError(error))
+        setError(getErrorMessage(error, '保存失败，请稍后重试'));
     } finally {
       setSaving(false);
     }
@@ -276,6 +289,15 @@ export function ProfileForm({
         </div>
       )}
 
+      {showLinuxDoBinding && (
+        <div className='mt-5'>
+          <p className={MODAL_LABEL_CLASS}>账号绑定</p>
+          <div className='grid grid-cols-2 gap-2'>
+            <LinuxDoBindingTile />
+          </div>
+        </div>
+      )}
+
       {error && (
         <p
           role='alert'
@@ -320,9 +342,11 @@ export function ProfileForm({
 export function ProfilePanel({
   onClose,
   onChangePassword,
+  showSuccessToast = true,
 }: {
   onClose: () => void;
   onChangePassword?: () => void;
+  showSuccessToast?: boolean;
 }) {
   const [open, requestClose] = useDeferredClose(onClose);
   return (
@@ -333,6 +357,7 @@ export function ProfilePanel({
     >
       <div role='dialog' aria-label='个人资料' aria-modal='true'>
         <ProfileForm
+          showSuccessToast={showSuccessToast}
           onSaved={requestClose}
           onClose={requestClose}
           onChangePassword={onChangePassword}

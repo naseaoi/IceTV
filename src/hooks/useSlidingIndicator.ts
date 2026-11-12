@@ -38,7 +38,15 @@ const STRETCH_OFFSET = 0.38;
 const LEAD_PROGRESS = 0.82;
 const TRAIL_PROGRESS = 0.28;
 
+interface Slide {
+  from: Pick<IndicatorBox, 'x' | 'width'>;
+  to: IndicatorBox;
+  startedAt: number;
+}
+
 const rememberedBoxes = new Map<string, IndicatorBox>();
+// 进行中的滑动：路由很快完成时旧导航在滑到一半就被卸载，新导航从同一进度接着播
+const rememberedSlides = new Map<string, Slide>();
 
 function toContainerBox(container: HTMLElement, rect: DOMRect) {
   const offset = offsetInContainer(container, rect);
@@ -78,12 +86,10 @@ function slideTransform(left: number, right: number, width: number) {
   return `translateX(${left}px) scaleX(${scale})`;
 }
 
-function playSlide(
-  element: HTMLElement,
-  from: Pick<IndicatorBox, 'x' | 'width'>,
-  to: IndicatorBox,
-) {
+function playSlide(element: HTMLElement, { from, to, startedAt }: Slide) {
   if (prefersReducedMotion()) return;
+  const elapsed = performance.now() - startedAt;
+  if (elapsed >= SLIDE_MS) return;
   const fromRight = from.x + from.width;
   const toRight = to.x + to.width;
   const forward = to.x + to.width / 2 >= from.x + from.width / 2;
@@ -102,10 +108,18 @@ function playSlide(
     },
     { transform: slideTransform(to.x, toRight, to.width) },
   ];
-  return animateWithFallback(element, keyframes, {
+  const animation = animateWithFallback(element, keyframes, {
     duration: SLIDE_MS,
     easing: 'linear',
   });
+  animation.currentTime = Math.max(elapsed, 0);
+  return animation;
+}
+
+function findInFlightSlide(memoryKey: string, to: IndicatorBox | null) {
+  const slide = rememberedSlides.get(memoryKey);
+  if (!slide || !to || !sameBox(slide.to, to)) return null;
+  return performance.now() - slide.startedAt < SLIDE_MS ? slide : null;
 }
 
 // 导航目标项下方的指示条：目标变化时以合成层动画滑过去，主线程忙于渲染新页面时也不掉帧
@@ -117,10 +131,15 @@ export function useSlidingIndicator<T extends HTMLElement>(
   const indicatorRef = useRef<HTMLSpanElement>(null);
   const [box, setBox] = useState<IndicatorBox | null>(null);
   const boxRef = useRef<IndicatorBox | null>(null);
-  const slideFromRef = useRef<Pick<IndicatorBox, 'x' | 'width'> | null>(null);
-  // 挂载时读一次上一页的位置；开发模式重复执行副作用时仍从同一起点出发
+  const slideRef = useRef<Slide | null>(null);
+  // 挂载时读一次上一页的位置与进行中的滑动；开发模式重复执行副作用时仍从同一起点出发
   const [mountFrom] = useState(() =>
-    memoryKey ? (rememberedBoxes.get(memoryKey) ?? null) : null,
+    memoryKey
+      ? {
+          box: rememberedBoxes.get(memoryKey) ?? null,
+          slide: rememberedSlides.get(memoryKey) ?? null,
+        }
+      : null,
   );
 
   useLayoutEffect(() => {
@@ -128,13 +147,23 @@ export function useSlidingIndicator<T extends HTMLElement>(
     if (!container) return;
     const next = measureTarget(container, width);
     const indicator = indicatorRef.current;
-    const from =
-      indicator && boxRef.current
-        ? toContainerBox(container, indicator.getBoundingClientRect())
-        : mountFrom;
+    const mounting = !indicator || !boxRef.current;
+    const resumed =
+      mounting && memoryKey && mountFrom?.slide
+        ? findInFlightSlide(memoryKey, next)
+        : null;
+    const from = mounting
+      ? (mountFrom?.box ?? null)
+      : toContainerBox(container, indicator.getBoundingClientRect());
 
-    slideFromRef.current =
-      next && from && !sameBox({ ...from, top: next.top }, next) ? from : null;
+    if (resumed) {
+      slideRef.current = resumed;
+    } else if (next && from && !sameBox({ ...from, top: next.top }, next)) {
+      slideRef.current = { from, to: next, startedAt: performance.now() };
+      if (memoryKey) rememberedSlides.set(memoryKey, slideRef.current);
+    } else {
+      slideRef.current = null;
+    }
     boxRef.current = next;
     if (memoryKey) {
       if (next) rememberedBoxes.set(memoryKey, next);
@@ -145,9 +174,9 @@ export function useSlidingIndicator<T extends HTMLElement>(
 
   useLayoutEffect(() => {
     const indicator = indicatorRef.current;
-    const from = slideFromRef.current;
-    if (!indicator || !box || !from) return;
-    const animation = playSlide(indicator, from, box);
+    const slide = slideRef.current;
+    if (!indicator || !box || !slide) return;
+    const animation = playSlide(indicator, slide);
     return () => animation?.cancel();
   }, [box]);
 
@@ -159,7 +188,8 @@ export function useSlidingIndicator<T extends HTMLElement>(
       const current = boxRef.current;
       if (next && current && sameBox(next, current)) return;
       // 尺寸变化直接对齐，不播放滑动
-      slideFromRef.current = null;
+      slideRef.current = null;
+      if (memoryKey) rememberedSlides.delete(memoryKey);
       boxRef.current = next;
       if (memoryKey) {
         if (next) rememberedBoxes.set(memoryKey, next);
@@ -212,6 +242,9 @@ export function usePendingTarget(activeHref: string | undefined) {
     },
     [activeHref],
   );
+
+  // 路由一旦变化就丢弃待定目标，否则后退回到 from 页时会重新选中当时点过的项
+  if (pending && pending.from !== activeHref) setPending(null);
 
   const targetHref =
     pending && pending.from === activeHref ? pending.href : activeHref;

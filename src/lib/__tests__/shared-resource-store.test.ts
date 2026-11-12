@@ -107,29 +107,36 @@ function contract(
         now + 1,
       );
       expect(
-        await storage.resources.renew(
-          `${prefix}:699`,
+        await storage.resources.renewLeases(
+          [`${prefix}:699`],
           prefix,
           now - 1,
           now + 2,
         ),
       ).toBe(false);
       expect(
-        await storage.resources.renew(`${prefix}:700`, prefix, now, now + 2),
+        await storage.resources.renewLeases(
+          [`${prefix}:700`],
+          prefix,
+          now,
+          now + 2,
+        ),
       ).toBe(true);
     } finally {
       clock.mockRestore();
     }
   });
 
-  it('caps shared connections and fences expired owners', async () => {
-    const key = randomUUID();
+  it('caps shared connections and fences expired owners across all dimensions', async () => {
+    const keys = ['global', 'host', 'user'].map(
+      (dimension) => `${randomUUID()}:${dimension}`,
+    );
+    const resources = keys.map((key) => ({ key, limit: 4 }));
     const results = await Promise.all(
       Array.from({ length: 50 }, (_, index) =>
-        stores[index % stores.length].resources.acquire(
-          key,
+        stores[index % stores.length].resources.acquireLeases(
+          index % 2 ? [...resources].reverse() : resources,
           String(index),
-          4,
           1000,
           2000,
         ),
@@ -137,23 +144,111 @@ function contract(
     );
     expect(results.filter((result) => result.allowed)).toHaveLength(4);
     const owner = String(results.findIndex((result) => result.allowed));
-    expect(await stores[1].resources.renew(key, owner, 1500, 4000)).toBe(true);
+    expect(await stores[1].resources.renewLeases(keys, owner, 1500, 4000)).toBe(
+      true,
+    );
     await stores[0].resources.prune(2100);
+    const one = keys.map((key) => ({ key, limit: 1 }));
     expect(
-      (await stores[1].resources.acquire(key, 'next', 1, 2100, 3000)).allowed,
-    ).toBe(false);
-    expect(
-      (await stores[1].resources.acquire(key, 'next', 1, 4100, 5000)).allowed,
-    ).toBe(true);
-    await stores[0].resources.release(key, owner);
-    expect(await stores[0].resources.renew(key, owner, 4100, 6000)).toBe(false);
-    expect(
-      (await stores[0].resources.acquire(key, 'blocked', 1, 4200, 5200))
+      (await stores[1].resources.acquireLeases(one, 'next', 2100, 3000))
         .allowed,
     ).toBe(false);
-    await stores[1].resources.release(key, 'next');
     expect(
-      (await stores[0].resources.acquire(key, 'released', 1, 4200, 5200))
+      (await stores[1].resources.acquireLeases(one, 'next', 4100, 5000))
+        .allowed,
+    ).toBe(true);
+    await stores[0].resources.releaseLeases(keys, owner);
+    expect(await stores[0].resources.renewLeases(keys, owner, 4100, 6000)).toBe(
+      false,
+    );
+    expect(
+      (await stores[0].resources.acquireLeases(one, 'blocked', 4200, 5200))
+        .allowed,
+    ).toBe(false);
+    await stores[1].resources.releaseLeases(keys, 'next');
+    expect(
+      (await stores[0].resources.acquireLeases(one, 'released', 4200, 5200))
+        .allowed,
+    ).toBe(true);
+  });
+
+  it.each([0, 1, 2, 3])(
+    'rejects dimension %s without inserting any other lease',
+    async (blocked) => {
+      const resources = Array.from({ length: 4 }, () => ({
+        key: randomUUID(),
+        limit: 1,
+      }));
+      await stores[0].resources.acquireLeases(
+        [resources[blocked]],
+        'holder',
+        1000,
+        3000,
+      );
+      expect(
+        await stores[1].resources.acquireLeases(
+          resources,
+          'refused',
+          1100,
+          4000,
+        ),
+      ).toEqual({
+        allowed: false,
+        rejectedKey: resources[blocked].key,
+        retryAfterMs: 1900,
+      });
+      for (const resource of resources) {
+        expect(
+          await stores[0].resources.renewLeases(
+            [resource.key],
+            'refused',
+            1200,
+            5000,
+          ),
+        ).toBe(false);
+        if (resource !== resources[blocked])
+          expect(
+            (
+              await stores[0].resources.acquireLeases(
+                [resource],
+                'free',
+                1200,
+                5000,
+              )
+            ).allowed,
+          ).toBe(true);
+      }
+    },
+  );
+
+  it('uses caller order for refusal and rolls back partial renewal', async () => {
+    const resources = ['z', 'a'].map((prefix) => ({
+      key: `${prefix}:${randomUUID()}`,
+      limit: 1,
+    }));
+    const keys = resources.map(({ key }) => key);
+    await stores[0].resources.acquireLeases(resources, 'holder', 1000, 2000);
+    expect(
+      await stores[1].resources.acquireLeases(resources, 'refused', 1100, 3000),
+    ).toMatchObject({ rejectedKey: keys[0] });
+    await stores[0].resources.releaseLeases([keys[1]], 'holder');
+    expect(
+      await stores[1].resources.renewLeases(keys, 'holder', 1200, 4000),
+    ).toBe(false);
+    expect(
+      await stores[0].resources.renewLeases([keys[0]], 'holder', 2000, 5000),
+    ).toBe(false);
+    expect(
+      (await stores[1].resources.acquireLeases(resources, 'next', 2000, 3000))
+        .allowed,
+    ).toBe(true);
+    await stores[0].resources.releaseLeases(keys, 'holder');
+    expect(
+      await stores[1].resources.renewLeases(keys, 'next', 2100, 4000),
+    ).toBe(true);
+    await stores[1].resources.releaseLeases(keys, 'next');
+    expect(
+      (await stores[0].resources.acquireLeases(resources, 'last', 2200, 4000))
         .allowed,
     ).toBe(true);
   });

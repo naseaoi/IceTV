@@ -1,6 +1,7 @@
 import {
   applyClientServerConfig,
   DEFAULT_RUNTIME_CONFIG,
+  getClientAuthRuntimeConfig,
   getCustomCategoryLabel,
 } from '@/lib/runtime-config';
 
@@ -8,6 +9,14 @@ describe('runtime config', () => {
   afterEach(() => {
     delete window.RUNTIME_CONFIG;
     delete window.__runtimeConfigReady;
+  });
+
+  it('LinuxDo 开关默认关闭并通过运行时配置读取，无首屏请求', async () => {
+    expect(DEFAULT_RUNTIME_CONFIG.LINUXDO_LOGIN).toBe(false);
+    applyClientServerConfig({ LinuxDoLogin: true });
+    expect((await getClientAuthRuntimeConfig()).linuxDoLogin).toBe(true);
+    applyClientServerConfig({});
+    expect((await getClientAuthRuntimeConfig()).linuxDoLogin).toBe(false);
   });
 
   it('keeps the server-only filter flag out of client runtime config', () => {
@@ -22,12 +31,10 @@ describe('runtime config', () => {
   it('preserves client custom proxy URLs', () => {
     const config = applyClientServerConfig({
       DoubanProxy: 'https://data.example/fetch?url=',
-      BangumiProxy: 'https://bangumi.example/fetch?url=',
       DoubanImageProxy: 'https://image.example/fetch?url=',
     });
 
     expect(config.DOUBAN_PROXY).toBe('https://data.example/fetch?url=');
-    expect(config.BANGUMI_PROXY).toBe('https://bangumi.example/fetch?url=');
     expect(config.DOUBAN_IMAGE_PROXY).toBe('https://image.example/fetch?url=');
   });
 

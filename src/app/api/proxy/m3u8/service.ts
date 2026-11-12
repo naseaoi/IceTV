@@ -1,5 +1,3 @@
-import { getAdFilterCacheNamespace } from '@/features/play/lib/ad-filter-strategy-registry';
-import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getConfigForRead } from '@/lib/config';
@@ -16,6 +14,10 @@ import { readTextLimited } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
+import {
+  hasSignedUrlParams,
+  SIGNED_URL_PARAM_RE,
+} from '@/lib/signed-url-params';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 type M3U8CacheEntry = {
@@ -31,14 +33,14 @@ export type M3U8LoadResult = M3U8CacheEntry & {
 };
 
 export type M3U8ProxyRequestContext = {
+  identity?: string;
+  proxyPoolStickyKey?: string;
   startedAt: number;
   proxyMode: string;
   userAction: string | null;
   userInitiated: boolean;
 };
 
-const SIGNED_URL_PARAM_RE =
-  /[?&](sign|signature|auth_key|auth|token|expires?|expire|hmac|x-amz-signature|security_token|oss_expires|wssecret|wstime|ccode|ksign)=/i;
 const M3U8_TTL = { freshMs: 60_000, staleMs: 60_000 };
 // 详情缓存最长 30 分钟，剧集地址的有效期只按这个量级假设；路径里带令牌的分片地址无法识别，不能缓存更久
 const ENDED_MEDIA_M3U8_TTL = {
@@ -72,11 +74,7 @@ async function getProxyRequestTimeoutMs(
   );
 }
 
-export function isSignedM3U8Url(rawUrl: string): boolean {
-  if (!rawUrl) return false;
-  if (!rawUrl.includes('?')) return false;
-  return SIGNED_URL_PARAM_RE.test(rawUrl);
-}
+export const isSignedM3U8Url = hasSignedUrlParams;
 
 // 完结的媒体清单内容不再变化，但内嵌的签名分片或密钥地址会过期，只有不含签名参数时才长缓存
 function getM3U8CacheTtl(entry: M3U8CacheEntry) {
@@ -90,7 +88,7 @@ function getM3U8CacheTtl(entry: M3U8CacheEntry) {
 }
 
 function getM3U8CacheKey(url: string, source: string | null): string {
-  return `${getAdFilterCacheNamespace(source)}\0${url}`;
+  return `${source?.trim().toLowerCase() || 'unknown'}\0${url}`;
 }
 
 export function peekM3U8Cache(url: string, source: string | null) {
@@ -102,6 +100,8 @@ export function refreshM3U8Cache(
   ua: string,
   source: string | null,
   isLive = false,
+  identity?: string,
+  proxyPoolStickyKey?: string,
 ): Promise<void> {
   const cacheKey = getM3U8CacheKey(url, source);
   const existing = m3u8RefreshInflight.get(cacheKey);
@@ -110,6 +110,8 @@ export function refreshM3U8Cache(
   const task = m3u8Cache
     .refresh(cacheKey, async () => {
       const loaded = await fetchM3U8Data(url, ua, source, isLive, {
+        identity,
+        proxyPoolStickyKey,
         startedAt: Date.now(),
         proxyMode: 'server-proxy',
         userAction: null,
@@ -254,6 +256,9 @@ async function fetchM3U8Data(
     headers: {
       'User-Agent': ua,
     },
+    resourceContext: { identity: context.identity },
+    proxyPoolStickyKey: context.proxyPoolStickyKey,
+    useProxyPool: !isLive,
     skipInitialValidation: true,
     timeoutMs,
   });
@@ -279,7 +284,7 @@ async function fetchM3U8Data(
 
   const contentType = response.headers.get('Content-Type') || '';
   const finalUrl = response.url;
-  let content = await readTextLimited(response, MAX_M3U8_BYTES);
+  const content = await readTextLimited(response, MAX_M3U8_BYTES);
   const loadedAt = Date.now();
   assertM3U8Content(content, contentType, {
     route: 'm3u8',
@@ -295,14 +300,6 @@ async function fetchM3U8Data(
     userAction: context.userAction,
     userInitiated: context.userInitiated,
   });
-
-  if (!isLive) {
-    try {
-      content = await filterM3U8AdsForSource(content, finalUrl, ua, source);
-    } catch (error) {
-      console.warn('m3u8 广告段检测失败:', error);
-    }
-  }
 
   return {
     content,

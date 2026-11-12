@@ -1,9 +1,82 @@
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
+  createHlsLoaderClass,
   isPlayerFastForwarding,
+  prefetchM3U8,
   restorePlayerPlaybackRate,
 } from '@/lib/player-runtime';
+
+describe('prefetchM3U8', () => {
+  it('跳过直连清单，代理清单仍预热服务端缓存', () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true });
+    global.fetch = fetchMock;
+    try {
+      prefetchM3U8('https://cdn.example/index.m3u8', { directManifest: true });
+      expect(fetchMock).not.toHaveBeenCalled();
+      const url = '/api/proxy/m3u8?url=test';
+      prefetchM3U8(url, { directManifest: false });
+      expect(fetchMock).toHaveBeenCalledWith(url, {
+        cache: 'no-store',
+        headers: { 'X-IceTV-Warm-Only': '1' },
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
+describe('createHlsLoaderClass', () => {
+  it.each(['manifest', 'level'])(
+    '将 %s 的最终响应地址传入转换器，并回退到请求地址',
+    (type) => {
+      class Loader {
+        load = jest.fn();
+      }
+      const transformManifestText = jest.fn(
+        (text: string) => text + '\nfiltered',
+      );
+      const Wrapped = createHlsLoaderClass(Loader, { transformManifestText });
+      for (const url of ['https://final.example/level/index.m3u8', undefined]) {
+        const context = { type, url: 'https://initial.example/index.m3u8' };
+        const callbacks = { onSuccess: jest.fn() };
+        new Wrapped({}).load(context, {}, callbacks);
+        const response = { data: '#EXTM3U', url };
+        callbacks.onSuccess(response, {}, context);
+        expect(transformManifestText).toHaveBeenLastCalledWith(
+          '#EXTM3U',
+          context,
+          url || context.url,
+        );
+        expect(response.data).toBe('#EXTM3U\nfiltered');
+      }
+    },
+  );
+
+  it('中转暂停响应不再重试，其他失败沿用原重试判断', () => {
+    let pausedHeader: string | null = '1';
+    let received: any;
+    class Loader {
+      loader = {
+        getResponseHeader: (name: string) =>
+          name === 'x-icetv-relay-paused' ? pausedHeader : null,
+      };
+      load = jest.fn((_context, config) => {
+        received = config;
+      });
+    }
+    const Wrapped = createHlsLoaderClass(Loader, {});
+    const original = { loadPolicy: { errorRetry: { maxNumRetry: 5 } } };
+    new Wrapped({}).load({ type: 'manifest' }, original, {});
+    const shouldRetry = received.loadPolicy.errorRetry.shouldRetry;
+
+    expect(shouldRetry({}, 0, false, { code: 503 }, true)).toBe(false);
+    pausedHeader = null;
+    expect(shouldRetry({}, 0, false, { code: 503 }, true)).toBe(true);
+    expect(original.loadPolicy.errorRetry).not.toHaveProperty('shouldRetry');
+  });
+});
 
 type Listener = (...args: unknown[]) => void;
 

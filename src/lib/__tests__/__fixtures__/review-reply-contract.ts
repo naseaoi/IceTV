@@ -83,7 +83,7 @@ export async function assertReviewReplies(storage: IStorage, prefix: string) {
   expect(second?.replyTo?.profileId).toBe(first?.author.profileId);
   expect(
     await storage.getReviewReplyMessageCount(author, 0, [], Date.now()),
-  ).toBe(2);
+  ).toBe(1);
   expect(
     await storage.getReviewReplyMessageCount(reader, 0, [], Date.now()),
   ).toBe(1);
@@ -94,14 +94,14 @@ export async function assertReviewReplies(storage: IStorage, prefix: string) {
   await storage.postReviewReply(...target, reader, '提及作者', mine!.id);
   expect(
     await storage.getReviewReplyMessageCount(author, 0, [], Date.now()),
-  ).toBe(3);
+  ).toBe(2);
   const messages = await storage.getReviewReplyMessages(
     author,
     0,
     [],
     Date.now(),
   );
-  expect(new Set(messages.map((item) => item.id)).size).toBe(3);
+  expect(new Set(messages.map((item) => item.id)).size).toBe(2);
   await storage.updateUserMessageState(author, {
     reviewReply: { id: messages[0].id, createdAt: messages[0].createdAt },
   });
@@ -113,7 +113,7 @@ export async function assertReviewReplies(storage: IStorage, prefix: string) {
       state.reviewReplyReadIds ?? [],
       Date.now(),
     ),
-  ).toBe(2);
+  ).toBe(1);
   expect(
     await storage.getReviewReplyMessageCount(
       author,

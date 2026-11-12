@@ -54,6 +54,12 @@ jest.mock('@/lib/cover-image-resize', () => ({
 const { GET } = require('./route') as typeof import('./route');
 const { clearResizedCoverCacheForTests } =
   require('@/lib/cover-image-resize-cache.server') as typeof import('@/lib/cover-image-resize-cache.server');
+const { clearImageHostHealthForTests } =
+  require('@/lib/image-proxy-host-health.server') as typeof import('@/lib/image-proxy-host-health.server');
+
+beforeEach(() => {
+  clearImageHostHealthForTests();
+});
 
 describe('image proxy route auth order', () => {
   beforeEach(() => {
@@ -122,7 +128,7 @@ describe('image proxy route auth order', () => {
 
     expect(response.status).toBe(429);
     expect(mockRequireServerProxyQuota).toHaveBeenCalledWith(
-      'douban-image',
+      'source-cover',
       request,
       undefined,
     );
@@ -149,7 +155,7 @@ describe('image proxy route auth order', () => {
 
     expect(response.status).toBe(429);
     expect(mockRequireServerProxyQuota).toHaveBeenCalledWith(
-      'douban-image',
+      'source-cover',
       request,
       'demo-user',
     );
@@ -192,6 +198,12 @@ describe('image proxy resize cache', () => {
     const second = await GET(request);
 
     expect(first.status).toBe(200);
+    expect(first.headers.get('Cache-Control')).toBe(
+      'private, max-age=2592000, stale-while-revalidate=86400',
+    );
+    expect(first.headers.has('CDN-Cache-Control')).toBe(false);
+    expect(first.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+    expect(first.headers.has('Netlify-Vary')).toBe(false);
     expect(second.status).toBe(200);
     expect(first.headers.get('content-type')).toBe('image/webp');
     expect(second.headers.get('content-type')).toBe('image/webp');
@@ -353,6 +365,59 @@ describe('图片代理上游错误与 Referer', () => {
     mockGetConfigForRead.mockRejectedValueOnce(new Error('config down'));
     await expect(GET(request)).rejects.toThrow('config down');
     expect(mockFetchWithUrlGuard).not.toHaveBeenCalled();
+  });
+
+  it('豆瓣图片与源站封面分别计入各自的配额', async () => {
+    mockValidateProxyUrlForRequest.mockResolvedValueOnce({
+      ok: true,
+      url: 'https://img1.doubanio.com/a.jpg',
+    });
+    await GET(request);
+    await GET(request);
+    expect(
+      mockRequireServerProxyQuota.mock.calls.map(([kind]) => kind),
+    ).toEqual(['douban-image', 'source-cover']);
+  });
+
+  it('同一域名连续失败后进入冷却，期间不再回源', async () => {
+    mockFetchWithUrlGuard.mockRejectedValue(new Error('timeout'));
+    for (let index = 0; index < 3; index += 1) {
+      expect((await GET(request)).status).toBe(504);
+    }
+    expect(mockFetchWithUrlGuard).toHaveBeenCalledTimes(3);
+
+    const cooled = await GET(request);
+    expect(cooled.status).toBe(502);
+    expect(mockFetchWithUrlGuard).toHaveBeenCalledTimes(3);
+  });
+
+  it('单图 404 与本站资源限制不计入域名失败', async () => {
+    for (let index = 0; index < 3; index += 1) {
+      mockFetchWithUrlGuard.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        body: { cancel: jest.fn().mockResolvedValue(undefined) },
+      });
+      await GET(request);
+      mockFetchWithUrlGuard.mockRejectedValueOnce(new ResourceLimitError());
+      await GET(request);
+    }
+
+    expect((await GET(request)).status).toBe(200);
+    expect(mockFetchWithUrlGuard).toHaveBeenCalledTimes(7);
+  });
+
+  it('回源成功清除此前的失败计数', async () => {
+    mockFetchWithUrlGuard
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockRejectedValueOnce(new Error('timeout'));
+    await GET(request);
+    await GET(request);
+    expect((await GET(request)).status).toBe(200);
+
+    mockFetchWithUrlGuard.mockRejectedValueOnce(new Error('timeout'));
+    await GET(request);
+    expect((await GET(request)).status).toBe(200);
   });
 
   it.each([

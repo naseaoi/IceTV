@@ -12,18 +12,6 @@ import {
 import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import {
-  bangumiDataSourceOptions,
-  normalizeBangumiDataSource,
-  readBangumiDataSource,
-  readBangumiProxyUrl,
-  readDefaultBangumiDataSource,
-  readDefaultBangumiProxyUrl,
-  resetBangumiDataSource,
-  resetBangumiProxyUrl,
-  writeBangumiDataSource,
-  writeBangumiProxyUrl,
-} from '@/lib/bangumi-source';
 import type { CustomProxyTestKind } from '@/lib/custom-proxy-test';
 import {
   CUSTOM_PROXY_LABELS,
@@ -67,6 +55,7 @@ import {
   resetAllLocalPreferenceToggles,
 } from '@/lib/local-preference-toggles';
 import { showToast } from '@/lib/toast';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -81,8 +70,6 @@ interface InitialSettings {
   localPreferenceToggles: ReturnType<typeof readLocalPreferenceToggleState>;
   doubanDataSource: string;
   doubanProxyUrl: string;
-  bangumiDataSource: string;
-  bangumiProxyUrl: string;
   doubanImageProxyType: string;
   doubanImageProxyUrl: string;
 }
@@ -91,7 +78,6 @@ interface InitialSettings {
 function readInitialSettings(): InitialSettings {
   const isAuthenticated = Boolean(getAuthInfoFromBrowserCookie()?.username);
   const doubanProxyUrl = readDoubanProxyUrl();
-  const bangumiProxyUrl = readBangumiProxyUrl();
   const doubanImageProxyUrl = readDoubanImageProxyUrl();
   return {
     isAuthenticated,
@@ -102,14 +88,6 @@ function readInitialSettings(): InitialSettings {
       isAuthenticated,
     ),
     doubanProxyUrl,
-    bangumiDataSource: normalizeBangumiDataSource(
-      resolveInitialProxySource(
-        readBangumiDataSource(),
-        bangumiProxyUrl,
-        isAuthenticated,
-      ),
-    ),
-    bangumiProxyUrl,
     doubanImageProxyType: resolveInitialProxySource(
       readDoubanImageProxyType(),
       doubanImageProxyUrl,
@@ -142,12 +120,6 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
   const [doubanDataSource, setDoubanDataSource] = useState(
     initial.doubanDataSource,
   );
-  const [bangumiDataSource, setBangumiDataSource] = useState(
-    initial.bangumiDataSource,
-  );
-  const [bangumiProxyUrl, setBangumiProxyUrl] = useState(
-    initial.bangumiProxyUrl,
-  );
   const [doubanImageProxyType, setDoubanImageProxyType] = useState(
     initial.doubanImageProxyType,
   );
@@ -168,11 +140,6 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
       resetDoubanProxyType();
     }
     if (
-      isInvalidCustomProxy(readBangumiDataSource(), initial.bangumiProxyUrl)
-    ) {
-      resetBangumiDataSource();
-    }
-    if (
       isInvalidCustomProxy(
         readDoubanImageProxyType(),
         initial.doubanImageProxyUrl,
@@ -190,13 +157,17 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     () => markServerProxyOption(doubanImageProxyTypeOptions, isAuthenticated),
     [isAuthenticated],
   );
-  const bangumiOptions = useMemo(
-    () => markServerProxyOption(bangumiDataSourceOptions, isAuthenticated),
-    [isAuthenticated],
-  );
+
+  const checkSaved = (saved: boolean) => {
+    if (!saved)
+      showToast('设置未能保存，刷新后会恢复', 'error', {
+        key: 'local-preference-save',
+      });
+    return saved;
+  };
 
   const showProxyToast = () => {
-    showToast('更换成功，刷新页面后生效', 'success');
+    showToast('刷新页面后生效', 'info');
   };
 
   const showLoginRequiredToast = () => {
@@ -206,9 +177,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      writeDoubanProxyUrl(value);
+      checkSaved(writeDoubanProxyUrl(value));
       if (doubanDataSource === 'custom') {
-        writeDoubanProxyType('custom');
+        checkSaved(writeDoubanProxyType('custom'));
       }
     } else {
       resetDoubanProxyUrl();
@@ -234,7 +205,7 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     const definition = localPreferenceToggleDefinitions.find(
       (item) => item.id === id,
     );
-    definition?.writeValue(value);
+    if (definition) checkSaved(definition.writeValue(value));
   };
 
   const handleDoubanDataSourceChange = (value: string) => {
@@ -255,49 +226,8 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    writeDoubanProxyType(nextSource);
+    if (!checkSaved(writeDoubanProxyType(nextSource))) return;
     showProxyToast();
-  };
-
-  const handleBangumiDataSourceChange = (value: string) => {
-    const nextSource = normalizeBangumiDataSource(value);
-    if (!canSelectProxyValue(nextSource, isAuthenticated)) {
-      showLoginRequiredToast();
-      return;
-    }
-    setBangumiDataSource(nextSource);
-    if (nextSource === 'custom') {
-      const error = getCustomProxyError('bangumi', bangumiProxyUrl);
-      setCustomProxyErrors((prev) => ({
-        ...prev,
-        bangumi: error,
-      }));
-      if (error) {
-        showToast(error, 'error');
-        return;
-      }
-    }
-    writeBangumiDataSource(nextSource);
-    showProxyToast();
-  };
-
-  const handleBangumiProxyUrlChange = (value: string) => {
-    setBangumiProxyUrl(value);
-    if (normalizeCustomProxyUrl(value)) {
-      writeBangumiProxyUrl(value);
-      if (bangumiDataSource === 'custom') {
-        writeBangumiDataSource('custom');
-      }
-    } else {
-      resetBangumiProxyUrl();
-      if (bangumiDataSource === 'custom') {
-        resetBangumiDataSource();
-      }
-    }
-    setCustomProxyErrors((prev) => ({
-      ...prev,
-      bangumi: getCustomProxyError('bangumi', value),
-    }));
   };
 
   const handleDoubanImageProxyTypeChange = (value: string) => {
@@ -318,7 +248,7 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    writeDoubanImageProxyType(nextSource);
+    if (!checkSaved(writeDoubanImageProxyType(nextSource))) return;
     writeDoubanImageProxyTypeCookie(nextSource);
     showProxyToast();
   };
@@ -326,9 +256,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
   const handleDoubanImageProxyUrlChange = (value: string) => {
     setDoubanImageProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      writeDoubanImageProxyUrl(value);
+      checkSaved(writeDoubanImageProxyUrl(value));
       if (doubanImageProxyType === 'custom') {
-        writeDoubanImageProxyType('custom');
+        checkSaved(writeDoubanImageProxyType('custom'));
         clearDoubanImageProxyTypeCookie();
       }
     } else {
@@ -361,9 +291,8 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: '' }));
       showToast(`测试通过，${CUSTOM_PROXY_LABELS[kind]}可用`, 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '代理测试失败';
+      const message = getErrorMessage(error, '代理测试失败，请稍后重试');
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: message }));
-      showToast(`测试失败，${message}`, 'error');
     } finally {
       setTestingProxy(null);
     }
@@ -374,24 +303,18 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     const defaultDoubanProxy = readDefaultDoubanProxyUrl();
     const defaultDoubanImageProxyType = readDefaultDoubanImageProxyType();
     const defaultDoubanImageProxyUrl = readDefaultDoubanImageProxyUrl();
-    const defaultBangumiDataSource = readDefaultBangumiDataSource();
-    const defaultBangumiProxy = readDefaultBangumiProxyUrl();
     const defaultLocalPreferenceToggles =
       readLocalPreferenceToggleDefaultState();
 
     setLocalPreferenceToggles(defaultLocalPreferenceToggles);
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
-    setBangumiDataSource(defaultBangumiDataSource);
-    setBangumiProxyUrl(defaultBangumiProxy);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
 
     resetAllLocalPreferenceToggles();
     resetDoubanProxyUrl();
     resetDoubanProxyType();
-    resetBangumiDataSource();
-    resetBangumiProxyUrl();
     resetDoubanImageProxyType();
     resetDoubanImageProxyUrl();
     clearDoubanImageProxyTypeCookie();
@@ -488,33 +411,6 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
                   onChange={handleDoubanImageProxyUrlChange}
                   onTest={() =>
                     handleTestCustomProxy('douban-image', doubanImageProxyUrl)
-                  }
-                />
-              )}
-            </SettingsRow>
-
-            <SettingsRow
-              title='Bangumi 数据代理'
-              thanks={getThanksInfo(bangumiDataSource)}
-              control={
-                <AdminSelect
-                  value={bangumiDataSource}
-                  onChange={(value) => handleBangumiDataSourceChange(value)}
-                  options={bangumiOptions}
-                />
-              }
-            >
-              {bangumiDataSource === 'custom' && (
-                <CustomProxyField
-                  id='local-bangumi-proxy-url'
-                  name='localBangumiProxyUrl'
-                  label='Bangumi 代理地址'
-                  value={bangumiProxyUrl}
-                  error={customProxyErrors.bangumi}
-                  isTesting={testingProxy === 'bangumi'}
-                  onChange={handleBangumiProxyUrlChange}
-                  onTest={() =>
-                    handleTestCustomProxy('bangumi', bangumiProxyUrl)
                   }
                 />
               )}

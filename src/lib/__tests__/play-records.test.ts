@@ -95,6 +95,43 @@ describe('play record selection', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
+  it('先按更新状态筛选再分页，游标记录移除仍能继续', () => {
+    const base = {
+      index: 1,
+      total_episodes: 3,
+      update_baseline_episodes: 2,
+    } as PlayRecord;
+    const records = {
+      a: { ...base, save_time: 3 },
+      b: { ...base, save_time: 3 },
+      c: { ...base, save_time: 2, tracking_enabled: false },
+      d: { ...base, save_time: 1 },
+    };
+    const options = { filter: 'updated' } as const;
+    const first = selectPlayRecordPage(records, 1, undefined, options);
+    expect(first).toEqual({
+      items: { b: records.b },
+      total: 3,
+      nextCursor: '3|b',
+    });
+    expect(selectPlayRecordPage(records, 1, first.nextCursor, options)).toEqual(
+      { items: { a: records.a }, total: 3, nextCursor: '3|a' },
+    );
+    expect(
+      selectPlayRecordPage(
+        { a: records.a, d: records.d },
+        2,
+        first.nextCursor,
+        options,
+      ),
+    ).toEqual({
+      items: { a: records.a, d: records.d },
+      total: 2,
+      nextCursor: null,
+    });
+    expect(selectPlayRecordPage(records, 10).total).toBe(4);
+  });
+
   it('uses group progress when determining an update', () => {
     const record = {
       index: 8,

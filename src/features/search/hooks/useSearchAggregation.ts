@@ -197,7 +197,7 @@ function createAggregatedResultItem(
   group: SearchResult[],
 ): AggregatedResultItem {
   const title = group[0]?.title || '';
-  const poster = group[0]?.poster || '';
+  const poster = group.find((item) => item.poster)?.poster || '';
   const year = group[0]?.year || 'unknown';
   const stats = computeGroupStats(group);
 

@@ -1,5 +1,4 @@
 import { followReviewSortKey } from '@/lib/follow-review-identity';
-import type { AdminConfig } from '@/types/admin';
 
 import type { IStorage, VideoReview } from '../../types';
 
@@ -287,10 +286,7 @@ export async function assertPublicReviewRoles(
   }
 }
 
-export function videoReviewContract(
-  createStorage: () => IStorage,
-  adminConfig: AdminConfig,
-) {
+export function videoReviewContract(createStorage: () => IStorage) {
   it('公开评价列表与单条评价返回当前作者角色，普通用户省略字段', async () => {
     await assertPublicReviewRoles(createStorage(), 'review-role');
   });
@@ -435,7 +431,6 @@ export function videoReviewContract(
 
   it('atomically merges read ids and never restores stale watermarks or announcements', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     const id = (time: number) =>
       `follow-review:${Buffer.from(JSON.stringify(['AbCdEf012345', 'work', '', time])).toString('base64url')}`;
     await Promise.all(
@@ -449,16 +444,19 @@ export function videoReviewContract(
       (await storage.getUserMessageState('reader')).followReviewReadIds,
     ).toHaveLength(3);
     await storage.updateUserMessageState('reader', {
-      announcement: { id: 'announcement:new' },
+      announcement: { id: 'announcement:200:new', createdAt: 200 },
+      announcementReadAt: 100,
       followReviewReadAt: 100,
     });
     await storage.updateUserMessageState('reader', {
-      announcement: { id: 'announcement:old' },
+      announcement: { id: 'announcement:50:old', createdAt: 50 },
+      announcementReadAt: 50,
       followReview: { id: id(2), createdAt: 2 },
       followReviewReadAt: 50,
     });
     expect(await storage.getUserMessageState('reader')).toMatchObject({
-      readAnnouncementId: 'announcement:new',
+      announcementReadAt: 100,
+      announcementReadIds: ['announcement:200:new'],
       followReviewReadAt: 100,
       followReviewReadIds: [],
     });
@@ -470,11 +468,12 @@ export function videoReviewContract(
       (await storage.getUserMessageState('reader')).followReviewReadIds,
     ).toEqual([id(300)]);
     await storage.updateUserMessageState('reader', {
-      announcement: { id: 'announcement:next', previousId: 'announcement:new' },
+      announcement: { id: 'announcement:300:next', createdAt: 300 },
+      announcementReadAt: 200,
     });
     expect(
-      (await storage.getUserMessageState('reader')).readAnnouncementId,
-    ).toBe('announcement:next');
+      (await storage.getUserMessageState('reader')).announcementReadIds,
+    ).toEqual(['announcement:300:next']);
     for (let time = 301; time <= 502; time++)
       await storage.updateUserMessageState('reader', {
         followReview: { id: id(time), createdAt: time },
@@ -490,7 +489,6 @@ export function videoReviewContract(
 
   it('creates stable profiles and rolls back registration on nickname conflicts', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     await storage.registerUser('social-a', 'test-password', 'Alice');
     const profile = await storage.getUserProfile('SOCIAL-A');
     expect(profile?.profile_id).toMatch(/^[A-Za-z0-9]{12}$/);
@@ -508,7 +506,6 @@ export function videoReviewContract(
 
   it('isolates public reactions, groups reports and cascades deletion', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     await storage.ensureUserProfile('author');
     await storage.ensureUserProfile('reader');
     await storage.setVideoReview('author', videoReview);
@@ -611,7 +608,6 @@ export function videoReviewContract(
 
   it('uses follow time, read watermarks and public visibility for activity', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     await storage.ensureUserProfile('author');
     await storage.ensureUserProfile('reader');
     await storage.setUserFollow('READER', 'AUTHOR', true);
@@ -654,7 +650,6 @@ export function videoReviewContract(
 
   it('round trips avatar updates through every public profile reference', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     const initial = await storage.ensureUserProfile('author');
     expect(initial.avatar_seed).toBeNull();
     const avatarSeed = 'Avatar012345';
@@ -732,84 +727,8 @@ export function videoReviewContract(
     expect((await storage.getUserProfile('author'))?.avatar_seed).toBeNull();
   });
 
-  it('round trips all social tables and repairs imported profile collisions', async () => {
-    const storage = createStorage();
-    await storage.clearAllData();
-    const empty = {
-      playRecords: {},
-      favorites: {},
-      searchHistory: [],
-      skipConfigs: {},
-      playbackSessions: {},
-    };
-    const profile = {
-      username: 'author',
-      profile_id: 'AbCdEf012345',
-      avatar_seed: 'Avatar012345',
-      nickname: 'Alice',
-      favorites_public: 3 as const,
-      updated_at: 1000,
-    };
-    const snapshot = {
-      adminConfig,
-      users: { author: 'hash', reader: 'hash', missing: 'hash' },
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-      userData: {
-        author: { ...empty, profile, videoReviews: [videoReview] },
-        reader: {
-          ...empty,
-          profile: { ...profile, username: 'reader' },
-          follows: [{ followee: 'author', created_at: 1 }],
-          likes: [
-            {
-              author: 'author',
-              title_norm: 'reviewdemo',
-              year: '2026',
-              created_at: 2,
-            },
-          ],
-          reports: [
-            {
-              author: 'author',
-              title_norm: 'reviewdemo',
-              year: '2026',
-              reason: 'spam' as const,
-              detail: '',
-              created_at: 3,
-            },
-          ],
-        },
-      },
-    };
-    await storage.replaceAllData(snapshot);
-    const author = await storage.getUserProfile('author');
-    const reader = await storage.getUserProfile('reader');
-    expect(reader?.profile_id).not.toBe(author?.profile_id);
-    expect(reader?.nickname).toBeNull();
-    expect(author?.avatar_seed).toBe(profile.avatar_seed);
-    expect(author?.favorites_public).toBe(3);
-    expect((await storage.getUserSocialData('author')).profile).toEqual(author);
-    expect(reader?.avatar_seed).toBe(profile.avatar_seed);
-    expect(await storage.getUserProfile('missing')).not.toBeNull();
-    const social = await storage.getUserSocialData('reader');
-    expect(social.follows).toHaveLength(1);
-    expect(social.likes).toHaveLength(1);
-    expect(social.reports).toHaveLength(1);
-    await storage.replaceAllData({ ...snapshot, users: {}, userData: {} });
-    expect(await storage.getUserProfile('reader')).toBeNull();
-    expect((await storage.getUserSocialData('reader')).likes).toEqual([]);
-    snapshot.userData.author.profile.avatar_seed = 'bad';
-    await storage.replaceAllData(snapshot);
-    expect((await storage.getUserProfile('author'))?.avatar_seed).toBeNull();
-    await storage.clearAllData();
-    expect(await storage.getUserProfile('author')).toBeNull();
-    expect((await storage.getUserSocialData('reader')).reports).toEqual([]);
-  });
-
   it('matches exact years, falls back to unknown, and preserves creation time', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     await storage.setVideoReview('review-user', {
       ...videoReview,
       year: '',
@@ -849,7 +768,6 @@ export function videoReviewContract(
 
   it('round trips decimal ratings and returns an unrounded numeric average', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     const older = { ...videoReview, rating: 8.6 };
     const newer = {
       ...videoReview,
@@ -888,7 +806,6 @@ export function videoReviewContract(
 
   it('isolates private reviews and aggregates all rated matches beyond the public list limit', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     for (let index = 0; index < 52; index++) {
       await storage.setVideoReview(`review-${index}`, {
         ...videoReview,
@@ -938,7 +855,6 @@ export function videoReviewContract(
 
   it('paginates timestamp ties without duplicates and treats LIKE wildcards literally', async () => {
     const storage = createStorage();
-    await storage.clearAllData();
     for (let index = 0; index < 35; index++) {
       await storage.setVideoReview('review-user', {
         ...videoReview,
@@ -969,37 +885,5 @@ export function videoReviewContract(
     await expect(storage.getPublicVideoReviewPage('broken')).rejects.toThrow(
       '分页游标无效',
     );
-  });
-
-  it('round trips reviews and clears them on replacement and full cleanup', async () => {
-    const storage = createStorage();
-    await storage.clearAllData();
-    await storage.setVideoReview('review-user', videoReview);
-    const videoReviews = await storage.getAllVideoReviews('review-user');
-    const snapshot = {
-      adminConfig,
-      users: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-      userData: {
-        'review-user': {
-          playRecords: {},
-          favorites: {},
-          searchHistory: [],
-          skipConfigs: {},
-          playbackSessions: {},
-          videoReviews,
-        },
-      },
-    };
-    await storage.replaceAllData(snapshot);
-    expect(await storage.getAllVideoReviews('review-user')).toEqual([
-      videoReview,
-    ]);
-    await storage.replaceAllData({ ...snapshot, userData: {} });
-    expect(await storage.getAllVideoReviews('review-user')).toEqual([]);
-    await storage.setVideoReview('review-user', videoReview);
-    await storage.clearAllData();
-    expect(await storage.getAllVideoReviews('review-user')).toEqual([]);
   });
 }

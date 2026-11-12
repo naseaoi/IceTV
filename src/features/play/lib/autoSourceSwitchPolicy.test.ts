@@ -5,8 +5,29 @@ import {
   rankAutoSwitchCandidates,
   selectAutoSwitchCandidates,
 } from '@/features/play/lib/autoSourceSwitchPolicy';
+import {
+  getOrProbe,
+  resetProbes,
+  seedProbeResults,
+} from '@/features/play/lib/sourceProbeStore';
+import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import type { SourcePlaybackStat } from '@/lib/source-playback-stats';
 import type { SearchResult } from '@/lib/types';
+
+jest.mock('@/features/play/lib/vodProbe', () => ({
+  probeVodEpisodeUrl: jest.fn(),
+}));
+jest.mock('@/lib/proxy-modes', () => ({
+  getProxyModes: jest.fn(() => Promise.resolve({})),
+  getSourcePlaybackRoute: jest.fn(() => ({
+    useServerProxy: false,
+    directManifest: true,
+    allowAutoFallback: true,
+  })),
+}));
+jest.mock('@/lib/source-route-stats.client', () => ({
+  reportSourcePlayOutcome: jest.fn(),
+}));
 
 function createSource(
   source: string,
@@ -36,6 +57,93 @@ function info(
 }
 
 describe('auto source switch policy', () => {
+  beforeEach(() => {
+    resetProbes();
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('prefers local reliability over global health just like initial selection', () => {
+    const now = Date.now();
+    const reliable = createSource('reliable', ['第1集']);
+    const failing = createSource('failing', ['第1集']);
+    const base = { startupMs: 100, manualSelections: 0, lastUsedAt: now };
+    const context = {
+      proxyModes: { reliable: 'server', failing: 'auto' },
+      healthTiers: { reliable: 'poor', failing: 'good' },
+    } as const;
+    expect(
+      rankAutoSwitchCandidates(
+        [failing, reliable],
+        new Map(),
+        new Map([
+          ['reliable', { ...base, successes: 3, failures: 0 }],
+          ['failing', { ...base, successes: 0, failures: 2 }],
+        ]),
+        now,
+        context,
+      ),
+    ).toEqual([reliable, failing]);
+    expect(
+      rankAutoSwitchCandidates(
+        [reliable, failing],
+        new Map(),
+        new Map(),
+        now,
+        context,
+      ),
+    ).toEqual([failing, reliable]);
+  });
+
+  it('uses panel probe updates instead of the old precomputed speed and failure', async () => {
+    const a = createSource('a', ['第1集']);
+    const b = createSource('b', ['第1集']);
+    const precomputed = new Map([
+      [buildAutoSwitchSourceKey(a.source, a.id), info('1 MB/s')],
+      [
+        buildAutoSwitchSourceKey(b.source, b.id),
+        info('2 MB/s', { hasError: true }),
+      ],
+    ]);
+    const rank = () => rankAutoSwitchCandidates([a, b], precomputed, new Map());
+    expect(rank()).toEqual([a, b]);
+
+    const probe = jest.mocked(probeVodEpisodeUrl);
+    probe.mockResolvedValue(info('3 MB/s'));
+    await getOrProbe(b, { force: true });
+    seedProbeResults(precomputed);
+    expect(rank()).toEqual([b, a]);
+
+    probe.mockRejectedValue(new Error('panel probe failed'));
+    await getOrProbe(b, { force: true });
+    expect(rank()).toEqual([a, b]);
+  });
+
+  it('expires both probe failures and speeds without resurrecting precomputed data', () => {
+    jest.useFakeTimers();
+    const a = createSource('a', ['第1集']);
+    const b = createSource('b', ['第1集']);
+    const c = createSource('c', ['第1集']);
+    const precomputed = new Map([
+      [
+        buildAutoSwitchSourceKey(a.source, a.id),
+        info('1 MB/s', { hasError: true }),
+      ],
+      [buildAutoSwitchSourceKey(c.source, c.id), info('3 MB/s')],
+    ]);
+    const rank = () =>
+      rankAutoSwitchCandidates([a, b, c], precomputed, new Map());
+    expect(rank()).toEqual([c, b, a]);
+    jest.advanceTimersByTime(10 * 60_000 - 1);
+    expect(rank()).toEqual([c, b, a]);
+    jest.advanceTimersByTime(1);
+    expect(rank()).toEqual([a, b, c]);
+    expect(rank()).toEqual([a, b, c]);
+  });
+
   it('parses measured load speeds into KB/s', () => {
     expect(parseLoadSpeedKBps('512.0 KB/s')).toBe(512);
     expect(parseLoadSpeedKBps('1.5 MB/s')).toBe(1536);

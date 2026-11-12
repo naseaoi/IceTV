@@ -328,31 +328,8 @@ async function refreshFavoriteCandidates(
       budget.processed += 1;
       const checkedAt = Date.now();
       const detail = await getDetail(parsed.source, parsed.id, favorite.title);
-      let nextFavorite: Favorite = {
-        ...favorite,
-        metadata_checked_at: checkedAt,
-      };
-
-      if (!detail) {
-        console.warn(`跳过无法获取详情的收藏: ${key}`);
-      } else {
-        const episodeCount = detail.episodes?.length || 0;
-        if (detail.poster && detail.poster !== favorite.cover) {
-          nextFavorite.cover = detail.poster;
-        }
-        if (episodeCount > 0 && episodeCount !== favorite.total_episodes) {
-          nextFavorite = {
-            ...nextFavorite,
-            title: detail.title || favorite.title,
-            cover: detail.poster || favorite.cover,
-            year: detail.year || favorite.year,
-            total_episodes: episodeCount,
-          };
-          console.log(
-            `更新收藏: ${favorite.title} (${favorite.total_episodes} -> ${episodeCount})`,
-          );
-        }
-      }
+      const nextFavorite = buildRefreshedFavorite(favorite, detail, checkedAt);
+      if (!detail) console.warn(`跳过无法获取详情的收藏: ${key}`);
 
       const saved = await db.saveFavoriteIfUnchanged(
         user,
@@ -368,6 +345,28 @@ async function refreshFavoriteCandidates(
       console.error(`处理收藏失败 (${key}):`, error);
     }
   }
+}
+
+export function buildRefreshedFavorite(
+  favorite: Favorite,
+  detail: SearchResult | null,
+  checkedAt: number,
+): Favorite {
+  const next: Favorite = {
+    ...favorite,
+    update_baseline_episodes:
+      favorite.update_baseline_episodes ?? favorite.total_episodes,
+    metadata_checked_at: checkedAt,
+    cover: detail?.poster || favorite.cover,
+  };
+  const total = detail?.episodes?.length ?? 0;
+  if (detail && total > 0 && total !== favorite.total_episodes) {
+    next.title = detail.title || favorite.title;
+    next.year = detail.year || favorite.year;
+    next.total_episodes = total;
+    if (total > favorite.total_episodes) next.update_detected_at = checkedAt;
+  }
+  return next;
 }
 
 function canProcessMetadata(budget: MetadataRefreshBudget): boolean {

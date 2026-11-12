@@ -40,6 +40,7 @@ import {
   readSourcePlaybackStats,
 } from '@/lib/source-playback-stats';
 import { SearchResult } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 export const VIDEO_INFO_BATCH_SIZE = SOURCE_PROBE_CONCURRENCY;
 
@@ -258,6 +259,8 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     getSnapshot,
   );
 
+  const currentSourceKeyRef = useRef('');
+  currentSourceKeyRef.current = `${currentSource}-${currentId}`;
   const currentItemRef = useRef<HTMLButtonElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const userScrollingRef = useRef(false);
@@ -281,6 +284,8 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [availableSources, currentSource, currentId],
   );
 
+  const searchMorePending = useRef(false);
+  const [searchMoreError, setSearchMoreError] = useState<string | null>(null);
   const [isSearchingMore, setIsSearchingMore] = useState(false);
   const [searchMoreDone, setSearchMoreDone] = useState(false);
   const [isRetestingAll, setIsRetestingAll] = useState(false);
@@ -309,6 +314,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           batch.map((source) =>
             getOrProbe(source, {
               force: options?.force,
+              shouldSkip: () =>
+                !isActiveRef.current ||
+                `${source.source}-${source.id}` === currentSourceKeyRef.current,
               episodeIndex: resolveSourceProbeEpisodeIndex({
                 activeDetail,
                 currentEpisodeIndex,
@@ -503,7 +511,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           <PanelActionButton
             busy={isSearchingMore}
             onClick={async () => {
-              if (!videoTitle) return;
+              if (!videoTitle || searchMorePending.current) return;
+              searchMorePending.current = true;
+              setSearchMoreError(null);
               setIsSearchingMore(true);
               setSearchMoreDone(false);
               try {
@@ -530,18 +540,31 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                     setSearchMoreDone(true);
                   }
                 }
-              } catch {
+              } catch (error) {
+                if (!isAbortError(error))
+                  setSearchMoreError(getErrorMessage(error, '搜索失败'));
                 setSearchMoreDone(false);
               } finally {
+                searchMorePending.current = false;
                 setIsSearchingMore(false);
               }
             }}
           >
             <Plus className='h-3.5 w-3.5' />
-            {searchMoreDone ? '搜索完成' : '搜索更多源站'}
+            {searchMoreError
+              ? '重试'
+              : searchMoreDone
+                ? '搜索完成'
+                : '搜索更多源站'}
           </PanelActionButton>
         </SectionTitle>
       </div>
+
+      {searchMoreError && (
+        <p role='alert' className='px-3 py-2 text-sm text-red-500'>
+          {searchMoreError}
+        </p>
+      )}
 
       <div className='relative flex min-h-0 flex-1 flex-col'>
         <div

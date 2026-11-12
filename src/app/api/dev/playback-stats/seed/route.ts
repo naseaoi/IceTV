@@ -1,6 +1,10 @@
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { buildDevPlaybackStatsSessions } from '@/features/playback-stats/lib/dev-seed';
+import {
+  buildDevPlaybackBuckets,
+  buildDevPlaybackStatsSessions,
+} from '@/features/playback-stats/lib/dev-seed';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
@@ -20,12 +24,20 @@ async function seedPlaybackStats(request: NextRequest) {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const sessions = buildDevPlaybackStatsSessions();
-    await Promise.all(
-      sessions.map((session) =>
-        db.savePlaybackSession(guardResult.username, session),
-      ),
+    const sessions = buildDevPlaybackStatsSessions().sort(
+      (a, b) => a.updated_at - b.updated_at,
     );
+    for (const session of sessions) {
+      session.id = createHash('sha256')
+        .update(`${guardResult.username}:${session.id}`)
+        .digest('hex');
+      await db.saveWatchSessionReport(
+        guardResult.username,
+        session,
+        buildDevPlaybackBuckets(session),
+        { total_episodes: 24 },
+      );
+    }
 
     return NextResponse.json(
       {

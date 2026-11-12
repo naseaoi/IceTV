@@ -61,6 +61,8 @@ describe('LivePlayerOverlay', () => {
         isVideoLoading
         playbackFailed={false}
         onRetry={jest.fn()}
+        inactivityStopped={false}
+        onResume={jest.fn()}
       />,
     );
 
@@ -74,6 +76,8 @@ describe('LivePlayerOverlay', () => {
         isVideoLoading={false}
         playbackFailed={false}
         onRetry={jest.fn()}
+        inactivityStopped={false}
+        onResume={jest.fn()}
       />,
     );
 
@@ -90,6 +94,8 @@ describe('LivePlayerOverlay', () => {
         isVideoLoading={false}
         playbackFailed
         onRetry={onRetry}
+        inactivityStopped={false}
+        onResume={jest.fn()}
       />,
     );
 
@@ -98,6 +104,23 @@ describe('LivePlayerOverlay', () => {
     ).not.toHaveClass('pointer-events-none');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the inactivity pause overlay with a resume action', () => {
+    const onResume = jest.fn();
+    render(
+      <LivePlayerOverlay
+        unsupportedType={null}
+        isVideoLoading={false}
+        playbackFailed={false}
+        onRetry={jest.fn()}
+        inactivityStopped
+        onResume={onResume}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '继续观看' }));
+    expect(onResume).toHaveBeenCalledTimes(1);
   });
 });
 

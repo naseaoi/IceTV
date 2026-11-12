@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ExpandableText from '@/components/ExpandableText';
@@ -12,6 +11,7 @@ import {
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { formatRelativeTime } from '@/lib/relative-time';
 import { type AdminReviewReportItem, REVIEW_REPORT_REASONS } from '@/lib/types';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 type Action = 'dismiss' | 'mark-spoiler' | 'delete-review' | 'delete-reply';
 const ACTION_LABELS: Record<Action, string> = {
@@ -50,7 +50,8 @@ export default function ReviewReports({
         setCursor(page.nextCursor);
         onCountChanged(page.pendingTotal);
       } catch (error) {
-        if (id === request.current) setError((error as Error).message);
+        if (id === request.current)
+          setError(getErrorMessage(error, '操作失败'));
       } finally {
         if (id === request.current) setLoading(false);
       }
@@ -81,7 +82,7 @@ export default function ReviewReports({
       setPending(null);
       await load(null);
     } catch (error) {
-      setError((error as Error).message);
+      setError(getErrorMessage(error, '操作失败'));
     } finally {
       busy.current = false;
       setSaving(false);

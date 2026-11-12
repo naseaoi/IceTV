@@ -8,10 +8,6 @@ import AdminContentSkeleton, {
 import { type AdminTabId } from '@/features/admin/lib/admin-tabs';
 import { type AdminConfig } from '@/types/admin';
 
-const DataMigration = dynamic(
-  () => import('@/components/DataMigration').then((mod) => mod.default),
-  { loading: () => <AdminContentSkeleton /> },
-);
 const CategoryConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/CategoryConfigTab').then(
@@ -54,12 +50,20 @@ const UserConfig = dynamic(
     ),
   { loading: () => <AdminContentSkeleton /> },
 );
+const AnnouncementsTab = dynamic(
+  () => import('@/features/admin/components/tabs/AnnouncementsTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
 const UserDanmakuTab = dynamic(
   () => import('@/features/admin/components/tabs/UserDanmakuTab'),
   { loading: () => <AdminContentSkeleton /> },
 );
 const ReviewsTab = dynamic(
   () => import('@/features/admin/components/tabs/ReviewsTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
+const TrafficTab = dynamic(
+  () => import('@/features/admin/components/tabs/TrafficTab'),
   { loading: () => <AdminContentSkeleton /> },
 );
 const VideoSourceConfig = dynamic(
@@ -123,6 +127,8 @@ const AdminTabBody = ({
           onDirtyChange={onSiteConfigDirtyChange}
         />
       );
+    case 'announcements':
+      return <AnnouncementsTab config={config} refreshConfig={refreshConfig} />;
     case 'user':
       return (
         <UserConfig config={config} role={role} refreshConfig={refreshConfig} />
@@ -139,8 +145,8 @@ const AdminTabBody = ({
       return <LiveSourceConfig config={config} refreshConfig={refreshConfig} />;
     case 'category':
       return <CategoryConfig config={config} refreshConfig={refreshConfig} />;
-    case 'data-migration':
-      return <DataMigration onRefreshConfig={refreshConfig} />;
+    case 'traffic':
+      return <TrafficTab />;
     default:
       return null;
   }

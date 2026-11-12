@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
 
+import { createThrottledMaintenance } from '@/lib/concurrency';
 import { db } from '@/lib/db';
 import {
   type SwrCacheOptions,
@@ -21,7 +22,7 @@ export interface SharedServerCacheOptions<T> extends SwrCacheOptions<T> {
 }
 
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
-let lastPruneAt = 0;
+const schedulePrune = createThrottledMaintenance(60_000);
 
 export function createSharedServerCache<T>(
   options: SharedServerCacheOptions<T>,
@@ -65,6 +66,7 @@ export function createSharedServerCache<T>(
     expectedGeneration: number,
   ): Promise<T> {
     let ownsLease = true;
+    let persisted = false;
     let renewing = false;
     const heartbeat = setInterval(
       async () => {
@@ -101,7 +103,7 @@ export function createSharedServerCache<T>(
         return value;
       const now = Date.now();
       const ttl = resolveCacheEntryTtl(options, value);
-      await db.setSharedCache(
+      persisted = await db.setSharedCache(
         sharedKey,
         token,
         serialized,
@@ -109,14 +111,12 @@ export function createSharedServerCache<T>(
         now + ttl.freshMs + ttl.staleMs,
         now,
       );
-      if (now - lastPruneAt >= 60_000) {
-        lastPruneAt = now;
-        await db.pruneSharedCache(now, 100);
-      }
+      schedulePrune(() => db.pruneSharedCache(Date.now(), 100));
       return value;
     } finally {
       clearInterval(heartbeat);
-      await db.releaseSharedCacheLease(sharedKey, token).catch(() => {});
+      if (!persisted)
+        await db.releaseSharedCacheLease(sharedKey, token).catch(() => {});
     }
   }
 
@@ -124,6 +124,7 @@ export function createSharedServerCache<T>(
     key: string,
     loader: () => Promise<T>,
     expectedGeneration: number,
+    returnStale: boolean,
   ): Promise<T> {
     if (!enabled) {
       const value = await loader();
@@ -139,6 +140,7 @@ export function createSharedServerCache<T>(
     let delayMs = 50;
     while (true) {
       let lease: string | null = null;
+      let stale: { value: T; fresh: boolean } | null = null;
       try {
         const cached = readRecord(key, await db.getSharedCache(sharedKey));
         if (cached?.fresh) {
@@ -152,6 +154,7 @@ export function createSharedServerCache<T>(
         ) {
           lease = token;
           const rechecked = readRecord(key, await db.getSharedCache(sharedKey));
+          stale = rechecked || cached;
           if (rechecked?.fresh) {
             await db.releaseSharedCacheLease(sharedKey, token);
             counters.sharedHits += 1;
@@ -171,7 +174,23 @@ export function createSharedServerCache<T>(
       }
       if (lease) {
         counters.sharedMisses += 1;
-        return loadOrigin(key, sharedKey, lease, loader, expectedGeneration);
+        const origin = loadOrigin(
+          key,
+          sharedKey,
+          lease,
+          loader,
+          expectedGeneration,
+        );
+        if (stale && returnStale) {
+          const background = origin.finally(() => {
+            if (inflight.get(key) === background) inflight.delete(key);
+          });
+          if (generation === expectedGeneration) inflight.set(key, background);
+          void background.catch(() => {});
+          counters.sharedHits += 1;
+          return stale.value;
+        }
+        return origin;
       }
       if (Date.now() >= deadline) throw new ResourceLimitError();
       counters.leaseWaits += 1;
@@ -182,10 +201,14 @@ export function createSharedServerCache<T>(
     }
   }
 
-  function startLoad(key: string, loader: () => Promise<T>): Promise<T> {
+  function startLoad(
+    key: string,
+    loader: () => Promise<T>,
+    returnStale = true,
+  ): Promise<T> {
     const existing = inflight.get(key);
     if (existing) return existing;
-    const task = load(key, loader, generation).finally(() => {
+    const task = load(key, loader, generation, returnStale).finally(() => {
       if (inflight.get(key) === task) inflight.delete(key);
     });
     inflight.set(key, task);
@@ -202,7 +225,9 @@ export function createSharedServerCache<T>(
       return startLoad(key, loader);
     },
     async refresh(key: string, loader: () => Promise<T>): Promise<void> {
-      await startLoad(key, loader);
+      await startLoad(key, loader, false);
+      // 冷读取交付旧值时会把在途任务交接给后台回源，显式刷新仍等待它。
+      await inflight.get(key);
     },
     set: local.set,
     peek: local.peek,

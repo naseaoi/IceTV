@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { doubanRouteCache } from '@/app/api/douban/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { createPrivateApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
   DoubanListApiResponse,
   normalizeDoubanListSubjects,
 } from '@/lib/douban-normalize';
+import { buildDoubanSearchSubjectsUrl } from '@/lib/douban-upstream-url';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import {
   readTextLimited,
@@ -77,7 +78,12 @@ export async function GET(request: NextRequest) {
     return handleTop250(pageStart);
   }
 
-  const target = `https://movie.douban.com/j/search_subjects?type=${type}&tag=${encodeURIComponent(tag)}&sort=recommend&page_limit=${pageSize}&page_start=${pageStart}`;
+  const target = buildDoubanSearchSubjectsUrl({
+    type: type as 'tv' | 'movie',
+    tag,
+    start: pageStart,
+    limit: pageSize,
+  });
 
   try {
     const response = await doubanRouteCache.getOrLoad(target, async () => {
@@ -175,9 +181,9 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
   }
 }
 
-async function createDoubanJsonResponse(response: DoubanResult) {
+async function createDoubanJsonResponse(response: unknown) {
   const cacheTime = await getCacheTime();
   return NextResponse.json(response, {
-    headers: createPublicApiCacheHeaders(cacheTime),
+    headers: createPrivateApiCacheHeaders(cacheTime),
   });
 }

@@ -23,6 +23,10 @@ jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: () => false,
 }));
 jest.mock('@/features/play/lib/sourceProbeGuard.server', () => ({
+  withAuthenticatedSourceProbeBudget: (
+    request: NextRequest,
+    handler: (request: NextRequest, auth: object) => Promise<Response>,
+  ) => handler(request, { username: 'user', isOwner: false, role: 'user' }),
   withSourceProbeBudget: (
     request: NextRequest,
     handler: (request: NextRequest) => Promise<Response>,
@@ -81,6 +85,7 @@ const request = (body: object = {}) =>
   ({
     url: 'http://localhost/api/test?id=1&source=giri&url=icetv-lazy://giri/playGV1-1-1/',
     headers: new Headers(),
+    signal: new AbortController().signal,
     json: async () => body,
   }) as NextRequest;
 const liveBody = {

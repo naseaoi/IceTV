@@ -13,6 +13,7 @@ import { LiveDataSource } from '@/features/admin/types/internal';
 interface LiveSourceAddFormProps {
   newLiveSource: LiveDataSource;
   isOpen: boolean;
+  error?: string;
   onChange: (value: LiveDataSource) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -22,6 +23,7 @@ interface LiveSourceAddFormProps {
 export function LiveSourceAddForm({
   newLiveSource,
   isOpen,
+  error,
   onChange,
   onSubmit,
   onCancel,
@@ -39,6 +41,11 @@ export function LiveSourceAddForm({
       onClose={onCancel}
       panelClassName='max-w-2xl max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='space-y-4 p-4 sm:p-6'>
         <div className='flex items-start justify-between gap-3'>
           <h5 className={MODAL_TITLE_CLASS}>添加直播源</h5>

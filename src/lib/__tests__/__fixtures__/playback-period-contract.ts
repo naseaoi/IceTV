@@ -47,6 +47,7 @@ export async function assertPlaybackPeriodRange(
     ]);
     expect(result.find((row) => row.started_at === 100)).toEqual({
       source: 'source-a',
+      episode_index: 1,
       video_id: 'video-a',
       title: 'Show A',
       cover: 'cover-a',
@@ -68,8 +69,7 @@ export async function assertPlaybackPeriodRange(
       storage.getPlaybackPeriodSessions('period-missing', 100, 200),
     ).resolves.toEqual([]);
   } finally {
-    for (const row of rows)
-      await storage.deletePlaybackSession(username, row.id);
-    await storage.deletePlaybackSession(otherUser, 'period-other');
+    await storage.deleteUser(username);
+    await storage.deleteUser(otherUser);
   }
 }

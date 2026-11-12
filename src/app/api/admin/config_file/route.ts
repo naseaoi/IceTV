@@ -70,6 +70,13 @@ export async function POST(request: NextRequest) {
         URL: subscriptionUrl ?? subscription.ConfigSubscribtion.URL,
         AutoUpdate: autoUpdate ?? subscription.ConfigSubscribtion.AutoUpdate,
         LastCheck: lastCheckTime || '',
+        ...((subscriptionUrl ?? subscription.ConfigSubscribtion.URL) ===
+          subscription.ConfigSubscribtion.URL &&
+        (!lastCheckTime ||
+          lastCheckTime === subscription.ConfigSubscribtion.LastCheck) &&
+        subscription.ConfigSubscribtion.FailureSince
+          ? { FailureSince: subscription.ConfigSubscribtion.FailureSince }
+          : {}),
       },
     };
     refineConfig(adminConfig, configFile);

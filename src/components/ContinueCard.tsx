@@ -1,6 +1,6 @@
 'use client';
 
-import { MoreVertical, Play } from 'lucide-react';
+import { Check, MoreVertical, Play } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useId, useState } from 'react';
 
@@ -14,6 +14,7 @@ import {
   CONTINUE_CARD_CLASS,
   CONTINUE_CARD_COVER_CLASS,
   CONTINUE_CARD_COVER_SIZES,
+  CONTINUE_CARD_FLUID_CLASS,
   CONTINUE_CARD_FOOTER_CLASS,
   CONTINUE_CARD_META_CLASS,
   CONTINUE_CARD_PROGRESS_BAR_CLASS,
@@ -65,6 +66,12 @@ interface ContinueCardProps {
   resumeTime: number;
   query?: string;
   onDelete?: () => void;
+  /** 铺满网格格子，横排滚动时保持固定宽度 */
+  fluid?: boolean;
+  /** 批量编辑：点击切换选中，不播放也不弹菜单 */
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
 }
 
 export default function ContinueCard({
@@ -85,6 +92,10 @@ export default function ContinueCard({
   resumeTime,
   query,
   onDelete,
+  fluid = false,
+  selectable = false,
+  selected = false,
+  onSelect,
 }: ContinueCardProps) {
   const router = useRouter();
   const interactionId = useId();
@@ -147,6 +158,7 @@ export default function ContinueCard({
 
   const handleDelete = useCallback(() => {
     showConfirm(interactionId, {
+      objectKey: `${source}+${id}`,
       title: '确认删除播放记录？',
       message: `将删除《${title}》的播放记录`,
       cancelText: '取消',
@@ -187,6 +199,7 @@ export default function ContinueCard({
       }
 
       showActionSheet(interactionId, {
+        objectKey: `${source}+${id}`,
         title,
         poster,
         actions: buildCardActions({
@@ -261,6 +274,7 @@ export default function ContinueCard({
     onLongPress: () => void openActions(),
     onClick: handlePlay,
   });
+  const handleActivate = selectable ? () => onSelect?.() : handlePlay;
 
   const progressPercent = Math.min(100, Math.max(0, progress));
   const displaySourceName = sourceName?.trim() || source;
@@ -272,14 +286,16 @@ export default function ContinueCard({
       : year;
   return (
     <div
-      role='link'
+      role={selectable ? 'button' : 'link'}
       data-continue-card
       tabIndex={0}
-      aria-label={`继续播放 ${title}`}
-      className={`${CONTINUE_CARD_CLASS} group relative cursor-pointer select-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-4 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950`}
-      onClick={handlePlay}
+      aria-label={selectable ? `选择 ${title}` : `继续播放 ${title}`}
+      aria-pressed={selectable ? selected : undefined}
+      className={`${fluid ? CONTINUE_CARD_FLUID_CLASS : CONTINUE_CARD_CLASS} group relative cursor-pointer select-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-4 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950`}
+      onClick={handleActivate}
       onContextMenu={(event) => {
         event.preventDefault();
+        if (selectable) return;
         void openActions({
           top: event.clientY,
           left: event.clientX,
@@ -288,14 +304,18 @@ export default function ContinueCard({
         });
       }}
       onKeyDown={(event) => {
-        if (event.target === event.currentTarget && event.key === 'Enter') {
-          handlePlay();
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Enter' || (selectable && event.key === ' ')) {
+          event.preventDefault();
+          handleActivate();
         }
       }}
-      {...longPressProps}
+      {...(selectable ? {} : longPressProps)}
     >
       <div
-        className={`${CONTINUE_CARD_COVER_CLASS} poster-rounded-clip relative overflow-hidden bg-gray-100 ring-1 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06]`}
+        className={`${CONTINUE_CARD_COVER_CLASS} poster-rounded-clip relative overflow-hidden bg-gray-100 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06] ${
+          selected ? 'ring-2 ring-brand-500 dark:ring-brand-400' : 'ring-1'
+        }`}
       >
         <CoverImage
           src={poster}
@@ -303,11 +323,32 @@ export default function ContinueCard({
           sizes={CONTINUE_CARD_COVER_SIZES}
           checkClientCacheBeforeLoad
         />
-        <div className='absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100'>
-          <span className='flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-gray-900 shadow-lg'>
-            <Play aria-hidden='true' className='ml-0.5 h-4 w-4 fill-current' />
-          </span>
-        </div>
+        {selectable ? (
+          <div
+            className={`absolute inset-0 transition ${
+              selected ? 'bg-black/30' : 'group-hover:bg-black/10'
+            }`}
+          >
+            <span
+              className={`absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border-2 transition ${
+                selected
+                  ? 'border-brand-500 bg-brand-500 text-white'
+                  : 'border-white/90 bg-black/20'
+              }`}
+            >
+              {selected && <Check className='h-3 w-3' strokeWidth={3} />}
+            </span>
+          </div>
+        ) : (
+          <div className='absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100'>
+            <span className='flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-gray-900 shadow-lg'>
+              <Play
+                aria-hidden='true'
+                className='ml-0.5 h-4 w-4 fill-current'
+              />
+            </span>
+          </div>
+        )}
       </div>
       <div className={CONTINUE_CARD_BODY_CLASS}>
         <p
@@ -363,24 +404,26 @@ export default function ContinueCard({
           </div>
         </div>
       </div>
-      <button
-        type='button'
-        data-button
-        aria-label='更多操作'
-        className='absolute -right-1 top-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-[color,background-color,opacity] hover:bg-gray-900/[0.06] hover:text-gray-700 focus-visible:opacity-100 group-hover:opacity-100 dark:text-gray-500 dark:hover:bg-white/[0.08] dark:hover:text-gray-200 [@media(pointer:fine)]:opacity-0'
-        onClick={(event) => {
-          event.stopPropagation();
-          const rect = event.currentTarget.getBoundingClientRect();
-          void openActions({
-            top: rect.top,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height,
-          });
-        }}
-      >
-        <MoreVertical className='h-4 w-4' />
-      </button>
+      {!selectable && (
+        <button
+          type='button'
+          data-button
+          aria-label='更多操作'
+          className='absolute -right-1 top-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-[color,background-color,opacity] hover:bg-gray-900/[0.06] hover:text-gray-700 focus-visible:opacity-100 group-hover:opacity-100 dark:text-gray-500 dark:hover:bg-white/[0.08] dark:hover:text-gray-200 [@media(pointer:fine)]:opacity-0'
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            void openActions({
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+            });
+          }}
+        >
+          <MoreVertical className='h-4 w-4' />
+        </button>
+      )}
     </div>
   );
 }

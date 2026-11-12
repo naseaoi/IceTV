@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 
 import ModalShell, { useDeferredClose } from './ModalShell';
 
@@ -11,6 +12,33 @@ function DeferredPanel({ onClose }: { onClose: () => void }) {
       </button>
     </ModalShell>
   );
+}
+
+function SwitchingPanels() {
+  const [panel, setPanel] = useState<'profile' | 'password' | null>(null);
+  return (
+    <>
+      <button type='button' onClick={() => setPanel('profile')}>
+        打开资料
+      </button>
+      {panel === 'profile' && (
+        <ModalShell isOpen onClose={() => setPanel(null)}>
+          <button type='button' onClick={() => setPanel('password')}>
+            修改密码
+          </button>
+        </ModalShell>
+      )}
+      {panel === 'password' && (
+        <ModalShell isOpen onClose={() => setPanel(null)}>
+          密码表单
+        </ModalShell>
+      )}
+    </>
+  );
+}
+
+function backdrop() {
+  return document.querySelector('.motion-backdrop');
 }
 
 describe('ModalShell', () => {
@@ -51,5 +79,20 @@ describe('ModalShell', () => {
       jest.advanceTimersByTime(130);
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('从一个弹窗直接切到另一个弹窗时压暗不中断，单独打开仍淡入', () => {
+    render(<SwitchingPanels />);
+    fireEvent.click(screen.getByRole('button', { name: '打开资料' }));
+    expect(backdrop()).toHaveAttribute('data-open', 'false');
+    act(() => {
+      jest.advanceTimersByTime(50);
+    });
+    expect(backdrop()).toHaveAttribute('data-open', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '修改密码' }));
+    expect(screen.getByText('密码表单')).toBeInTheDocument();
+    expect(document.querySelectorAll('.motion-backdrop')).toHaveLength(1);
+    expect(backdrop()).toHaveAttribute('data-open', 'true');
   });
 });

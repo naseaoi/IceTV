@@ -10,6 +10,10 @@ import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import {
+  isServerRelayPaused,
+  serverRelayPausedResponse,
+} from '@/lib/host-traffic.server';
+import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
@@ -29,7 +33,6 @@ import {
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
-import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -101,6 +104,9 @@ async function handleGet(request: NextRequest) {
     });
   }
 
+  const config = await getConfigForRead();
+  if (await isServerRelayPaused(config)) return serverRelayPausedResponse();
+
   const quotaFailure = await requireServerProxyQuota(
     'vod-segment',
     request,
@@ -117,7 +123,6 @@ async function handleGet(request: NextRequest) {
   };
 
   if (isLiveStream) {
-    const config = await getConfigForRead();
     if (config.SiteConfig.EnableLiveEntry !== true) {
       return NextResponse.json({ error: '直播未开启' }, { status: 404 });
     }
@@ -157,10 +162,9 @@ async function handleGet(request: NextRequest) {
     });
   }
 
-  const ua = await resolveProxyUserAgent(source);
-  const runtimeParams = normalizeRuntimeParams(
-    (await getConfigForRead()).SiteConfig,
-  );
+  const ua = await resolveProxyUserAgent(source, config);
+  const siteConfig = config.SiteConfig;
+  const runtimeParams = normalizeRuntimeParams(siteConfig);
   const timeoutMs = resolveVodSegmentProxyTimeoutMs(
     source,
     runtimeParams.ProxyRequestTimeoutSeconds * 1000,
@@ -211,10 +215,6 @@ async function handleGet(request: NextRequest) {
             userInitiated,
           });
 
-          if (source) {
-            markSourceCors(source, responseAllowsCors(response.headers));
-          }
-
           return new Response(response.body, {
             status: response.status,
             statusText: response.statusText,
@@ -250,6 +250,11 @@ async function handleGet(request: NextRequest) {
       headers,
       skipInitialValidation: true,
       timeoutMs,
+      proxyPoolStickyKey: isLiveStream
+        ? undefined
+        : authorization.proxyPoolStickyKey,
+      useProxyPool:
+        !isLiveStream && siteConfig.UpstreamProxyPoolSegments === true,
       resourceContext,
       signal: request.signal,
     });
@@ -293,11 +298,6 @@ async function handleGet(request: NextRequest) {
       userAction,
       userInitiated,
     });
-
-    // 只用真实 segment 响应学习跨域能力，避免被 m3u8 响应头误导。
-    if (source) {
-      markSourceCors(source, responseAllowsCors(response.headers));
-    }
 
     const responseHeaders = buildSegmentResponseHeaders(
       response.headers,
@@ -375,7 +375,7 @@ function buildSegmentResponseHeaders(
     'Cache-Control',
     isLiveStream
       ? 'no-cache'
-      : 'public, max-age=3600, stale-while-revalidate=300',
+      : 'private, max-age=3600, stale-while-revalidate=300',
   );
 
   const contentType = sourceHeaders.get('content-type');

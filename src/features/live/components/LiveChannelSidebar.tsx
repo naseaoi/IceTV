@@ -1,6 +1,7 @@
 ﻿import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
 import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
 
+import LoadErrorState from '@/components/LoadErrorState';
 import {
   PLAYER_PANEL_SURFACE_CLASS,
   PlayerPanelContent,
@@ -32,6 +33,8 @@ interface LiveChannelSidebarProps {
   liveSources: LiveSource[];
   epgData: EpgData | null;
   isEpgLoading: boolean;
+  epgError?: string | null;
+  retryEpg?: () => void;
   favorited: boolean;
   handleToggleFavorite: () => void;
   groupContainerRef: MutableRefObject<HTMLDivElement | null>;
@@ -112,6 +115,8 @@ function EpgTab({
   currentSource,
   epgData,
   isEpgLoading,
+  epgError,
+  retryEpg,
   favorited,
   handleToggleFavorite,
 }: Pick<
@@ -120,6 +125,8 @@ function EpgTab({
   | 'currentSource'
   | 'epgData'
   | 'isEpgLoading'
+  | 'epgError'
+  | 'retryEpg'
   | 'favorited'
   | 'handleToggleFavorite'
 >) {
@@ -199,6 +206,8 @@ function EpgTab({
           <Spinner className='mr-3 h-5 w-5 text-brand-500' />
           加载节目单...
         </div>
+      ) : epgError ? (
+        <LoadErrorState message={epgError} onRetry={() => retryEpg?.()} />
       ) : programs.length === 0 ? (
         <EmptyPanel
           icon={<Clock className='h-8 w-8 text-gray-400 dark:text-gray-600' />}
@@ -284,6 +293,8 @@ export function LiveChannelSidebar({
   liveSources,
   epgData,
   isEpgLoading,
+  epgError,
+  retryEpg,
   favorited,
   handleToggleFavorite,
   groupContainerRef,
@@ -435,6 +446,8 @@ export function LiveChannelSidebar({
             currentSource={currentSource}
             epgData={epgData}
             isEpgLoading={isEpgLoading}
+            epgError={epgError}
+            retryEpg={retryEpg}
             favorited={favorited}
             handleToggleFavorite={handleToggleFavorite}
           />

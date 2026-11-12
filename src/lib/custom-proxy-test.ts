@@ -1,9 +1,8 @@
-export type CustomProxyTestKind = 'douban-data' | 'douban-image' | 'bangumi';
+export type CustomProxyTestKind = 'douban-data' | 'douban-image';
 
 export const CUSTOM_PROXY_LABELS: Record<CustomProxyTestKind, string> = {
   'douban-data': '豆瓣代理',
   'douban-image': '豆瓣图片代理',
-  bangumi: 'Bangumi 代理',
 };
 
 const TEST_TARGET_URLS: Record<CustomProxyTestKind, string> = {
@@ -11,7 +10,6 @@ const TEST_TARGET_URLS: Record<CustomProxyTestKind, string> = {
     'https://movie.douban.com/j/search_subjects?type=movie&tag=%E7%83%AD%E9%97%A8&sort=recommend&page_limit=1&page_start=0',
   'douban-image':
     'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p480747492.jpg',
-  bangumi: 'https://api.bgm.tv/calendar',
 };
 
 const TEST_TIMEOUT_MS = 10000;

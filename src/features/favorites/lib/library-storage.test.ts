@@ -6,18 +6,15 @@ import type { FavoriteSort } from '@/features/favorites/lib/favorite-library';
 import type { FavoriteLibraryPage } from '@/features/favorites/lib/library-query';
 import {
   favoriteProjection,
+  InvalidFavoriteLibraryQuery,
   libraryStatements,
+  validateLibraryQuery,
 } from '@/features/favorites/lib/library-storage';
 import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
+import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
 import { MySqlStorage } from '@/lib/mysql.db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
-import type {
-  Favorite,
-  IStorage,
-  PlayRecord,
-  StorageImportData,
-  VideoReview,
-} from '@/lib/types';
+import type { Favorite, IStorage, PlayRecord, VideoReview } from '@/lib/types';
 
 const favorite: Favorite = {
   title: 'Demo',
@@ -36,6 +33,27 @@ type InternalSqlite = {
   migrateFavoriteProjection(): void;
   migrateLegacyUsernameCasing(): void;
 };
+
+it.each([0, -1, 1.5, NaN, Infinity, FAVORITE_RENDER_CHUNK + 1])(
+  '收藏库拒绝非法条数 %s',
+  (limit) => {
+    expect(() => validateLibraryQuery({ ...query, limit }, 'demo')).toThrow(
+      new InvalidFavoriteLibraryQuery('收藏查询条件无效'),
+    );
+  },
+);
+
+it.each(['sqlite', 'mysql'] as const)(
+  '%s 查询按条数多读取一行判断续页',
+  (dialect) => {
+    for (const limit of [undefined, 1, FAVORITE_RENDER_CHUNK]) {
+      const sql = libraryStatements(dialect, 'demo', { ...query, limit });
+      expect(sql.page).toMatch(
+        new RegExp(`LIMIT ${(limit ?? FAVORITE_RENDER_CHUNK) + 1}$`),
+      );
+    }
+  },
+);
 
 for (const backend of ['sqlite', 'mysql'] as const) {
   const suite = backend === 'mysql' && !liveUrl ? describe.skip : describe;
@@ -58,6 +76,54 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           storage as unknown as { pool: { end(): Promise<void> } }
         ).pool.end();
       else (storage as unknown as InternalSqlite).db.close();
+    });
+
+    it('指定条数截断并允许变更条数续页，计数包含直播且排除无效投影', async () => {
+      for (const key of ['source+a', 'source+b', 'source+c', 'source+d']) {
+        await storage.setFavorite(username, key, {
+          ...favorite,
+          origin: key === 'source+d' ? 'live' : 'vod',
+        });
+      }
+      await storage.setFavorite(username, 'source+invalid', {
+        ...favorite,
+        save_time: NaN,
+      });
+      await storage.setPlayRecord(username, 'source+c', {
+        ...favorite,
+        index: 4,
+        play_time: 20,
+        total_time: 100,
+      });
+      const first = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        limit: 1,
+      });
+      expect(first.items.map((item) => item.key)).toEqual(['source+d']);
+      expect(first).toMatchObject({ total: 4, libraryTotal: 4 });
+      expect(first.nextCursor).toEqual(expect.any(String));
+      const second = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        limit: 2,
+        cursor: first.nextCursor,
+      });
+      expect(second.items.map((item) => item.key)).toEqual([
+        'source+c',
+        'source+b',
+      ]);
+      expect(second.items[0].playRecord?.index).toBe(4);
+      expect(second).toMatchObject({ total: 4, libraryTotal: 4 });
+      expect(second.nextCursor).toEqual(expect.any(String));
+      const third = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        limit: 1,
+        cursor: second.nextCursor,
+      });
+      expect(third.items.map((item) => item.key)).toEqual(['source+a']);
+      expect(third.nextCursor).toBeNull();
+      expect(
+        (await storage.getFavoriteLibraryPage(username, query)).items,
+      ).toHaveLength(4);
     });
 
     it('matches in-memory semantics for all sorts and filters over tied cursor pages', async () => {
@@ -300,29 +366,14 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       ).toBe(0);
     });
 
-    it('rebuilds projections through replace/import and clear paths', async () => {
-      // 测试使用独立数据库；替换全库不会接触开发数据。
-      const data = {
-        users: { [username]: '' },
-        userData: {
-          [username]: {
-            favorites: {
-              'source+imported': { ...favorite, title: 'Imported' },
-            },
-            playRecords: {},
-            searchHistory: [],
-            skipConfigs: {},
-            playbackSessions: {},
-          },
-        },
-        adminConfig: {},
-        sourceRouteStats: [],
-        inviteCodeUsage: {},
-      } as unknown as StorageImportData;
-      await storage.replaceAllData(data);
+    it('写入收藏时重建投影，清空收藏时同步移除投影', async () => {
+      await storage.setFavorite(username, 'source+projected', {
+        ...favorite,
+        title: 'Projected',
+      });
       const page = await storage.getFavoriteLibraryPage(username, {
         ...query,
-        query: 'imported',
+        query: 'projected',
       });
       expect(page.total).toBe(1);
       await storage.deleteAllFavorites(username);

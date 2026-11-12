@@ -2,6 +2,7 @@ import type { MutableRefObject } from 'react';
 
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { resolveNextStablePlaybackTime } from '@/features/play/hooks/usePlayProgress';
+import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import {
   createArtPlayerContextmenus,
   createArtPlayerControls,
@@ -22,6 +23,7 @@ import {
   waitForDanmakuPlayerSwitch,
 } from '@/features/play/lib/danmaku/load-notice';
 import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
+import { prewarmLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
 import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import {
   type PlayerLoadingSessionState,
@@ -32,7 +34,6 @@ import {
   shouldDismissLoadingFromCanPlay,
   shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
-import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
 import {
   applyResumeTime,
   isWithinAutoResumeWindow,
@@ -47,11 +48,16 @@ import {
   registerVodNativeRuntime,
 } from '@/features/play/lib/vodHlsRuntime';
 import {
+  createVodPlaybackIntent,
+  getVodSourceAttempt,
+} from '@/features/play/lib/vodPlaybackIntent';
+import {
   buildVodProxyUrl,
   buildVodSegmentProxyUrl,
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -124,8 +130,8 @@ export async function initializeArtPlayer(
     handleNextEpisode,
     handleSkipConfigChange,
     saveCurrentPlayProgress,
-    reportPlaybackStats,
     startPlaybackStatsSession,
+    handlePlaybackStatsEvent,
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
@@ -134,6 +140,7 @@ export async function initializeArtPlayer(
     onPlaybackStarted,
     onDanmakuEnable,
     onSourceProxyFallbackStarted,
+    playbackIntentRef,
     onPlaybackRecoveryExhausted,
     onCurrentSourceVideoInfo,
   } = params;
@@ -172,7 +179,7 @@ export async function initializeArtPlayer(
     const buildProxyUrl = (rawUrl: string) =>
       buildVodProxyUrl({
         rawUrl,
-        useServerProxy: preUseProxy,
+        ...playbackRoute,
         sourceKey: preSourceKey,
         playbackRequestMode: playbackRequestModeRef.current || 'initial',
       });
@@ -189,18 +196,16 @@ export async function initializeArtPlayer(
     const playbackUrl = resolvePlaybackUrl(videoUrl);
 
     if (mediaKind === 'hls') {
-      prefetchM3U8(buildProxyUrl(videoUrl));
+      prefetchM3U8(buildProxyUrl(videoUrl), playbackRoute);
     }
     preconnectForUrl(videoUrl);
 
     const nextEpisodeUrl =
       detailRef.current?.episodes?.[currentEpisodeIndex + 1] ?? null;
-    if (nextEpisodeUrl) {
-      if (isVodM3u8Url(nextEpisodeUrl)) {
-        prefetchM3U8(buildProxyUrl(nextEpisodeUrl));
-      }
-      preconnectForUrl(nextEpisodeUrl);
-    }
+    const nextManifestPrefetchUrl =
+      nextEpisodeUrl && isVodM3u8Url(nextEpisodeUrl)
+        ? buildProxyUrl(nextEpisodeUrl)
+        : null;
     scheduleNextEpisodePreload({
       sourceKey: preSourceKey,
       videoId: playbackInfoContext.id,
@@ -212,6 +217,17 @@ export async function initializeArtPlayer(
       autoPlayNextEnabledRef,
       blockAdEnabledRef,
       skipConfigRef,
+      warmUp: (signal) => {
+        if (!nextEpisodeUrl) return;
+        if (isLazyEpisodeUrl(nextEpisodeUrl)) {
+          prewarmLazyEpisodeUrl(preSourceKey, nextEpisodeUrl, signal);
+          return;
+        }
+        if (nextManifestPrefetchUrl) {
+          prefetchM3U8(nextManifestPrefetchUrl, playbackRoute);
+        }
+        preconnectForUrl(nextEpisodeUrl);
+      },
     });
 
     const { Artplayer, Hls } = await getPlayerModules();
@@ -314,7 +330,12 @@ export async function initializeArtPlayer(
         load: (...args: unknown[]) => void;
       },
       {
-        transformManifestText: (content) => filterAdsFromM3U8(content),
+        transformManifestText: (content, _context, manifestUrl) =>
+          filterM3U8AdsForSource(
+            content,
+            manifestUrl,
+            detailRef.current?.source,
+          ),
       },
     );
 
@@ -336,6 +357,7 @@ export async function initializeArtPlayer(
       setIsVideoLoading,
       setRealtimeLoadSpeed,
       onSourceProxyFallbackStarted,
+      playbackIntentRef,
       onPlaybackRecoveryExhausted,
       onCurrentSourceVideoInfo,
     });
@@ -416,7 +438,22 @@ export async function initializeArtPlayer(
     bindPlayerHoverControls(player);
     bindPlayerMobileControls(player);
     let nativeUseServerProxy = mediaKind === 'native' && preUseProxy;
-    let nativeFallbackStarted = false;
+    const nativeIntent =
+      playbackIntentRef?.current ?? createVodPlaybackIntent();
+    const nativeAttempt =
+      mediaKind === 'native'
+        ? getVodSourceAttempt(
+            nativeIntent,
+            preSourceKey,
+            detailRef.current?.id || '',
+          )
+        : null;
+    if (nativeAttempt) {
+      nativeAttempt.allowAutoFallback = playbackRoute.allowAutoFallback;
+      nativeAttempt.triedRoutes.add(
+        nativeUseServerProxy ? 'server' : 'browser',
+      );
+    }
     const nativeRouteStatReported = {
       browser: { success: false, failure: false },
       server: { success: false, failure: false },
@@ -440,31 +477,41 @@ export async function initializeArtPlayer(
         player.video as HTMLVideoElement,
       ).__icetvUsingServerProxy = nativeUseServerProxy;
       // 必须在创建后同步登记：未登记的播放器按已释放处理，起播和出错回退都不会再响应
-      registerVodNativeRuntime(player.video as HTMLVideoElement, videoUrl);
+      registerVodNativeRuntime(
+        player.video as HTMLVideoElement,
+        videoUrl,
+        nativeIntent,
+      );
     }
 
     const switchNativeToServerProxy = (reason: string) => {
       if (
         mediaKind !== 'native' ||
-        nativeUseServerProxy ||
+        artPlayerRef.current !== player ||
+        getVodRuntimeSourceUrl(player.video as HTMLVideoElement) !== videoUrl ||
+        !nativeAttempt ||
+        nativeAttempt.routeSwitched ||
+        (playbackIntentRef && playbackIntentRef.current !== nativeIntent) ||
+        navigator.onLine === false ||
         !preSourceKey ||
         !playbackRoute.allowAutoFallback
       ) {
         return false;
       }
 
-      const fallbackUrl = buildSegmentProxyUrl(videoUrl);
+      const nextServer = !nativeUseServerProxy;
+      const fallbackUrl = nextServer
+        ? buildSegmentProxyUrl(videoUrl)
+        : videoUrl;
       console.warn('原生视频直连起播失败，切换服务端代理重试', {
         sourceKey: preSourceKey,
         reason,
       });
       reportNativeRouteStat(false);
 
-      if (preSourceKey) {
-        rememberSourceServerProxy(preSourceKey, videoUrl);
-      }
-      nativeUseServerProxy = true;
-      nativeFallbackStarted = true;
+      nativeUseServerProxy = nextServer;
+      nativeAttempt.routeSwitched = true;
+      nativeAttempt.triedRoutes.add(nextServer ? 'server' : 'browser');
       setRealtimeLoadSpeed('直连失败，切换代理...');
       setIsVideoLoading(true);
       onSourceProxyFallbackStarted?.();
@@ -474,7 +521,7 @@ export async function initializeArtPlayer(
         const activeVideo = player.video as HTMLVideoElement | undefined;
         if (activeVideo) {
           const managedVideo = getManagedVideo(activeVideo);
-          managedVideo.__icetvUsingServerProxy = true;
+          managedVideo.__icetvUsingServerProxy = nextServer;
           ensureVideoSource(activeVideo, fallbackUrl);
           void activeVideo.play().catch(() => {});
         }
@@ -484,6 +531,12 @@ export async function initializeArtPlayer(
         return false;
       }
     };
+
+    if (mediaKind === 'native' && player.video) {
+      getManagedVideo(
+        player.video as HTMLVideoElement,
+      ).__icetvSwitchToServerProxy = switchNativeToServerProxy;
+    }
 
     const resolveDeclaredDuration = (): number | null => {
       const activeVideo = player.video as HTMLVideoElement | null;
@@ -578,16 +631,34 @@ export async function initializeArtPlayer(
       }, 50);
     };
 
-    const notifyPlayerPlaybackStarted = () => {
+    const reportPlayerRouteStarted = () => {
+      if (
+        mediaKind !== 'native' ||
+        nativeRouteStatReported[nativeUseServerProxy ? 'server' : 'browser']
+          .success
+      )
+        return;
       const activeVideo = player.video as HTMLVideoElement | undefined;
       const activeSourceKey = detailRef.current?.source || '';
       if (activeVideo && activeSourceKey) {
         const activeManagedVideo = getManagedVideo(activeVideo);
-        if (activeManagedVideo.__icetvUsingServerProxy === false) {
+        if (
+          mediaKind === 'native' &&
+          activeManagedVideo.__icetvUsingServerProxy === false
+        ) {
           clearSourceProxyOverride(activeSourceKey, videoUrl);
         }
       }
+      if (
+        mediaKind === 'native' &&
+        nativeUseServerProxy &&
+        nativeAttempt?.routeSwitched
+      )
+        rememberSourceServerProxy(preSourceKey, videoUrl);
       reportNativeRouteStat(true);
+    };
+
+    const notifyPlayerPlaybackStarted = () => {
       showSourceSwitchSuccessNotice();
       startPlaybackStatsSession?.();
       onPlaybackStarted?.();
@@ -600,25 +671,32 @@ export async function initializeArtPlayer(
      */
     const isStalePlayerSession = () =>
       artPlayerRef.current !== player ||
+      (mediaKind === 'native' &&
+        playbackIntentRef &&
+        playbackIntentRef.current !== nativeIntent) ||
       (sessionEpisodeIndexRef.current !== null &&
         sessionEpisodeIndexRef.current !== currentEpisodeIndexRef.current) ||
       // 换源开始或逐集解析停旧集时运行时已释放，视频上仍是被放弃的旧地址，它的就绪和起播不能当作本次加载完成
       getVodRuntimeSourceUrl(player.video as HTMLVideoElement) === null;
 
-    const finishInitialLoading = () => {
+    const finishInitialLoading = (playing = false) => {
       if (isStalePlayerSession()) {
         return;
       }
 
-      if (!markPlayerLoadingSessionStarted(loadingSessionRef.current)) {
-        return;
-      }
+      const firstStart = markPlayerLoadingSessionStarted(
+        loadingSessionRef.current,
+      );
+      if (!firstStart && !playing) return;
+      // 线路恢复仍需收起加载层并记录新线路成功，源起播通知每个加载会话只发一次。
+      setIsVideoLoading(false);
+      setRealtimeLoadSpeed('');
+      reportPlayerRouteStarted();
+      if (!firstStart) return;
 
       resumeTimeRef.current = null;
       resumeModeRef.current = null;
       autoAdvanceArmedRef.current = true;
-      setIsVideoLoading(false);
-      setRealtimeLoadSpeed('');
       notifyPlayerPlaybackStarted();
     };
 
@@ -838,7 +916,8 @@ export async function initializeArtPlayer(
 
     player.on('video:playing', () => {
       ensureInitialPlaybackPosition();
-      finishLoadingFromPlaybackStarted();
+      finishInitialLoading(true);
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('playing');
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         retryPendingResumePosition();
       }
@@ -847,13 +926,13 @@ export async function initializeArtPlayer(
     player.on('pause', () => {
       void releaseWakeLock();
       saveCurrentPlayProgress();
-      reportPlaybackStats?.(true);
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('pause');
       setIsPlaying(false);
     });
 
     player.on('video:ended', () => {
       void releaseWakeLock();
-      reportPlaybackStats?.(true);
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('ended');
       setIsPlaying(false);
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
       if (
@@ -917,6 +996,7 @@ export async function initializeArtPlayer(
     player.on('video:progress', finishInitialLoadingIfMediaReady);
 
     player.on('video:timeupdate', () => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('timeupdate');
       updateStableCurrentTime(player.currentTime || 0);
 
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
@@ -984,33 +1064,34 @@ export async function initializeArtPlayer(
     });
 
     player.on('error', (error: Error) => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('error');
       console.error('播放器错误:', error);
       const activeVideo = player.video as HTMLVideoElement | undefined;
       // 运行时已释放时出错的是被放弃的旧地址，Artplayer 重连会把它重新挂上：保持暂停，不上报也不切线路
       if (activeVideo && pauseIfVodRuntimeReleased(activeVideo)) {
         return;
       }
+      if (isStalePlayerSession()) return;
       if (player.currentTime > 0) {
+        return;
+      }
+      if (
+        mediaKind !== 'native' ||
+        navigator.onLine === false ||
+        activeVideo?.error?.code === 1
+      )
+        return;
+      if (activeVideo?.error?.code !== 2) {
+        onPlaybackRecoveryExhausted?.('native-media-error');
         return;
       }
       reportNativeRouteStat(false);
       if (
         mediaKind === 'native' &&
-        !nativeFallbackStarted &&
-        switchNativeToServerProxy(error.message || 'player-error')
-      ) {
+        switchNativeToServerProxy(error.message || 'network-error')
+      )
         return;
-      }
-      const activeManagedVideo = activeVideo
-        ? getManagedVideo(activeVideo)
-        : null;
-      if (
-        activeManagedVideo?.__icetvSwitchToServerProxy?.(
-          error.message || 'player-error',
-        )
-      ) {
-        return;
-      }
+      onPlaybackRecoveryExhausted?.('native-network-error');
     });
 
     player.on('video:timeupdate', () => {
@@ -1018,14 +1099,22 @@ export async function initializeArtPlayer(
       if (now - lastSaveTimeRef.current > 5000) {
         saveCurrentPlayProgress();
       }
-      reportPlaybackStats?.();
     });
 
+    // 媒体键、画中画等直接暂停元素时不一定经过 Artplayer 的 pause 事件
+    for (const event of ['pause', 'waiting', 'stalled', 'error'] as const) {
+      player.on(`video:${event}`, () => {
+        if (!isStalePlayerSession()) handlePlaybackStatsEvent?.(event);
+      });
+    }
+
     player.on('video:seeking', () => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeking');
       updateStableCurrentTime(player.currentTime || 0);
     });
 
     player.on('video:seeked', () => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeked');
       updateStableCurrentTime(player.currentTime || 0);
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         completePendingResumeIfReady();

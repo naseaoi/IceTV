@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type {
   Pool,
   PoolConnection,
@@ -16,6 +17,8 @@ import {
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
+import { accessNoticeAction, accessPermissionsKey } from '@/lib/user-notice';
+import { noticeInsert } from '@/lib/user-notice-storage';
 import { normalizeUsername } from '@/lib/username';
 import type { AdminConfig } from '@/types/admin';
 
@@ -28,36 +31,19 @@ export class MysqlUserAccessStore {
   async get(username: string): Promise<UserAccess | null> {
     username = normalizeUsername(username);
     const [rows] = await this.db.query<RowDataPacket[]>(
-      `SELECT username, role, banned, enabled_apis FROM user_access WHERE username = ? AND (username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = user_access.username))${this.lock ? ' FOR UPDATE' : ''}`,
+      `SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a LEFT JOIN user_group_members m ON m.username = a.username WHERE a.username = ? AND (a.username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = a.username)) ORDER BY m.position, m.group_name${this.lock ? ' FOR UPDATE' : ''}`,
       [username, normalizeUsername(getOwnerUsername() || '')],
     );
     if (!rows[0])
       return username === normalizeUsername(getOwnerUsername() || '')
         ? effectiveUserAccess({ username, role: 'user' })
         : null;
-    const [tags] = await this.db.query<RowDataPacket[]>(
-      'SELECT group_name FROM user_group_members WHERE username = ? ORDER BY position, group_name',
-      [username],
-    );
     return userAccessFromRow(
       rows[0] as Parameters<typeof userAccessFromRow>[0],
-      tags.map((row) => String(row.group_name)),
+      rows.flatMap((row) =>
+        row.group_name == null ? [] : [String(row.group_name)],
+      ),
     );
-  }
-
-  async all(): Promise<UserAccess[]> {
-    const [rows] = await this.db.query<RowDataPacket[]>(
-      'SELECT username FROM user_access ORDER BY username',
-    );
-    const result: UserAccess[] = [];
-    for (const row of rows) {
-      const user = await this.get(String(row.username));
-      if (user) result.push(user);
-    }
-    const owner = normalizeUsername(getOwnerUsername() || '');
-    if (owner && !result.some((row) => row.username === owner))
-      result.push((await this.get(owner))!);
-    return result;
   }
 
   async put(user: UserAccess): Promise<void> {
@@ -78,13 +64,39 @@ export class MysqlUserAccessStore {
     patch: UserAccessPatch,
     guard?: UserAccessGuard,
   ): Promise<number> {
+    const [configRows] = await this.db.query<RowDataPacket[]>(
+      'SELECT config_json FROM admin_config WHERE id = 1',
+    );
+    const config = configRows[0]
+      ? (JSON.parse(String(configRows[0].config_json)) as AdminConfig)
+      : null;
     let count = 0;
     for (const username of [
       ...new Set(usernames.map(normalizeUsername)),
     ].sort()) {
       const user = await this.get(username);
       if (!user || !canManageUserAccess(user, guard)) continue;
-      await this.put({ ...user, ...patch });
+      const next = effectiveUserAccess({ ...user, ...patch });
+      await this.put(next);
+      const change = accessNoticeAction(user, next);
+      const action =
+        change === 'permissions-changed' &&
+        config &&
+        accessPermissionsKey(user, config) ===
+          accessPermissionsKey(next, config)
+          ? null
+          : change;
+      if (action) {
+        const event = noticeInsert(
+          'mysql',
+          username,
+          randomUUID(),
+          'account-change',
+          action,
+          {},
+        );
+        await this.db.execute(event.sql, event.params);
+      }
       count++;
     }
     return count;

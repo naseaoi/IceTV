@@ -7,6 +7,7 @@ import { cookies } from 'next/headers';
 import { AuthProvider } from '@/components/AuthProvider';
 import { CardInteractionProvider } from '@/components/CardInteractionProvider';
 import { ClientErrorReporter } from '@/components/ClientErrorReporter';
+import { LinuxDoBindNotifier } from '@/components/LinuxDoBindNotifier';
 import { MessageCenterProvider } from '@/components/messages/MessageCenterProvider';
 import { PageScrollRestorer } from '@/components/PageScrollRestorer';
 import ReleaseNotifier from '@/components/ReleaseNotifier';
@@ -15,6 +16,7 @@ import { SiteProvider } from '@/components/SiteProvider';
 import { SWRegister } from '@/components/SWRegister';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import ToastViewport from '@/components/ToastViewport';
+import { AdminAlertsProvider } from '@/features/admin/components/AdminAlertsProvider';
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
@@ -86,19 +88,17 @@ export default async function RootLayout({
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
     OPEN_REGISTER: publicConfig.OpenRegister,
+    LINUXDO_LOGIN: publicConfig.LinuxDoLogin,
     REQUIRE_INVITE_CODE: publicConfig.RequireInviteCode,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
     DOUBAN_PROXY_TYPE: publicConfig.DoubanProxyType,
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
-    BANGUMI_DATA_SOURCE: publicConfig.BangumiDataSource,
-    BANGUMI_PROXY: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
     DOUBAN_IMAGE_PROXY_TYPE: publicConfig.DoubanImageProxyType,
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
     ENABLE_LIVE_ENTRY: enableLiveEntry,
     DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
     ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
-    LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     AUTO_SWITCH_SOURCE: publicConfig.AutoSwitchSource,
     ENABLE_DANMAKU: publicConfig.EnableDanmaku,
     ENABLE_USER_DANMAKU: publicConfig.EnableUserDanmaku,
@@ -107,7 +107,6 @@ export default async function RootLayout({
     VOD_PAGE_TIMEOUT_SECONDS: publicConfig.VodPageTimeoutSeconds,
     VOD_FRAGMENT_TIMEOUT_SECONDS: publicConfig.VodFragmentTimeoutSeconds,
     PLAYBACK_HISTORY_PAGE_SIZE: publicConfig.PlaybackHistoryPageSize,
-    PLAYBACK_HISTORY_LIMIT: publicConfig.PlaybackHistoryLimit,
     SEARCH_HISTORY_LIMIT: publicConfig.SearchHistoryLimit,
     CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
     COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
@@ -148,16 +147,19 @@ export default async function RootLayout({
               footerText={initialFooterText}
             >
               <AuthProvider initialSession={initialAuthSession}>
-                <MessageCenterProvider>
-                  <CardInteractionProvider>
-                    <WatchRecordProvider>{children}</WatchRecordProvider>
-                    <PageScrollRestorer />
-                    <ClientErrorReporter />
-                    <ToastViewport />
-                    <ReleaseNotifier />
-                    <SWRegister />
-                  </CardInteractionProvider>
-                </MessageCenterProvider>
+                <AdminAlertsProvider>
+                  <MessageCenterProvider>
+                    <CardInteractionProvider>
+                      <WatchRecordProvider>{children}</WatchRecordProvider>
+                      <PageScrollRestorer />
+                      <ClientErrorReporter />
+                      <ToastViewport />
+                      <LinuxDoBindNotifier />
+                      <ReleaseNotifier />
+                      <SWRegister />
+                    </CardInteractionProvider>
+                  </MessageCenterProvider>
+                </AdminAlertsProvider>
               </AuthProvider>
             </SiteProvider>
           </RuntimeConfigProvider>

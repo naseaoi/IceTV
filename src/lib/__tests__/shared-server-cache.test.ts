@@ -28,7 +28,8 @@ describe('shared server cache', () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
     jest.restoreAllMocks();
     (storage as unknown as { db: Database.Database }).db.close();
   });
@@ -50,6 +51,81 @@ describe('shared server cache', () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  it('waits for persistence, skips successful release, and does not await maintenance', async () => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(Date.now() + 120_000);
+    let finishWrite!: (value: boolean) => void;
+    let failPrune!: (reason: Error) => void;
+    jest.mocked(db.setSharedCache).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishWrite = resolve;
+      }),
+    );
+    jest.mocked(db.pruneSharedCache).mockReturnValueOnce(
+      new Promise((_, reject) => {
+        failPrune = reject;
+      }),
+    );
+    try {
+      let settled = false;
+      const first = cache()
+        .getOrLoad('first', async () => 'value')
+        .then((value) => {
+          settled = true;
+          return value;
+        });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      expect(db.setSharedCache).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+      finishWrite(true);
+      await expect(first).resolves.toBe('value');
+      expect(db.releaseSharedCacheLease).not.toHaveBeenCalled();
+      expect(db.pruneSharedCache).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+      expect(db.pruneSharedCache).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(120_000);
+      await cache().getOrLoad('second', async () => 'value');
+      jest.advanceTimersByTime(0);
+      expect(db.pruneSharedCache).toHaveBeenCalledTimes(1);
+      failPrune(new Error('maintenance failed'));
+      for (let step = 0; step < 5; step += 1) await Promise.resolve();
+      await cache().getOrLoad('third', async () => 'value');
+      jest.advanceTimersByTime(0);
+      for (let step = 0; step < 5; step += 1) await Promise.resolve();
+      expect(db.pruneSharedCache).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each(['refused', 'failed'])(
+    'releases the token when persistence is %s',
+    async (mode) => {
+      if (mode === 'refused')
+        jest.mocked(db.setSharedCache).mockResolvedValueOnce(false);
+      else
+        jest
+          .mocked(db.setSharedCache)
+          .mockRejectedValueOnce(new Error('write failed'));
+      const result = cache().getOrLoad('same', async () => 'value');
+      if (mode === 'refused') await expect(result).resolves.toBe('value');
+      else await expect(result).rejects.toThrow('write failed');
+      expect(db.releaseSharedCacheLease).toHaveBeenCalledTimes(1);
+      const key = `shared-test:${createHash('sha256').update('same').digest('hex')}`;
+      expect(await storage.getSharedCache(key)).toBeNull();
+    },
+  );
+
+  it('rejects absolutely expired shared values even while pruning is delayed', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await cache().getOrLoad('same', async () => 'old');
+    clock.mockReturnValue(3000);
+    const loader = jest.fn(async () => 'new');
+    await expect(cache().getOrLoad('same', loader)).resolves.toBe('new');
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
   it('coalesces fifty simultaneous instances on a cold key', async () => {
     const loader = jest.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
@@ -60,6 +136,84 @@ describe('shared server cache', () => {
     );
     expect(results.every((result) => result === 'value')).toBe(true);
     expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns cold-instance stale data while one background refresh writes back', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await cache().getOrLoad('same', async () => 'old');
+    clock.mockReturnValue(2100);
+    let resolveOrigin!: (value: string) => void;
+    const loader = jest.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveOrigin = resolve;
+        }),
+    );
+    const cold = cache();
+    const staleRequest = cold.getOrLoad('same', loader);
+    let refreshSettled = false;
+    const concurrentRefresh = cold.refresh('same', loader).then(() => {
+      refreshSettled = true;
+    });
+    await expect(staleRequest).resolves.toBe('old');
+    expect(refreshSettled).toBe(false);
+    await expect(cold.getOrLoad('same', loader)).resolves.toBe('old');
+    await expect(cache().getOrLoad('same', loader)).resolves.toBe('old');
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(cold.stats().inflight).toBe(1);
+    resolveOrigin('new');
+    await concurrentRefresh;
+    expect(refreshSettled).toBe(true);
+    await cold.refresh('same', loader);
+    expect(cold.stats().inflight).toBe(0);
+    await expect(cache().getOrLoad('same', loader)).resolves.toBe('new');
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps returned stale data and releases its lease when background loading fails', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await cache().getOrLoad('same', async () => 'old');
+    clock.mockReturnValue(2100);
+    let rejectOrigin!: (error: Error) => void;
+    const cold = cache();
+    const loader = () =>
+      new Promise<string>((_resolve, reject) => {
+        rejectOrigin = reject;
+      });
+    await expect(cold.getOrLoad('same', loader)).resolves.toBe('old');
+    const completed = cold.refresh('same', loader);
+    rejectOrigin(new Error('background failed'));
+    await expect(completed).rejects.toThrow('background failed');
+    expect(cold.peek('same')).toEqual({ value: 'old', fresh: false });
+    const key = `shared-test:${createHash('sha256').update('same').digest('hex')}`;
+    expect((await storage.getSharedCache(key))?.value).toBe('"old"');
+    expect(
+      await storage.acquireSharedCacheLease(key, 'next', 2100, 31_000),
+    ).toBe(true);
+    await storage.releaseSharedCacheLease(key, 'next');
+  });
+
+  it('waits for the origin when there is no usable value', async () => {
+    let resolveOrigin!: (value: string) => void;
+    let settled = false;
+    let pending!: Promise<string>;
+    const started = new Promise<void>((resolveStarted) => {
+      const cold = cache();
+      const result = cold.getOrLoad('empty', () => {
+        resolveStarted();
+        return new Promise<string>((resolve) => {
+          resolveOrigin = resolve;
+        });
+      });
+      void result.then(() => {
+        settled = true;
+      });
+      pending = result;
+    });
+    await started;
+    expect(settled).toBe(false);
+    resolveOrigin('loaded');
+    await expect(pending).resolves.toBe('loaded');
   });
 
   it('does not rerun a rejected origin loader', async () => {

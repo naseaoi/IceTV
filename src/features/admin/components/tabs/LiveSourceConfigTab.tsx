@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {
   type DragEndEvent,
@@ -20,7 +20,6 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect, useMemo, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
@@ -32,8 +31,8 @@ import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { LiveDataSource } from '@/features/admin/types/internal';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { showToast } from '@/lib/toast';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 const LiveSourceConfig = ({
@@ -43,12 +42,12 @@ const LiveSourceConfig = ({
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
 }) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const [formError, setFormError] = useState('');
+  const [actionError, setActionError] = useState('');
   const { isLoading, withLoading } = useLoadingState();
   const { runAction } = useAdminSourceActions({
     endpoint: '/api/admin/live',
     refreshConfig,
-    showAlert,
   });
   const [liveSources, setLiveSources] = useState<LiveDataSource[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
@@ -101,12 +100,8 @@ const LiveSourceConfig = ({
   }, [config]);
 
   const callLiveSourceApi = async (body: Record<string, unknown>) => {
-    try {
-      await runAction({ ...body });
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '操作失败', showAlert);
-      throw err;
-    }
+    setActionError('');
+    await runAction({ ...body });
   };
 
   const handleToggleEnable = (key: string) => {
@@ -115,7 +110,7 @@ const LiveSourceConfig = ({
     const action = target.disabled ? 'enable' : 'disable';
     withLoading(`toggleLiveSource_${key}`, () =>
       callLiveSourceApi({ action, key }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleDelete = (key: string) => {
@@ -130,7 +125,7 @@ const LiveSourceConfig = ({
     setDeleteTarget(null);
     withLoading(`deleteLiveSource_${target.key}`, () =>
       callLiveSourceApi({ action: 'delete', key: target.key }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleRefreshLiveSources = async () => {
@@ -139,12 +134,24 @@ const LiveSourceConfig = ({
     await withLoading('refreshLiveSources', async () => {
       setIsRefreshing(true);
       try {
-        await adminPost('/api/admin/live/refresh', {}, '刷新失败');
+        const result = await adminPost<{
+          refreshed: number;
+          failed: { key: string; name: string }[];
+          liveDisabled?: boolean;
+        }>('/api/admin/live/refresh', {}, '刷新失败');
         await refreshConfig();
-        showToast('直播源已刷新', 'success');
+        if (result.liveDisabled) {
+          showToast('直播未开启，已跳过刷新', 'info');
+        } else if (result.failed.length > 0) {
+          showToast(
+            `已刷新 ${result.refreshed} 个直播源，${result.failed.length} 个失败：${result.failed.map((source) => source.name).join('、')}`,
+            'error',
+          );
+        } else {
+          showToast('直播源已刷新', 'success');
+        }
       } catch (err) {
-        showError(err instanceof Error ? err.message : '刷新失败', showAlert);
-        throw err;
+        showError(err, '刷新失败');
       } finally {
         setIsRefreshing(false);
       }
@@ -153,6 +160,7 @@ const LiveSourceConfig = ({
 
   const handleAddLiveSource = () => {
     if (!newLiveSource.name || !newLiveSource.key || !newLiveSource.url) return;
+    setFormError('');
     withLoading('addLiveSource', async () => {
       await callLiveSourceApi({
         action: 'add',
@@ -172,12 +180,13 @@ const LiveSourceConfig = ({
         from: 'custom',
       });
       setShowAddForm(false);
-    }).catch(() => void 0);
+    }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
   const handleEditLiveSource = () => {
     if (!editingLiveSource || !editingLiveSource.name || !editingLiveSource.url)
       return;
+    setFormError('');
     withLoading('editLiveSource', async () => {
       await callLiveSourceApi({
         action: 'edit',
@@ -188,7 +197,7 @@ const LiveSourceConfig = ({
         epg: editingLiveSource.epg,
       });
       setEditingLiveSource(null);
-    }).catch(() => void 0);
+    }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
   const handleCancelEdit = () => {
@@ -197,7 +206,13 @@ const LiveSourceConfig = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (isFiltering || !over || active.id === over.id) return;
+    if (
+      isLoading('saveLiveSourceOrder') ||
+      isFiltering ||
+      !over ||
+      active.id === over.id
+    )
+      return;
     const oldIndex = liveSources.findIndex((s) => s.key === active.id);
     const newIndex = liveSources.findIndex((s) => s.key === over.id);
     setLiveSources((prev) => arrayMove(prev, oldIndex, newIndex));
@@ -212,7 +227,7 @@ const LiveSourceConfig = ({
       .then(() => {
         setOrderChanged(false);
       })
-      .catch(() => void 0);
+      .catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   if (!config) {
@@ -225,6 +240,11 @@ const LiveSourceConfig = ({
 
   return (
     <div className='space-y-6'>
+      {actionError && (
+        <p role='alert' className='text-sm text-red-600'>
+          {actionError}
+        </p>
+      )}
       <div className='flex items-center justify-between gap-3'>
         <AdminSearchField
           value={filterQuery}
@@ -235,6 +255,7 @@ const LiveSourceConfig = ({
         <div className='flex shrink-0 items-center gap-2'>
           <button
             onClick={() => {
+              setFormError('');
               setShowAddForm(true);
               setEditingLiveSource(null);
             }}
@@ -246,6 +267,7 @@ const LiveSourceConfig = ({
       </div>
 
       <LiveSourceAddForm
+        error={formError}
         newLiveSource={newLiveSource}
         isOpen={showAddForm}
         onChange={setNewLiveSource}
@@ -255,6 +277,7 @@ const LiveSourceConfig = ({
       />
 
       <LiveSourceEditForm
+        error={formError}
         editingLiveSource={editingLiveSource}
         isOpen={!!editingLiveSource}
         onChange={setEditingLiveSource}
@@ -301,7 +324,9 @@ const LiveSourceConfig = ({
               )}
               {visibleRows.map((liveSource) => (
                 <SortableLiveSourceRow
-                  isSortingDisabled={isFiltering}
+                  isSortingDisabled={
+                    isFiltering || isLoading('saveLiveSourceOrder')
+                  }
                   key={liveSource.key}
                   liveSource={liveSource}
                   isToggleLoading={isLoading(
@@ -336,16 +361,6 @@ const LiveSourceConfig = ({
           </button>
         </div>
       )}
-
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
 
       <ConfirmModal
         isOpen={!!deleteTarget}

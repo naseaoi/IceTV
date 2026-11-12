@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react';
 import type React from 'react';
+import { useCallback, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import {
@@ -21,6 +22,8 @@ import { noSelectStyle, preventContextMenu } from './constants';
 interface VideoCardPosterProps {
   title: string;
   poster: string;
+  // 聚合卡片里其他源的封面，当前封面不可用时依次换用
+  posterAlternates?: readonly string[];
   priority: boolean;
   origin: NonNullable<VideoCardProps['origin']>;
   from: VideoCardProps['from'];
@@ -42,9 +45,32 @@ function formatEpisodeBadge(episodes: number, currentEpisode?: number) {
   return currentEpisode ? `${currentEpisode}/${episodes}` : `${episodes} 集`;
 }
 
+function usePosterWithAlternates(
+  poster: string,
+  alternates: readonly string[] | undefined,
+) {
+  const candidates = alternates?.length
+    ? Array.from(new Set([poster, ...alternates].filter(Boolean)))
+    : [poster];
+  const candidatesKey = candidates.join('\n');
+  const [fallback, setFallback] = useState({ key: candidatesKey, index: 0 });
+  const index = fallback.key === candidatesKey ? fallback.index : 0;
+  const hasNext = index < candidates.length - 1;
+  // 同一张图可能重复上报失败，按当前序号换图保证只前进一步
+  const advance = useCallback(
+    () => setFallback({ key: candidatesKey, index: index + 1 }),
+    [candidatesKey, index],
+  );
+  return {
+    src: candidates[index] ?? '',
+    onUnavailable: hasNext ? advance : undefined,
+  };
+}
+
 export function VideoCardPoster({
   title,
   poster,
+  posterAlternates,
   priority,
   origin,
   from,
@@ -66,6 +92,7 @@ export function VideoCardPoster({
   const showEpisodeBadge = !showRate && (episodes ?? 0) > 1;
   const showSourceName = config.showSourceName && Boolean(sourceName);
   const showUpdate = hasUpdate && (availableEpisodes ?? 0) > 1;
+  const cover = usePosterWithAlternates(poster, posterAlternates);
 
   return (
     <div
@@ -76,7 +103,8 @@ export function VideoCardPoster({
       onContextMenu={preventContextMenu}
     >
       <CoverImage
-        src={poster}
+        src={cover.src}
+        onUnavailable={cover.onUnavailable}
         alt={title}
         priority={priority}
         fit={origin === 'live' ? 'contain' : 'cover'}

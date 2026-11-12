@@ -252,7 +252,11 @@ export default function ContinueWatching({
         </h2>
         {(loading || playRecords.length > 0) && (
           <Link
-            href='/continue-watching'
+            href={
+              updateCount > 0
+                ? '/continue-watching?filter=updated'
+                : '/continue-watching'
+            }
             className={`${SECTION_LINK_TEXT_CLASS} flex items-center ${
               updateCount > 0
                 ? 'font-semibold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'

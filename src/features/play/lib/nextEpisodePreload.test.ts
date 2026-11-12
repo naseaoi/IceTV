@@ -14,7 +14,17 @@ import {
   selectPreloadSegmentUrls,
   selectPreloadVariantUrl,
   shouldStartNextEpisodePreload,
+  shouldWarmUpNextEpisode,
 } from '@/features/play/lib/nextEpisodePreload';
+import * as proxyModes from '@/lib/proxy-modes';
+
+jest.mock('@/lib/proxy-modes', () => {
+  const actual = jest.requireActual('@/lib/proxy-modes');
+  return {
+    ...actual,
+    resolveSourcePlaybackRoute: jest.fn(actual.resolveSourcePlaybackRoute),
+  };
+});
 
 const MB = 1024 * 1024;
 const CDN = 'https://cdn.example.com/show/';
@@ -158,6 +168,30 @@ describe('shouldStartNextEpisodePreload', () => {
   });
 });
 
+describe('shouldWarmUpNextEpisode', () => {
+  const base = {
+    autoPlayNext: true,
+    currentTime: 3,
+    bufferedAheadSeconds: NEXT_EPISODE_PRELOAD_LIMITS.healthyBufferSeconds,
+    saveData: false,
+  };
+
+  it('当前集已起播且缓冲稳定时预热', () => {
+    expect(shouldWarmUpNextEpisode(base)).toBe(true);
+  });
+
+  it('未起播、缓冲不足、关闭连播或省流量时不预热', () => {
+    expect(shouldWarmUpNextEpisode({ ...base, currentTime: 0 })).toBe(false);
+    expect(shouldWarmUpNextEpisode({ ...base, bufferedAheadSeconds: 5 })).toBe(
+      false,
+    );
+    expect(shouldWarmUpNextEpisode({ ...base, autoPlayNext: false })).toBe(
+      false,
+    );
+    expect(shouldWarmUpNextEpisode({ ...base, saveData: true })).toBe(false);
+  });
+});
+
 describe('getForwardBufferSeconds', () => {
   it('measures the buffered range ahead and bridges tiny gaps', () => {
     expect(
@@ -262,6 +296,82 @@ describe('preloadEpisodeFragments', () => {
     return { cache, controller, result };
   }
 
+  it.each([true, false])(
+    'rycj 预载按开关 %s 过滤并使用最终清单地址',
+    async (filterAds) => {
+      const finalUrl = 'https://final.example/redirected/index.m3u8';
+      const lines = ['#EXTM3U'];
+      for (let block = 0; block < 6; block++) {
+        lines.push('#EXT-X-DISCONTINUITY');
+        for (let fragment = 0; fragment < 3; fragment++) {
+          lines.push(`#EXTINF:${4.173 + fragment * 0.113},`);
+          lines.push(
+            block === 0
+              ? `https://other.example/clip-${fragment}.ts`
+              : `../media/${block}-${fragment}.ts`,
+          );
+        }
+      }
+      lines.push('#EXT-X-ENDLIST');
+      const requested: string[] = [];
+      const fetcher: PreloadFetcher = async (url) => {
+        requested.push(url);
+        return upstreamTarget(url) === NEXT_EPISODE_URL
+          ? fakeResponse(finalUrl, { text: lines.join('\n') })
+          : fakeResponse(url, { bytes: 100 });
+      };
+      const { result } = run(fetcher, { sourceKey: 'rycj', filterAds });
+      await expect(result).resolves.toBe(3);
+      expect(requested.slice(1)).toEqual(
+        Array.from({ length: 3 }, (_, fragment) =>
+          filterAds
+            ? `https://final.example/media/1-${fragment}.ts`
+            : `https://other.example/clip-${fragment}.ts`,
+        ),
+      );
+    },
+  );
+
+  it('直连预载保留分片缓存并按每层最终地址解析相对路径', async () => {
+    const route = jest
+      .mocked(proxyModes.resolveSourcePlaybackRoute)
+      .mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: false,
+      });
+    try {
+      const requested: string[] = [];
+      const fetcher: PreloadFetcher = async (url) => {
+        requested.push(url);
+        if (url === NEXT_EPISODE_URL)
+          return fakeResponse('https://master.example/final/index.m3u8', {
+            text: masterPlaylist(),
+          });
+        if (url === 'https://master.example/final/mid/index.m3u8')
+          return fakeResponse('https://media.example/redirect/index.m3u8', {
+            text: mediaPlaylist(3, '../segments/'),
+          });
+        return fakeResponse(url, { bytes: 100 });
+      };
+      const { cache, result } = run(fetcher);
+      await expect(result).resolves.toBe(3);
+      expect(requested).toEqual([
+        NEXT_EPISODE_URL,
+        'https://master.example/final/mid/index.m3u8',
+        ...Array.from(
+          { length: 3 },
+          (_, i) => `https://media.example/segments/seg-${i}.ts`,
+        ),
+      ]);
+      expect(cache.has('https://media.example/segments/seg-0.ts')).toBe(true);
+    } finally {
+      route.mockImplementation(
+        jest.requireActual('@/lib/proxy-modes').resolveSourcePlaybackRoute,
+      );
+    }
+  });
+
   it('stores the head segments of the matching variant as complete entries', async () => {
     const { fetcher, requested } = createFetcher((url) => {
       const target = upstreamTarget(url);
@@ -278,11 +388,7 @@ describe('preloadEpisodeFragments', () => {
     const { cache, result } = run(fetcher);
 
     await expect(result).resolves.toBe(3);
-    const manifestUrl = new URL(requested[0]);
-    expect(manifestUrl.pathname).toBe('/api/proxy/m3u8');
-    expect(manifestUrl.searchParams.get('url')).toBe(NEXT_EPISODE_URL);
-    expect(manifestUrl.searchParams.get('icetv-source')).toBe('giri');
-    expect(manifestUrl.searchParams.get('allowCORS')).toBe('true');
+    expect(requested[0]).toBe(NEXT_EPISODE_URL);
     expect(requested.slice(1).map(upstreamTarget)).toEqual([
       `${CDN}mid/index.m3u8`,
       `${CDN}mid/seg-0.ts`,
@@ -428,6 +534,46 @@ describe('scheduleNextEpisodePreload', () => {
     await tick();
     await tick();
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('起播且缓冲稳定后预热下一集一次，片尾预载照常', async () => {
+    const warmUp = jest.fn();
+    const video = createVideo({
+      currentTime: 0,
+      buffered: createRanges([[0, 5]]),
+    });
+    scheduleNextEpisodePreload(createOptions(video, { warmUp }));
+
+    await tick();
+    expect(warmUp).not.toHaveBeenCalled();
+
+    video.currentTime = 2;
+    (video as unknown as { buffered: unknown }).buffered = createRanges([
+      [0, 1_500],
+    ]);
+    await tick();
+    expect(warmUp).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    scheduleNextEpisodePreload(createOptions(video, { warmUp }));
+    video.currentTime = 1_450;
+    await tick();
+    expect(warmUp).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('关闭连播时不预热下一集', async () => {
+    const warmUp = jest.fn();
+    const video = createVideo();
+    scheduleNextEpisodePreload(
+      createOptions(video, {
+        warmUp,
+        autoPlayNextEnabledRef: { current: false },
+      }),
+    );
+    await tick();
+    await tick();
+    expect(warmUp).not.toHaveBeenCalled();
   });
 
   it('aborts the running preload when the episode changes', async () => {

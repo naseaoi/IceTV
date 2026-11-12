@@ -1,13 +1,28 @@
 /** @jest-environment node */
 
+import {
+  assertAnnualRecapMessages,
+  assertAnnualRecapStorage,
+} from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import {
+  assertBatchDeletePlayRecords,
+  assertBatchReadPlayRecords,
+  assertUpdatedPlayRecordPage,
+} from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
+import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
+import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
+import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
-import { IMPORT_ADMIN_CONFIG } from './__fixtures__/import-admin-config';
+import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { resetMysqlTestData } from './__fixtures__/mysql-test-data';
+import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
@@ -47,29 +62,377 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     storage = new MySqlStorage(liveUrl);
   });
 
+  beforeEach(async () => resetMysqlTestData(storage));
+
   afterAll(async () => {
     await (
       storage as unknown as { pool: { end: () => Promise<void> } }
     ).pool.end();
   });
 
+  it('单次 JOIN 保留多组顺序、无组用户及删号边界', async () => {
+    await storage.registerUser('access-reader', 'password');
+    await storage.updateUserAccess(['access-reader'], {
+      role: 'admin',
+      tags: ['second', 'first'],
+      enabledApis: ['source'],
+    });
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    const query = jest.spyOn(pool, 'query');
+    expect(await storage.getUserAccess('ACCESS-READER')).toMatchObject({
+      role: 'admin',
+      tags: ['second', 'first'],
+      enabledApis: ['source'],
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    query.mockRestore();
+    await storage.updateUserAccess(['access-reader'], {
+      tags: [],
+      enabledApis: [],
+      banned: true,
+    });
+    expect(await storage.getUserAccess('access-reader')).toMatchObject({
+      banned: true,
+      tags: undefined,
+      enabledApis: undefined,
+    });
+    await pool.execute('DELETE FROM users WHERE username = ?', [
+      'access-reader',
+    ]);
+    expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('批量读取隔离用户并省略缺失键', async () => {
+    await assertBatchReadPlayRecords(storage);
+  });
+
+  describe('管理通知契约', () => {
+    userNoticeContract(() => storage);
+  });
+
+  it('管理通知失败回滚删除，并发重试只生成一次通知', async () => {
+    await storage.registerUser('notice-rollback', 'password');
+    await storage.setVideoReview('notice-rollback', videoReview);
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    await pool.query(
+      "CREATE TRIGGER fail_notice BEFORE INSERT ON user_notice_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'notice failed'",
+    );
+    try {
+      await expect(
+        storage.deleteVideoReview(
+          'notice-rollback',
+          videoReview.title_norm,
+          videoReview.year,
+          true,
+        ),
+      ).rejects.toThrow('notice failed');
+      expect(
+        await storage.getVideoReview(
+          'notice-rollback',
+          videoReview.title_norm,
+          videoReview.year,
+        ),
+      ).not.toBeNull();
+    } finally {
+      await pool.query('DROP TRIGGER fail_notice');
+    }
+    await Promise.all(
+      [1, 2].map(() =>
+        storage.deleteVideoReview(
+          'notice-rollback',
+          videoReview.title_norm,
+          videoReview.year,
+          true,
+        ),
+      ),
+    );
+    expect(
+      await storage.getUserNoticeCount('notice-rollback', 0, [], Date.now()),
+    ).toBe(1);
+    await Promise.all(
+      [1, 2].map(() =>
+        storage.updateUserAccess(['notice-rollback'], { role: 'admin' }),
+      ),
+    );
+    expect(
+      await storage.getUserNoticeCount('notice-rollback', 0, [], Date.now()),
+    ).toBe(2);
+  });
+
+  describe('announcements', () => {
+    announcementContract(() => storage);
+  });
+
+  it('评价首次公开迁移回滚、并发重试与一次性回填保留旧消息身份', async () => {
+    const impl = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      migrateReviewFirstPublished(): Promise<void>;
+    };
+    for (const username of ['author', 'reader'])
+      await storage.ensureUserProfile(username);
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      await storage.setUserFollow('reader', 'author', true);
+      await storage.setVideoReview('author', videoReview);
+      const [before] = await storage.getFollowReviewMessages(
+        'reader',
+        0,
+        [],
+        3000,
+      );
+      await storage.setVideoReview('author', {
+        ...videoReview,
+        title_norm: 'old-private',
+        is_public: false,
+      });
+      await impl.pool.execute(
+        'UPDATE video_reviews SET first_published_at = NULL',
+      );
+      await impl.pool.execute('DELETE FROM storage_migrations WHERE name = ?', [
+        'review_first_published_v1',
+      ]);
+      await impl.pool.query(
+        "CREATE TRIGGER interrupt_review_migration BEFORE UPDATE ON storage_migrations FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'interrupt'",
+      );
+      try {
+        await expect(impl.migrateReviewFirstPublished()).rejects.toThrow(
+          'interrupt',
+        );
+        const [rows] = await impl.pool.query(
+          'SELECT first_published_at FROM video_reviews',
+        );
+        expect(rows).toEqual([
+          { first_published_at: null },
+          { first_published_at: null },
+        ]);
+      } finally {
+        await impl.pool.query('DROP TRIGGER interrupt_review_migration');
+      }
+      await Promise.all([
+        impl.migrateReviewFirstPublished(),
+        impl.migrateReviewFirstPublished(),
+      ]);
+      expect(
+        await storage.getFollowReviewMessages('reader', 0, [before.id], 3000),
+      ).toEqual([]);
+      await storage.setVideoReview('author', {
+        ...videoReview,
+        title_norm: 'old-private',
+        updated_at: 8000,
+      });
+      expect(
+        await storage.getFollowReviewMessageCount('reader', 2000, [], 9000),
+      ).toBe(0);
+      await storage.setVideoReview('author', {
+        ...videoReview,
+        title_norm: 'new-draft',
+        is_public: false,
+        updated_at: 9000,
+      });
+      await impl.migrateReviewFirstPublished();
+      const [rows] = await impl.pool.query(
+        "SELECT first_published_at FROM video_reviews WHERE title_norm = 'new-draft'",
+      );
+      expect(rows).toEqual([{ first_published_at: null }]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('历史与桶统计双后端契约', async () => {
+    await assertWatchHistoryContract(storage);
+  });
+
+  it('历史迁移中断回滚，重试按大小写身份与最新行回填，完成标记阻止复活', async () => {
+    const impl = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      migrateWatchHistory(): Promise<void>;
+    };
+    const base = {
+      id: 'migrate-session-a',
+      source: 'Source',
+      video_id: 'video',
+      title: '旧作品',
+      source_name: '源',
+      cover: '',
+      year: '2026',
+      episode_index: 1,
+      started_at: 100,
+      ended_at: 200,
+      watch_seconds: 10,
+      last_position: 10,
+      total_time: 100,
+      created_at: 100,
+      updated_at: 200,
+    };
+    await storage.setPlaybackSession('migration-user', base);
+    await storage.setPlaybackSession('migration-user', {
+      ...base,
+      id: 'migrate-session-z',
+      started_at: 150,
+      last_position: 70,
+    });
+    await storage.setPlaybackSession('migration-user', {
+      ...base,
+      id: 'migrate-session-other',
+      source: 'source',
+    });
+    await storage.setPlayRecord('migration-user', 'Source+video', {
+      ...basePlayRecord,
+      total_episodes: 24,
+      group_label: '第二季',
+      group_index: 3,
+      group_total: 12,
+    });
+    await impl.pool.execute('DELETE FROM storage_migrations WHERE name = ?', [
+      'watch_history_v1',
+    ]);
+    await impl.pool.query(
+      "CREATE TRIGGER interrupt_history_migration BEFORE UPDATE ON storage_migrations FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'interrupt'",
+    );
+    try {
+      await expect(impl.migrateWatchHistory()).rejects.toMatchObject({
+        message: 'interrupt',
+      });
+      expect(
+        await storage.getWatchHistoryPage('migration-user', { limit: 10 }),
+      ).toEqual([]);
+    } finally {
+      await impl.pool.query('DROP TRIGGER interrupt_history_migration');
+    }
+    await Promise.all([impl.migrateWatchHistory(), impl.migrateWatchHistory()]);
+    const rows = await storage.getWatchHistoryPage('migration-user', {
+      limit: 10,
+    });
+    expect(rows).toHaveLength(2);
+    const row = rows.find((row) => row.source === 'Source')!;
+    expect(row).toMatchObject({
+      position: 70,
+      first_watched_at: 100,
+      total_episodes: 24,
+      group_label: '第二季',
+    });
+    for (const item of rows)
+      await storage.deleteWatchHistoryEntry('migration-user', item.id);
+    await impl.migrateWatchHistory();
+    expect(
+      await storage.getWatchHistoryPage('migration-user', { limit: 10 }),
+    ).toEqual([]);
+  });
+
+  it('并发重复桶写入以最大值统计并返回同一个历史身份', async () => {
+    const session = {
+      id: 'concurrent-session',
+      source: 'source',
+      video_id: 'video',
+      title: '作品',
+      source_name: '源',
+      cover: '',
+      year: '2026',
+      episode_index: 1,
+      started_at: 900000,
+      ended_at: 960000,
+      watch_seconds: 0,
+      last_position: 30,
+      total_time: 100,
+      created_at: 900000,
+      updated_at: 960000,
+    };
+    const ids = await Promise.all(
+      [3000, 1000, 4000, 2000].map((watch_ms) =>
+        storage.saveWatchSessionReport(
+          'concurrent-user',
+          session,
+          [{ start: 900000, watch_ms }],
+          { total_episodes: 1 },
+        ),
+      ),
+    );
+    expect(new Set(ids).size).toBe(1);
+    expect(
+      (
+        await storage.getPlaybackPeriodSessions('concurrent-user', 0, 1000000)
+      )[0].watch_seconds,
+    ).toBe(4);
+    expect(
+      await storage.getWatchHistoryPage('concurrent-user', { limit: 10 }),
+    ).toHaveLength(1);
+  });
+
+  it('筛选分页与追更计数及客户端判定保持一致', async () => {
+    await assertUpdatedPlayRecordPage(storage);
+  });
+
+  it('批量删除隔离用户并同步影响追更计数', async () => {
+    await assertBatchDeletePlayRecords(storage);
+  });
+
   it('新粉丝与点赞通知双后端契约', async () => {
-    await storage.clearAllData();
     await assertSocialNotifications(storage, 'mysql-notification');
   });
 
   it('公开评价作者角色双后端契约', async () => {
-    await storage.clearAllData();
     await assertPublicReviewRoles(storage, 'mysql-review-role');
   });
 
   it('回复双后端契约', async () => {
-    await storage.clearAllData();
     await assertReviewReplies(storage, 'mysql-reply');
   });
 
+  it('isolates current route semantics while retaining and purging both versions', async () => {
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'server',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    for (const mode of ['browser', 'server']) {
+      await pool.execute(
+        'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        ['versioned', mode, '2026-01-08', 99, 99, 1],
+      );
+    }
+    expect(await storage.getSourceRouteStats('2026-01-01')).toEqual(
+      expect.arrayContaining([
+        {
+          source: 'versioned',
+          routeMode: 'browser',
+          successCount: 1,
+          failureCount: 0,
+        },
+        {
+          source: 'versioned',
+          routeMode: 'server',
+          successCount: 0,
+          failureCount: 1,
+        },
+      ]),
+    );
+    expect(await storage.getSourceRouteStats('2026-01-01')).toHaveLength(2);
+    expect(
+      (await storage.getAllSourceRouteStatBuckets()).map(
+        (row) => row.routeMode,
+      ),
+    ).toEqual(
+      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
+    );
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
+  });
+
   it('keeps concurrent search increments and play counters without multiplying reporter-days', async () => {
-    await storage.clearAllData();
     const row = {
       source: 'concurrent',
       bucketDate: '2026-01-02',
@@ -115,7 +478,6 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('rolls back the complete health search batch on a later row failure', async () => {
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -145,7 +507,6 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -204,7 +565,6 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
-    await storage.clearAllData();
     const report = {
       source: ' alpha ',
       bucketDate: '2026-01-02',
@@ -250,45 +610,14 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
       [],
     );
-    const seed = async () => {
-      await storage.recordSourcePlayReport(report);
-      await storage.recordSourceHealthSearchBatch([
-        {
-          source: 'alpha',
-          bucketDate: '2026-01-02',
-          okCount: 1,
-          emptyCount: 0,
-          errorCount: 0,
-          latencyMsSum: 1,
-          latencySamples: 1,
-        },
-      ]);
-    };
-    await seed();
-    await storage.clearAllData();
-    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
-    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
-      [],
-    );
-    await seed();
-    await storage.replaceAllData({
-      adminConfig: {
-        UserConfig: {},
-        SourceConfig: [],
-        LiveConfig: [],
-      } as unknown as import('@/types/admin').AdminConfig,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
+    await storage.purgeSourceHealthBefore('2026-01-04');
     expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       [],
     );
   });
   describe('邀请码批量事务契约（真实实例）', () => {
-    inviteCodeBatchContract(() => storage);
+    inviteCodeBatchContract(() => storage, resetMysqlTestData);
   });
 
   it('邀请码真实 SQL 分页、并发占用与过期过滤一致', async () => {
@@ -477,7 +806,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     }
   });
 
-  it('filters live favorites in SQL before applying a tied-time cursor', async () => {
+  it('真实 SQL 中个人主页排除直播后续页，库总数包含直播', async () => {
     const username = `public-favorites-${Date.now()}`;
     try {
       for (const [key, origin] of [
@@ -494,29 +823,37 @@ describeLive('MySQL 追更查询（真实实例）', () => {
           save_time: 1000,
         });
       }
-      const first = await storage.getFavoritePage(
-        username,
-        2,
-        undefined,
-        undefined,
-        false,
-      );
-      const second = await storage.getFavoritePage(
-        username,
-        2,
-        1000,
-        'source+c',
-        false,
-      );
+      const query = {
+        query: '',
+        filter: 'all',
+        sort: 'saved',
+        limit: 2,
+        profileScope: 'public',
+      } as const;
+      const first = await storage.getFavoriteLibraryPage(username, query);
+      const second = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        cursor: first.nextCursor,
+      });
       expect(first.items.map((item) => item.key)).toEqual([
         'source+e',
         'source+c',
       ]);
       expect(first.total).toBe(3);
-      expect(first.nextCursor).toBe('1000|source+c');
+      expect(first.nextCursor).toEqual(expect.any(String));
+      expect(first.libraryTotal).toBe(6);
       expect(second.items.map((item) => item.key)).toEqual(['source+b']);
       expect(second.nextCursor).toBeNull();
-      expect((await storage.getFavoritePage(username, 10)).total).toBe(6);
+      expect(
+        (
+          await storage.getFavoriteLibraryPage(username, {
+            query: '',
+            filter: 'all',
+            sort: 'saved',
+            limit: 10,
+          })
+        ).total,
+      ).toBe(6);
     } finally {
       await storage.deleteAllFavorites(username);
     }
@@ -536,6 +873,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
   it('reads period sessions with real SQL range and user predicates', async () => {
     await assertPlaybackPeriodRange(storage);
+    await assertStatsReuse(storage);
+    await assertPlaybackAnnualData(storage);
+    await assertAnnualRecapStorage(storage);
+    await assertAnnualRecapMessages(storage);
   });
 
   it('serializes concurrent message-state updates on a missing row', async () => {
@@ -556,7 +897,8 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       ).toHaveLength(12);
       await storage.updateUserMessageState(username, {
         followReviewReadAt: 100,
-        announcement: { id: 'new' },
+        announcement: { id: 'announcement:200:new', createdAt: 200 },
+        announcementReadAt: 100,
       });
       await Promise.all([
         storage.updateUserMessageState(username, {
@@ -564,13 +906,22 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         }),
         storage.updateUserMessageState(username, {
           followReviewReadAt: 50,
-          announcement: { id: 'old' },
+          announcement: { id: 'announcement:50:old', createdAt: 50 },
+          announcementReadAt: 50,
         }),
       ]);
       expect(await storage.getUserMessageState(username)).toEqual({
         followReviewReadAt: 100,
         followReviewReadIds: [],
-        readAnnouncementId: 'new',
+        announcementReadAt: 100,
+        announcementReadIds: ['announcement:200:new'],
+      });
+      await storage.updateUserMessageState(username, {
+        announcementReadAt: 200,
+      });
+      expect(await storage.getUserMessageState(username)).toMatchObject({
+        announcementReadAt: 200,
+        announcementReadIds: [],
       });
     } finally {
       await storage.deleteUser(username);
@@ -1008,7 +1359,22 @@ describeLive('MySQL user danmaku contract (real instance)', () => {
     const storage = new MySqlStorage(liveUrl);
     stores.push(storage);
     return storage;
-  }, IMPORT_ADMIN_CONFIG);
+  }, resetMysqlTestData);
+  afterAll(async () => {
+    for (const storage of stores)
+      await (
+        storage as unknown as { pool: import('mysql2/promise').Pool }
+      ).pool.end();
+  });
+});
+
+describeLive('MySQL OAuth 身份契约（真实实例）', () => {
+  const stores: MySqlStorage[] = [];
+  oauthIdentityContract(() => {
+    const storage = new MySqlStorage(liveUrl);
+    stores.push(storage);
+    return storage;
+  }, resetMysqlTestData);
   afterAll(async () => {
     for (const storage of stores)
       await (

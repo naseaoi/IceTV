@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { X } from 'lucide-react';
 
@@ -14,6 +14,7 @@ import { CustomCategory } from '@/features/admin/types/internal';
 interface CategoryAddFormProps {
   newCategory: CustomCategory;
   isOpen: boolean;
+  error?: string;
   typeOptions: { value: string; label: string }[];
   onChange: (value: CustomCategory) => void;
   onSubmit: () => void;
@@ -24,6 +25,7 @@ interface CategoryAddFormProps {
 export function CategoryAddForm({
   newCategory,
   isOpen,
+  error,
   typeOptions,
   onChange,
   onSubmit,
@@ -38,6 +40,11 @@ export function CategoryAddForm({
       onClose={onCancel}
       panelClassName='max-w-2xl max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='space-y-4 p-4 sm:p-6'>
         <div className='flex items-start justify-between gap-3'>
           <h5 className={MODAL_TITLE_CLASS}>添加分类</h5>

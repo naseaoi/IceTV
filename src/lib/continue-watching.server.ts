@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { getListSkeletonCount } from '@/lib/list-count-cookies.server';
 import { normalizePlayRecordLimit } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
@@ -23,13 +24,64 @@ export async function getContinueWatchingSkeletonCount({
     return 0;
   }
 
-  const rawCount = Number(cookieStore.get(cookieName)?.value || 0);
+  return getListSkeletonCount(cookieName, limit);
+}
 
-  if (!Number.isFinite(rawCount) || rawCount <= 0) {
-    return 0;
+export interface ContinueWatchingPageData {
+  skeletonCount: number;
+  counts: {
+    all: number | null;
+    updated: number | null;
+    shelved: number | null;
+  };
+}
+
+// 继续观看页首屏：骨架条数取计数 cookie，筛选胶囊的计数查库
+export async function getContinueWatchingPageData(
+  skeletonLimit: number,
+): Promise<ContinueWatchingPageData> {
+  const empty = {
+    skeletonCount: 0,
+    counts: { all: null, updated: null, shelved: null },
+  };
+  const cookieStore = await cookies();
+  const authCookie = cookieStore.get('auth')?.value;
+  if (!authCookie) return empty;
+
+  const session = await getServerAuthSession(authCookie);
+  if (session.status !== 'authenticated') return empty;
+
+  const skeletonCount = await getListSkeletonCount(
+    'cw_page_count',
+    skeletonLimit,
+  );
+  try {
+    const [page, trackingPage, shelvedPage] = await Promise.all([
+      db.getPlayRecordPage(session.username, 1),
+      db.getUnreadTrackingPlayRecordPage(session.username, 1),
+      db.getPlayRecordPage(
+        session.username,
+        1,
+        undefined,
+        undefined,
+        'shelved',
+      ),
+    ]);
+    return {
+      skeletonCount,
+      counts: {
+        all: page.total,
+        updated: trackingPage.total,
+        shelved: shelvedPage.total,
+      },
+    };
+  } catch (error) {
+    console.error('获取继续观看计数失败:', error);
+    return {
+      skeletonCount,
+      counts: { all: null, updated: null, shelved: null },
+    };
   }
-
-  return Math.min(Math.floor(rawCount), limit);
 }
 
 export interface ContinueWatchingInitialData {

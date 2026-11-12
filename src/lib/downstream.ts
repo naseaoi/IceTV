@@ -1,3 +1,4 @@
+import { waitForSharedLoad } from '@/lib/concurrency';
 import { API_CONFIG, ApiSite, getConfigForRead } from '@/lib/config';
 import {
   getDetailFromGirigiri,
@@ -24,11 +25,14 @@ import {
   normalizeRuntimeParams,
 } from '@/lib/runtime-params';
 import {
+  type SearchPageLoadResult,
   dedupeSearchLoad,
   getCachedSearchPage,
+  loadSpecialSourceSearch,
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { parseSeriesStatus } from '@/lib/series-status';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
@@ -59,6 +63,10 @@ interface ApiSearchItem {
 interface SearchFromApiOptions {
   maxSearchPages?: number;
   signal?: AbortSignal;
+  // 第 1 页失败时抛 SearchSourceUnavailableError，而不是返回空结果
+  reportFailure?: boolean;
+  // 第 1 页跳过缓存与在途合并，直接回源
+  refreshFirstPage?: boolean;
 }
 
 const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
@@ -116,7 +124,7 @@ async function searchWithCache(
   url: string,
   timeoutMs = 8000,
   signal?: AbortSignal,
-): Promise<{ results: SearchResult[]; pageCount?: number }> {
+): Promise<SearchPageLoadResult> {
   if (signal?.aborted) {
     return { results: [] };
   }
@@ -127,7 +135,7 @@ async function searchWithCache(
     if (cached.status === 'ok') {
       return { results: cached.data, pageCount: cached.pageCount };
     } else {
-      return { results: [] };
+      return { results: [], failed: true };
     }
   }
 
@@ -139,11 +147,15 @@ async function searchWithCache(
     if (stale.entry.status === 'ok') {
       return { results: stale.entry.data, pageCount: stale.entry.pageCount };
     }
-    return { results: [] };
+    return { results: [], failed: true };
   }
 
-  return dedupeSearchLoad(cacheSource, query, page, () =>
-    fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs, signal),
+  return waitForSharedLoad(
+    () =>
+      dedupeSearchLoad(cacheSource, query, page, () =>
+        fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs),
+      ),
+    signal,
   );
 }
 
@@ -154,7 +166,7 @@ async function fetchAndCacheSearchPage(
   url: string,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<{ results: SearchResult[]; pageCount?: number }> {
+): Promise<SearchPageLoadResult> {
   if (signal?.aborted) {
     return { results: [] };
   }
@@ -182,7 +194,7 @@ async function fetchAndCacheSearchPage(
           [],
         );
       }
-      return { results: [] };
+      return { results: [], failed: true };
     }
 
     const data = await readJsonLimited<any>(
@@ -268,7 +280,7 @@ async function fetchAndCacheSearchPage(
         [],
       );
     }
-    return { results: [] };
+    return { results: [], failed: !abortedByParent };
   } finally {
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
@@ -307,6 +319,41 @@ export async function probeSourceSearch(
   }
 }
 
+// 共享加载不绑定单个请求的取消，消费者取消只放弃等待
+async function searchSpecialSource(
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const search = isGirigiriSource(apiSite)
+    ? searchFromGirigiri
+    : searchFromXgcartoon;
+  try {
+    return await waitForSharedLoad(
+      () =>
+        loadSpecialSourceSearch(getSourceCacheKey(apiSite), query, () =>
+          search(apiSite, query),
+        ),
+      signal,
+    );
+  } catch (error) {
+    if (signal?.aborted) return [];
+    throw error;
+  }
+}
+
+// 各页独立缓存、排名漂移会造成页间重叠；(source, id) 是网格 key，须保留首次出现的条目。
+function uniqueSearchResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  const unique = results.filter((item) => {
+    const key = `${item.source}\u0000${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return unique.length === results.length ? results : unique;
+}
+
 export async function searchFromApi(
   apiSite: ApiSite,
   query: string,
@@ -316,12 +363,10 @@ export async function searchFromApi(
     return [];
   }
 
-  if (isGirigiriSource(apiSite)) {
-    return searchFromGirigiri(apiSite, query, options.signal);
-  }
-
-  if (isXgcartoonSource(apiSite)) {
-    return searchFromXgcartoon(apiSite, query, options.signal);
+  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
+    return uniqueSearchResults(
+      await searchSpecialSource(apiSite, query, options.signal),
+    );
   }
 
   try {
@@ -331,14 +376,30 @@ export async function searchFromApi(
     const apiUrl =
       apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
 
-    const firstPageResult = await searchWithCache(
-      apiSite,
-      query,
-      1,
-      apiUrl,
-      searchTimeoutMs,
-      options.signal,
-    );
+    const firstPageResult = options.refreshFirstPage
+      ? await fetchAndCacheSearchPage(
+          apiSite,
+          query,
+          1,
+          apiUrl,
+          searchTimeoutMs,
+          options.signal,
+        )
+      : await searchWithCache(
+          apiSite,
+          query,
+          1,
+          apiUrl,
+          searchTimeoutMs,
+          options.signal,
+        );
+    if (
+      firstPageResult.failed &&
+      options.reportFailure &&
+      !options.signal?.aborted
+    ) {
+      throw new SearchSourceUnavailableError(apiSite.name);
+    }
     const results = [...firstPageResult.results];
     const pageCountFromFirst = firstPageResult.pageCount;
 
@@ -388,9 +449,14 @@ export async function searchFromApi(
       });
     }
 
-    return results;
+    return uniqueSearchResults(results);
   } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
+    if (
+      error instanceof ResourceLimitError ||
+      error instanceof SearchSourceUnavailableError
+    ) {
+      throw error;
+    }
     return [];
   }
 }
@@ -400,12 +466,10 @@ export async function searchFirstPageFromApi(
   query: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<SearchResult[]> {
-  if (isGirigiriSource(apiSite)) {
-    return searchFromGirigiri(apiSite, query, options.signal);
-  }
-
-  if (isXgcartoonSource(apiSite)) {
-    return searchFromXgcartoon(apiSite, query, options.signal);
+  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
+    return uniqueSearchResults(
+      await searchSpecialSource(apiSite, query, options.signal),
+    );
   }
 
   try {
@@ -420,7 +484,7 @@ export async function searchFirstPageFromApi(
       runtimeParams.SearchRequestTimeoutSeconds * 1000,
       options.signal,
     );
-    return firstPageResult.results;
+    return uniqueSearchResults(firstPageResult.results);
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
     return [];

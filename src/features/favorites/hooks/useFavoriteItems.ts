@@ -1,147 +1,107 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 
+import {
+  fetchFavoriteLibraryPage,
+  toFavoriteItem,
+} from '@/features/favorites/lib/library-client';
 import type { FavoriteItem } from '@/features/favorites/types';
 import {
-  clearAllFavorites,
   getCachedFavoritesSnapshot,
   getCachedPlayRecordsSnapshot,
-  getFavoritePage,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
-import { normalizeFavoriteLimit } from '@/lib/favorites';
 import { FAVORITE_PREVIEW_LIMIT } from '@/lib/favorites-count';
 import {
   readFavoriteItemsCount,
   writeFavoriteItemsCount,
 } from '@/lib/local-preferences';
-import type { FavoritePageItem, PlayRecord } from '@/lib/types';
-import { parseStorageKey } from '@/lib/utils';
+
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
-function buildFavoriteItem(
-  key: string,
-  favorite: FavoritePageItem['favorite'],
-  playRecord?: PlayRecord,
-): FavoriteItem | null {
-  const parsedKey = parseStorageKey(key);
-  if (!parsedKey) return null;
-
-  return {
-    id: parsedKey.id,
-    source: parsedKey.source,
-    title: favorite.title,
-    year: favorite.year,
-    poster: favorite.cover,
-    episodes: favorite.total_episodes,
-    source_name: favorite.source_name,
-    currentEpisode: playRecord?.index,
-    progress:
-      playRecord && playRecord.total_time > 0
-        ? (playRecord.play_time / playRecord.total_time) * 100
-        : 0,
-    search_title: favorite.search_title,
-    origin: favorite.origin,
-  };
-}
-
-function buildFavoritePageItems(items: FavoritePageItem[]): FavoriteItem[] {
-  return items.flatMap(({ key, favorite, playRecord }) => {
-    const item = buildFavoriteItem(key, favorite, playRecord);
-    return item ? [item] : [];
-  });
-}
-
-function readCachedFavoriteItems(limit: number): {
-  items: FavoriteItem[];
-  total: number;
-} | null {
+// 本标签页已有全量收藏缓存时先用它渲染，避免返回页面时闪骨架；随后仍以收藏库接口结果为准
+function readCachedFavoriteItems(): FavoriteItem[] | null {
   const cachedFavorites = getCachedFavoritesSnapshot();
   if (!cachedFavorites) return null;
   const cachedPlayRecords = getCachedPlayRecordsSnapshot() || {};
-  const entries = Object.entries(cachedFavorites)
-    .sort(([leftKey, left], [rightKey, right]) => {
-      return (
-        right.save_time - left.save_time || rightKey.localeCompare(leftKey)
-      );
-    })
-    .slice(0, limit);
-
-  return {
-    items: entries.flatMap(([key, favorite]) => {
-      const item = buildFavoriteItem(key, favorite, cachedPlayRecords[key]);
+  return Object.entries(cachedFavorites)
+    .sort(
+      ([leftKey, left], [rightKey, right]) =>
+        right.save_time - left.save_time || rightKey.localeCompare(leftKey),
+    )
+    .slice(0, FAVORITE_PREVIEW_LIMIT)
+    .flatMap(([key, favorite]) => {
+      const item = toFavoriteItem({
+        key,
+        favorite,
+        playRecord: cachedPlayRecords[key],
+      });
       return item ? [item] : [];
-    }),
-    total: Object.keys(cachedFavorites).length,
-  };
+    });
 }
 
-export function useFavoriteItems(
-  enabled: boolean,
-  initialSkeletonCount = 0,
-  pageLimit = FAVORITE_PREVIEW_LIMIT,
-) {
-  const limit = useMemo(() => normalizeFavoriteLimit(pageLimit), [pageLimit]);
-  const normalizedInitialSkeletonCount = Math.min(
-    Math.max(0, Math.floor(initialSkeletonCount)),
-    limit,
-  );
+// 「我的」页收藏栏：与收藏库同一查询，只取最近收藏的前几条
+export function useFavoriteItems(initialSkeletonCount = 0) {
   const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   // 首次请求返回前一律视为加载中，避免先闪出空态
-  const [loading, setLoading] = useState(enabled);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [skeletonCount, setSkeletonCount] = useState(
-    normalizedInitialSkeletonCount,
+    Math.min(
+      Math.max(0, Math.floor(initialSkeletonCount)),
+      FAVORITE_PREVIEW_LIMIT,
+    ),
   );
 
   useIsomorphicLayoutEffect(() => {
-    if (!enabled) return;
-
-    const cached = readCachedFavoriteItems(limit);
+    const cached = readCachedFavoriteItems();
     if (cached) {
-      setFavoriteItems(cached.items);
-      setTotal(cached.total);
-      setSkeletonCount(Math.min(cached.items.length, limit));
+      setFavoriteItems(cached);
+      setTotal(Math.max(readFavoriteItemsCount(), cached.length));
+      setSkeletonCount(cached.length);
       setLoading(false);
       return;
     }
-
-    const nextSkeletonCount = Math.min(
-      Math.max(normalizedInitialSkeletonCount, readFavoriteItemsCount()),
-      limit,
+    setSkeletonCount((current) =>
+      Math.min(
+        Math.max(current, readFavoriteItemsCount()),
+        FAVORITE_PREVIEW_LIMIT,
+      ),
     );
-    setSkeletonCount(nextSkeletonCount);
-    setLoading(true);
-  }, [enabled, limit, normalizedInitialSkeletonCount]);
+  }, []);
 
   useEffect(() => {
-    if (!enabled) return;
-
-    let cancelled = false;
+    let controller: AbortController | null = null;
     const refresh = async () => {
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
       try {
-        const page = await getFavoritePage(limit);
-        if (cancelled) return;
-        const items = buildFavoritePageItems(page.items);
+        const page = await fetchFavoriteLibraryPage(
+          {
+            query: '',
+            filter: 'all',
+            sort: 'saved',
+            limit: FAVORITE_PREVIEW_LIMIT,
+          },
+          current.signal,
+        );
+        if (current.signal.aborted) return;
+        const items = page.items.flatMap((entry) => {
+          const item = toFavoriteItem(entry);
+          return item ? [item] : [];
+        });
         setFavoriteItems(items);
-        setTotal(page.total);
-        setNextCursor(page.nextCursor);
-        setSkeletonCount(Math.min(items.length, limit));
-        writeFavoriteItemsCount(page.total);
+        setTotal(page.libraryTotal);
+        setSkeletonCount(items.length);
+        writeFavoriteItemsCount(page.libraryTotal);
       } catch (error) {
+        if (current.signal.aborted) return;
         console.error('获取收藏失败:', error);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!current.signal.aborted) setLoading(false);
       }
     };
 
@@ -150,55 +110,15 @@ export function useFavoriteItems(
       void refresh();
     });
     return () => {
-      cancelled = true;
+      controller?.abort();
       unsubscribe();
     };
-  }, [enabled, limit]);
-
-  const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const page = await getFavoritePage(limit, nextCursor);
-      const nextItems = buildFavoritePageItems(page.items);
-      setFavoriteItems((current) => {
-        const existing = new Set(
-          current.map((item) => `${item.source}+${item.id}`),
-        );
-        return [
-          ...current,
-          ...nextItems.filter(
-            (item) => !existing.has(`${item.source}+${item.id}`),
-          ),
-        ];
-      });
-      setTotal(page.total);
-      setNextCursor(page.nextCursor);
-      writeFavoriteItemsCount(page.total);
-    } catch (error) {
-      console.error('加载更多收藏失败:', error);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [limit, loadingMore, nextCursor]);
-
-  const clearFavorites = useCallback(async () => {
-    await clearAllFavorites();
-    setFavoriteItems([]);
-    setTotal(0);
-    setNextCursor(null);
-    setSkeletonCount(0);
-    writeFavoriteItemsCount(0);
   }, []);
 
   return {
     favoriteItems,
     total,
     loading,
-    loadingMore,
     skeletonCount,
-    hasMore: nextCursor !== null,
-    loadMore,
-    clearFavorites,
   };
 }

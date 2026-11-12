@@ -1,17 +1,15 @@
-﻿import crypto from 'crypto';
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  type AuthCookiePayload,
-  generateSignature,
-  getSessionExpiresAt,
-  getSignatureData,
-  isSecureRequest,
-} from '@/lib/auth.server';
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { seedListCountCookies } from '@/lib/list-count-seed.server';
+import {
+  generateAuthCookie,
+  recordLoginActivity,
+  setAuthCookies,
+} from '@/lib/login-session.server';
 import { verifyPassword } from '@/lib/password';
-import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
@@ -26,14 +24,6 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-type AuthRole = 'owner' | 'admin' | 'user';
-
-type LoginAuthCookiePayload = AuthCookiePayload & {
-  role: AuthRole;
-  signature: string;
-  expiresAt: number;
-  sessionType: 'account';
-};
 const LOGIN_MAX_ATTEMPTS = 10;
 const LOGIN_USER_MAX_ATTEMPTS = 30;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
@@ -206,68 +196,6 @@ function clearLoginFailures(buckets: AttemptBucket[]): void {
   buckets.forEach((bucket) => loginAttempts.delete(bucket.key));
 }
 
-async function recordLoginActivity(username: string): Promise<void> {
-  try {
-    await db.recordUserActivity(username, Date.now());
-  } catch (err) {
-    console.error('记录登录时间失败', err);
-  }
-}
-
-function setAuthCookies(
-  response: NextResponse,
-  req: NextRequest,
-  authData: LoginAuthCookiePayload,
-): void {
-  const expires = new Date(authData.expiresAt);
-  const secure = isSecureRequest(req);
-
-  response.cookies.set('auth', encodeURIComponent(JSON.stringify(authData)), {
-    path: '/',
-    expires,
-    sameSite: 'lax',
-    httpOnly: true,
-    secure,
-  });
-
-  response.cookies.set(
-    'auth_meta',
-    encodeURIComponent(
-      JSON.stringify({
-        username: authData.username,
-        role: authData.role,
-      }),
-    ),
-    {
-      path: '/',
-      expires,
-      sameSite: 'lax',
-      httpOnly: false,
-      secure,
-    },
-  );
-}
-
-async function generateAuthCookie(
-  role: AuthRole,
-  username: string,
-): Promise<LoginAuthCookiePayload> {
-  const expiresAt = getSessionExpiresAt();
-  const signatureData = getSignatureData('account', expiresAt, username);
-  const signature = await generateSignature(
-    signatureData,
-    getAuthSigningSecret(),
-  );
-
-  return {
-    role,
-    username,
-    signature,
-    expiresAt,
-    sessionType: 'account',
-  };
-}
-
 export async function POST(req: NextRequest) {
   try {
     const ownerUsername = getOwnerUsername();
@@ -316,7 +244,10 @@ export async function POST(req: NextRequest) {
       const authPayload = await generateAuthCookie('owner', rawUsername);
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.buckets);
-      await recordLoginActivity(username);
+      await Promise.all([
+        recordLoginActivity(username),
+        seedListCountCookies(response, username),
+      ]);
 
       return response;
     } else if (
@@ -342,7 +273,14 @@ export async function POST(req: NextRequest) {
 
       const user = await db.getUserAccess(username);
       if (user && user.banned) {
-        return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
+        return NextResponse.json(
+          {
+            error: '账号已被封禁，请联系管理员',
+            code: 'USER_BANNED',
+            accountStatus: 'banned',
+          },
+          { status: 403 },
+        );
       }
 
       const response = NextResponse.json({ ok: true });
@@ -352,12 +290,18 @@ export async function POST(req: NextRequest) {
       );
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.buckets);
-      await recordLoginActivity(username);
+      await Promise.all([
+        recordLoginActivity(username),
+        seedListCountCookies(response, username),
+      ]);
 
       return response;
     } catch (err) {
       console.error('数据库验证失败', err);
-      return NextResponse.json({ error: '数据库错误' }, { status: 500 });
+      return NextResponse.json(
+        { error: '登录暂时不可用，请稍后重试' },
+        { status: 500 },
+      );
     }
   } catch (error) {
     console.error('登录接口异常', error);

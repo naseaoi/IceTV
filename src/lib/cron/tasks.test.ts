@@ -1,7 +1,9 @@
+const mockPurgeUserNotices = jest.fn();
 const mockPurgeSourceRouteStatsBefore = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    purgeUserNotices: (...args: unknown[]) => mockPurgeUserNotices(...args),
     purgeSourceRouteStatsBefore: (...args: unknown[]) =>
       mockPurgeSourceRouteStatsBefore(...args),
   },
@@ -84,6 +86,9 @@ describe('cron task dispatcher', () => {
     expect(mockCleanupPlaybackSessions).toHaveBeenCalledTimes(1);
     expect(mockCleanupInviteCodes).toHaveBeenCalledTimes(1);
     expect(mockCleanupSourceHealth).toHaveBeenCalledTimes(1);
+    expect(mockPurgeUserNotices).toHaveBeenCalledWith(
+      Date.now() - 30 * 86400000,
+    );
     expect(mockPurgeSourceRouteStatsBefore).toHaveBeenCalledWith('2026-10-02');
     expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
   });

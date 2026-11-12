@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import ModalShell from '@/components/modals/ModalShell';
 import { type ReviewReportReason, REVIEW_REPORT_REASONS } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 export const REPORT_REASON_LABELS: Record<ReviewReportReason, string> = {
   spoiler: '未标注剧透',
@@ -45,7 +46,8 @@ export default function ReportDialog({
       await onSubmit(reason, detail.trim());
       setDetail('');
     } catch (submitError) {
-      setError((submitError as Error).message);
+      if (!isAbortError(submitError))
+        setError(getErrorMessage(submitError, '操作失败，请稍后重试'));
     } finally {
       setSending(false);
     }

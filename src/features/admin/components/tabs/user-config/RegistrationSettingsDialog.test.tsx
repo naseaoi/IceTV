@@ -4,6 +4,10 @@ import {
   type InviteCodeListState,
   RegistrationSettingsDialog,
 } from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { showToast } from '@/lib/toast';
+jest.mock('@/lib/clipboard', () => ({ copyTextToClipboard: jest.fn() }));
+jest.mock('@/lib/toast', () => ({ showToast: jest.fn() }));
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -38,6 +42,11 @@ function renderDialog(
       inviteList={inviteList}
       isTogglingRegister={false}
       isTogglingInvite={false}
+      linuxDoConfigured={false}
+      linuxDo={{ Enabled: false, MinTrustLevel: 1 }}
+      isSettingLinuxDo={false}
+      onToggleLinuxDo={jest.fn()}
+      onLinuxDoTrustLevelChange={jest.fn()}
       isCreatingCode={false}
       deletingCode={null}
       isPurgingCodes={false}
@@ -206,4 +215,25 @@ describe('RegistrationSettingsDialog invite code generator', () => {
     renderDialog({ activeCount: 200 });
     expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
   });
+});
+
+it('复制失败显示错误，邀请码保留', async () => {
+  jest.mocked(copyTextToClipboard).mockResolvedValueOnce(false);
+  renderDialog({
+    items: [
+      {
+        code: 'COPYFAIL',
+        createdAt: Date.now(),
+        expiresAt: Date.now() + DAY,
+        createdBy: 'owner',
+      },
+    ],
+  });
+  await act(async () => {
+    fireEvent.click(
+      screen.getByRole('button', { name: '复制邀请码 COPYFAIL' }),
+    );
+  });
+  expect(showToast).toHaveBeenCalledWith('复制失败，请重试', 'error');
+  expect(screen.getByText('COPYFAIL')).toBeInTheDocument();
 });

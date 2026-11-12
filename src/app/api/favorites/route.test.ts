@@ -8,7 +8,6 @@ installWebPolyfills();
 
 const mockSaveFavorite = jest.fn();
 const mockGetFavoriteForWork = jest.fn();
-const mockGetFavoritePage = jest.fn();
 const mockGetFavoriteLibraryPage = jest.fn();
 const mockGetAllFavorites = jest.fn();
 
@@ -22,7 +21,6 @@ jest.mock('@/lib/api-auth', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getFavoriteForWork: (...args: unknown[]) => mockGetFavoriteForWork(...args),
-    getFavoritePage: (...args: unknown[]) => mockGetFavoritePage(...args),
     getFavoriteLibraryPage: (...args: unknown[]) =>
       mockGetFavoriteLibraryPage(...args),
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
@@ -46,10 +44,37 @@ describe('favorites route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSaveFavorite.mockResolvedValue(undefined);
-    mockGetFavoritePage.mockResolvedValue({
-      items: [],
-      total: 25,
-      nextCursor: '1000|source+video-1',
+  });
+
+  it.each([-1, 1.5, '12', null])('拒绝非法总集数 %j', async (total) => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+1',
+        favorite: { title: '剧集', source_name: '源', total_episodes: total },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockSaveFavorite).not.toHaveBeenCalled();
+  });
+
+  it('客户端通知基线与事件时间交由服务端决定', async () => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+1',
+        favorite: {
+          title: '剧集',
+          source_name: '源',
+          total_episodes: 12,
+          update_baseline_episodes: 0,
+          update_detected_at: 999,
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(mockSaveFavorite.mock.calls[0][3]).toMatchObject({
+      total_episodes: 12,
+      update_baseline_episodes: undefined,
+      update_detected_at: undefined,
     });
   });
 
@@ -124,23 +149,46 @@ describe('favorites route', () => {
     expect(response.status).toBe(400);
   });
 
-  it('分页查询不读取全量收藏', async () => {
-    const response = await GET(
-      createRequest('http://localhost/api/favorites?format=page&limit=24'),
-    );
-
-    await expect(response.json()).resolves.toEqual({
+  it('收藏库透传指定条数并只读取分页', async () => {
+    const page = {
       items: [],
+      libraryTotal: 25,
       total: 25,
-      nextCursor: '1000|source+video-1',
-    });
-    expect(mockGetFavoritePage).toHaveBeenCalledWith(
-      'demo',
-      24,
-      undefined,
-      undefined,
+      nextCursor: 'token',
+    };
+    mockGetFavoriteLibraryPage.mockResolvedValue(page);
+    const response = await GET(
+      createRequest('http://localhost/api/favorites?format=library&limit=24'),
     );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(page);
+    expect(mockGetFavoriteLibraryPage).toHaveBeenCalledWith('demo', {
+      query: '',
+      filter: 'all',
+      sort: 'saved',
+      cursor: null,
+      limit: 24,
+    });
+    expect(mockGetAllFavorites).not.toHaveBeenCalled();
   });
+
+  it.each(['0', '-1', '999', 'bad', ''])(
+    '非法条数 %j 返回 400',
+    async (limit) => {
+      const { validateLibraryQuery } =
+        await import('@/features/favorites/lib/library-storage');
+      mockGetFavoriteLibraryPage.mockImplementationOnce((username, query) => {
+        validateLibraryQuery(query, username);
+      });
+      const response = await GET(
+        createRequest(
+          `http://localhost/api/favorites?format=library&limit=${limit}`,
+        ),
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: '收藏查询条件无效' });
+    },
+  );
 });
 
 it.each([

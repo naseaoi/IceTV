@@ -10,6 +10,16 @@ const EMPTY_TITLE_TEXT_CLASS = 'mt-4 text-base font-medium';
 export const LIBRARY_PILL_BUTTON_CLASS =
   'inline-flex h-9 items-center rounded-full bg-gray-900 px-4 text-sm font-medium text-white transition hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200';
 
+// 观看历史、继续观看等列表页的吸顶工具栏：编辑态与普通态共用同一条
+export const LIBRARY_STICKY_TOOLBAR_CLASS =
+  'z-20 -mx-4 mb-4 flex items-center gap-2 bg-gray-50 px-4 py-3 dark:bg-gray-950 sm:-mx-8 sm:px-8 md:sticky md:top-16 xl:-mx-12 xl:px-12';
+
+export const LIBRARY_TOOLBAR_BUTTON_CLASS =
+  'inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm text-gray-600 transition hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white';
+
+export const LIBRARY_DANGER_BUTTON_CLASS =
+  'inline-flex h-9 items-center rounded-full bg-red-500 px-4 text-sm font-medium text-white transition hover:bg-red-600 disabled:pointer-events-none disabled:opacity-40';
+
 export function LibraryEmptySkeleton() {
   return (
     <div aria-hidden='true' className='flex flex-col items-center px-6 py-20'>

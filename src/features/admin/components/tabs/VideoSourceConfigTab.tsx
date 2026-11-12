@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {
   type DragEndEvent,
@@ -20,7 +20,6 @@ import {
 } from '@dnd-kit/sortable';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
@@ -43,21 +42,21 @@ import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOp
 import {
   SOURCE_INSIGHT_DAYS,
   useSourceInsights,
+  useSourceUsage,
 } from '@/features/admin/hooks/useSourceInsights';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
 import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
-import { showError } from '@/features/admin/lib/notifications';
 import { DataSource } from '@/features/admin/types/internal';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
 import {
   type SourceProxyMode,
   DEFAULT_SOURCE_PROXY_MODE,
 } from '@/lib/proxy-modes';
 import type { SourceRouteStatsItem } from '@/lib/types';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
@@ -96,19 +95,21 @@ const VideoSourceConfig = ({
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
 }) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const [batchError, setBatchError] = useState('');
+  const [batchPending, setBatchPending] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [actionError, setActionError] = useState('');
   const { isLoading, withLoading } = useLoadingState();
   const { runAction } = useAdminSourceActions({
     endpoint: '/api/admin/source',
     refreshConfig,
-    showAlert,
   });
   const [sources, setSources] = useState<DataSource[]>([]);
-  const {
-    routeStats,
-    capabilities: routeCapabilities,
-    health: sourceHealth,
-  } = useSourceInsights(config, Boolean(config?.SourceConfig));
+  const { routeStats, health: sourceHealth } = useSourceInsights(
+    config,
+    Boolean(config?.SourceConfig),
+  );
+  const sourceUsage = useSourceUsage(Boolean(config?.SourceConfig));
   const sourceRouteStats = useMemo(
     () => buildSourceRouteStats(routeStats),
     [routeStats],
@@ -118,7 +119,8 @@ const VideoSourceConfig = ({
   const [sortMode, setSortMode] = useState<SourceSortMode>('manual');
   const normalizedQuery = filterQuery.trim().toLowerCase();
   const isFiltering = normalizedQuery.length > 0 || healthFilter !== 'all';
-  const isSortingLocked = isFiltering || sortMode !== 'manual';
+  const isSortingLocked =
+    isFiltering || sortMode !== 'manual' || isLoading('saveSourceOrder');
   const cleanupCount = useMemo(
     () =>
       sources.filter((item) =>
@@ -126,13 +128,9 @@ const VideoSourceConfig = ({
       ).length,
     [sources, sourceHealth],
   );
-  const isRelaySource = useCallback(
-    (key: string) => routeCapabilities[key]?.direct === 'blocked',
-    [routeCapabilities],
-  );
   const relayCount = useMemo(
-    () => sources.filter((item) => isRelaySource(item.key)).length,
-    [sources, isRelaySource],
+    () => sources.filter((item) => item.proxyMode === 'server').length,
+    [sources],
   );
   const visibleRows = useMemo(() => {
     const matched = sources.filter(
@@ -140,7 +138,7 @@ const VideoSourceConfig = ({
         (healthFilter === 'all' ||
           (healthFilter === 'cleanup'
             ? isSourceCleanupCandidate(sourceHealth.get(item.key))
-            : isRelaySource(item.key))) &&
+            : item.proxyMode === 'server')) &&
         [item.name, item.key, item.api, item.detail].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
         ),
@@ -148,14 +146,7 @@ const VideoSourceConfig = ({
     return sortMode === 'quality'
       ? sortByHealth(matched, sourceHealth)
       : matched;
-  }, [
-    sources,
-    sourceHealth,
-    healthFilter,
-    isRelaySource,
-    sortMode,
-    normalizedQuery,
-  ]);
+  }, [sources, sourceHealth, healthFilter, sortMode, normalizedQuery]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -227,14 +218,10 @@ const VideoSourceConfig = ({
 
   const callSourceApi = useCallback(
     async (body: Record<string, unknown>) => {
-      try {
-        await runAction({ ...body });
-      } catch (err) {
-        showError(err instanceof Error ? err.message : '操作失败', showAlert);
-        throw err;
-      }
+      setActionError('');
+      await runAction({ ...body });
     },
-    [runAction, showAlert],
+    [runAction],
   );
 
   const handleToggleEnable = (key: string) => {
@@ -243,7 +230,7 @@ const VideoSourceConfig = ({
     const action = target.disabled ? 'enable' : 'disable';
     withLoading(`toggleSource_${key}`, () =>
       callSourceApi({ action, key }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleChangeProxyMode = (key: string, proxyMode: SourceProxyMode) => {
@@ -256,7 +243,7 @@ const VideoSourceConfig = ({
     }
     withLoading(`proxyMode_${key}`, () =>
       callSourceApi({ action: 'set_proxy_mode', key, proxyMode }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleToggleAdminOnly = (key: string) => {
@@ -268,7 +255,7 @@ const VideoSourceConfig = ({
         key,
         adminOnly: !target.adminOnly,
       }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleDelete = (key: string) => {
@@ -283,11 +270,12 @@ const VideoSourceConfig = ({
     setDeleteTarget(null);
     withLoading(`deleteSource_${target.key}`, () =>
       callSourceApi({ action: 'delete', key: target.key }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleAddSource = () => {
     if (!newSource.name || !newSource.key || !newSource.api) return;
+    setFormError('');
     withLoading('addSource', async () => {
       await callSourceApi({
         action: 'add',
@@ -305,11 +293,12 @@ const VideoSourceConfig = ({
         from: 'custom',
       });
       setShowAddForm(false);
-    }).catch(() => void 0);
+    }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
   const handleEditSource = () => {
     if (!editingSource || !editingSource.name || !editingSource.api) return;
+    setFormError('');
     withLoading('editSource', async () => {
       await callSourceApi({
         action: 'edit',
@@ -319,7 +308,7 @@ const VideoSourceConfig = ({
         detail: editingSource.detail || '',
       });
       setEditingSource(null);
-    }).catch(() => void 0);
+    }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -339,11 +328,15 @@ const VideoSourceConfig = ({
       .then(() => {
         setOrderChanged(false);
       })
-      .catch(() => void 0);
+      .catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
-  const { isValidating, startValidation, getValidationStatus } =
-    useSourceValidation({ sources, showAlert });
+  const {
+    isValidating,
+    error: validationError,
+    startValidation,
+    getValidationStatus,
+  } = useSourceValidation({ sources });
 
   const handleOpenValidationModal = (sourceKeys?: string[]) => {
     setSearchKeyword('');
@@ -374,11 +367,7 @@ const VideoSourceConfig = ({
 
   const handleBatchValidation = () => {
     if (selectedSources.size === 0) {
-      showAlert({
-        type: 'warning',
-        title: '请先选择要检测的视频源',
-        message: '请选择至少一个视频源',
-      });
+      setActionError('请选择至少一个视频源');
       return;
     }
     handleOpenValidationModal(Array.from(selectedSources));
@@ -417,7 +406,6 @@ const VideoSourceConfig = ({
     onClearSelection: clearSelection,
     callSourceApi,
     withLoading,
-    showAlert,
   });
 
   if (!config) {
@@ -440,6 +428,16 @@ const VideoSourceConfig = ({
 
   return (
     <div className='space-y-6'>
+      {validationError && (
+        <p role='alert' className='text-sm text-red-600'>
+          {validationError}
+        </p>
+      )}
+      {actionError && (
+        <p role='alert' className='text-sm text-red-600'>
+          {actionError}
+        </p>
+      )}
       <div className='flex items-center justify-between gap-3'>
         <AdminSearchField
           value={filterQuery}
@@ -458,7 +456,7 @@ const VideoSourceConfig = ({
             options={[
               { value: 'all', label: '全部' },
               { value: 'cleanup', label: `待清理 ${cleanupCount}` },
-              { value: 'relay', label: `需中转 ${relayCount}` },
+              { value: 'relay', label: `代理 ${relayCount}` },
             ]}
             showSelectedIcon={false}
             ariaLabel='按源站质量筛选'
@@ -479,6 +477,7 @@ const VideoSourceConfig = ({
           />
           <button
             onClick={() => {
+              setFormError('');
               setShowAddForm(true);
               setEditingSource(null);
             }}
@@ -490,6 +489,7 @@ const VideoSourceConfig = ({
       </div>
 
       <VideoSourceAddForm
+        error={formError}
         newSource={newSource}
         isOpen={showAddForm}
         onChange={setNewSource}
@@ -499,6 +499,7 @@ const VideoSourceConfig = ({
       />
 
       <VideoSourceEditForm
+        error={formError}
         editingSource={editingSource}
         isOpen={!!editingSource}
         onChange={setEditingSource}
@@ -582,7 +583,7 @@ const VideoSourceConfig = ({
                   {healthFilter === 'cleanup' && !normalizedQuery
                     ? '没有待清理的视频源'
                     : healthFilter === 'relay' && !normalizedQuery
-                      ? '没有需中转的视频源'
+                      ? '没有使用代理的视频源'
                       : isFiltering
                         ? '没有匹配的视频源'
                         : '暂无视频源'}
@@ -596,9 +597,9 @@ const VideoSourceConfig = ({
                   isSelected={selectedSources.has(source.key)}
                   validationStatus={getValidationStatus(source.key)}
                   sourceRouteStats={sourceRouteStats[source.key] || null}
-                  routeCapability={routeCapabilities[source.key] || null}
                   sourceHealth={sourceHealth.get(source.key) || null}
                   healthDays={SOURCE_INSIGHT_DAYS}
+                  sourceUsage={sourceUsage.get(source.key) || null}
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                   isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                   isAdminOnlyLoading={isLoading(`adminOnly_${source.key}`)}
@@ -645,23 +646,29 @@ const VideoSourceConfig = ({
         onStart={handleStartValidation}
       />
 
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
-
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
-        onClose={confirmModal.onCancel}
-        onConfirm={confirmModal.onConfirm}
+        onClose={() => {
+          if (!batchPending) {
+            setBatchError('');
+            confirmModal.onCancel();
+          }
+        }}
+        onConfirm={async () => {
+          if (batchPending) return;
+          setBatchError('');
+          setBatchPending(true);
+          try {
+            await confirmModal.onConfirm();
+          } catch (error) {
+            setBatchError(getErrorMessage(error, '批量操作失败'));
+          } finally {
+            setBatchPending(false);
+          }
+        }}
         confirmText={isAnyBatchLoading ? '操作中...' : '确认'}
-        confirmDisabled={isAnyBatchLoading}
+        confirmDisabled={batchPending || isAnyBatchLoading}
         cancelClassName={`px-4 py-2 text-sm font-medium ${buttonStyles.secondary}`}
         confirmClassName={`px-4 py-2 text-sm font-medium ${
           isAnyBatchLoading ? buttonStyles.disabled : buttonStyles.primary
@@ -671,6 +678,11 @@ const VideoSourceConfig = ({
         <p className='text-sm text-gray-600 dark:text-gray-400'>
           {confirmModal.message}
         </p>
+        {batchError && (
+          <p role='alert' className='mt-3 text-sm text-red-600'>
+            {batchError}
+          </p>
+        )}
       </ConfirmModal>
 
       <ConfirmModal

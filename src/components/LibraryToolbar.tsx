@@ -19,6 +19,47 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+// 内容库筛选胶囊，加载中计数用与真实数字等宽的占位
+export function LibraryFilterChip({
+  label,
+  count,
+  active,
+  loading = false,
+  digits,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  loading?: boolean;
+  digits?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      aria-pressed={active}
+      onClick={onClick}
+      className={`inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[13px] font-medium transition ${
+        active
+          ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
+          : 'bg-white/75 text-gray-600 ring-1 ring-inset ring-black/[0.06] hover:bg-white hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/[0.06] dark:hover:bg-white/10 dark:hover:text-white'
+      }`}
+    >
+      {label}
+      {loading ? (
+        <SkeletonNumber
+          digits={digits}
+          className='ml-1.5 tabular-nums'
+          barClassName='h-2.5 rounded-sm'
+        />
+      ) : (
+        <span className='ml-1.5 tabular-nums opacity-55'>{count}</span>
+      )}
+    </button>
+  );
+}
+
 export interface LibraryToolbarProps<F extends string, S extends string> {
   searchLabel: string;
   query: string;
@@ -134,30 +175,15 @@ export function LibraryToolbar<F extends string, S extends string>({
           {filterOptions.map((option) => {
             const active = option.value === filter;
             return (
-              <button
+              <LibraryFilterChip
                 key={option.value}
-                type='button'
-                aria-pressed={active}
+                label={option.label}
+                count={option.count}
+                active={active}
+                loading={loading}
+                digits={lastDigits?.[option.value]}
                 onClick={() => onFilterChange(option.value)}
-                className={`inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[13px] font-medium transition ${
-                  active
-                    ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
-                    : 'bg-white/75 text-gray-600 ring-1 ring-inset ring-black/[0.06] hover:bg-white hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/[0.06] dark:hover:bg-white/10 dark:hover:text-white'
-                }`}
-              >
-                {option.label}
-                {loading ? (
-                  <SkeletonNumber
-                    digits={lastDigits?.[option.value]}
-                    className='ml-1.5 tabular-nums'
-                    barClassName='h-2.5 rounded-sm'
-                  />
-                ) : (
-                  <span className='ml-1.5 tabular-nums opacity-55'>
-                    {option.count}
-                  </span>
-                )}
-              </button>
+              />
             );
           })}
         </div>

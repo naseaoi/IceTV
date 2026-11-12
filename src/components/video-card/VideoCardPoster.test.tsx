@@ -5,7 +5,23 @@ import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
 
 jest.mock('@/components/CoverImage', () => ({
   __esModule: true,
-  default: ({ alt }: { alt: string }) => <div aria-label={alt} />,
+  default: ({
+    alt,
+    src,
+    onUnavailable,
+  }: {
+    alt: string;
+    src: string;
+    onUnavailable?: () => void;
+  }) => (
+    <div aria-label={alt} data-src={src}>
+      {onUnavailable && (
+        <button type='button' onClick={onUnavailable}>
+          封面不可用
+        </button>
+      )}
+    </div>
+  ),
 }));
 
 jest.mock('@/components/FavoriteHeartButton', () => ({
@@ -24,6 +40,30 @@ const config: VideoCardDisplayConfig = {
 };
 
 describe('VideoCardPoster', () => {
+  it('聚合封面不可用时依次换用其他源的封面', () => {
+    render(
+      <VideoCardPoster
+        title='聚合影片'
+        poster='/a.webp'
+        posterAlternates={['/a.webp', '', '/b.webp', '/a.webp', '/c.webp']}
+        priority={false}
+        origin='vod'
+        from='search'
+        config={config}
+        visibleFavorited={false}
+        onToggleFavorite={jest.fn()}
+      />,
+    );
+    const cover = () => screen.getByLabelText('聚合影片');
+
+    expect(cover()).toHaveAttribute('data-src', '/a.webp');
+    fireEvent.click(screen.getByText('封面不可用'));
+    expect(cover()).toHaveAttribute('data-src', '/b.webp');
+    fireEvent.click(screen.getByText('封面不可用'));
+    expect(cover()).toHaveAttribute('data-src', '/c.webp');
+    expect(screen.queryByText('封面不可用')).not.toBeInTheDocument();
+  });
+
   it('封面容器使用显式圆角裁剪以保持缩放后的圆角', () => {
     render(
       <VideoCardPoster

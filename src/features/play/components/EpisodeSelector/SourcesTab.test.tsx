@@ -439,3 +439,28 @@ describe('SourcesTab probe status', () => {
     expect(screen.queryByText('0.00s')).not.toBeInTheDocument();
   });
 });
+
+it('搜索更多失败就地重试，已有源站保留', async () => {
+  const original = global.fetch;
+  global.fetch = jest
+    .fn()
+    .mockRejectedValueOnce(new Error('failed'))
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) });
+  try {
+    render(
+      <SourcesTab
+        availableSources={[createSource({})]}
+        sourceSearchLoading={false}
+        sourceSearchError={null}
+        isActive
+        videoTitle='作品'
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '搜索更多源站' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+    await screen.findByRole('button', { name: '搜索完成' });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    global.fetch = original;
+  }
+});

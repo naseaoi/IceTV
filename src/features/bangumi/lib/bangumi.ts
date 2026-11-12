@@ -1,13 +1,17 @@
 import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
-  BANGUMI_CALENDAR_MAX_AGE_SECONDS,
+  BANGUMI_CALENDAR_STALE_SECONDS,
 } from '@/features/home/lib/home-cache';
+import { createSharedServerCache } from '@/lib/shared-server-cache';
 
 import {
   type BangumiFetchInit,
   fetchBangumiCalendarJson,
 } from './bangumi-fetch';
-import { normalizeBangumiCalendarData } from './bangumi-normalize';
+import {
+  isUsableBangumiCalendarData,
+  normalizeBangumiCalendarData,
+} from './bangumi-normalize';
 
 export interface BangumiCalendarData {
   weekday: {
@@ -32,89 +36,51 @@ export interface BangumiCalendarData {
 }
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
-const BANGUMI_CACHE_FRESH_MS = BANGUMI_CALENDAR_FRESH_SECONDS * 1000;
-const BANGUMI_CACHE_MAX_AGE_MS = BANGUMI_CALENDAR_MAX_AGE_SECONDS * 1000;
 const BANGUMI_MAX_ATTEMPTS = 2;
 
-let bangumiCalendarCache:
-  | {
-      data: BangumiCalendarData[];
-      freshUntil: number;
-      staleUntil: number;
-    }
-  | undefined;
+const bangumiCalendarCache = createSharedServerCache<BangumiCalendarData[]>({
+  name: 'bangumi-calendar-v1',
+  maxSize: 1,
+  freshMs: BANGUMI_CALENDAR_FRESH_SECONDS * 1000,
+  staleMs: BANGUMI_CALENDAR_STALE_SECONDS * 1000,
+  shouldCache: isUsableBangumiCalendarData,
+});
 
+// 全站共用一份日历：过期后先返回旧数据并在后台刷新，刷新失败或拿到空数据时沿用未过最长保留期的旧数据
 export async function getBangumiCalendarData(
   init: BangumiFetchInit = {},
 ): Promise<BangumiCalendarData[]> {
-  const cachedData = getCachedBangumiCalendarData();
-
-  if (cachedData) {
-    return cachedData;
+  let data: BangumiCalendarData[];
+  try {
+    data = await bangumiCalendarCache.getOrLoad(BANGUMI_CALENDAR_URL, () =>
+      loadBangumiCalendarData(init),
+    );
+  } catch (error) {
+    const stale = bangumiCalendarCache.peek(BANGUMI_CALENDAR_URL);
+    if (stale) return stale.value;
+    throw error;
   }
 
-  const staleData = getCachedBangumiCalendarData({ allowStale: true });
+  if (isUsableBangumiCalendarData(data)) return data;
+  return bangumiCalendarCache.peek(BANGUMI_CALENDAR_URL)?.value ?? data;
+}
+
+async function loadBangumiCalendarData(
+  init: BangumiFetchInit,
+): Promise<BangumiCalendarData[]> {
   const maxAttempts = init.timeoutMs ? 1 : BANGUMI_MAX_ATTEMPTS;
+  let calendarData: BangumiCalendarData[] = [];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const data = await fetchBangumiCalendarJson(
-        new URL(BANGUMI_CALENDAR_URL),
-        init,
+      calendarData = normalizeBangumiCalendarData(
+        await fetchBangumiCalendarJson(new URL(BANGUMI_CALENDAR_URL), init),
       );
-      const calendarData = normalizeBangumiCalendarData(data);
-
-      if (isUsableBangumiCalendarData(calendarData)) {
-        const now = Date.now();
-        bangumiCalendarCache = {
-          data: calendarData,
-          freshUntil: now + BANGUMI_CACHE_FRESH_MS,
-          staleUntil: now + BANGUMI_CACHE_MAX_AGE_MS,
-        };
-        return calendarData;
-      }
-
-      if (attempt === maxAttempts) {
-        if (staleData) {
-          return staleData;
-        }
-        return calendarData;
-      }
+      if (isUsableBangumiCalendarData(calendarData)) return calendarData;
     } catch (error) {
-      if (attempt === maxAttempts) {
-        if (staleData) {
-          return staleData;
-        }
-        throw error;
-      }
+      if (attempt === maxAttempts) throw error;
     }
   }
 
-  return [];
-}
-
-export function getCachedBangumiCalendarData(
-  options: {
-    allowStale?: boolean;
-  } = {},
-): BangumiCalendarData[] | undefined {
-  if (!bangumiCalendarCache) {
-    return undefined;
-  }
-
-  const now = Date.now();
-  if (bangumiCalendarCache.staleUntil <= now) {
-    bangumiCalendarCache = undefined;
-    return undefined;
-  }
-
-  if (!options.allowStale && bangumiCalendarCache.freshUntil <= now) {
-    return undefined;
-  }
-
-  return bangumiCalendarCache.data;
-}
-
-function isUsableBangumiCalendarData(data: BangumiCalendarData[]): boolean {
-  return data.some((item) => item.items.length > 0);
+  return calendarData;
 }

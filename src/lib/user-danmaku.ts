@@ -26,6 +26,8 @@ export interface UserDanmakuListResponse {
 }
 
 export interface UserDanmakuSendInput {
+  title?: string;
+  year?: string;
   key: string;
   time: number;
   text: string;

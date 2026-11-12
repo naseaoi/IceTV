@@ -1,5 +1,9 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 
+import {
+  readNotifiedMessageAt,
+  writeNotifiedMessageAt,
+} from '@/lib/message-notification-preference';
 import type { UserMessagePage, UserMessageSummary } from '@/lib/message-types';
 import { dismissToast, showToast } from '@/lib/toast';
 
@@ -83,6 +87,15 @@ import {
 
 function summaryOf(revision: string, unreadCount: number): UserMessageSummary {
   return {
+    latestUnreadAt: unreadCount ? Number(revision.split('-')[1]) * 1000 : 0,
+    latestUnread: unreadCount
+      ? {
+          type: 'tracking-update',
+          title: '测试剧集',
+          toEpisodes: 2,
+          createdAt: 1000,
+        }
+      : null,
     unreadCount,
     trackingUnreadCount: unreadCount,
     reviewReplyUnreadCount: 0,
@@ -155,6 +168,7 @@ function renderProvider() {
 describe('MessageCenterProvider', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(document, 'hasFocus').mockReturnValue(true);
     window.localStorage.clear();
     mockGetMessageSummary.mockResolvedValue(summaryOf('rev-1', 1));
     mockGetMessagePage.mockResolvedValue(pageOf(1));
@@ -176,6 +190,89 @@ describe('MessageCenterProvider', () => {
     await act(async () => screen.getByTestId('open').click());
     await screen.findByTestId('panel');
     expect(mockLoadPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('revision 改变但事件时间未推进时只更新角标', async () => {
+    renderProvider();
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1));
+    mockGetMessageSummary.mockResolvedValue({
+      ...summaryOf('rev-2', 2),
+      latestUnreadAt: 1000,
+    });
+    window.dispatchEvent(new CustomEvent('messagesUpdated'));
+    await waitFor(() =>
+      expect(screen.getByTestId('unread')).toHaveTextContent('2'),
+    );
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('未读数量下降仍提醒时间更新的事件，固定 key 原地更新', async () => {
+    mockGetMessageSummary.mockResolvedValue(summaryOf('rev-1', 3));
+    renderProvider();
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1));
+    mockGetMessageSummary.mockResolvedValue(summaryOf('rev-2', 1));
+    window.dispatchEvent(new CustomEvent('messagesUpdated'));
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(2));
+    expect(
+      jest
+        .mocked(showToast)
+        .mock.calls.every((call) => call[2]?.key === 'messages'),
+    ).toBe(true);
+  });
+
+  it('无焦点时保留待提醒事件，焦点恢复后提醒；重挂载共享水位', async () => {
+    jest.mocked(document.hasFocus).mockReturnValue(false);
+    const view = renderProvider();
+    await waitFor(() =>
+      expect(screen.getByTestId('unread')).toHaveTextContent('1'),
+    );
+    expect(showToast).not.toHaveBeenCalled();
+    jest.mocked(document.hasFocus).mockReturnValue(true);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(showToast).toHaveBeenCalledTimes(1);
+    view.unmount();
+    const calls = mockGetMessageSummary.mock.calls.length;
+    renderProvider();
+    await waitFor(() =>
+      expect(mockGetMessageSummary).toHaveBeenCalledTimes(calls + 1),
+    );
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('隐藏页面不提醒，另一个标签页推进水位后不重复提醒', async () => {
+    const visible = jest
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden');
+    renderProvider();
+    await waitFor(() =>
+      expect(screen.getByTestId('unread')).toHaveTextContent('1'),
+    );
+    expect(showToast).not.toHaveBeenCalled();
+    writeNotifiedMessageAt('demo', 1000);
+    visible.mockReturnValue('visible');
+    await act(async () =>
+      document.dispatchEvent(new Event('visibilitychange')),
+    );
+    expect(showToast).not.toHaveBeenCalled();
+    visible.mockRestore();
+  });
+
+  it('面板打开时推进提醒时间，关闭和重挂载后不补弹', async () => {
+    const view = renderProvider();
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1));
+    await act(async () => screen.getByTestId('open').click());
+    await screen.findByTestId('panel');
+    mockGetMessageSummary.mockResolvedValue(summaryOf('rev-2', 2));
+    window.dispatchEvent(new CustomEvent('messagesUpdated'));
+    await waitFor(() =>
+      expect(screen.getByTestId('unread')).toHaveTextContent('2'),
+    );
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(readNotifiedMessageAt('demo')).toBe(2000);
+    view.unmount();
+    renderProvider();
+    await waitFor(() => expect(mockGetMessageSummary).toHaveBeenCalledTimes(3));
+    expect(showToast).toHaveBeenCalledTimes(1);
   });
 
   it('挂载后暴露未读数并弹出提示', async () => {

@@ -1,9 +1,11 @@
+import { orderDoubanRoutes } from '@/lib/douban-route-memory';
 import type { DoubanImageProxyType } from '@/lib/douban-source';
 
 export const DOUBAN_IMAGE_PROXY_TYPE_COOKIE = 'douban_image_proxy_type';
 const COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 export const PUBLIC_DOUBAN_IMAGE_PROXY_TYPES = new Set<DoubanImageProxyType>([
+  'auto',
   'direct',
   'cmliussss-cdn-tencent',
   'cmliussss-cdn-ali',
@@ -17,7 +19,69 @@ export function getUsableDoubanImageProxyType(
     return proxyType;
   }
 
-  return isAuthenticated ? proxyType : 'direct';
+  return isAuthenticated ? proxyType : 'auto';
+}
+
+export const AUTO_DOUBAN_IMAGE_ROUTES = [
+  'cmliussss-cdn-tencent',
+  'cmliussss-cdn-ali',
+  'server',
+] as const;
+
+const CMLIUSSSS_IMAGE_URL_RE =
+  /^https:\/\/img\.doubanio\.cmliussss\.(?:net|com)\//i;
+
+export function isDoubanImageUrl(url: string): boolean {
+  return url.includes('doubanio.com') || CMLIUSSSS_IMAGE_URL_RE.test(url);
+}
+
+// 首页服务端渲染已换成镜像地址；豆瓣各 img 子域内容相同，还原到 img1 供其他通道使用
+function toOriginalDoubanImageUrl(url: string): string {
+  return url.replace(CMLIUSSSS_IMAGE_URL_RE, 'https://img1.doubanio.com/');
+}
+
+export interface DoubanImageCandidate {
+  url: string;
+  route?: string;
+}
+
+export function getDoubanImageCandidates(
+  url: string,
+  proxyType: string,
+  options: {
+    proxyUrl?: string;
+    isAuthenticated: boolean;
+    preferredRoute?: string | null;
+  },
+): DoubanImageCandidate[] {
+  const usableType = getUsableDoubanImageProxyType(
+    proxyType,
+    options.isAuthenticated,
+  );
+  if (usableType !== 'auto') {
+    // 固定通道下镜像地址保持原样，避免把服务端渲染的地址再改写一次
+    return [
+      {
+        url: CMLIUSSSS_IMAGE_URL_RE.test(url)
+          ? url
+          : processDoubanImageUrl(url, usableType, options.proxyUrl),
+      },
+    ];
+  }
+
+  const original = toOriginalDoubanImageUrl(url);
+  const routes = AUTO_DOUBAN_IMAGE_ROUTES.filter(
+    (route) => route !== 'server' || options.isAuthenticated,
+  );
+  const candidates = orderDoubanRoutes(
+    routes,
+    options.preferredRoute ?? null,
+  ).map((route) => ({ url: processDoubanImageUrl(original, route), route }));
+  // 非 img 子域的图片镜像不改写，去掉重复地址
+  return candidates.filter(
+    (candidate, index) =>
+      candidates.findIndex((item) => item.url === candidate.url) === index,
+  );
 }
 
 export function normalizePublicDoubanImageProxyType(
@@ -39,6 +103,8 @@ export function processDoubanImageUrl(
   }
 
   switch (proxyType) {
+    case 'auto':
+      return processDoubanImageUrl(originalUrl, AUTO_DOUBAN_IMAGE_ROUTES[0]);
     case 'direct':
       return originalUrl;
     case 'server':

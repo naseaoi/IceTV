@@ -12,6 +12,7 @@ import {
 } from '@/features/play/lib/danmaku/user-client';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { type UserDanmakuItem, buildUserDanmakuKey } from '@/lib/user-danmaku';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 interface MyDanmakuSectionProps {
   source: string;
@@ -92,7 +93,8 @@ export function MyDanmakuSection({
       setItems((previous) => previous.filter((item) => item.id !== id));
       onDeleted?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
+      if (!isAbortError(err))
+        setError(getErrorMessage(err, '删除失败，请重试'));
     } finally {
       setDeletingId(null);
     }

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import AdminPage from '@/app/admin/page';
@@ -26,11 +32,6 @@ jest.mock('@/components/AuthProvider', () => ({
   }),
 }));
 
-jest.mock('@/components/DataMigration', () => ({
-  __esModule: true,
-  default: () => <div>DataMigration</div>,
-}));
-
 jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
   default: () => null,
@@ -41,10 +42,18 @@ jest.mock('@/components/modals/ConfirmModal', () => ({
   default: ({
     isOpen,
     onConfirm,
+    message,
   }: {
+    message?: string;
     isOpen: boolean;
     onConfirm: () => void;
-  }) => (isOpen ? <button onClick={onConfirm}>ConfirmModal</button> : null),
+  }) =>
+    isOpen ? (
+      <div>
+        <p>{message}</p>
+        <button onClick={onConfirm}>ConfirmModal</button>
+      </div>
+    ) : null,
 }));
 
 const mockReplace = jest.fn();
@@ -92,13 +101,6 @@ jest.mock('@/hooks/useAlertModal', () => ({
   }),
 }));
 
-jest.mock('@/features/admin/hooks/useLoadingState', () => ({
-  useLoadingState: () => ({
-    isLoading: () => false,
-    withLoading: async (_key: string, fn: () => Promise<unknown>) => fn(),
-  }),
-}));
-
 type UseAdminPageActionsOptions = {
   setConfig: (value: unknown) => void;
   setRole: (value: 'owner' | 'admin' | null) => void;
@@ -122,12 +124,10 @@ describe('AdminPage role visibility', () => {
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      LiveDirectConnect: false,
       AutoSwitchSource: false,
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',
-      BangumiDataSource: 'server',
       DoubanImageProxyType: '',
       DisableYellowFilter: false,
       FluidSearch: true,
@@ -197,7 +197,6 @@ describe('AdminPage role visibility', () => {
       expect(screen.getByText('配置文件')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('数据迁移')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: '重置配置' }),
     ).toBeInTheDocument();
@@ -213,14 +212,19 @@ describe('AdminPage role visibility', () => {
     });
 
     expect(screen.queryByText('配置文件')).not.toBeInTheDocument();
-    expect(screen.queryByText('数据迁移')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: '重置配置' }),
     ).not.toBeInTheDocument();
   });
 
   it('opens reset confirm modal and triggers reset action', async () => {
-    const resetConfig = jest.fn().mockResolvedValue(undefined);
+    let resolve!: () => void;
+    const resetConfig = jest.fn(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
     mockSearch = 'tab=config-file';
     setupOwnerWithResetSpy(resetConfig);
 
@@ -238,10 +242,17 @@ describe('AdminPage role visibility', () => {
       expect(screen.getByText('ConfirmModal')).toBeInTheDocument();
     });
 
+    expect(screen.getByText(/用户权限与封禁不受影响/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('ConfirmModal'));
-
+    expect(screen.getByRole('button', { name: '重置配置' })).toBeDisabled();
+    await act(async () => {
+      resolve();
+    });
     await waitFor(() => {
       expect(resetConfig).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole('button', { name: '重置配置' }),
+      ).not.toBeDisabled();
     });
   });
 

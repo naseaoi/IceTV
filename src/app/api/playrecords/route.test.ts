@@ -7,9 +7,13 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 installWebPolyfills();
 
 const mockGetAllPlayRecords = jest.fn();
+const mockGetPlayRecordsByKeys = jest.fn();
 const mockGetPlayRecord = jest.fn();
 const mockGetPlayRecordPage = jest.fn();
 const mockSavePlayRecord = jest.fn();
+const mockDeletePlayRecord = jest.fn();
+const mockDeletePlayRecords = jest.fn();
+const mockDeleteAllPlayRecords = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest
@@ -21,16 +25,27 @@ jest.mock('@/lib/api-auth', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
+    getPlayRecordsByKeys: (...args: unknown[]) =>
+      mockGetPlayRecordsByKeys(...args),
     getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
     getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
+    deletePlayRecord: (...args: unknown[]) => mockDeletePlayRecord(...args),
+    deletePlayRecords: (...args: unknown[]) => mockDeletePlayRecords(...args),
+    deleteAllPlayRecords: (...args: unknown[]) =>
+      mockDeleteAllPlayRecords(...args),
   },
 }));
 
-const { GET, PATCH, POST } = require('./route') as typeof import('./route');
+const { GET, PATCH, POST, DELETE } =
+  require('./route') as typeof import('./route');
 
 function createRequest(url: string, init?: RequestInit): NextRequest {
-  return new Request(url, init) as unknown as NextRequest;
+  const request = new Request(url, init);
+  if (typeof request.text !== 'function') {
+    request.text = async () => String(init?.body ?? '');
+  }
+  return request as unknown as NextRequest;
 }
 
 function createJsonRequest(body: unknown): NextRequest {
@@ -139,6 +154,58 @@ describe('playrecords route', () => {
     mockSavePlayRecord.mockResolvedValue(undefined);
   });
 
+  it('按候选键去重读取且仅查询当前账号，缺失键省略', async () => {
+    mockGetPlayRecordsByKeys.mockResolvedValue({
+      'source+new': records['source+new'],
+    });
+    const response = await GET(
+      createRequest(
+        'http://localhost/api/playrecords?keys=source%2Bnew&keys=source%2Bmissing&keys=source%2Bnew',
+      ),
+    );
+    expect(await response.json()).toEqual({
+      'source+new': records['source+new'],
+    });
+    expect(mockGetPlayRecordsByKeys.mock.calls).toEqual([
+      ['demo', ['source+new', 'source+missing']],
+    ]);
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+    expect(response.headers.get('cache-control')).toContain('no-store');
+  });
+
+  it.each([
+    'keys=',
+    'keys=invalid',
+    'keys=%2Bid',
+    'keys=source%2B',
+    `keys=s%2B${'x'.repeat(512)}`,
+    Array.from({ length: 51 }, (_, i) => `keys=s%2B${i}`).join('&'),
+  ])('拒绝无效或超限定向参数 %s', async (query) => {
+    const response = await GET(
+      createRequest(`http://localhost/api/playrecords?${query}`),
+    );
+    expect(response.status).toBe(400);
+    expect(mockGetPlayRecordsByKeys).not.toHaveBeenCalled();
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it('接受上限 50 个键并保留 id 内的加号', async () => {
+    const params = new URLSearchParams();
+    Array.from({ length: 50 }, (_, i) => params.append('keys', `s+${i}+part`));
+    const response = await GET(
+      createRequest(`http://localhost/api/playrecords?${params}`),
+    );
+    expect(response.status).toBe(200);
+    expect(mockGetPlayRecordsByKeys).toHaveBeenCalledTimes(1);
+    expect(mockGetPlayRecordsByKeys).toHaveBeenCalledWith(
+      'demo',
+      params.getAll('keys'),
+    );
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
+  });
+
   it('limit 参数只返回按保存时间排序的最近记录', async () => {
     const response = await GET(
       createRequest('http://localhost/api/playrecords?limit=2'),
@@ -179,8 +246,101 @@ describe('playrecords route', () => {
       2,
       undefined,
       undefined,
+      undefined,
     );
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it.each(['updated', 'shelved', 'unknown'])(
+    '分页传递筛选 %s 并保留游标',
+    async (filter) => {
+      const response = await GET(
+        createRequest(
+          `http://localhost/api/playrecords?format=page&limit=2&cursor=200%7Csource%2Bmiddle&filter=${filter}`,
+        ),
+      );
+      expect(response.status).toBe(200);
+      expect(mockGetPlayRecordPage).toHaveBeenCalledWith(
+        'demo',
+        2,
+        200,
+        'source+middle',
+        filter === 'updated' || filter === 'shelved' ? filter : undefined,
+      );
+      expect(await response.json()).toEqual(
+        await mockGetPlayRecordPage.mock.results[0].value,
+      );
+    },
+  );
+
+  it('批量删除合法键并去重', async () => {
+    const response = await DELETE(
+      createRequest('http://localhost/api/playrecords', {
+        method: 'DELETE',
+        body: JSON.stringify({ keys: ['source+a', 'source+b', 'source+a'] }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+    expect(mockDeletePlayRecords).toHaveBeenCalledWith('demo', [
+      'source+a',
+      'source+b',
+    ]);
+    expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { keys: ['source+a', 'invalid'] },
+    { keys: ['+a'] },
+    { keys: ['source+'] },
+    { keys: [1] },
+    { keys: 'source+a' },
+    {},
+    null,
+    { keys: Array.from({ length: 201 }, (_, index) => `source+${index}`) },
+  ])('拒绝非法批量删除参数 %p', async (body) => {
+    const response = await DELETE(
+      createRequest('http://localhost/api/playrecords', {
+        method: 'DELETE',
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockDeletePlayRecords).not.toHaveBeenCalled();
+    expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it('空数组为空操作，单条删除及无请求体清空保留', async () => {
+    const response = await DELETE(
+      createRequest('http://localhost/api/playrecords', {
+        method: 'DELETE',
+        body: JSON.stringify({ keys: [] }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(mockDeletePlayRecords).not.toHaveBeenCalled();
+    expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
+    await DELETE(
+      createRequest('http://localhost/api/playrecords?key=source%2Ba', {
+        method: 'DELETE',
+      }),
+    );
+    expect(mockDeletePlayRecord).toHaveBeenCalledWith('demo', 'source', 'a');
+    await DELETE(
+      createRequest('http://localhost/api/playrecords', { method: 'DELETE' }),
+    );
+    expect(mockDeleteAllPlayRecords).toHaveBeenCalledWith('demo');
+  });
+
+  it('非法 JSON 返回 400 并保留记录', async () => {
+    const response = await DELETE(
+      createRequest('http://localhost/api/playrecords', {
+        method: 'DELETE',
+        body: '{',
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
   });
 
   it('保存播放进度时由服务端记录元数据检查时间', async () => {

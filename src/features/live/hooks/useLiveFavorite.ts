@@ -27,10 +27,16 @@ export function useLiveFavorite({
     favoritedRef.current = isFav;
   });
 
+  const pendingRef = useRef(false);
+
   // 切换收藏（乐观更新 + 回滚）
   const handleToggleFavorite = async () => {
+    if (pendingRef.current) return;
     if (!currentSourceRef.current || !currentChannelRef.current) return;
 
+    const sourceKey = currentSourceRef.current.key;
+    const channelId = currentChannelRef.current.id;
+    pendingRef.current = true;
     try {
       const currentFavorited = favoritedRef.current;
       const newFavorited = !currentFavorited;
@@ -64,11 +70,18 @@ export function useLiveFavorite({
       } catch (err) {
         console.error('收藏操作失败:', err);
         // 操作失败，回滚状态
-        setFavorited(currentFavorited);
-        favoritedRef.current = currentFavorited;
+        if (
+          currentSourceRef.current?.key === sourceKey &&
+          currentChannelRef.current?.id === channelId
+        ) {
+          setFavorited(currentFavorited);
+          favoritedRef.current = currentFavorited;
+        }
       }
     } catch (err) {
       console.error('切换收藏失败:', err);
+    } finally {
+      pendingRef.current = false;
     }
   };
 

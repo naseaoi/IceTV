@@ -6,13 +6,19 @@ type RuntimeCacheEntry = {
   handler: unknown;
 };
 
-export function excludeDefaultApiRuntimeCache<T extends RuntimeCacheEntry>(
-  entries: T[],
+// Serwist 按数组顺序取第一条匹配的规则，默认规则末尾的 /.*/ NetworkOnly 会接走所有同源请求，
+// 自定义规则必须排在默认规则之前才会生效
+export function composeRuntimeCaching<T extends RuntimeCacheEntry>(
+  customEntries: T[],
+  defaultEntries: T[],
 ): T[] {
-  return entries.filter((entry) => {
-    const handler = entry.handler as CacheNamedHandler;
-    return handler.cacheName !== 'apis';
-  });
+  return [
+    ...customEntries,
+    ...defaultEntries.filter((entry) => {
+      const handler = entry.handler as CacheNamedHandler;
+      return handler.cacheName !== 'apis';
+    }),
+  ];
 }
 
 export function shouldHandleVodSegmentCache(input: {
@@ -31,13 +37,6 @@ export function shouldHandleVodSegmentCache(input: {
   );
 }
 
-export function shouldHandleNextImageCache(input: {
-  pathname: string;
-  search: string;
-}): boolean {
-  return /^\/_next\/image\?url=.+$/.test(input.pathname + input.search);
-}
-
 export function shouldHandleImageProxyCache(input: {
   pathname: string;
   search: string;
@@ -51,24 +50,10 @@ export function shouldHandleBangumiCoverCache(input: {
   return /^\/api\/bangumi-cover\/[lcmgs]\//i.test(input.pathname);
 }
 
-export function shouldHandleExternalCoverCache(input: {
-  hostname: string;
-}): boolean {
-  return /^(lain\.bgm\.tv|img\d+\.doubanio\.com|img\.doubanio\.cmliussss\.(net|com))$/.test(
-    input.hostname,
-  );
-}
-
-export function shouldHandleJsonApiCache(input: {
+// 跨域图片多为不透明响应，Chrome 按每条约 7MB 计入配额；只走网络，复用浏览器 HTTP 缓存
+export function shouldBypassCrossOriginImageCache(input: {
   sameOrigin: boolean;
-  method: string;
-  pathname: string;
+  destination: string;
 }): boolean {
-  return (
-    input.sameOrigin &&
-    input.method === 'GET' &&
-    /^\/api\/(detail|douban(\/(categories|recommends))?)(\/|$)/.test(
-      input.pathname,
-    )
-  );
+  return !input.sameOrigin && input.destination === 'image';
 }

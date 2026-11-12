@@ -17,15 +17,18 @@ const makeCode = (
   ...extra,
 });
 
-export function inviteCodeBatchContract(createStorage: () => IStorage) {
+export function inviteCodeBatchContract(
+  createStorage: () => IStorage,
+  reset: (storage: IStorage) => Promise<void> = async () => {},
+) {
   let storage: IStorage;
   beforeEach(async () => {
     storage = createStorage();
-    await storage.clearAllData();
+    await reset(storage);
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
   });
   afterEach(async () => {
-    await storage.clearAllData();
+    await reset(storage);
   });
 
   const fill = async (count: number) => {

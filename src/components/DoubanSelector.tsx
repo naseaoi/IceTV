@@ -21,7 +21,9 @@ interface DoubanSelectorProps {
   secondarySelection?: string;
   onPrimaryChange: (value: string) => void;
   onSecondaryChange: (value: string) => void;
-  onMultiLevelChange?: (values: Record<string, string>) => void;
+  multiLevelValues: Record<string, string>;
+  onMultiLevelChange: (values: Record<string, string>) => void;
+  selectedWeekday: string;
   onWeekdayChange: (weekday: string) => void;
 }
 
@@ -123,7 +125,9 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
   secondarySelection,
   onPrimaryChange,
   onSecondaryChange,
+  multiLevelValues,
   onMultiLevelChange,
+  selectedWeekday,
   onWeekdayChange,
 }) => {
   const opts = doubanSelectorOptionsMap[type] || fallbackOpts;
@@ -143,10 +147,6 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
     opts.secondaryDefault,
     secondary.updatePosition,
   );
-
-  const handleMultiLevelChange = (values: Record<string, string>) => {
-    onMultiLevelChange?.(values);
-  };
 
   return (
     <div>
@@ -180,7 +180,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             <div className='max-w-full overflow-x-auto'>
               <MultiLevelSelector
                 key={`${type}-${primarySelection}`}
-                onChange={handleMultiLevelChange}
+                value={multiLevelValues}
+                onChange={onMultiLevelChange}
                 contentType={type}
               />
             </div>
@@ -216,7 +217,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             <div className='max-w-full overflow-x-auto'>
               <MultiLevelSelector
                 key={`${type}-${primarySelection}`}
-                onChange={handleMultiLevelChange}
+                value={multiLevelValues}
+                onChange={onMultiLevelChange}
                 contentType={type}
               />
             </div>
@@ -239,20 +241,25 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
           </div>
           {(primarySelection || animePrimaryOptions[0].value) === '每日放送' ? (
             <div className='max-w-full overflow-x-auto'>
-              <WeekdaySelector onWeekdayChange={onWeekdayChange} />
+              <WeekdaySelector
+                value={selectedWeekday}
+                onChange={onWeekdayChange}
+              />
             </div>
           ) : (
             <div className='max-w-full overflow-x-auto'>
               {(primarySelection || animePrimaryOptions[0].value) === '番剧' ? (
                 <MultiLevelSelector
                   key={`anime-tv-${primarySelection}`}
-                  onChange={handleMultiLevelChange}
+                  value={multiLevelValues}
+                  onChange={onMultiLevelChange}
                   contentType='anime-tv'
                 />
               ) : (
                 <MultiLevelSelector
                   key={`anime-movie-${primarySelection}`}
-                  onChange={handleMultiLevelChange}
+                  value={multiLevelValues}
+                  onChange={onMultiLevelChange}
                   contentType='anime-movie'
                 />
               )}
@@ -291,7 +298,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             <div className='max-w-full overflow-x-auto'>
               <MultiLevelSelector
                 key={`${type}-${primarySelection}`}
-                onChange={handleMultiLevelChange}
+                value={multiLevelValues}
+                onChange={onMultiLevelChange}
                 contentType={type}
               />
             </div>

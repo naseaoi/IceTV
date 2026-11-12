@@ -1,9 +1,11 @@
 import { searchFromApi } from '@/lib/downstream';
 import {
   clearSearchSourceFailureCooldownsForTests,
+  collectSearchAggregation,
   getUpstreamSearchGateStats,
   runSearchAggregation,
 } from '@/lib/search-aggregate';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 
@@ -337,5 +339,68 @@ describe('source health search budgets', () => {
     const results = await pending;
     expect(completed).toEqual(['poor', 'good']);
     expect(results.map((item) => item.source)).toEqual(['good', 'poor']);
+  });
+});
+
+describe('failed source reporting', () => {
+  const site = { key: 'flaky', name: '不稳定源', api: 'https://api.example' };
+  const baseOptions = {
+    apiSites: [site],
+    query: '重试',
+    maxSearchPages: 1,
+    disableYellowFilter: true,
+    sourceConcurrency: 1,
+    sourceFailureCooldownMs: 60_000,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    clearSearchSourceFailureCooldownsForTests();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('collects first-page failures without putting the source into cooldown', async () => {
+    (searchFromApi as jest.Mock).mockRejectedValue(
+      new SearchSourceUnavailableError(site.name),
+    );
+    await expect(collectSearchAggregation(baseOptions)).resolves.toEqual({
+      results: [],
+      failedSources: ['flaky'],
+    });
+    await collectSearchAggregation(baseOptions);
+    expect(searchFromApi).toHaveBeenCalledTimes(2);
+    expect(searchFromApi).toHaveBeenCalledWith(
+      site,
+      '重试',
+      expect.objectContaining({ reportFailure: true, refreshFirstPage: false }),
+    );
+  });
+
+  it('retries a cooled-down source and refreshes its first page', async () => {
+    (searchFromApi as jest.Mock)
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValue([createResult({ title: '重试成功' })]);
+    await runSearchAggregation(baseOptions);
+    await expect(collectSearchAggregation(baseOptions)).resolves.toEqual({
+      results: [],
+      failedSources: ['flaky'],
+    });
+    expect(searchFromApi).toHaveBeenCalledTimes(1);
+
+    const retried = await collectSearchAggregation({
+      ...baseOptions,
+      retryFailed: true,
+    });
+    expect(retried.failedSources).toEqual([]);
+    expect(retried.results.map((item) => item.title)).toEqual(['重试成功']);
+    expect(searchFromApi).toHaveBeenLastCalledWith(
+      site,
+      '重试',
+      expect.objectContaining({ refreshFirstPage: true }),
+    );
   });
 });

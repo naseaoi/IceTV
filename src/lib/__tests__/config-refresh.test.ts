@@ -136,6 +136,45 @@ describe('subscribed config refresh', () => {
     log.mockRestore();
   });
 
+  it('records the first failure without replacing its timestamp on repeated failures', async () => {
+    const log = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    (fetchWithUrlGuard as jest.Mock).mockRejectedValue(
+      new Error('private error'),
+    );
+    await refreshSubscribedConfig();
+    const update = (db.compareAndSetAdminConfig as jest.Mock).mock.calls[0][2];
+    expect(update.subscription.expected).toBe(subscription);
+    expect(update.subscription.next.ConfigSubscribtion.FailureSince).toEqual(
+      expect.any(String),
+    );
+    (db.getConfigSubscription as jest.Mock).mockResolvedValue(
+      update.subscription.next,
+    );
+    await refreshSubscribedConfig();
+    expect(
+      (db.compareAndSetAdminConfig as jest.Mock).mock.calls[1][2].subscription
+        .next.ConfigSubscribtion.FailureSince,
+    ).toBe(update.subscription.next.ConfigSubscribtion.FailureSince);
+    log.mockRestore();
+  });
+
+  it('clears the persisted failure on successful refresh', async () => {
+    (db.getConfigSubscription as jest.Mock).mockResolvedValue({
+      ...subscription,
+      ConfigSubscribtion: {
+        ...subscription.ConfigSubscribtion,
+        FailureSince: '2026-11-01T00:00:00Z',
+      },
+    });
+    await refreshSubscribedConfig();
+    expect(
+      (db.compareAndSetAdminConfig as jest.Mock).mock.calls[0][2].subscription
+        .next.ConfigSubscribtion.FailureSince,
+    ).toBe('');
+  });
+
   it('skips disabled subscriptions before reading config', async () => {
     (db.getConfigSubscription as jest.Mock).mockResolvedValue(
       subscriptionFromConfig(),

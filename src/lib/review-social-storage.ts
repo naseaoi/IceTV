@@ -2,6 +2,10 @@ import { randomInt } from 'crypto';
 
 import { profileFavoriteOriginSql } from '@/features/favorites/lib/library-storage';
 import {
+  annualRecapSchema,
+  AnnualRecapStorage,
+} from '@/lib/annual-recap-storage';
+import {
   type FollowReviewQuery,
   followReviewMessageId,
   parseFollowReviewMessageId,
@@ -19,9 +23,9 @@ import type {
   MyVideoReviewPage,
   PublicVideoReviewPage,
   ReviewReportReason,
-  StorageUserImportData,
   UserProfile,
   UserProfileView,
+  UserSocialData,
   VideoReview,
   VideoReviewRating,
   WorkReviewSummary,
@@ -45,14 +49,6 @@ import {
   WORK_REVIEWS_PAGE_SIZE,
 } from '@/lib/video-reviews';
 
-export const SOCIAL_TABLES = [
-  'user_profiles',
-  'user_follows',
-  'video_review_likes',
-  'video_review_reports',
-  'video_review_replies',
-  'video_review_reply_reports',
-] as const;
 export class NicknameTakenError extends Error {
   constructor() {
     super('昵称已被使用');
@@ -72,6 +68,7 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
     dialect === 'mysql' ? ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin' : '';
   return [
     ...replySchema(dialect),
+    annualRecapSchema(dialect),
     `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_follows (follower ${text} NOT NULL, followee ${text} NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (follower, followee)${dialect === 'mysql' ? ', KEY idx_user_follows_followee (followee)' : ''})${suffix}`,
     ...['likes', 'reports'].map((kind) => {
@@ -267,6 +264,36 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     }
     return (await this.getUserProfile(username))!;
   }
+  async getAnnualRecap(
+    ...args: Parameters<IStorage['getAnnualRecap']>
+  ): ReturnType<IStorage['getAnnualRecap']> {
+    return new AnnualRecapStorage(this.sql).getAnnualRecap(...args);
+  }
+  async getAnnualRecapYears(
+    ...args: Parameters<IStorage['getAnnualRecapYears']>
+  ): ReturnType<IStorage['getAnnualRecapYears']> {
+    return new AnnualRecapStorage(this.sql).getAnnualRecapYears(...args);
+  }
+  async saveAnnualRecap(
+    ...args: Parameters<IStorage['saveAnnualRecap']>
+  ): ReturnType<IStorage['saveAnnualRecap']> {
+    return new AnnualRecapStorage(this.sql).saveAnnualRecap(...args);
+  }
+  async deleteAnnualRecap(
+    ...args: Parameters<IStorage['deleteAnnualRecap']>
+  ): ReturnType<IStorage['deleteAnnualRecap']> {
+    return new AnnualRecapStorage(this.sql).deleteAnnualRecap(...args);
+  }
+  async getFollowRecapMessages(
+    ...args: Parameters<IStorage['getFollowRecapMessages']>
+  ): ReturnType<IStorage['getFollowRecapMessages']> {
+    return new AnnualRecapStorage(this.sql).getFollowRecapMessages(...args);
+  }
+  async getFollowRecapMessageCount(
+    ...args: Parameters<IStorage['getFollowRecapMessageCount']>
+  ): ReturnType<IStorage['getFollowRecapMessageCount']> {
+    return new AnnualRecapStorage(this.sql).getFollowRecapMessageCount(...args);
+  }
   async getUserProfileView(
     username: string,
     viewer: string,
@@ -300,7 +327,9 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         ...(favoritesVisible ? [username] : []),
       ],
     );
+    const year = (await this.getAnnualRecapYears(username))[0];
     return {
+      recap: year ? { year } : null,
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,
@@ -821,8 +850,8 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       .filter((id) => id !== null);
     return {
       from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username
-        WHERE f.follower = ? AND v.is_public = 1 AND v.updated_at > f.created_at AND v.updated_at > ?
-        ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.updated_at = ?)').join(' ')}`,
+        WHERE f.follower = ? AND v.is_public = 1 AND v.first_published_at > f.created_at AND v.first_published_at > ?
+        ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?)').join(' ')}`,
       params: [
         normalizeUsername(username),
         Math.max(readAt, now - 30 * 86400000),
@@ -868,7 +897,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       const identity = parseFollowReviewMessageId(query.id);
       if (!identity) return [];
       filter +=
-        ' AND p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.updated_at = ?';
+        ' AND p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?';
       params.push(...identity);
     }
     if (query.before) {
@@ -876,22 +905,26 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       const identity = parseFollowReviewSortKey(key);
       if (identity) {
         filter +=
-          ' AND (v.updated_at < ? OR (v.updated_at = ? AND (p.profile_id, v.title_norm, v.year) < (?, ?, ?)))';
+          ' AND (v.first_published_at < ? OR (v.first_published_at = ? AND (p.profile_id, v.title_norm, v.year) < (?, ?, ?)))';
         params.push(createdAt, createdAt, ...identity);
       } else {
         filter +=
           key > 'follow-review:'
-            ? ' AND v.updated_at <= ?'
-            : ' AND v.updated_at < ?';
+            ? ' AND v.first_published_at <= ?'
+            : ' AND v.first_published_at < ?';
         params.push(createdAt);
       }
     }
     const limit = Math.max(1, Math.min(201, Math.floor(query.limit ?? 30)));
     const rows = await this.sql.rows<
-      VideoReviewRow & { profile_id: string; nickname: string | null }
+      VideoReviewRow & {
+        profile_id: string;
+        nickname: string | null;
+        first_published_at: number;
+      }
     >(
-      `SELECT v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
-       ORDER BY v.updated_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
+      `SELECT v.username, v.review_json, v.first_published_at, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
+       ORDER BY v.first_published_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
       [...params, limit],
     );
     return rows.map((row) => {
@@ -901,7 +934,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
           row.profile_id,
           r.title_norm,
           r.year,
-          r.updated_at,
+          Number(row.first_published_at),
         ),
         type: 'follow-review' as const,
         review: {
@@ -918,45 +951,38 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         year: r.year,
         cover: r.cover,
         rating: r.rating,
-        createdAt: r.updated_at,
+        createdAt: Number(row.first_published_at),
       };
     });
   }
-  async getUserSocialData(
-    username: string,
-  ): Promise<
-    Pick<
-      StorageUserImportData,
-      'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
-    >
-  > {
+  async getUserSocialData(username: string): Promise<UserSocialData> {
     username = normalizeUsername(username);
     const profile = await this.getUserProfile(username);
     const follows = await this.sql.rows<
-      NonNullable<StorageUserImportData['follows']>[number]
+      NonNullable<UserSocialData['follows']>[number]
     >('SELECT followee, created_at FROM user_follows WHERE follower = ?', [
       username,
     ]);
     const likes = await this.sql.rows<
-      NonNullable<StorageUserImportData['likes']>[number]
+      NonNullable<UserSocialData['likes']>[number]
     >(
       'SELECT author, title_norm, year, created_at FROM video_review_likes WHERE liker = ?',
       [username],
     );
     const reports = await this.sql.rows<
-      NonNullable<StorageUserImportData['reports']>[number]
+      NonNullable<UserSocialData['reports']>[number]
     >(
       'SELECT author, title_norm, year, reason, detail, created_at FROM video_review_reports WHERE reporter = ?',
       [username],
     );
     const replies = await this.sql.rows<
-      NonNullable<StorageUserImportData['replies']>[number]
+      NonNullable<UserSocialData['replies']>[number]
     >(
       'SELECT id, author, title_norm, year, reply_to, content, created_at FROM video_review_replies WHERE username = ?',
       [username],
     );
     const replyReports = await this.sql.rows<
-      NonNullable<StorageUserImportData['replyReports']>[number]
+      NonNullable<UserSocialData['replyReports']>[number]
     >(
       'SELECT reply_id, reason, detail, created_at FROM video_review_reply_reports WHERE reporter = ?',
       [username],
@@ -983,47 +1009,4 @@ export function isUniqueError(error: unknown): boolean {
       'ER_DUP_ENTRY',
     ].includes(String(error.code))
   );
-}
-
-export function importedAvatarSeed(value: unknown): string | null {
-  try {
-    return validateAvatarSeed(value);
-  } catch {
-    return null;
-  }
-}
-
-export function importedProfileValues(
-  username: string,
-  profile: UserProfile | undefined,
-  usedIds: Set<string>,
-  usedNames: Set<string>,
-): unknown[] {
-  let id = profile?.profile_id;
-  while (!id || !/^[a-zA-Z0-9]{12}$/.test(id) || usedIds.has(id))
-    id = newProfileId();
-  usedIds.add(id);
-  let nickname: string | null = null;
-  let norm: string | null = null;
-  if (profile?.nickname) {
-    try {
-      const v = validateNickname(profile.nickname, { allowReserved: true });
-      if (!usedNames.has(v.nicknameNorm)) {
-        nickname = v.nickname;
-        norm = v.nicknameNorm;
-        usedNames.add(norm);
-      }
-    } catch {
-      // 旧备份昵称按当前规则重新校验。
-    }
-  }
-  return [
-    normalizeUsername(username),
-    id,
-    nickname,
-    norm,
-    importedAvatarSeed(profile?.avatar_seed),
-    validateLibraryVisibility(profile?.favorites_public ?? 0, true),
-    profile?.updated_at ?? Date.now(),
-  ];
 }

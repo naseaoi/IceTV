@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
-import AlertModal from '@/components/modals/AlertModal';
+import LoadErrorState from '@/components/LoadErrorState';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
@@ -33,22 +33,25 @@ export function DoubanPageClient() {
   const {
     doubanData,
     loading,
-    selectorsReady,
     hasMore,
     isLoadingMore,
     primarySelection,
     secondarySelection,
+    multiLevelValues,
+    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
-    bangumiCalendarError,
-    clearBangumiCalendarError,
+    loadFailed,
+    retryLoad,
+    calendarStale,
   } = useDoubanFeed(type);
 
-  const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
+  const canLoadMore =
+    hasMore && !loadFailed && !calendarStale && !isLoadingMore && !loading;
 
   const selectorNode =
     type !== 'custom' ? (
@@ -56,6 +59,8 @@ export function DoubanPageClient() {
         type={type as 'movie' | 'tv' | 'show' | 'anime'}
         primarySelection={primarySelection}
         secondarySelection={secondarySelection}
+        multiLevelValues={multiLevelValues}
+        selectedWeekday={selectedWeekday}
         onPrimaryChange={handlePrimaryChange}
         onSecondaryChange={handleSecondaryChange}
         onMultiLevelChange={handleMultiLevelChange}
@@ -83,7 +88,7 @@ export function DoubanPageClient() {
 
       <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-1 md:pt-6`}>
         <div className={DOUBAN_GRID_WRAPPER_CLASS}>
-          {loading || !selectorsReady ? (
+          {loading ? (
             <DoubanFeedLoading />
           ) : (
             <VirtualizedGrid
@@ -109,7 +114,11 @@ export function DoubanPageClient() {
           )}
         </div>
 
-        {hasMore && !loading && (
+        {!loading && (loadFailed || calendarStale) && (
+          <LoadErrorState onRetry={retryLoad} />
+        )}
+
+        {hasMore && !loading && !loadFailed && !calendarStale && (
           <div
             ref={loadingRef}
             className='flex h-24 items-center justify-center'
@@ -124,7 +133,7 @@ export function DoubanPageClient() {
           </div>
         )}
 
-        {!hasMore && doubanData.length > 0 && (
+        {!hasMore && !loadFailed && !calendarStale && doubanData.length > 0 && (
           <div className='mt-6 flex items-center gap-4 py-10 text-xs text-gray-400 dark:text-gray-500'>
             <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
             已加载全部
@@ -132,22 +141,15 @@ export function DoubanPageClient() {
           </div>
         )}
 
-        {!loading && selectorsReady && doubanData.length === 0 && (
-          <div className='py-24 text-center text-sm text-gray-500 dark:text-gray-400'>
-            暂无相关内容
-          </div>
-        )}
+        {!loading &&
+          !loadFailed &&
+          !calendarStale &&
+          doubanData.length === 0 && (
+            <div className='py-24 text-center text-sm text-gray-500 dark:text-gray-400'>
+              暂无相关内容
+            </div>
+          )}
       </div>
-
-      <AlertModal
-        isOpen={Boolean(bangumiCalendarError)}
-        onClose={clearBangumiCalendarError}
-        type='error'
-        title='番剧数据获取失败'
-        message={bangumiCalendarError || undefined}
-        showConfirm
-        confirmText='知道了'
-      />
     </PageLayout>
   );
 }

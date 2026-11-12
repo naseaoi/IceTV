@@ -1,6 +1,7 @@
 import {
   SOURCE_PROBE_HEADER,
   SourceProbeDeferredError,
+  SourceProbeNetworkError,
 } from '@/features/play/lib/sourceProbeRequestPolicy';
 
 let cooldownUntil = 0;
@@ -21,13 +22,23 @@ export async function fetchSourceProbe(
     headers?: Record<string, string>;
   } = {},
 ): Promise<Response> {
-  if (!isLocalRequest(url)) return fetch(url, init);
+  const request = async (options: RequestInit) => {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') throw error;
+      throw new SourceProbeNetworkError(
+        error instanceof Error ? error.message : 'Network request failed',
+      );
+    }
+  };
+  if (!isLocalRequest(url)) return request(init);
   if (Date.now() < cooldownUntil) {
     throw new SourceProbeDeferredError(
       Math.ceil((cooldownUntil - Date.now()) / 1000),
     );
   }
-  const response = await fetch(url, {
+  const response = await request({
     ...init,
     headers: { ...init.headers, [SOURCE_PROBE_HEADER]: '1' },
   });

@@ -8,6 +8,7 @@ import { getCachedDetail } from '@/lib/detail-cache';
 import { searchFirstPageFromApi } from '@/lib/downstream';
 import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
+  mergeRetriedSearchAggregate,
   peekCachedSearchAggregate,
   setCachedSearchAggregate,
 } from '@/lib/search-cache';
@@ -28,18 +29,29 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/source-health.server', () => ({
   getSourceHealthTiers: jest.fn(),
 }));
-jest.mock('@/lib/source-route-capability.server', () => ({
-  getSourceRouteCapabilities: jest.fn().mockResolvedValue({}),
-  resolveSourceRoute: () => 'auto',
-}));
-jest.mock('@/lib/search-aggregate', () => ({
-  runSearchAggregation: jest.fn(),
-}));
+jest.mock('@/lib/search-aggregate', () => {
+  const runSearchAggregation = jest.fn();
+  return {
+    runSearchAggregation,
+    collectSearchAggregation: jest.fn(async (options) => {
+      const failedSources: string[] = [];
+      const results = await runSearchAggregation({
+        ...options,
+        onSourceError: (site: { key: string }, error: unknown) => {
+          failedSources.push(site.key);
+          options.onSourceError?.(site, error);
+        },
+      });
+      return { results, failedSources };
+    }),
+  };
+});
 jest.mock('@/lib/search-cache', () => ({
   peekCachedSearchAggregate: jest.fn(),
   loadCachedSearchAggregate: jest.fn((_params, loader) => loader()),
   refreshCachedSearchAggregate: jest.fn((_params, loader) => loader()),
   setCachedSearchAggregate: jest.fn(),
+  mergeRetriedSearchAggregate: jest.fn(),
 }));
 jest.mock('@/lib/downstream', () => ({ searchFirstPageFromApi: jest.fn() }));
 jest.mock('@/lib/detail-cache', () => ({ getCachedDetail: jest.fn() }));
@@ -59,11 +71,16 @@ const tiers = new Map([
   ['good-a', 'good'],
   ['forbidden', 'good'],
 ]);
-const request = () =>
+const request = (search = '?q=test') =>
   ({
-    url: 'http://localhost/api/search?q=test',
+    url: `http://localhost/api/search${search}`,
     signal: new AbortController().signal,
   }) as NextRequest;
+const readEvents = async (response: Response) =>
+  (await response.text())
+    .trim()
+    .split('\n\n')
+    .map((line) => JSON.parse(line.slice(6)));
 const video = (source: string) => ({
   source,
   source_name: source,
@@ -151,10 +168,10 @@ it('streams completion order immediately and supplies canonical source order on 
       .at(-1)[0]
       .apiSites.map((site: { key: string }) => site.key),
   ).toEqual(['good-z', 'good-a', 'unknown', 'offline']);
-  expect(setCachedSearchAggregate).toHaveBeenCalledWith(expect.anything(), [
-    video('good-z'),
-    video('offline'),
-  ]);
+  expect(setCachedSearchAggregate).toHaveBeenCalledWith(expect.anything(), {
+    results: [video('good-z'), video('offline')],
+    failedSources: [],
+  });
   expect(runSearchAggregation).toHaveBeenCalledWith(
     expect.objectContaining({ sourceHealthTiers: tiers }),
   );
@@ -212,4 +229,52 @@ it('keeps upstream exception details out of source_error events', async () => {
   } finally {
     log.mockRestore();
   }
+});
+
+it('reports failed sources from fresh and cached aggregates', async () => {
+  (runSearchAggregation as jest.Mock).mockImplementationOnce(
+    async (options) => {
+      options.onSourceError(sites[0], new Error('timeout'));
+      return [video('good-z')];
+    },
+  );
+  expect(await (await GET(request())).json()).toMatchObject({
+    totalSources: 4,
+    failedSources: [{ key: 'offline', name: 'offline' }],
+  });
+
+  (peekCachedSearchAggregate as jest.Mock).mockReturnValue({
+    fresh: true,
+    entry: { results: [video('good-z')], failedSources: ['offline'] },
+  });
+  const events = await readEvents(await streamGET(request()));
+  expect(events.filter((event) => event.type === 'source_error')).toEqual([
+    expect.objectContaining({ source: 'offline', sourceName: 'offline' }),
+  ]);
+  expect(events.at(-1)).toMatchObject({ type: 'complete' });
+});
+
+it('retries only the requested available sources and merges them into the cached aggregate', async () => {
+  (runSearchAggregation as jest.Mock).mockImplementationOnce(
+    async (options) => {
+      options.onSourceResult(sites[0], [video('offline')]);
+      return [video('offline')];
+    },
+  );
+  const events = await readEvents(
+    await streamGET(request('?q=test&retry=offline,unknown-key')),
+  );
+  expect(peekCachedSearchAggregate).not.toHaveBeenCalled();
+  expect(runSearchAggregation).toHaveBeenCalledWith(
+    expect.objectContaining({ apiSites: [sites[0]], retryFailed: true }),
+  );
+  expect(events[0]).toMatchObject({ type: 'start', totalSources: 1 });
+  expect(setCachedSearchAggregate).not.toHaveBeenCalled();
+  expect(mergeRetriedSearchAggregate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      apiSites: [sites[1], sites[2], sites[3], sites[0]],
+    }),
+    new Set(['offline']),
+    { results: [video('offline')], failedSources: [] },
+  );
 });

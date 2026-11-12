@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 
+import { useLiveInactivityStop } from '@/features/live/hooks/useLiveInactivityStop';
 import {
   readBufferedRanges,
   resolveLiveRecoveryPosition,
@@ -17,17 +18,15 @@ import {
 import {
   type LivePlaybackRoute,
   buildLiveM3u8ProxyUrl,
+  isDirectLiveRequestUrl,
   isLivePlaylistContextType,
+  rememberLiveServerRoute,
+  resolveInitialLiveRoute,
   rewriteLivePlaylistRequestUrl,
 } from '@/features/live/lib/livePlaybackRoute';
 import type { LiveChannel, LiveSource } from '@/features/live/types';
 import { createArtPlayerContextmenus } from '@/features/play/lib/artPlayerSettings';
 import { logHlsError } from '@/lib/hls-error-log';
-import {
-  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
-  LIVE_DIRECT_CONNECT_STORAGE_KEY,
-  readLiveDirectConnect,
-} from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   bindPlayerHoverControls,
@@ -48,6 +47,7 @@ import {
   destroyArtPlayer,
   ensureVideoSource,
 } from '@/lib/player-utils';
+import { isServerRelayPausedHlsError } from '@/lib/server-relay';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
 const LIVE_STALL_RECOVERY_DELAY_MS = 2500;
@@ -207,6 +207,7 @@ export function useLivePlayer({
   const loadedUrlRef = useRef('');
   const liveRouteRef = useRef<LivePlaybackRoute>('server');
   const liveSourceKeyRef = useRef('');
+  const liveStreamUrlRef = useRef('');
   const mutedAutoplayRequestedRef = useRef(false);
   const userPausedRef = useRef(false);
   const livePlaybackRecoveryRef = useRef(false);
@@ -214,6 +215,7 @@ export function useLivePlayer({
   const [liveRouteVersion, setLiveRouteVersion] = useState(0);
   const [retryVersion, setRetryVersion] = useState(0);
   const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [relayPaused, setRelayPaused] = useState(false);
   const loadingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -242,6 +244,7 @@ export function useLivePlayer({
   const doCleanup = () => {
     setUnsupportedType(null);
     setPlaybackFailed(false);
+    setRelayPaused(false);
     loadedUrlRef.current = '';
     liveRouteRef.current = 'server';
     liveSourceKeyRef.current = '';
@@ -257,6 +260,13 @@ export function useLivePlayer({
     doCleanup();
     setRetryVersion((version) => version + 1);
   };
+
+  const { stopped: inactivityStopped, resume: resumeAfterInactivity } =
+    useLiveInactivityStop({
+      streamKey: videoUrl,
+      isStreaming: () => artPlayerRef.current !== null,
+      onStop: doCleanup,
+    });
 
   const requestInitialLiveAutoplay = (video: HTMLVideoElement | null) => {
     if (userPausedRef.current) return;
@@ -283,7 +293,12 @@ export function useLivePlayer({
     };
 
     const preload = async () => {
-      if (!videoUrl || !artRef.current || !currentChannel) {
+      if (
+        inactivityStopped ||
+        !videoUrl ||
+        !artRef.current ||
+        !currentChannel
+      ) {
         return;
       }
 
@@ -298,9 +313,8 @@ export function useLivePlayer({
 
         if (cancelled || !artRef.current) return;
 
-        const initialRoute: LivePlaybackRoute = readLiveDirectConnect()
-          ? 'browser'
-          : 'server';
+        const initialRoute = resolveInitialLiveRoute(videoUrl);
+        liveStreamUrlRef.current = videoUrl;
         liveRouteRef.current = initialRoute;
         const targetUrl = buildLiveM3u8ProxyUrl({
           rawUrl: videoUrl,
@@ -323,6 +337,7 @@ export function useLivePlayer({
           return;
         }
         setPlaybackFailed(false);
+        setRelayPaused(false);
         mutedAutoplayRequestedRef.current = false;
         userPausedRef.current = false;
         livePlaybackRecoveryRef.current = false;
@@ -387,6 +402,22 @@ export function useLivePlayer({
 
           let videoRuntimeCleaned = false;
           const recoveryController = createHlsFatalRecoveryController();
+          const directRoute = liveRouteRef.current === 'browser';
+          let directVerified = false;
+          let routeFallbackRequested = false;
+
+          // 直连起播前任何直连请求失败都立即改走服务器；起播后只有致命错误才回落
+          const tryFallbackToServer = (data: any) => {
+            if (!directRoute || routeFallbackRequested) return false;
+            if (data?.type !== Hls.ErrorTypes.NETWORK_ERROR) return false;
+            if (directVerified && !data.fatal) return false;
+            const requestUrl = data.frag?.url ?? data.context?.url ?? data.url;
+            if (!isDirectLiveRequestUrl(requestUrl)) return false;
+            routeFallbackRequested = true;
+            rememberLiveServerRoute(liveStreamUrlRef.current);
+            setLiveRouteVersion((version) => version + 1);
+            return true;
+          };
 
           let alignedToLiveEdge = false;
           let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -510,6 +541,7 @@ export function useLivePlayer({
           });
 
           hls.on(Hls.Events.FRAG_LOADED, function (_event: any, data: any) {
+            directVerified = true;
             recoveryController.handleFragmentLoaded(data?.frag);
           });
 
@@ -521,7 +553,17 @@ export function useLivePlayer({
               expectedAbort:
                 videoRuntimeCleaned || isManagedVideoExpectedAbort(video),
             });
-            if (logResult.expectedAbort) {
+            if (logResult.expectedAbort || tryFallbackToServer(data)) {
+              return;
+            }
+            // 中转暂停期间重试无意义，首个被拒请求即停止并提示
+            const relayRejected = isServerRelayPausedHlsError(data);
+            if (relayRejected) {
+              loadedUrlRef.current = '';
+              cleanupPlayer(artPlayerRef);
+              setLiveVideoLoading(false);
+              setRelayPaused(true);
+              setPlaybackFailed(true);
               return;
             }
 
@@ -650,6 +692,7 @@ export function useLivePlayer({
     artRef,
     currentChannel,
     currentSourceRef,
+    inactivityStopped,
     liveRouteVersion,
     loading,
     retryVersion,
@@ -671,30 +714,6 @@ export function useLivePlayer({
       cleanupPlayer(artPlayerRef);
     };
   }, [clearLiveLoadingTimer]);
-
-  useEffect(() => {
-    const handleRoutePreferenceChange = () => {
-      setLiveRouteVersion((version) => version + 1);
-    };
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === LIVE_DIRECT_CONNECT_STORAGE_KEY) {
-        handleRoutePreferenceChange();
-      }
-    };
-
-    window.addEventListener(
-      LIVE_DIRECT_CONNECT_CHANGE_EVENT,
-      handleRoutePreferenceChange,
-    );
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener(
-        LIVE_DIRECT_CONNECT_CHANGE_EVENT,
-        handleRoutePreferenceChange,
-      );
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -726,6 +745,9 @@ export function useLivePlayer({
     artPlayerRef,
     cleanupPlayer: doCleanup,
     playbackFailed,
+    relayPaused,
     retryPlayback,
+    inactivityStopped,
+    resumeAfterInactivity,
   };
 }

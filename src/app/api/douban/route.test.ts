@@ -55,10 +55,12 @@ describe('douban route input validation', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetchDoubanData).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'tag=%E7%A7%91%E5%B9%BB%20%26%20%E6%82%AC%E7%96%91',
-      ),
-    );
+    expect(response.headers.get('Cache-Control')).toBe('private, max-age=300');
+    expect(response.headers.has('CDN-Cache-Control')).toBe(false);
+    expect(response.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+    expect(response.headers.has('Netlify-Vary')).toBe(false);
+    const target = new URL((fetchDoubanData as jest.Mock).mock.calls.at(-1)[0]);
+    expect(target.searchParams.get('tag')).toBe('科幻 & 悬疑');
+    expect(target.searchParams.get('sort')).toBe('recommend');
   });
 });

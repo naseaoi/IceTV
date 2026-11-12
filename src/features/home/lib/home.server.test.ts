@@ -3,7 +3,7 @@
 import { setImmediate } from 'node:timers';
 
 jest.mock('@/features/bangumi/lib/bangumi', () => ({
-  getCachedBangumiCalendarData: jest.fn(() => []),
+  getBangumiCalendarData: jest.fn(async () => []),
 }));
 jest.mock('@/lib/config', () => ({
   getPublicConfig: jest.fn(async () => ({ DoubanImageProxyType: 'direct' })),
@@ -38,7 +38,7 @@ function hotItem(id: string) {
   };
 }
 
-const HERO_INTRO_WAIT_MS = 800;
+const HOME_UPSTREAM_WAIT_MS = 800;
 
 describe('home server hero intros', () => {
   let getHomeInitialData: typeof import('./home.server').getHomeInitialData;
@@ -79,7 +79,7 @@ describe('home server hero intros', () => {
   async function loadPastWaitBudget() {
     const page = getHomeInitialData();
     await flushBackground();
-    jest.advanceTimersByTime(HERO_INTRO_WAIT_MS);
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS);
     return page;
   }
 
@@ -181,5 +181,193 @@ describe('home server hero intros', () => {
     expect(page.heroItems.every((item) => item.intro === undefined)).toBe(true);
     expect(loadIntro).not.toHaveBeenCalled();
     expect(fetchDoubanData).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('home server bangumi calendar', () => {
+  let getHomeInitialData: typeof import('./home.server').getHomeInitialData;
+  let getBangumiCalendarData: jest.Mock;
+
+  const calendar = [
+    {
+      weekday: { en: 'Sun' },
+      items: [
+        {
+          id: 1,
+          name: 'Anime',
+          name_cn: '动画',
+          rating: { score: 8 },
+          air_date: '2026-01-01',
+          images: { large: '', common: '', medium: '', small: '', grid: '' },
+        },
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.resetModules();
+    ({ getHomeInitialData } = require('./home.server'));
+    ({ getBangumiCalendarData } = require('@/features/bangumi/lib/bangumi'));
+    const { fetchDoubanData } = require('@/lib/douban');
+    fetchDoubanData.mockResolvedValue({ items: [] });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('renders the calendar when it loads within the wait budget', async () => {
+    getBangumiCalendarData.mockResolvedValue(calendar);
+
+    const page = await getHomeInitialData();
+
+    expect(page.bangumiCalendarData).toEqual(calendar);
+  });
+
+  it('leaves the calendar to the client when loading is slow', async () => {
+    const pending = deferred<typeof calendar>();
+    getBangumiCalendarData.mockReturnValue(pending.promise);
+
+    const page = getHomeInitialData();
+    await flushBackground();
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS);
+
+    expect((await page).bangumiCalendarData).toEqual([]);
+  });
+
+  it('leaves calendars without any items to the client', async () => {
+    getBangumiCalendarData.mockResolvedValue([
+      { weekday: { en: 'Sun' }, items: [] },
+    ]);
+
+    const page = await getHomeInitialData();
+
+    expect(page.bangumiCalendarData).toEqual([]);
+  });
+});
+
+describe('home server recommendations', () => {
+  it('requests one full feed page so the category feed continues without gaps', async () => {
+    jest.resetModules();
+    const { getHomeInitialData } = require('./home.server');
+    const { fetchDoubanData } = require('@/lib/douban');
+    const { DOUBAN_PAGE_SIZE } = require('@/features/douban/lib/grid-layout');
+    fetchDoubanData.mockResolvedValue({ items: [] });
+
+    await getHomeInitialData();
+
+    const feedUrls = fetchDoubanData.mock.calls
+      .map(([url]: [string]) => new URL(url))
+      .filter((url: URL) => url.pathname.includes('/recent_hot/'));
+    expect(feedUrls.length).toBeGreaterThan(0);
+    for (const url of feedUrls) {
+      expect(url.searchParams.get('start')).toBe('0');
+      expect(url.searchParams.get('limit')).toBe(String(DOUBAN_PAGE_SIZE));
+    }
+  });
+});
+
+describe('home server recommendation wait budget', () => {
+  let getHomeInitialData: typeof import('./home.server').getHomeInitialData;
+  let fetchDoubanData: jest.Mock;
+  let loadIntro: jest.Mock;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.resetModules();
+    ({ getHomeInitialData } = require('./home.server'));
+    ({ fetchDoubanData } = require('@/lib/douban'));
+    loadIntro = jest.fn(async () => ({ intro: 'Intro' }));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  function mockFeeds(feeds: Record<string, Promise<unknown>>) {
+    fetchDoubanData.mockImplementation((url: string) => {
+      const feed = Object.keys(feeds).find((path) => url.includes(path));
+      return feed ? feeds[feed] : loadIntro(url);
+    });
+  }
+
+  const readyFeed = (prefix: string) =>
+    Promise.resolve({
+      items: ['1', '2', '3'].map((id) => hotItem(`${prefix}${id}`)),
+    });
+
+  it('leaves slow recommendations and the hero to the client and keeps loading in the background', async () => {
+    const slowMovies = deferred<unknown>();
+    mockFeeds({
+      'recent_hot/movie': slowMovies.promise,
+      'type=tv': readyFeed('2'),
+      'type=show': readyFeed('3'),
+    });
+
+    const page = getHomeInitialData();
+    await flushBackground();
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS);
+    const cold = await page;
+
+    expect(cold.hotMovies).toEqual([]);
+    expect(cold.hotTvShows).toHaveLength(3);
+    expect(cold.hotVarietyShows).toHaveLength(3);
+    expect(cold.heroItems).toEqual([]);
+    expect(loadIntro).not.toHaveBeenCalled();
+
+    slowMovies.resolve({ items: ['1', '2', '3'].map(hotItem) });
+    await flushBackground();
+
+    const warmed = await getHomeInitialData();
+    expect(warmed.hotMovies.map((item) => item.id)).toEqual(['1', '2', '3']);
+    expect(warmed.heroItems.map((item) => item.type)).toContain('movie');
+    expect(
+      fetchDoubanData.mock.calls.filter(([url]: [string]) =>
+        url.includes('recent_hot/movie'),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('keeps the server hero when only variety shows are slow', async () => {
+    mockFeeds({
+      'recent_hot/movie': readyFeed('1'),
+      'type=tv': readyFeed('2'),
+      'type=show': deferred<unknown>().promise,
+    });
+
+    const page = getHomeInitialData();
+    await flushBackground();
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS);
+    const result = await page;
+
+    expect(result.hotVarietyShows).toEqual([]);
+    expect(result.heroItems).toHaveLength(5);
+    expect(result.heroItems.every((item) => item.intro === 'Intro')).toBe(true);
+  });
+
+  it('shares one wait budget between recommendations and hero intros', async () => {
+    const lateMovies = deferred<unknown>();
+    mockFeeds({
+      'recent_hot/movie': lateMovies.promise,
+      'type=tv': readyFeed('2'),
+      'type=show': readyFeed('3'),
+    });
+    loadIntro.mockReturnValue(deferred<unknown>().promise);
+
+    const page = getHomeInitialData();
+    await flushBackground();
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS - 100);
+    lateMovies.resolve({ items: ['1', '2', '3'].map(hotItem) });
+    await flushBackground();
+    jest.advanceTimersByTime(100);
+    const result = await page;
+
+    expect(result.heroItems).toHaveLength(5);
+    expect(result.heroItems.every((item) => item.intro === undefined)).toBe(
+      true,
+    );
   });
 });

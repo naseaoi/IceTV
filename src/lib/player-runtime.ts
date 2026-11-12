@@ -1,5 +1,8 @@
 import type HlsType from 'hls.js';
 
+import type { SourcePlaybackRoute } from '@/lib/proxy-modes';
+import { isServerRelayPausedHlsError } from '@/lib/server-relay';
+
 type PlayerModules = {
   Artplayer: any;
   Hls: any;
@@ -86,7 +89,7 @@ export type ManagedVideoElement = HTMLVideoElement & {
   } | null;
   /** 当前会话内该 video 实际使用的流量路由，供起播成功后清理短期兜底记忆。 */
   __icetvUsingServerProxy?: boolean;
-  /** browser 起播失败时，挂给外层事件复用的同源 server 回退入口。 */
+  // 自动线路加载超时时尝试本意图尚未使用的另一线路，固定线路返回 false。
   __icetvSwitchToServerProxy?: ((reason: string) => boolean) | null;
   /** 预期媒体请求中止截止时间 */
   __icetvExpectedAbortUntil?: number;
@@ -117,8 +120,15 @@ export function preloadPlayerModules(): void {
 }
 
 /** 预取 m3u8 代理地址（与模块加载并行），填充服务端缓存 */
-export function prefetchM3U8(proxyUrl: string): void {
-  fetch(proxyUrl, { cache: 'no-store' }).catch(() => {});
+export function prefetchM3U8(
+  proxyUrl: string,
+  route: Pick<SourcePlaybackRoute, 'directManifest'>,
+): void {
+  if (route.directManifest) return;
+  fetch(proxyUrl, {
+    cache: 'no-store',
+    headers: { 'X-IceTV-Warm-Only': '1' },
+  }).catch(() => {});
 }
 
 export function getManagedVideo(video: HTMLVideoElement): ManagedVideoElement {
@@ -507,9 +517,57 @@ export function bindPlayerMobileControls(
   return cleanup;
 }
 
+type RetryDecider = (
+  retryConfig: unknown,
+  retryCount: number,
+  isTimeout: boolean,
+  loaderResponse: unknown,
+  retry: boolean,
+) => boolean;
+
+type LoaderConfig = {
+  loadPolicy?: {
+    errorRetry?: { shouldRetry?: RetryDecider } | null;
+  };
+};
+
+// 服务器中转暂停时重试注定失败，跳过 hls.js 内部重试，让播放层首个错误即可处理
+function skipRetryWhenRelayPaused(
+  loadConfig: unknown,
+  getNetworkDetails: () => unknown,
+): unknown {
+  const config = loadConfig as LoaderConfig | null;
+  const errorRetry = config?.loadPolicy?.errorRetry;
+  if (!errorRetry) return loadConfig;
+  const shouldRetry = errorRetry.shouldRetry;
+  return {
+    ...config,
+    loadPolicy: {
+      ...config.loadPolicy,
+      errorRetry: {
+        ...errorRetry,
+        shouldRetry: ((retryConfig, retryCount, isTimeout, response, retry) => {
+          if (
+            isServerRelayPausedHlsError({ networkDetails: getNetworkDetails() })
+          ) {
+            return false;
+          }
+          return shouldRetry
+            ? shouldRetry(retryConfig, retryCount, isTimeout, response, retry)
+            : retry;
+        }) satisfies RetryDecider,
+      },
+    },
+  };
+}
+
 type HlsLoaderFactoryOptions = {
   rewriteContext?: (context: LoaderContext) => void;
-  transformManifestText?: (content: string, context: LoaderContext) => string;
+  transformManifestText?: (
+    content: string,
+    context: LoaderContext,
+    manifestUrl: string,
+  ) => string;
 };
 
 /**
@@ -523,6 +581,7 @@ export function createHlsLoaderClass(
     constructor(config: unknown) {
       super(config);
 
+      const instance = this as unknown as { loader?: unknown };
       const load = this.load.bind(this);
       this.load = function (
         context: unknown,
@@ -547,18 +606,23 @@ export function createHlsLoaderClass(
             callbackContext: unknown,
             networkDetails?: unknown,
           ) {
-            const nextResponse = response as { data?: unknown };
+            const nextResponse = response as { data?: unknown; url?: string };
             if (typeof nextResponse.data === 'string') {
               nextResponse.data = options.transformManifestText!(
                 nextResponse.data,
                 loaderContext,
+                nextResponse.url || loaderContext.url || '',
               );
             }
             return onSuccess(response, stats, callbackContext, networkDetails);
           };
         }
 
-        load(context, loadConfig, callbacks);
+        load(
+          context,
+          skipRetryWhenRelayPaused(loadConfig, () => instance.loader),
+          callbacks,
+        );
       };
     }
   };

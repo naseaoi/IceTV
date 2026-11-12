@@ -5,6 +5,9 @@ import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import {
   markPlayRecordUpdateRead,
+  MAX_DELETE_PLAY_RECORD_KEYS,
+  MAX_PLAY_RECORD_KEY_LENGTH,
+  MAX_READ_PLAY_RECORD_KEYS,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
@@ -21,6 +24,25 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const { searchParams } = new URL(request.url);
+    if (searchParams.has('keys')) {
+      const keys = searchParams.getAll('keys');
+      if (
+        keys.length > MAX_READ_PLAY_RECORD_KEYS ||
+        keys.some(
+          (key) =>
+            key.length > MAX_PLAY_RECORD_KEY_LENGTH || !parseStorageKey(key),
+        )
+      ) {
+        return NextResponse.json(
+          { error: '无效的播放记录键或查询数量超限' },
+          { status: 400 },
+        );
+      }
+      const records = await db.getPlayRecordsByKeys(guardResult.username, [
+        ...new Set(keys),
+      ]);
+      return NextResponse.json(records, { headers: NO_STORE_HEADERS });
+    }
     if (searchParams.get('format') === 'page') {
       const cursor = parsePlayRecordCursor(searchParams.get('cursor'));
       const page = await db.getPlayRecordPage(
@@ -28,6 +50,11 @@ export async function GET(request: NextRequest) {
         normalizePlayRecordLimit(searchParams.get('limit')),
         cursor?.time,
         cursor?.key,
+        searchParams.get('filter') === 'shelved'
+          ? 'shelved'
+          : searchParams.get('filter') === 'updated'
+            ? 'updated'
+            : undefined,
       );
       return NextResponse.json(page, {
         status: 200,
@@ -212,7 +239,40 @@ export async function DELETE(request: NextRequest) {
 
       await db.deletePlayRecord(username, parsed.source, parsed.id);
     } else {
-      await db.deleteAllPlayRecords(username);
+      const text = await request.text();
+      if (text.trim()) {
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          return NextResponse.json(
+            { error: 'Invalid JSON body' },
+            { status: 400 },
+          );
+        }
+        const keys =
+          body && typeof body === 'object' && 'keys' in body
+            ? body.keys
+            : undefined;
+        if (!Array.isArray(keys) || keys.length > MAX_DELETE_PLAY_RECORD_KEYS) {
+          return NextResponse.json(
+            { error: 'keys must be an array of at most 200 items' },
+            { status: 400 },
+          );
+        }
+        if (
+          keys.some((key) => typeof key !== 'string' || !parseStorageKey(key))
+        ) {
+          return NextResponse.json(
+            { error: 'Invalid key format' },
+            { status: 400 },
+          );
+        }
+        if (keys.length > 0)
+          await db.deletePlayRecords(username, [...new Set(keys)]);
+      } else {
+        await db.deleteAllPlayRecords(username);
+      }
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

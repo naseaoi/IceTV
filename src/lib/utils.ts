@@ -3,8 +3,8 @@ import he from 'he';
 import { toBangumiCoverProxyUrl } from '@/features/bangumi/lib/bangumi-cover-url';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
-  getUsableDoubanImageProxyType,
-  processDoubanImageUrl,
+  getDoubanImageCandidates,
+  isDoubanImageUrl,
 } from '@/lib/douban-image-url';
 import {
   readDoubanImageProxyType,
@@ -17,45 +17,58 @@ import {
   shouldProxySourceCover,
 } from '@/lib/source-cover-proxy';
 
-export function processImageUrl(
+export interface ImageCandidate {
+  url: string;
+  // 豆瓣「自动」通道名，用于记住回退成功的通道
+  doubanRoute?: string;
+  // 源站封面代理失败后的直连地址，加载成功则该 host 暂时改为直连
+  sourceDirectFallback?: boolean;
+}
+
+// 按尝试顺序给出封面地址：首项即默认地址，后续项为加载失败后的回退
+export function getImageCandidates(
   originalUrl: string,
   sourceCoverProxyMode?: SourceCoverProxyMode,
-): string {
-  if (!originalUrl) return originalUrl;
+  preferredDoubanRoute: string | null = null,
+): ImageCandidate[] {
+  if (!originalUrl) return [];
 
   const bangumiCoverProxyUrl = toBangumiCoverProxyUrl(originalUrl);
   if (bangumiCoverProxyUrl) {
-    return bangumiCoverProxyUrl;
+    return [{ url: bangumiCoverProxyUrl }, { url: originalUrl }];
   }
 
-  if (/^https:\/\/img\.doubanio\.cmliussss\.(net|com)\//i.test(originalUrl)) {
-    return originalUrl;
-  }
-
-  if (originalUrl.includes('doubanio.com')) {
-    const proxyType = getUsableDoubanImageProxyType(
-      readDoubanImageProxyType(),
-      Boolean(getAuthInfoFromBrowserCookie()?.username),
-    );
-    return processDoubanImageUrl(
-      originalUrl,
-      proxyType,
-      readDoubanImageProxyUrl(),
-    );
+  if (isDoubanImageUrl(originalUrl)) {
+    return getDoubanImageCandidates(originalUrl, readDoubanImageProxyType(), {
+      proxyUrl: readDoubanImageProxyUrl(),
+      isAuthenticated: Boolean(getAuthInfoFromBrowserCookie()?.username),
+      preferredRoute: preferredDoubanRoute,
+    }).map(({ url, route }) => ({ url, doubanRoute: route }));
   }
 
   try {
     const url = new URL(originalUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return originalUrl;
+      return [{ url: originalUrl }];
     }
     const mode = normalizeSourceCoverProxyMode(sourceCoverProxyMode);
-    return shouldProxySourceCover(url.href, mode)
-      ? buildSourceCoverProxyUrl(url.href)
-      : url.href;
+    if (!shouldProxySourceCover(url.href, mode)) return [{ url: url.href }];
+    const proxyUrl = buildSourceCoverProxyUrl(url.href);
+    return mode === 'auto'
+      ? [{ url: proxyUrl }, { url: url.href, sourceDirectFallback: true }]
+      : [{ url: proxyUrl }];
   } catch {
-    return originalUrl;
+    return [{ url: originalUrl }];
   }
+}
+
+export function processImageUrl(
+  originalUrl: string,
+  sourceCoverProxyMode?: SourceCoverProxyMode,
+): string {
+  return (
+    getImageCandidates(originalUrl, sourceCoverProxyMode)[0]?.url ?? originalUrl
+  );
 }
 
 function decodeHtmlText(text: string): string {

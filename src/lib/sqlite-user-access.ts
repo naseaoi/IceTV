@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 
 import { getOwnerUsername } from '@/lib/env.server';
 import {
@@ -11,6 +12,8 @@ import {
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
+import { accessNoticeAction, accessPermissionsKey } from '@/lib/user-notice';
+import { noticeInsert } from '@/lib/user-notice-storage';
 import { normalizeUsername } from '@/lib/username';
 import type { AdminConfig } from '@/types/admin';
 
@@ -19,39 +22,24 @@ export class SqliteUserAccessStore {
 
   get(username: string): UserAccess | null {
     username = normalizeUsername(username);
-    const row = this.db
+    const rows = this.db
       .prepare(
-        'SELECT username, role, banned, enabled_apis FROM user_access WHERE username = ? AND (username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = user_access.username))',
+        'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a LEFT JOIN user_group_members m ON m.username = a.username WHERE a.username = ? AND (a.username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = a.username)) ORDER BY m.position, m.group_name',
       )
-      .get(username, normalizeUsername(getOwnerUsername() || '')) as
-      | Parameters<typeof userAccessFromRow>[0]
-      | undefined;
-    if (!row)
+      .all(
+        username,
+        normalizeUsername(getOwnerUsername() || ''),
+      ) as (Parameters<typeof userAccessFromRow>[0] & {
+      group_name: string | null;
+    })[];
+    if (!rows[0])
       return username === normalizeUsername(getOwnerUsername() || '')
         ? effectiveUserAccess({ username, role: 'user' })
         : null;
-    const tags = this.db
-      .prepare(
-        'SELECT group_name FROM user_group_members WHERE username = ? ORDER BY position, group_name',
-      )
-      .all(username) as { group_name: string }[];
     return userAccessFromRow(
-      row,
-      tags.map((row) => row.group_name),
+      rows[0],
+      rows.flatMap((row) => (row.group_name === null ? [] : [row.group_name])),
     );
-  }
-
-  all(): UserAccess[] {
-    const rows = this.db
-      .prepare('SELECT username FROM user_access ORDER BY username')
-      .all() as { username: string }[];
-    const result = rows
-      .map((row) => this.get(row.username))
-      .filter((user): user is UserAccess => user !== null);
-    const owner = normalizeUsername(getOwnerUsername() || '');
-    if (owner && !result.some((row) => row.username === owner))
-      result.push(this.get(owner)!);
-    return result;
   }
 
   put(user: UserAccess): void {
@@ -75,13 +63,39 @@ export class SqliteUserAccessStore {
   ): number {
     return this.db
       .transaction(() => {
+        const configRow = this.db
+          .prepare('SELECT config_json FROM admin_config WHERE id = 1')
+          .get() as { config_json: string } | undefined;
+        const config = configRow
+          ? (JSON.parse(configRow.config_json) as AdminConfig)
+          : null;
         let count = 0;
         for (const username of [
           ...new Set(usernames.map(normalizeUsername)),
         ].sort()) {
           const user = this.get(username);
           if (!user || !canManageUserAccess(user, guard)) continue;
-          this.put({ ...user, ...patch });
+          const next = effectiveUserAccess({ ...user, ...patch });
+          this.put(next);
+          const change = accessNoticeAction(user, next);
+          const action =
+            change === 'permissions-changed' &&
+            config &&
+            accessPermissionsKey(user, config) ===
+              accessPermissionsKey(next, config)
+              ? null
+              : change;
+          if (action) {
+            const event = noticeInsert(
+              'sqlite',
+              username,
+              randomUUID(),
+              'account-change',
+              action,
+              {},
+            );
+            this.db.prepare(event.sql).run(...event.params);
+          }
           count++;
         }
         return count;

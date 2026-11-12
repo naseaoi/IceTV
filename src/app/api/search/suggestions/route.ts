@@ -4,7 +4,11 @@ import {
   normalizeSearchQueryInput,
   shouldRequestSearchSuggestions,
 } from '@/features/search/lib/searchQuery';
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import {
+  ActiveUserInfo,
+  isGuardFailure,
+  requireActiveUser,
+} from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
@@ -34,7 +38,7 @@ export async function GET(request: NextRequest) {
     const suggestions = await generateSuggestions(
       config,
       query,
-      guardResult.username,
+      guardResult,
       request.signal,
     );
 
@@ -51,7 +55,7 @@ export async function GET(request: NextRequest) {
 async function generateSuggestions(
   config: Readonly<AdminConfig>,
   query: string,
-  username: string,
+  auth: ActiveUserInfo,
   signal?: AbortSignal,
 ): Promise<
   Array<{
@@ -63,7 +67,7 @@ async function generateSuggestions(
   const queryLower = query.toLowerCase();
 
   const [availableSites, sourceHealthTiers] = await Promise.all([
-    getAvailableApiSites(username, config),
+    getAvailableApiSites(auth.username, config, auth.userAccess),
     getSourceHealthTiers(),
   ]);
   const apiSites = rankSourcesByHealth(availableSites, sourceHealthTiers);

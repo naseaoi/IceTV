@@ -34,11 +34,14 @@ export function writeStorage(key: string, value: string): boolean {
   }
 }
 
-export function removeStorage(key: string): void {
+export function removeStorage(key: string): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
   try {
-    getStorage()?.removeItem(key);
+    storage.removeItem(key);
+    return true;
   } catch {
-    // 存储不可用时无可删除
+    return false;
   }
 }
 

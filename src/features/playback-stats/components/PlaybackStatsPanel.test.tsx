@@ -68,6 +68,7 @@ function work(title: string, watchSeconds: number): PlaybackTopWork {
     videoId: title,
     watchSeconds,
     sessionCount: 1,
+    episodeCount: 1,
     lastWatchedAt: 0,
   };
 }
@@ -93,6 +94,8 @@ function stats(
       watchSeconds: seconds[index],
     })),
     topWorks,
+    hours: Array<number>(24).fill(0),
+    currentStreak: 0,
   };
 }
 

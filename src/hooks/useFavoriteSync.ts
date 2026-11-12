@@ -15,15 +15,24 @@ export function useFavoriteSync(
   // 初始收藏状态
   useEffect(() => {
     if (!source || !id) return;
+    let active = true;
+    const unsubscribe = subscribeToDataUpdates('favoritesUpdated', () => {
+      active = false;
+    });
     (async () => {
       try {
         const fav = await checkIsFavorited(source, id);
+        if (!active) return;
         setFavorited(fav);
         onSync?.(fav);
       } catch (err) {
         console.error('检查收藏状态失败:', err);
       }
     })();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [source, id, onSync, setFavorited]);
 
   // 收藏数据变化订阅

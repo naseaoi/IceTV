@@ -7,6 +7,7 @@ import { db } from '@/lib/db';
 import {
   ResourceLimitError,
   resourceLimitResponse,
+  UpstreamCooldownError,
 } from '@/lib/server-resource-errors';
 import type { SharedResourceStore } from '@/lib/shared-resource-store';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
@@ -79,7 +80,7 @@ describe('upstream resources', () => {
       );
       expect(cancel).toHaveBeenCalledTimes(1);
       expect(leaseCount()).toBe(0);
-      const acquire = jest.spyOn(store, 'acquire');
+      const acquire = jest.spyOn(store, 'acquireLeases');
       const consume = jest.spyOn(store, 'consume');
       const read = jest.spyOn(store, 'getCooldown');
       jest.mocked(Date.now).mockReturnValue(now + 1200);
@@ -158,6 +159,64 @@ describe('upstream resources', () => {
       await (
         await withUpstreamResponse('https://up.example/a', origin, { store })
       ).body!.cancel();
+      expect(origin).toHaveBeenCalledTimes(1);
+    });
+
+    it('isolates proxy cooldowns from direct and other exits, including shared storage reads', async () => {
+      const scope = 'http://127.0.0.1:7891';
+      const otherScope = 'http://127.0.0.1:7892';
+      const limitedOrigin = jest.fn(async () => limited(429, '30'));
+      await expect(
+        withUpstreamResponse('https://UP.example.:8443/a', limitedOrigin, {
+          store,
+          cooldownScope: scope,
+        }),
+      ).rejects.toBeInstanceOf(UpstreamCooldownError);
+      expect(leaseCount()).toBe(0);
+
+      const sharedStore = new SqliteResourceStore(
+        (storage as unknown as { db: Database.Database }).db,
+      );
+      const origin = jest.fn(loader);
+      for (const resourceStore of [store, sharedStore]) {
+        await expect(
+          withUpstreamResponse('http://up.example/b', origin, {
+            store: resourceStore,
+            cooldownScope: scope,
+          }),
+        ).rejects.toBeInstanceOf(UpstreamCooldownError);
+      }
+      expect(origin).not.toHaveBeenCalled();
+      expect(limitedOrigin).toHaveBeenCalledTimes(1);
+
+      for (const cooldownScope of [undefined, otherScope]) {
+        const response = await withUpstreamResponse(
+          'https://up.example/c',
+          origin,
+          { store: sharedStore, cooldownScope },
+        );
+        expect((await response.arrayBuffer()).byteLength).toBe(16);
+      }
+      expect(origin).toHaveBeenCalledTimes(2);
+      expect(leaseCount()).toBe(0);
+    });
+
+    it('keeps direct host cooldown separate from a proxy exit', async () => {
+      await expect(
+        withUpstreamResponse('https://up.example/a', async () => limited(), {
+          store,
+        }),
+      ).rejects.toBeInstanceOf(UpstreamCooldownError);
+      const origin = jest.fn(loader);
+      const response = await withUpstreamResponse(
+        'https://up.example/b',
+        origin,
+        { store, cooldownScope: 'http://127.0.0.1:7891' },
+      );
+      await response.arrayBuffer();
+      await expect(
+        withUpstreamResponse('https://up.example/c', origin, { store }),
+      ).rejects.toBeInstanceOf(UpstreamCooldownError);
       expect(origin).toHaveBeenCalledTimes(1);
     });
 
@@ -253,6 +312,59 @@ describe('upstream resources', () => {
       ).rejects.toMatchObject({ retryAfterSeconds: 30 });
       expect(origin).not.toHaveBeenCalled();
     });
+  });
+
+  it.each([
+    ['global', 503],
+    ['host', 503],
+    ['live', 503],
+    ['user', 429],
+  ] as const)(
+    'preserves %s refusal status without leaving partial leases',
+    async (dimension, status) => {
+      jest.spyOn(Date, 'now').mockReturnValue(1000);
+      const resourceKey = (await import('@/lib/shared-resource-quota.server'))
+        .resourceKey;
+      const identity =
+        dimension === 'host'
+          ? 'up.example'
+          : dimension === 'user'
+            ? 'user:one'
+            : 'all';
+      const key = resourceKey(`connections:media:${dimension}`, identity);
+      process.env.UPSTREAM_MEDIA_CONCURRENCY = '1';
+      process.env.UPSTREAM_MEDIA_HOST_CONCURRENCY = '1';
+      process.env.UPSTREAM_MEDIA_USER_CONCURRENCY = '1';
+      process.env.UPSTREAM_LIVE_CONCURRENCY = '1';
+      await store.acquireLeases(
+        [{ key, limit: 1 }],
+        'holder',
+        Date.now(),
+        Date.now() + 25_000,
+      );
+      const origin = jest.fn(loader);
+      await expect(
+        withUpstreamResponse('https://up.example/a', origin, {
+          store,
+          kind: 'live',
+          identity: 'user:one',
+        }),
+      ).rejects.toMatchObject({ status, retryAfterSeconds: 25 });
+      expect(origin).not.toHaveBeenCalled();
+      expect(leaseCount()).toBe(1);
+    },
+  );
+
+  it('fails closed when atomic admission fails', async () => {
+    jest
+      .spyOn(store, 'acquireLeases')
+      .mockRejectedValue(new Error('database down'));
+    const origin = jest.fn(loader);
+    await expect(
+      withUpstreamResponse('https://up.example/a', origin, { store }),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(origin).not.toHaveBeenCalled();
+    expect(leaseCount()).toBe(0);
   });
 
   it('caps fifteen concurrent probe users at eight without consuming playback slots', async () => {
@@ -550,7 +662,7 @@ describe('upstream resources', () => {
   });
 
   it('releases leases once when aborted before the origin responds', async () => {
-    const release = jest.spyOn(store, 'release');
+    const release = jest.spyOn(store, 'releaseLeases');
     const parent = new AbortController();
     let started!: () => void;
     const originStarted = new Promise<void>((resolve) => {
@@ -573,24 +685,24 @@ describe('upstream resources', () => {
     parent.abort(new Error('disconnected'));
     await new Promise((resolve) => setImmediate(resolve));
     expect(leaseCount()).toBe(0);
-    expect(release).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(1);
     const cancel = jest.fn();
     respond(new Response(new ReadableStream({ cancel })));
     await expect(pending).rejects.toThrow('disconnected');
     expect(cancel).toHaveBeenCalled();
-    expect(release).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it('still releases leases acquired after an abort during admission', async () => {
     const parent = new AbortController();
-    const acquire = store.acquire.bind(store);
-    let admitHost!: () => void;
-    const hostTurn = new Promise<void>((resolve) => {
-      admitHost = resolve;
+    const acquire = store.acquireLeases.bind(store);
+    let admit!: () => void;
+    const admissionTurn = new Promise<void>((resolve) => {
+      admit = resolve;
     });
-    jest.spyOn(store, 'acquire').mockImplementation(async (key, ...rest) => {
-      if (key.startsWith('connections:metadata:host:')) await hostTurn;
-      return acquire(key, ...rest);
+    jest.spyOn(store, 'acquireLeases').mockImplementation(async (...args) => {
+      await admissionTurn;
+      return acquire(...args);
     });
     const origin = jest.fn(loader);
     const pending = withUpstreamResponse('https://up.example/a', origin, {
@@ -598,9 +710,9 @@ describe('upstream resources', () => {
       signal: parent.signal,
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(leaseCount()).toBe(1);
+    expect(leaseCount()).toBe(0);
     parent.abort(new Error('disconnected'));
-    admitHost();
+    admit();
     await expect(pending).rejects.toThrow('disconnected');
     expect(origin).not.toHaveBeenCalled();
     expect(leaseCount()).toBe(0);
@@ -608,7 +720,7 @@ describe('upstream resources', () => {
 
   it('renews long responses and aborts if ownership is lost', async () => {
     jest.useFakeTimers('modern');
-    const renew = jest.spyOn(store, 'renew');
+    const renew = jest.spyOn(store, 'renewLeases');
     const response = await withUpstreamResponse(
       'https://up.example/a',
       async () => new Response(new ReadableStream()),
@@ -616,7 +728,7 @@ describe('upstream resources', () => {
     );
     jest.advanceTimersByTime(10_000);
     for (let step = 0; step < 12; step += 1) await Promise.resolve();
-    expect(renew).toHaveBeenCalledTimes(2);
+    expect(renew).toHaveBeenCalledTimes(1);
     renew.mockResolvedValue(false);
     const body = response.text();
     jest.advanceTimersByTime(10_000);

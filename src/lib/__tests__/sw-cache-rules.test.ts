@@ -1,46 +1,20 @@
 import {
-  excludeDefaultApiRuntimeCache,
+  composeRuntimeCaching,
+  shouldBypassCrossOriginImageCache,
   shouldHandleBangumiCoverCache,
-  shouldHandleExternalCoverCache,
   shouldHandleImageProxyCache,
-  shouldHandleJsonApiCache,
-  shouldHandleNextImageCache,
   shouldHandleVodSegmentCache,
 } from '../sw-cache-rules';
 
-describe('excludeDefaultApiRuntimeCache', () => {
-  it('removes the default same-origin api cache rule', () => {
-    const apiRule = {
-      matcher: () => true,
-      handler: { cacheName: 'apis' },
-    };
-    const otherRule = {
-      matcher: () => true,
-      handler: {},
-    };
+describe('composeRuntimeCaching', () => {
+  it('places custom rules before defaults and drops the default api cache', () => {
+    const customRule = { matcher: () => true, handler: { cacheName: 'mine' } };
+    const apiRule = { matcher: () => true, handler: { cacheName: 'apis' } };
+    const catchAllRule = { matcher: /.*/i, handler: {} };
 
-    expect(excludeDefaultApiRuntimeCache([apiRule, otherRule])).toEqual([
-      otherRule,
-    ]);
-  });
-});
-
-describe('shouldHandleJsonApiCache', () => {
-  it('caches reusable read APIs only', () => {
     expect(
-      shouldHandleJsonApiCache({
-        sameOrigin: true,
-        method: 'GET',
-        pathname: '/api/douban/recommends',
-      }),
-    ).toBe(true);
-    expect(
-      shouldHandleJsonApiCache({
-        sameOrigin: true,
-        method: 'GET',
-        pathname: '/api/search/suggestions',
-      }),
-    ).toBe(false);
+      composeRuntimeCaching([customRule], [apiRule, catchAllRule]),
+    ).toEqual([customRule, catchAllRule]);
   });
 });
 
@@ -68,13 +42,7 @@ describe('shouldHandleVodSegmentCache', () => {
 });
 
 describe('cover image cache matchers', () => {
-  it('matches optimized and proxied cover requests', () => {
-    expect(
-      shouldHandleNextImageCache({
-        pathname: '/_next/image',
-        search: '?url=https%3A%2F%2Fexample.com%2Fa.jpg&w=180&q=72',
-      }),
-    ).toBe(true);
+  it('matches proxied and bangumi cover requests', () => {
     expect(
       shouldHandleImageProxyCache({
         pathname: '/api/image-proxy',
@@ -87,21 +55,27 @@ describe('cover image cache matchers', () => {
       }),
     ).toBe(true);
   });
+});
 
-  it('matches supported external cover hosts only', () => {
+describe('shouldBypassCrossOriginImageCache', () => {
+  it('bypasses cross-origin images only', () => {
     expect(
-      shouldHandleExternalCoverCache({ hostname: 'img1.doubanio.com' }),
-    ).toBe(true);
-    expect(shouldHandleExternalCoverCache({ hostname: 'lain.bgm.tv' })).toBe(
-      true,
-    );
-    expect(
-      shouldHandleExternalCoverCache({
-        hostname: 'img.doubanio.cmliussss.net',
+      shouldBypassCrossOriginImageCache({
+        sameOrigin: false,
+        destination: 'image',
       }),
     ).toBe(true);
-    expect(shouldHandleExternalCoverCache({ hostname: 'example.com' })).toBe(
-      false,
-    );
+    expect(
+      shouldBypassCrossOriginImageCache({
+        sameOrigin: true,
+        destination: 'image',
+      }),
+    ).toBe(false);
+    expect(
+      shouldBypassCrossOriginImageCache({
+        sameOrigin: false,
+        destination: 'font',
+      }),
+    ).toBe(false);
   });
 });

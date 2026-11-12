@@ -4,17 +4,17 @@
 
 ## 按改动范围先读
 
-| 改动涉及                                             | 先读                                     |
-| ---------------------------------------------------- | ---------------------------------------- |
-| 存储层、配置写入、用户权限、邀请码、导入导出、新增表 | [数据与存储](docs/data-storage.md)       |
-| 评价、收藏库、观看状态、个人主页、关注、卡片菜单     | [评价与收藏](docs/reviews-favorites.md)  |
-| 消息、追更、关注动态                                 | [消息与追更](docs/messages-tracking.md)  |
-| 搜索、源站接入、源站健康与探测、逐集解析             | [源站与搜索](docs/sources-search.md)     |
-| 点播 / 直播播放、换源、分片缓存、弹幕、去广告        | [播放](docs/playback.md)                 |
-| 页面、组件、样式、后台界面                           | [前端界面](docs/frontend.md)             |
-| 部署、环境变量、缓存与回源预算、定时任务             | [部署](docs/deployment.md)               |
-| 性能相关改动                                         | [性能验证](docs/performance-baseline.md) |
-| 打 tag、发版                                         | [发布](docs/release.md)                  |
+| 改动涉及                                         | 先读                                     |
+| ------------------------------------------------ | ---------------------------------------- |
+| 存储层、配置写入、用户权限、邀请码、新增表       | [数据与存储](docs/data-storage.md)       |
+| 评价、收藏库、观看状态、个人主页、关注、卡片菜单 | [评价与收藏](docs/reviews-favorites.md)  |
+| 消息、追更、关注动态                             | [消息与追更](docs/messages-tracking.md)  |
+| 搜索、源站接入、源站健康与探测、逐集解析         | [源站与搜索](docs/sources-search.md)     |
+| 点播 / 直播播放、换源、分片缓存、弹幕、去广告    | [播放](docs/playback.md)                 |
+| 页面、组件、样式、后台界面                       | [前端界面](docs/frontend.md)             |
+| 部署、环境变量、缓存与回源预算、定时任务         | [部署](docs/deployment.md)               |
+| 性能相关改动                                     | [性能验证](docs/performance-baseline.md) |
+| 打 tag、发版                                     | [发布](docs/release.md)                  |
 
 ## 配置读写
 
@@ -39,7 +39,7 @@
 - 根布局经 `src/lib/auth-session.server.ts` 校验后把初始会话注入 `AuthProvider`，客户端统一用 `useAuthSession()` 消费。`/api/auth/session` 只用于显式重新验证，首次渲染与普通路由切换不调用。登录态失效派发 `AUTH_SESSION_LOST_EVENT`，由 `AuthProvider` 统一处理。
 - 受保护路由在对应 `layout.tsx` 挂 `AuthenticatedRoute`，确保门禁先于 `loading.tsx` 和页面内 `Suspense`。
 - 游客点受保护入口时先进目标页展示统一登录提示，**不在入口组件直接跳 `/login`**。
-- 前端拦截不算防线，服务端仍需对应 Guard。代理模式、播放路由统计等辅助接口同属登录后能力。公开能力仅限：首页、分类、版本信息、登录注册、受限封面缓存。
+- 前端拦截不算防线，服务端仍需对应 Guard。代理模式、播放路由统计等辅助接口同属登录后能力。公开能力仅限：首页、分类、版本信息、登录注册、受限封面缓存、Bangumi 日历（固定地址的共享缓存）。
 
 ## 外部请求与客户端 IP
 
@@ -66,7 +66,7 @@
 ## 本地设置
 
 - `localStorage` 只经 `src/lib/browser-storage.ts` 访问（ESLint 拦截直接访问），它统一处理服务端渲染、隐私模式与配额已满时的异常；写入返回是否成功，配额满时调用方可清理后重试。
-- 业务代码不直接拼 key 与默认值，各类设置用对应 helper（均在 `src/lib/`）：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Bangumi `bangumi-source.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`。新增设置先补 helper，再让设置面板和消费方接入。
+- 业务代码不直接拼 key 与默认值，各类设置用对应 helper（均在 `src/lib/`）：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`。新增设置先补 helper，再让设置面板和消费方接入。
 - 主题的存储键、默认值与首屏主题脚本都在 `src/lib/theme-preference.ts`，脚本与 `ThemeProvider` 共用常量；新增主题取值时同步改脚本里的取值判断。
 
 ## 错误处理

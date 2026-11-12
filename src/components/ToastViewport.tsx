@@ -390,11 +390,12 @@ export default function ToastViewport() {
     return current;
   });
 
+  // 层级须高于弹窗遮罩（z-[9999]）与下拉浮层（z-[10000]），否则会被压暗或遮挡
   return (
     <section
       aria-label='通知'
       aria-live='polite'
-      className='pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+4.75rem)] z-[2000]'
+      className='pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+4.75rem)] z-[10010]'
     >
       <ol
         className='relative'

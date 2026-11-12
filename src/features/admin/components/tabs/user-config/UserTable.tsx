@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo } from 'react';
+
 import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import {
   buttonStyles,
@@ -16,6 +18,7 @@ import {
   formatLastActive,
   formatLastActiveTooltip,
 } from '@/features/admin/lib/userActivity';
+import { resolveSourceAccessRule } from '@/lib/source-access';
 
 interface User {
   username: string;
@@ -26,8 +29,16 @@ interface User {
   tags?: string[];
 }
 
+interface UserTableSource {
+  key: string;
+  disabled?: boolean;
+  adminOnly?: boolean;
+}
+
 interface UserTableProps {
   users: User[];
+  userGroups: readonly { name: string; enabledApis?: string[] }[];
+  sources: readonly UserTableSource[];
   total?: number;
   selectedCount?: number;
   lastActiveAt: Record<string, number>;
@@ -50,8 +61,25 @@ interface UserTableProps {
   onDeleteUser: (username: string) => void;
 }
 
+function formatSourceAccess(
+  user: User,
+  userGroups: UserTableProps['userGroups'],
+  available: { staff: ReadonlySet<string>; user: ReadonlySet<string> },
+) {
+  const rule = resolveSourceAccessRule(user, userGroups);
+  if (!rule) return '无限制';
+  const pool = user.role === 'user' ? available.user : available.staff;
+  let count = 0;
+  rule.keys.forEach((key) => {
+    if (pool.has(key)) count += 1;
+  });
+  return rule.origin === 'group' ? `${count} 个（用户组）` : `${count} 个`;
+}
+
 export function UserTable({
   users,
+  userGroups,
+  sources,
   total = users.length,
   selectedCount,
   lastActiveAt,
@@ -74,6 +102,17 @@ export function UserTable({
   onDeleteUser,
 }: UserTableProps) {
   const selectionCount = selectedCount ?? selectedUsers.size;
+  const availableSources = useMemo(() => {
+    const enabled = sources.filter((source) => !source.disabled);
+    return {
+      staff: new Set(enabled.map((source) => source.key)),
+      user: new Set(
+        enabled
+          .filter((source) => !source.adminOnly)
+          .map((source) => source.key),
+      ),
+    };
+  }, [sources]);
 
   return (
     <div className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
@@ -243,9 +282,7 @@ export function UserTable({
                     {' · 用户组 '}
                     {user.tags?.length ? user.tags.join(', ') : '无'}
                     {' · 视频源 '}
-                    {user.enabledApis?.length
-                      ? `${user.enabledApis.length} 个`
-                      : '无限制'}
+                    {formatSourceAccess(user, userGroups, availableSources)}
                   </p>
                 </div>
                 <div className='shrink-0'>

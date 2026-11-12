@@ -5,6 +5,7 @@ import {
   resolveProxyUserAgent,
 } from '@/app/api/proxy/utils';
 import { getOptionalActiveUser } from '@/lib/api-auth';
+import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
@@ -17,7 +18,6 @@ import {
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
-import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -84,9 +84,6 @@ export async function GET(request: NextRequest) {
               accept: '*/*',
             },
           );
-          if (source) {
-            markSourceCors(source, responseAllowsCors(response.headers));
-          }
           return new Response(bufferToArrayBuffer(response.body), {
             status: response.status,
             statusText: response.statusText,
@@ -109,6 +106,16 @@ export async function GET(request: NextRequest) {
       headers: {
         'User-Agent': ua,
       },
+      resourceContext: {
+        identity:
+          authorization.via === 'session'
+            ? `user:${authorization.username}`
+            : `ip:${getClientIp(request)}`,
+      },
+      proxyPoolStickyKey: isLiveStream
+        ? undefined
+        : authorization.proxyPoolStickyKey,
+      useProxyPool: !isLiveStream,
       skipInitialValidation: true,
       timeoutMs,
     });
@@ -118,10 +125,6 @@ export async function GET(request: NextRequest) {
         { error: 'Failed to fetch key' },
         { status: 500 },
       );
-    }
-    // key 与 segment 一样属于真实媒体资源，请求成功后可作为跨域能力依据。
-    if (source) {
-      markSourceCors(source, responseAllowsCors(response.headers));
     }
     const keyData = await readArrayBufferLimited(response, MAX_KEY_BYTES);
     return new Response(keyData, {

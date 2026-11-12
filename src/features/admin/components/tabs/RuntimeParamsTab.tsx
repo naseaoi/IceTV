@@ -3,17 +3,14 @@
 import { ChevronDown } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import { RuntimeParamSection } from '@/features/admin/components/tabs/runtime-params/RuntimeParamSection';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { RUNTIME_PARAMS_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
-import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import {
   ADVANCED_RUNTIME_PARAM_GROUPS,
   COMMON_RUNTIME_PARAM_GROUPS,
 } from '@/features/admin/lib/runtime-param-fields';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   applyClientServerConfig,
   fetchClientServerConfig,
@@ -24,6 +21,7 @@ import {
   RuntimeParamSettings,
   runtimeParamsFromConfig,
 } from '@/lib/runtime-params';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 const RuntimeParamsTab = ({
@@ -37,8 +35,8 @@ const RuntimeParamsTab = ({
   onSavingChange?: (saving: boolean) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { withLoading } = useLoadingState();
+  const [error, setError] = useState('');
   const [runtimeParams, setRuntimeParams] = useState<RuntimeParamSettings>(
     DEFAULT_RUNTIME_PARAMS,
   );
@@ -65,6 +63,7 @@ const RuntimeParamsTab = ({
   const handleSave = async () => {
     if (savingRef.current || !runtimeParamsDirty) return;
 
+    setError('');
     savingRef.current = true;
     onSavingChange?.(true);
 
@@ -82,11 +81,10 @@ const RuntimeParamsTab = ({
         }
 
         setBaselineRuntimeParams(normalizedRuntimeParams);
-        showSuccess('保存成功');
         await refreshConfig();
       });
     } catch (err) {
-      showError(err instanceof Error ? err.message : '保存失败', showAlert);
+      setError(getErrorMessage(err, '保存失败'));
     } finally {
       savingRef.current = false;
       onSavingChange?.(false);
@@ -118,6 +116,11 @@ const RuntimeParamsTab = ({
       }}
       className='space-y-8'
     >
+      {error && (
+        <p role='alert' className='text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       {COMMON_RUNTIME_PARAM_GROUPS.map((group) => (
         <RuntimeParamSection
           key={group.id}
@@ -154,16 +157,6 @@ const RuntimeParamsTab = ({
           ))}
         </div>
       </details>
-
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
     </form>
   );
 };

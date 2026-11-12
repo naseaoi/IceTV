@@ -1,5 +1,4 @@
-﻿'use client';
-
+'use client';
 import {
   CheckCircle2,
   ExternalLink,
@@ -11,7 +10,6 @@ import {
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
-import AlertModal from '@/components/modals/AlertModal';
 import Spinner from '@/components/Spinner';
 import {
   AdminSettingRow,
@@ -22,14 +20,7 @@ import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
-import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { SiteConfig } from '@/features/admin/types/internal';
-import { useAlertModal } from '@/hooks/useAlertModal';
-import {
-  DEFAULT_BANGUMI_DATA_SOURCE,
-  normalizeSiteBangumiDataSource,
-  siteBangumiDataSourceOptions,
-} from '@/lib/bangumi-source';
 import {
   getThanksInfo,
   normalizeSiteDoubanImageProxyType,
@@ -37,7 +28,10 @@ import {
   siteDoubanDataSourceOptions,
   siteDoubanImageProxyTypeOptions,
 } from '@/lib/douban-options';
-import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
+import {
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
 import {
   type LocalPreferenceToggleSiteConfigKey,
   localPreferenceToggleDefinitions,
@@ -49,6 +43,8 @@ import {
   normalizeSourceCoverProxyMode,
   sourceCoverProxyModeOptions,
 } from '@/lib/source-cover-proxy';
+import { DisplayableError } from '@/lib/user-facing-error';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 const DEFAULT_SITE_SETTINGS: SiteConfig = {
@@ -60,13 +56,12 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   LiveAccess: 'all',
   DefaultAggregateSearch: true,
   EnableOptimization: true,
-  LiveDirectConnect: false,
   AutoSwitchSource: false,
+  UpstreamProxyPoolSegments: false,
   EnableDanmaku: false,
   EnableUserDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
-  DoubanProxyType: 'direct',
-  BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
+  DoubanProxyType: DEFAULT_DOUBAN_PROXY_TYPE,
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
@@ -83,12 +78,11 @@ type EditableSiteSettings = Pick<
   | 'LiveAccess'
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
-  | 'LiveDirectConnect'
   | 'AutoSwitchSource'
+  | 'UpstreamProxyPoolSegments'
   | 'EnableDanmaku'
   | 'EnableUserDanmaku'
   | 'DoubanProxyType'
-  | 'BangumiDataSource'
   | 'DoubanImageProxyType'
   | 'SourceCoverProxyMode'
   | 'DisableYellowFilter'
@@ -110,9 +104,6 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     DoubanProxyType: normalizeSiteDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
     ),
-    BangumiDataSource: normalizeSiteBangumiDataSource(
-      config.SiteConfig.BangumiDataSource,
-    ),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
     ),
@@ -123,8 +114,9 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     LiveAccess: normalizeLiveAccess(config.SiteConfig.LiveAccess),
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
-    LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource ?? false,
+    UpstreamProxyPoolSegments:
+      config.SiteConfig.UpstreamProxyPoolSegments ?? false,
     EnableDanmaku: config.SiteConfig.EnableDanmaku ?? false,
     EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
@@ -144,12 +136,11 @@ function normalizeEditableSiteSettings(
     LiveAccess: normalizeLiveAccess(value.LiveAccess),
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
-    LiveDirectConnect: value.LiveDirectConnect ?? false,
     AutoSwitchSource: value.AutoSwitchSource ?? false,
+    UpstreamProxyPoolSegments: value.UpstreamProxyPoolSegments ?? false,
     EnableDanmaku: value.EnableDanmaku ?? false,
     EnableUserDanmaku: value.EnableUserDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
-    BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       value.DoubanImageProxyType,
     ),
@@ -172,8 +163,9 @@ const SiteConfigComponent = ({
   onSavingChange?: (saving: boolean) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { withLoading } = useLoadingState();
+  const [error, setError] = useState('');
+  const [savedNotice, setSavedNotice] = useState('');
   const [siteSettings, setSiteSettings] = useState<SiteConfig>(
     DEFAULT_SITE_SETTINGS,
   );
@@ -239,14 +231,6 @@ const SiteConfigComponent = ({
     }));
   };
 
-  const handleBangumiDataSourceChange = (value: string) => {
-    const nextSource = normalizeSiteBangumiDataSource(value);
-    setSiteSettings((prev) => ({
-      ...prev,
-      BangumiDataSource: nextSource,
-    }));
-  };
-
   // 处理豆瓣图片代理变化
   const handleDoubanImageProxyChange = (value: string) => {
     setSiteSettings((prev) => ({
@@ -272,6 +256,8 @@ const SiteConfigComponent = ({
       return;
     }
 
+    setError('');
+    setSavedNotice('');
     savingRef.current = true;
     onSavingChange?.(true);
 
@@ -291,7 +277,7 @@ const SiteConfigComponent = ({
             stagingToken?: string;
           };
           if (!response.ok || !data.stagingToken) {
-            throw new Error(data.error || '图标上传失败');
+            throw new DisplayableError(data.error || '图标上传失败');
           }
           stagingToken = data.stagingToken;
         }
@@ -312,11 +298,11 @@ const SiteConfigComponent = ({
         setBaselineSiteSettings(normalizedSiteSettings);
         setPendingIconFile(null);
         revokeIconPreviewObjectUrl();
-        showSuccess('保存成功, 请刷新页面');
+        setSavedNotice('刷新页面后生效');
         await refreshConfig();
       });
     } catch (err) {
-      showError(err instanceof Error ? err.message : '保存失败', showAlert);
+      setError(getErrorMessage(err, '保存失败'));
     } finally {
       setIconUploading(false);
       savingRef.current = false;
@@ -360,7 +346,7 @@ const SiteConfigComponent = ({
     } catch (error) {
       setDanmakuTestResult({
         success: false,
-        message: error instanceof Error ? error.message : '网络请求失败',
+        message: getErrorMessage(error, '网络请求失败'),
       });
     } finally {
       setDanmakuTesting(false);
@@ -377,6 +363,16 @@ const SiteConfigComponent = ({
       onSubmit={handleSubmit}
       className='space-y-6'
     >
+      {error && (
+        <p role='alert' className='text-sm text-red-600'>
+          {error}
+        </p>
+      )}
+      {savedNotice && (
+        <p role='status' className='text-sm text-gray-500'>
+          {savedNotice}
+        </p>
+      )}
       <AdminSettingsGroup title='基本信息'>
         <AdminSettingRow label='站点名称' htmlFor='site-name'>
           <input
@@ -461,7 +457,7 @@ const SiteConfigComponent = ({
                   const file = e.target.files?.[0];
                   if (!file) return;
                   if (file.size > 512 * 1024) {
-                    showError('图标文件不能超过 512KB', showAlert);
+                    setError('图标文件不能超过 512KB');
                     e.target.value = '';
                     return;
                   }
@@ -481,9 +477,8 @@ const SiteConfigComponent = ({
           </div>
         </AdminSettingRow>
         <AdminSettingRow
-          label='站点公告'
+          label='站点须知'
           htmlFor='site-announcement'
-          description='修改后会重新推送给用户'
           layout='stacked'
         >
           <textarea
@@ -496,7 +491,7 @@ const SiteConfigComponent = ({
                 Announcement: e.target.value,
               }))
             }
-            rows={3}
+            rows={1}
             className={`${inputStyles.withFocus} block w-full resize-y`}
           />
         </AdminSettingRow>
@@ -516,7 +511,7 @@ const SiteConfigComponent = ({
                 FooterText: e.target.value,
               }))
             }
-            rows={3}
+            rows={1}
             className={`${inputStyles.withFocus} block w-full resize-y`}
           />
         </AdminSettingRow>
@@ -586,18 +581,6 @@ const SiteConfigComponent = ({
           />
         </AdminSettingRow>
         <AdminSettingRow
-          label='Bangumi 数据代理'
-          htmlFor='site-bangumi-data-source'
-        >
-          <AdminSelect
-            id='site-bangumi-data-source'
-            value={siteSettings.BangumiDataSource}
-            onChange={(value) => handleBangumiDataSourceChange(value)}
-            options={siteBangumiDataSourceOptions}
-            className='w-full sm:w-80'
-          />
-        </AdminSettingRow>
-        <AdminSettingRow
           label='源站封面加载'
           htmlFor='site-source-cover-proxy-mode'
         >
@@ -614,6 +597,20 @@ const SiteConfigComponent = ({
             className='w-full sm:w-80'
           />
         </AdminSettingRow>
+        {siteSettings.UpstreamProxyPoolConfigured && (
+          <AdminSettingRow label='视频分片走代理池' layout='inline'>
+            <AdminStatusSwitch
+              enabled={siteSettings.UpstreamProxyPoolSegments}
+              ariaLabel='切换视频分片走代理池'
+              onToggle={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  UpstreamProxyPoolSegments: !prev.UpstreamProxyPoolSegments,
+                }))
+              }
+            />
+          </AdminSettingRow>
+        )}
       </AdminSettingsGroup>
 
       <AdminSettingsGroup title='功能'>
@@ -747,16 +744,6 @@ const SiteConfigComponent = ({
           );
         })}
       </AdminSettingsGroup>
-
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
     </form>
   );
 };

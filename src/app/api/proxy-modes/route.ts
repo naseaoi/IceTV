@@ -2,15 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
-import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
+import { isServerRelayPaused } from '@/lib/host-traffic.server';
 import {
-  getSourceRouteCapabilities,
-  resolveSourceRoute,
-} from '@/lib/source-route-capability.server';
+  type SourceProxyMode,
+  DEFAULT_SOURCE_PROXY_MODE,
+} from '@/lib/proxy-modes';
 
 export const runtime = 'nodejs';
 
-// 返回各源实际采用的线路：「自动」源已检测出浏览器无法直连时直接给「代理」，客户端不再先直连失败一轮
 export async function GET(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
@@ -18,18 +17,21 @@ export async function GET(request: NextRequest) {
 
     const config = await getConfigForRead();
     const availableSources = new Set(
-      (await getAvailableApiSites(guardResult.username, config)).map(
-        (source) => source.key,
-      ),
+      (
+        await getAvailableApiSites(
+          guardResult.username,
+          config,
+          guardResult.userAccess,
+        )
+      ).map((source) => source.key),
     );
-    const capabilities = await getSourceRouteCapabilities();
-    const modes: Record<string, string> = {};
+    // 中转暂停时自动源不再回落服务器；仅限中转的源保持原样，由播放失败触发自动换源
+    const relayPaused = await isServerRelayPaused();
+    const modes: Record<string, SourceProxyMode> = {};
     for (const s of config.SourceConfig) {
       if (!availableSources.has(s.key)) continue;
-      const route = resolveSourceRoute(s.proxyMode, capabilities, s.key);
-      if (s.proxyMode || route !== DEFAULT_SOURCE_PROXY_MODE) {
-        modes[s.key] = route;
-      }
+      const mode = s.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
+      modes[s.key] = relayPaused && mode === 'auto' ? 'browser' : mode;
     }
     return NextResponse.json(modes, {
       headers: { 'Cache-Control': 'no-store' },

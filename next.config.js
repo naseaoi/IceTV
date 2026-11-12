@@ -18,7 +18,7 @@ const nextConfig = {
         ? { exclude: ['error', 'warn'] }
         : false,
   },
-  serverExternalPackages: ['better-sqlite3', 'mysql2'],
+  serverExternalPackages: ['better-sqlite3', 'mysql2', 'undici'],
   experimental: {
     // 持久化缓存在机械盘上会持续写入与合并、越积越大，拖慢热更新；关闭后热更新只走内存
     turbopackFileSystemCacheForDev:

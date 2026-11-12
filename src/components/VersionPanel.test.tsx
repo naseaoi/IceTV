@@ -13,7 +13,10 @@ jest.mock('@/lib/changelog', () => ({
       version: '2.0.0',
       date: '2026-11-05',
       added: ['前台新功能'],
-      changed: [],
+      changed: [
+        '界面精简：卡片只保留状态',
+        '切换筛选时保留当前列表而不是清空重新加载：更顺滑',
+      ],
       fixed: [],
       admin: ['当前版本后台改动'],
     },
@@ -68,5 +71,17 @@ describe('VersionPanel 后台条目', () => {
     expect(screen.getByText('前台新功能')).toBeInTheDocument();
     expect(screen.queryByText('当前版本后台改动')).not.toBeInTheDocument();
     expect(screen.queryByText(/1\.9\.0/)).not.toBeInTheDocument();
+  });
+
+  it('「主题：细节」写法的条目单独标出主题，过长前缀保持原样', () => {
+    asRole('user');
+    render(<VersionPanel isOpen onClose={jest.fn()} />);
+
+    expect(screen.getByText('界面精简：').closest('li')).toHaveTextContent(
+      '界面精简：卡片只保留状态',
+    );
+    expect(
+      screen.getByText('切换筛选时保留当前列表而不是清空重新加载：更顺滑'),
+    ).toBeInTheDocument();
   });
 });

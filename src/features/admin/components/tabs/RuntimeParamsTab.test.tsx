@@ -134,7 +134,7 @@ describe('RuntimeParamsTab', () => {
     fireEvent.submit(form);
 
     await waitFor(() => expect(refreshConfig).toHaveBeenCalledTimes(1));
-    expect(showToast).toHaveBeenCalledWith('保存成功', 'success');
+    expect(showToast).not.toHaveBeenCalled();
     expect(adminPost).toHaveBeenCalledWith(
       '/api/admin/runtime',
       expect.objectContaining({

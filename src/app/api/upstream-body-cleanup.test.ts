@@ -6,6 +6,11 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 
 installWebPolyfills();
 const mockFetch = jest.fn();
+const mockAuthorization = jest.fn(async () => ({
+  authorized: true,
+  via: 'session',
+  username: 'owner',
+}));
 
 jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: () => false,
@@ -27,11 +32,7 @@ jest.mock('@/lib/live-access.server', () => ({
 }));
 jest.mock('@/lib/proxy-auth', () => ({
   authorizeProxyRequest: async () => null,
-  resolveProxyAuthorization: async () => ({
-    authorized: true,
-    via: 'session',
-    username: 'owner',
-  }),
+  resolveProxyAuthorization: () => mockAuthorization(),
 }));
 jest.mock('@/lib/url-guard', () => ({
   fetchWithUrlGuard: (...args: unknown[]) => mockFetch(...args),
@@ -45,10 +46,6 @@ jest.mock('@/lib/http-proxy-json', () => ({
 jest.mock('@/lib/config-subscription', () => ({
   decodeConfigSubscriptionContent: jest.fn(),
   readConfigSubscriptionText: jest.fn(),
-}));
-jest.mock('@/lib/source-capability', () => ({
-  markSourceCors: jest.fn(),
-  responseAllowsCors: jest.fn(),
 }));
 jest.mock('@/lib/server-proxy-guard', () => ({
   recordServerProxyFailure: jest.fn(),
@@ -97,6 +94,51 @@ it.each([
     expect(cancel).toHaveBeenCalledTimes(1);
   },
 );
+
+it.each([
+  ['session', false, 'user:owner'],
+  ['signature', false, 'ip:203.0.113.8'],
+  ['session', true, 'user:owner'],
+] as const)(
+  'key forwards %s identity and live=%s pool selection',
+  async (via, isLive, identity) => {
+    mockAuthorization.mockResolvedValueOnce({
+      authorized: true,
+      via,
+      username: 'owner',
+    });
+    mockFetch.mockClear().mockResolvedValue({
+      ok: false,
+      body: { cancel: jest.fn().mockResolvedValue(undefined) },
+    });
+    const response = await keyRoute.GET({
+      url: `${request.url}&icetv-live=${isLive ? '1' : '0'}`,
+      headers: new Headers({ 'x-real-ip': '203.0.113.8' }),
+    } as NextRequest);
+    expect(response.status).toBe(500);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://example.com/image.jpg',
+      expect.objectContaining({
+        resourceContext: { identity },
+        useProxyPool: !isLive,
+      }),
+    );
+  },
+);
+
+it('logo 成功响应只允许浏览器私有缓存', async () => {
+  mockFetch.mockResolvedValue({
+    ok: true,
+    headers: new Headers({ 'content-type': 'image/png' }),
+    body: null,
+    arrayBuffer: async () => new Uint8Array([1, 2]).buffer,
+  });
+  const response = await logoRoute.GET(request);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400');
+  expect(response.headers.has('CDN-Cache-Control')).toBe(false);
+  expect(response.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+});
 
 it('直播预检成功仅读取响应头并取消正文', async () => {
   const cancel = jest.fn().mockResolvedValue(undefined);

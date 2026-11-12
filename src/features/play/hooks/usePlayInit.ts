@@ -15,6 +15,7 @@ import {
   peekHistoryRestoreEpisodeIndex,
   waitForHistoryRestore,
 } from '@/features/play/hooks/usePlayProgress';
+import { hasDetailContentChange } from '@/features/play/lib/detailContentChange';
 import {
   readDetailSnapshot,
   saveDetailSnapshot,
@@ -36,6 +37,10 @@ import {
   SourceProbeDeferredError,
 } from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
+  getOrProbe,
+  holdBackgroundSourceProbes,
+} from '@/features/play/lib/sourceProbeStore';
+import {
   type SourceSelectionContext,
   compareSourceRoutePreference,
   preferDirectRouteSources,
@@ -46,17 +51,18 @@ import {
   buildVodProxyUrl,
   isVodM3u8Url,
 } from '@/features/play/lib/vodProxyUrl';
-import { withTimeout } from '@/lib/concurrency';
+import { withAbortableTimeout } from '@/lib/concurrency';
 import {
-  getAllPlayRecords,
+  generateStorageKey,
   getCachedPlayRecordsSnapshot,
+  getPlayRecordsByKeys,
 } from '@/lib/db.client';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import { hasMatchingPlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
-import { shouldUseServerProxy } from '@/lib/proxy-modes';
+import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
@@ -69,8 +75,6 @@ import { PlayRecord, SearchResult } from '@/lib/types';
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 const SOURCE_PROBE_FOREGROUND_LIMIT = SOURCE_PROBE_CONCURRENCY;
-// 可信源直接起播后推迟后台测速，避免与起播争抢带宽
-const TRUSTED_SOURCE_BACKGROUND_PROBE_DELAY_MS = 5_000;
 const TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS = 3_000;
 // 起播等历史恢复的上限：播放记录接口正常远在此内返回；超时按当前集起播，记录迟到时照旧由历史恢复换集
 const HISTORY_RESTORE_WAIT_TIMEOUT_MS = 1_000;
@@ -126,18 +130,6 @@ function resolveTargetEpisodeIndex(
     requestedEpisodeIndex < episodeCount
     ? requestedEpisodeIndex
     : 0;
-}
-
-function waitForDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, ms);
-    signal?.addEventListener('abort', finish, { once: true });
-  });
 }
 
 function scoreProbeResults(results: SourceProbeResult[]) {
@@ -240,6 +232,7 @@ async function preferBestSource(
   };
 
   const selectSource = (source: SearchResult) => {
+    holdBackgroundSourceProbes();
     selectedKey = getSourceKey(source);
     selectedEpisodeIndex = resolveTargetEpisodeIndex(
       (source.episodes || []).length,
@@ -295,8 +288,9 @@ async function preferBestSource(
 
   const probeSource = async (
     source: SearchResult,
+    foreground = false,
   ): Promise<SourceProbeResult | null> => {
-    if (signal?.aborted) return null;
+    if (signal?.aborted || navigator.onLine === false) return null;
     // 已真实起播的当前源不再下载样本测速：面板沿用播放器上报的实测信息，也不会因此记失败并推荐换源
     if (getSourceKey(source) === getPlayingSourceKey()) return null;
     const episodeUrl = getTargetEpisodeUrl(source);
@@ -312,20 +306,34 @@ async function preferBestSource(
     }
 
     try {
-      const useProxy = shouldUseServerProxy(
+      const route = getSourcePlaybackRoute(
         source.source,
         episodeUrl,
         proxyModes,
       );
-      const testResult = await probeVodEpisodeUrl(
-        episodeUrl,
-        useProxy,
-        source.source,
-      );
-      const sample = takeProbeSegmentSample(testResult);
-      if (signal?.aborted) return null;
-      if (sample && !samplesSettled) {
-        pendingSamples.set(getSourceKey(source), sample);
+      const testResult = await getOrProbe(source, {
+        foreground,
+        signal,
+        probeIdentity: JSON.stringify([episodeUrl, route]),
+        shouldSkip: () => getSourceKey(source) === getPlayingSourceKey(),
+        probe: async (probeSignal) => {
+          const info = await probeVodEpisodeUrl(
+            episodeUrl,
+            route,
+            source.source,
+            probeSignal,
+          );
+          const sample = takeProbeSegmentSample(info);
+          if (sample && !samplesSettled && !signal?.aborted)
+            pendingSamples.set(getSourceKey(source), sample);
+          return info;
+        },
+      });
+      if (!testResult || signal?.aborted) return null;
+      if (testResult.hasError) {
+        failedSourceKeys.add(getSourceKey(source));
+        writeProbeInfo(source, testResult);
+        return null;
       }
       const result = { source, testResult };
       collectedResults.push(result);
@@ -333,7 +341,12 @@ async function preferBestSource(
       notifyBetterSource();
       return result;
     } catch (error) {
-      if (!signal?.aborted && !(error instanceof SourceProbeDeferredError)) {
+      if (
+        !signal?.aborted &&
+        !!navigator.onLine &&
+        (error as Error)?.name !== 'AbortError' &&
+        !(error instanceof SourceProbeDeferredError)
+      ) {
         failedSourceKeys.add(getSourceKey(source));
         writeProbeInfo(source, {
           quality: '错误',
@@ -350,11 +363,7 @@ async function preferBestSource(
   const buildPlaybackPlaylistUrl = (source: SearchResult, episodeUrl: string) =>
     buildVodProxyUrl({
       rawUrl: episodeUrl,
-      useServerProxy: shouldUseServerProxy(
-        source.source,
-        episodeUrl,
-        proxyModes,
-      ),
+      ...getSourcePlaybackRoute(source.source, episodeUrl, proxyModes),
       sourceKey: source.source,
       playbackRequestMode: 'initial',
     });
@@ -368,10 +377,15 @@ async function preferBestSource(
     const deadline = Date.now() + TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS;
     try {
       const episodeUrl = isLazyEpisodeUrl(rawUrl)
-        ? await withTimeout(
-            resolveLazyEpisodeUrl(source.source, rawUrl, { probe: true }),
+        ? await withAbortableTimeout(
+            (resolveSignal) =>
+              resolveLazyEpisodeUrl(source.source, rawUrl, {
+                probe: true,
+                signal: resolveSignal,
+              }),
             TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS,
             'Episode url resolve timeout',
+            signal,
           )
         : rawUrl;
       const remainingMs = deadline - Date.now();
@@ -381,6 +395,7 @@ async function preferBestSource(
         (await checkM3u8PlaylistAvailable(
           buildPlaybackPlaylistUrl(source, episodeUrl),
           remainingMs,
+          signal,
         ))
       );
     } catch {
@@ -404,7 +419,10 @@ async function preferBestSource(
       ? peekResolvedLazyEpisodeUrl(runnerUp.source, rawUrl)
       : rawUrl;
     if (!episodeUrl || !isVodM3u8Url(episodeUrl)) return;
-    prefetchM3U8(buildPlaybackPlaylistUrl(runnerUp, episodeUrl));
+    prefetchM3U8(
+      buildPlaybackPlaylistUrl(runnerUp, episodeUrl),
+      getSourcePlaybackRoute(runnerUp.source, episodeUrl, proxyModes),
+    );
   };
 
   const probeBatchUntilSuccess = async (
@@ -417,7 +435,7 @@ async function preferBestSource(
       let resolved = false;
 
       batch.forEach((source) => {
-        probeSource(source)
+        probeSource(source, true)
           .then((result) => {
             if (result && !resolved) {
               resolved = true;
@@ -465,7 +483,6 @@ async function preferBestSource(
     settleProbeSamples(null);
     prefetchRunnerUp(trustedSource);
     void (async () => {
-      await waitForDelay(TRUSTED_SOURCE_BACKGROUND_PROBE_DELAY_MS, signal);
       if (signal?.aborted) return;
       await probeSource(trustedSource);
       await probeRemainingSources(
@@ -511,23 +528,6 @@ export function updateVideoUrl(
   if (newUrl !== currentVideoUrl) {
     setVideoUrl(newUrl);
   }
-}
-
-function getEpisodeGroupsSignature(detail: SearchResult): string {
-  return (detail.episode_groups || [])
-    .map((group) => `${group.label}:${group.count}`)
-    .join('|');
-}
-
-function hasDetailContentChange(
-  prev: SearchResult,
-  next: SearchResult,
-): boolean {
-  return (
-    next.episodes.length !== prev.episodes.length ||
-    getEpisodeGroupsSignature(next) !== getEpisodeGroupsSignature(prev) ||
-    (!!next.title && next.title !== prev.title)
-  );
 }
 
 function mergeSourceResult(
@@ -769,7 +769,21 @@ export function usePlayInit({
         .catch(() => undefined);
     };
 
-    const fetchSourceDetail = async (
+    const initDetailTasks = new Map<string, Promise<SearchResult | null>>();
+    const fetchSourceDetail = (
+      source: string,
+      id: string,
+    ): Promise<SearchResult | null> => {
+      const key = JSON.stringify([source, id]);
+      let task = initDetailTasks.get(key);
+      if (!task) {
+        task = loadSourceDetail(source, id);
+        initDetailTasks.set(key, task);
+      }
+      return task;
+    };
+
+    const loadSourceDetail = async (
       source: string,
       id: string,
     ): Promise<SearchResult | null> => {
@@ -860,10 +874,23 @@ export function usePlayInit({
     };
 
     let aggregateGroupRawToClear = '';
-    // 除了带播放意图的直达入口（意图已定下集和时间，不读记录），都与搜索、详情并行读取播放记录：到达后供测速预判续播的集，起播时交给历史恢复复用这次请求
+    // 候选身份确定后定向读取；测速不等待远端历史，仍可使用本地快照。
     let startupPlayRecordsRequest: Promise<Record<string, PlayRecord>> | null =
       null;
     let startupPlayRecords: Record<string, PlayRecord> | null = null;
+    const requestStartupRecords = (
+      sources: { source: string; id: string }[],
+    ) => {
+      startupPlayRecordsRequest = getPlayRecordsByKeys(
+        sources.map((source) => generateStorageKey(source.source, source.id)),
+      );
+      void startupPlayRecordsRequest.then(
+        (records) => {
+          startupPlayRecords = records;
+        },
+        () => undefined,
+      );
+    };
 
     const clearAggregateGroup = () => {
       const rawToClear = aggregateGroupRawToClear;
@@ -989,18 +1016,12 @@ export function usePlayInit({
       );
 
       if (
-        !currentSource ||
-        !currentId ||
-        needPreferRef.current ||
+        currentSource &&
+        currentId &&
+        !needPreferRef.current &&
         !hasMatchingPlayIntent({ source: currentSource, id: currentId })
       ) {
-        startupPlayRecordsRequest = getAllPlayRecords();
-        void startupPlayRecordsRequest.then(
-          (records) => {
-            startupPlayRecords = records;
-          },
-          () => undefined,
-        );
+        requestStartupRecords([{ source: currentSource, id: currentId }]);
       }
 
       const cachedGroup = loadAggregateGroup();
@@ -1027,6 +1048,7 @@ export function usePlayInit({
 
         const quickDetail = quickData?.detail;
         if (quickDetail?.episodes && quickDetail.episodes.length > 0) {
+          requestStartupRecords([quickDetail]);
           const quickSources = quickData?.sources || [quickDetail];
           saveDetailSnapshot(quickDetail.source, quickDetail.id, quickDetail);
           setAvailableSources(
@@ -1038,6 +1060,12 @@ export function usePlayInit({
           setSourceSearchLoading(true);
           void fetchSourcesData(quickQuery);
           await finalizePlaybackDetail(quickDetail);
+          // quick 可能直接用搜索结果起播，与详情快照同样后台核对一次完整详情
+          revalidateDetailSnapshot(
+            quickDetail.source,
+            quickDetail.id,
+            quickDetail,
+          );
           return;
         }
       }
@@ -1082,52 +1110,56 @@ export function usePlayInit({
         return;
       }
 
-      const selectionContext = await selectionContextPromise;
-      if (signal.aborted) return;
-      let detailData: SearchResult = preferDirectRouteSources(
-        sourcesInfo,
-        selectionContext,
-        readSourcePlaybackStats(),
-      )[0];
+      if (
+        !startupPlayRecordsRequest &&
+        (!currentSource || !currentId || needPreferRef.current)
+      ) {
+        requestStartupRecords(sourcesInfo);
+      }
+      let detailData: SearchResult;
       if (currentSource && currentId && !needPreferRef.current) {
         const target = sourcesInfo.find(
           (source) =>
             source.source === currentSource && source.id === currentId,
         );
-        if (target) {
-          detailData = target;
-        } else {
+        if (!target) {
           setError('未找到匹配结果');
           setLoading(false);
           return;
         }
-      }
-
-      const shouldPreferSource =
-        (!currentSource || !currentId || needPreferRef.current) &&
-        optimizationEnabled &&
-        sourcesInfo.length > 1;
-
-      if (shouldPreferSource) {
-        setLoadingStage('preferring');
-        setLoadingMessage('正在优选最佳播放源...');
-
-        // 续播的集按已到的播放记录预判，未到时退回本地缓存，不为测速等待记录请求
-        const cachedPlayRecords = getCachedPlayRecordsSnapshot();
-        detailData = await preferBestSource(
+        detailData = target;
+      } else if (sourcesInfo.length === 1) {
+        detailData = sourcesInfo[0];
+      } else {
+        // 只有多候选需要排序时才等选源上下文，固定源与单候选不让健康接口的尾延迟进入起播
+        const selectionContext = await selectionContextPromise;
+        if (signal.aborted) return;
+        detailData = preferDirectRouteSources(
           sourcesInfo,
-          (source) =>
-            peekHistoryRestoreEpisodeIndex(
-              source,
-              startupPlayRecords ?? cachedPlayRecords,
-            ) ?? currentEpisodeIndex,
-          getActiveSourceKey,
-          getPlayingSourceKey,
-          setPrecomputedVideoInfo,
-          setSourceRecommendation,
           selectionContext,
-          signal,
-        );
+          readSourcePlaybackStats(),
+        )[0];
+        if (optimizationEnabled) {
+          setLoadingStage('preferring');
+          setLoadingMessage('正在优选最佳播放源...');
+
+          // 续播的集按已到的播放记录预判，未到时退回本地缓存，不为测速等待记录请求
+          const cachedPlayRecords = getCachedPlayRecordsSnapshot();
+          detailData = await preferBestSource(
+            sourcesInfo,
+            (source) =>
+              peekHistoryRestoreEpisodeIndex(
+                source,
+                startupPlayRecords ?? cachedPlayRecords,
+              ) ?? currentEpisodeIndex,
+            getActiveSourceKey,
+            getPlayingSourceKey,
+            setPrecomputedVideoInfo,
+            setSourceRecommendation,
+            selectionContext,
+            signal,
+          );
+        }
       }
       if (signal.aborted) return;
 

@@ -26,6 +26,7 @@ import {
   writeSourcePreferredQualityHeight,
 } from '@/lib/local-preferences';
 import { showTimedArtNotice } from '@/lib/player-utils';
+import { showToast } from '@/lib/toast';
 
 type VodQualityHls = HlsQualityController & {
   autoLevelEnabled?: boolean;
@@ -40,17 +41,30 @@ type VodHlsQualityControllerOptions = {
   setRealtimeLoadSpeed: (message: string) => void;
 };
 
+type HlsFragmentLike = { type?: string; level?: number } | null | undefined;
+
+export type HlsLevelFailure = {
+  details?: string;
+  fatal?: boolean;
+  level?: number;
+  context?: { type?: string; level?: number | null } | null;
+  frag?: HlsFragmentLike;
+};
+
 export type VodHlsQualityController = {
   dispose: () => void;
   handleBufferUpdated: () => void;
-  handleFragmentLoaded: () => void;
+  handleFragmentLoaded: (frag?: HlsFragmentLike) => void;
   handleFragmentLoading: (levelIndex: number | null) => void;
   handleManifestParsed: () => void;
   isActive: () => boolean;
-  tryRecoverFatalNetworkFailure: (input: {
-    isFragmentNetworkError: boolean;
-    isFragmentOrLevelNetworkError: boolean;
-  }) => boolean;
+  tryDowngradeFailedLevel: (
+    failure: HlsLevelFailure,
+    options: { requireOtherLevelLoaded: boolean },
+  ) => boolean;
+  tryRecoverFatalNetworkFailure: (
+    isFragmentOrLevelNetworkError: boolean,
+  ) => boolean;
   tryRecoverManualSelectionFailure: (
     isFragmentOrLevelNetworkError: boolean,
   ) => boolean;
@@ -59,15 +73,27 @@ export type VodHlsQualityController = {
 const MANUAL_QUALITY_FAILURE_LIMIT = 2;
 const DEFAULT_QUALITY_PROBE_MS = 10_000;
 
-function getCurrentHlsLevelIndex(hls: VodQualityHls): number | null {
-  const candidates = [hls.currentLevel, hls.loadLevel, hls.nextLoadLevel];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'number' && candidate >= 0) {
-      return candidate;
-    }
-  }
-  return null;
+function resolveFailedLevelIndex(
+  failure: HlsLevelFailure,
+  levelCount: number,
+): number | null {
+  const level = /^level/i.test(failure.details || '')
+    ? failure.context?.type === 'level'
+      ? failure.context.level
+      : failure.level
+    : failure.frag?.type === 'main'
+      ? failure.frag.level
+      : null;
+  return typeof level === 'number' &&
+    Number.isInteger(level) &&
+    level >= 0 &&
+    level < levelCount
+    ? level
+    : null;
 }
+
+const minLevelIndex = (current: number | null, cap: number) =>
+  current === null ? null : Math.min(current, cap);
 
 export function createVodHlsQualityController({
   sourceKey,
@@ -85,6 +111,8 @@ export function createVodHlsQualityController({
   let autoMinLevelIndex: number | null = null;
   let autoPreferredLevelIndex: number | null = null;
   let autoEmergencyMode = false;
+  // 本次清单内主媒体分片加载成功过的档位；换线路会重新解析清单，因此天然按线路隔离
+  const loadedLevelIndexes = new Set<number>();
 
   const clearQualityProbe = () => {
     if (!qualityProbeTimer) {
@@ -146,9 +174,11 @@ export function createVodHlsQualityController({
     clearQualityProbe();
     clearControlSync();
     manualQualityNetworkFailures = 0;
+    loadedLevelIndexes.clear();
+    autoEmergencyMode = false;
     const levels = hls.levels || [];
-    active = !!policy && buildQualityOptions(levels).length >= 2;
-    if (!active || !policy) {
+    active = buildQualityOptions(levels).length >= 2;
+    if (!active) {
       controlOptions = null;
       applyAutoQualityLevel(hls);
       hls.__icetvDefaultQualityLevel = null;
@@ -158,11 +188,11 @@ export function createVodHlsQualityController({
 
     const defaultLevelIndex = findLevelIndexByHeight(
       levels,
-      policy.defaultHeight,
+      policy.defaultHeight ?? 0,
     );
     const autoStartLevelIndex = findLevelIndexByHeight(
       levels,
-      policy.autoStartHeight,
+      policy.autoStartHeight ?? 0,
     );
     autoMinLevelIndex = policy.autoMinHeight
       ? findLevelIndexByHeight(levels, policy.autoMinHeight)
@@ -179,7 +209,10 @@ export function createVodHlsQualityController({
       autoInitialMinLevelIndex: autoPreferredLevelIndex,
       autoMaxLevelIndex,
       onPreferenceChange: (height) => {
-        writeSourcePreferredQualityHeight(sourceKey, height);
+        if (!writeSourcePreferredQualityHeight(sourceKey, height))
+          showToast('设置未能保存，刷新后会恢复', 'error', {
+            key: 'local-preference-save',
+          });
         if (!controlOptions) {
           return;
         }
@@ -217,6 +250,8 @@ export function createVodHlsQualityController({
         }
       }, DEFAULT_QUALITY_PROBE_MS);
     } else {
+      // 复用的 hls 实例可能带着上一个源的档位限制
+      applyAutoQualityLevel(hls);
       seedAutoQualityStartLevel(
         hls,
         autoStartLevelIndex,
@@ -231,7 +266,14 @@ export function createVodHlsQualityController({
     );
   };
 
-  const handleFragmentLoaded = () => {
+  const handleFragmentLoaded = (frag?: HlsFragmentLike) => {
+    if (
+      frag?.type === 'main' &&
+      typeof frag.level === 'number' &&
+      frag.level >= 0
+    ) {
+      loadedLevelIndexes.add(frag.level);
+    }
     clearQualityProbe();
     if (hls.__icetvManualQualityLocked === true) {
       manualQualityNetworkFailures = 0;
@@ -241,7 +283,7 @@ export function createVodHlsQualityController({
   const handleBufferUpdated = () => {
     if (
       !active ||
-      !policy?.recoveryBufferSeconds ||
+      !policy.recoveryBufferSeconds ||
       hls.__icetvManualQualityLocked === true ||
       hls.autoLevelEnabled === false ||
       !autoEmergencyMode
@@ -256,7 +298,7 @@ export function createVodHlsQualityController({
   const handleFragmentLoading = (levelIndex: number | null) => {
     if (
       !active ||
-      !policy?.emergencyBufferSeconds ||
+      !policy.emergencyBufferSeconds ||
       hls.__icetvManualQualityLocked === true ||
       hls.autoLevelEnabled === false ||
       levelIndex === null ||
@@ -283,7 +325,7 @@ export function createVodHlsQualityController({
     if (
       !active ||
       !isFragmentOrLevelNetworkError ||
-      policy?.preserveManualSelectionOnFailure === true ||
+      policy.preserveManualSelectionOnFailure === true ||
       hls.autoLevelEnabled !== false ||
       hls.__icetvManualQualityLocked !== true
     ) {
@@ -298,59 +340,87 @@ export function createVodHlsQualityController({
     return releaseToAuto('所选画质连续加载失败，已临时切回自动');
   };
 
-  const tryRecoverFatalNetworkFailure = ({
-    isFragmentNetworkError,
-    isFragmentOrLevelNetworkError,
-  }: {
-    isFragmentNetworkError: boolean;
-    isFragmentOrLevelNetworkError: boolean;
-  }) => {
-    if (!active || !policy || !controlOptions) {
+  // 降到失败档以下并把自动码率上限压在目标档，避免 ABR 又升回坏档；限制随下一次清单解析解除
+  const tryDowngradeFailedLevel = (
+    failure: HlsLevelFailure,
+    { requireOtherLevelLoaded }: { requireOtherLevelLoaded: boolean },
+  ) => {
+    if (
+      !active ||
+      !controlOptions ||
+      !policy.allowFailureDowngrade ||
+      hls.__icetvManualQualityLocked === true
+    ) {
+      return false;
+    }
+    const levels = hls.levels || [];
+    const failedLevel = resolveFailedLevelIndex(failure, levels.length);
+    if (failedLevel === null) {
+      return false;
+    }
+    if (
+      requireOtherLevelLoaded &&
+      ![...loadedLevelIndexes].some((level) => level !== failedLevel)
+    ) {
+      return false;
+    }
+    const nextLowerLevel = findNextLowerLevelIndex(levels, failedLevel);
+    if (nextLowerLevel === null) {
+      return false;
+    }
+    const targetLevel = Math.max(
+      nextLowerLevel,
+      autoMinLevelIndex ?? nextLowerLevel,
+    );
+    if (targetLevel >= failedLevel) {
       return false;
     }
 
-    if (
-      isFragmentNetworkError &&
-      policy.allowFailureDowngrade &&
-      hls.__icetvManualQualityLocked !== true
-    ) {
-      const currentLevel = getCurrentHlsLevelIndex(hls);
-      const nextLowerLevel =
-        currentLevel === null
-          ? null
-          : findNextLowerLevelIndex(hls.levels || [], currentLevel);
-      const nextLevel =
-        nextLowerLevel === null || currentLevel === null
-          ? null
-          : Math.max(nextLowerLevel, autoMinLevelIndex ?? nextLowerLevel);
-      if (
-        currentLevel !== null &&
-        nextLevel !== null &&
-        nextLevel < currentLevel
-      ) {
-        applyAutoQualityLevel(hls, {
-          startLevelIndex: nextLevel,
-          minLevelIndex: autoMinLevelIndex,
-          maxLevelIndex: controlOptions.autoMaxLevelIndex,
-        });
-        markQualityControlTemporaryAuto(artPlayerRef, hls, controlOptions);
-        hls.startLoad();
-        const level = hls.levels?.[nextLevel];
-        const label = level?.height ? `${level.height}p` : '较低画质';
-        showNotice(`当前画质分片加载失败，已切换到${label}`);
-        return true;
-      }
+    clearQualityProbe();
+    autoEmergencyMode = false;
+    autoMinLevelIndex = minLevelIndex(autoMinLevelIndex, targetLevel);
+    autoPreferredLevelIndex = minLevelIndex(
+      autoPreferredLevelIndex,
+      targetLevel,
+    );
+    controlOptions.autoStartLevelIndex = minLevelIndex(
+      controlOptions.autoStartLevelIndex,
+      targetLevel,
+    );
+    controlOptions.autoInitialMinLevelIndex = autoPreferredLevelIndex;
+    controlOptions.autoMaxLevelIndex =
+      minLevelIndex(controlOptions.autoMaxLevelIndex, targetLevel) ??
+      targetLevel;
+    applyAutoQualityLevel(hls, {
+      startLevelIndex: targetLevel,
+      minLevelIndex: autoMinLevelIndex,
+      maxLevelIndex: targetLevel,
+    });
+    hls.nextLoadLevel = targetLevel;
+    // 致命错误后 hls.js 已停止加载；非致命时它仍在加载，startLoad 会中止在途请求
+    if (failure.fatal) {
+      hls.startLoad();
     }
+    markQualityControlTemporaryAuto(artPlayerRef, hls, controlOptions);
+    const level = levels[targetLevel];
+    const label = level?.height ? `${level.height}p` : '较低画质';
+    showNotice(`当前画质加载失败，已切换到${label}`);
+    return true;
+  };
 
+  const tryRecoverFatalNetworkFailure = (
+    isFragmentOrLevelNetworkError: boolean,
+  ) => {
     if (
-      isFragmentOrLevelNetworkError &&
-      hls.autoLevelEnabled === false &&
-      hls.__icetvManualQualityLocked !== true
+      !active ||
+      !isFragmentOrLevelNetworkError ||
+      hls.autoLevelEnabled !== false ||
+      hls.__icetvManualQualityLocked === true
     ) {
-      clearQualityProbe();
-      return releaseToAuto();
+      return false;
     }
-    return false;
+    clearQualityProbe();
+    return releaseToAuto();
   };
 
   return {
@@ -364,6 +434,7 @@ export function createVodHlsQualityController({
     handleFragmentLoading,
     handleManifestParsed,
     isActive: () => active,
+    tryDowngradeFailedLevel,
     tryRecoverFatalNetworkFailure,
     tryRecoverManualSelectionFailure,
   };

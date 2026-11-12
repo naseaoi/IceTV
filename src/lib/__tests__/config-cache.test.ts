@@ -15,8 +15,8 @@ const baseConfig: AdminConfig = {
     LiveAccess: 'all',
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    LiveDirectConnect: false,
     AutoSwitchSource: false,
+    UpstreamProxyPoolSegments: false,
     EnableDanmaku: false,
     EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
@@ -24,7 +24,6 @@ const baseConfig: AdminConfig = {
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    BangumiDataSource: 'server',
     DoubanImageProxyType: 'direct',
     DisableYellowFilter: false,
     FluidSearch: true,
@@ -359,6 +358,47 @@ describe('config cache persistence', () => {
     await expect(keys()).resolves.toEqual(['open', 'relay']);
   });
 
+  it('复用同账号请求快照并保留个人源优先及空列表语义', async () => {
+    const config = cloneBaseConfig();
+    config.SourceConfig = [
+      { key: 'open', name: 'Open', api: 'https://a.example', from: 'custom' },
+      { key: 'group', name: 'Group', api: 'https://b.example', from: 'custom' },
+      {
+        key: 'staff',
+        name: 'Staff',
+        api: 'https://c.example',
+        from: 'custom',
+        adminOnly: true,
+      },
+    ];
+    config.UserConfig.Tags = [{ name: 'vip', enabledApis: ['group', 'staff'] }];
+    const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+      adminConfig: config,
+    });
+    const { db } = require('../db') as typeof import('../db');
+    const snapshot = {
+      username: 'alice',
+      role: 'user' as const,
+      tags: ['vip'],
+      enabledApis: ['open', 'staff'],
+    };
+    const keys = async (access: typeof snapshot) =>
+      (await getAvailableApiSites('alice', config, access)).map(
+        (site) => site.key,
+      );
+    expect(await keys(snapshot)).toEqual(['open']);
+    expect(await keys({ ...snapshot, enabledApis: [] })).toEqual(['group']);
+    expect(await keys({ ...snapshot, enabledApis: [], tags: [] })).toEqual([
+      'open',
+      'group',
+    ]);
+    expect(db.getUserAccess).not.toHaveBeenCalled();
+    await getAvailableApiSites('other', config, snapshot);
+    expect(db.getUserAccess).toHaveBeenCalledWith('other');
+    await getAvailableApiSites('owner-1', config);
+    expect(db.getUserAccess).toHaveBeenCalledWith('owner-1');
+  });
+
   it('uses database users as the source of truth', async () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.UserConfig.Users = [
@@ -487,15 +527,13 @@ describe('config cache persistence', () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SiteConfig.DoubanProxyType = 'server';
     adminConfig.SiteConfig.DoubanImageProxyType = 'cmliussss-cdn-ali';
-    adminConfig.SiteConfig.BangumiDataSource = 'direct';
     const { getPublicConfig } = await loadConfigModule(jest.fn(), {
       adminConfig,
     });
 
     await expect(getPublicConfig()).resolves.toMatchObject({
-      DoubanProxyType: 'direct',
+      DoubanProxyType: 'auto',
       DoubanImageProxyType: 'cmliussss-cdn-ali',
-      BangumiDataSource: 'direct',
     });
   });
 
@@ -503,15 +541,13 @@ describe('config cache persistence', () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SiteConfig.DoubanProxyType = 'custom';
     adminConfig.SiteConfig.DoubanImageProxyType = 'custom';
-    adminConfig.SiteConfig.BangumiDataSource = 'custom';
     const { getPublicConfig } = await loadConfigModule(jest.fn(), {
       adminConfig,
     });
 
     await expect(getPublicConfig()).resolves.toMatchObject({
-      DoubanProxyType: 'direct',
-      DoubanImageProxyType: 'direct',
-      BangumiDataSource: 'direct',
+      DoubanProxyType: 'auto',
+      DoubanImageProxyType: 'auto',
     });
   });
 
@@ -521,10 +557,8 @@ describe('config cache persistence', () => {
     Object.assign(config.SiteConfig, {
       DoubanProxyType: 'custom',
       DoubanImageProxyType: 'custom',
-      BangumiDataSource: 'custom',
       DoubanProxy: 'https://data.example/fetch?url=',
       DoubanImageProxy: 'https://image.example/fetch?url=',
-      BangumiProxy: 'https://bangumi.example/fetch?url=',
       UnknownSetting: true,
     });
 
@@ -532,17 +566,36 @@ describe('config cache persistence', () => {
 
     expect(checked.SiteConfig).toEqual({
       ...baseConfig.SiteConfig,
-      DoubanProxyType: 'direct',
-      DoubanImageProxyType: 'direct',
-      BangumiDataSource: 'direct',
+      DoubanProxyType: 'auto',
+      DoubanImageProxyType: 'auto',
     });
+  });
+
+  it('loads legacy site settings through the whitelist and persists only supported fields', async () => {
+    const adminConfig = cloneBaseConfig();
+    Object.assign(adminConfig.SiteConfig, { UnknownSetting: true });
+    const expectedSiteConfig = { ...baseConfig.SiteConfig };
+    const compareAndSetAdminConfig = jest.fn().mockResolvedValue(true);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+      compareAndSetAdminConfig,
+    });
+
+    const loaded = await getConfigForRead();
+
+    expect(loaded.SiteConfig).toEqual(expectedSiteConfig);
+    expect(compareAndSetAdminConfig).toHaveBeenCalledTimes(1);
+    expect(compareAndSetAdminConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SiteConfig: expect.objectContaining({ UnknownSetting: true }),
+      }),
+      expect.objectContaining({ SiteConfig: expectedSiteConfig }),
+    );
   });
 
   it('preserves all supported site settings during config self check', async () => {
     const { configSelfCheck } = await loadConfigModule(jest.fn());
     const config = cloneBaseConfig();
-    config.SiteConfig.AnnouncementVersion = 'announcement-version';
-    config.SiteConfig.AnnouncementPublishedAt = 123;
     config.SiteConfig.DisableYellowFilter = true;
     const originalSiteConfig = { ...config.SiteConfig };
 

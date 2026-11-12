@@ -1,6 +1,9 @@
 import {
   buildLiveM3u8ProxyUrl,
+  isDirectLiveRequestUrl,
   isLivePlaylistContextType,
+  rememberLiveServerRoute,
+  resolveInitialLiveRoute,
   rewriteLivePlaylistRequestUrl,
 } from './livePlaybackRoute';
 
@@ -91,5 +94,46 @@ describe('live playback route', () => {
     expect(isLivePlaylistContextType('manifest')).toBe(true);
     expect(isLivePlaylistContextType('level')).toBe(true);
     expect(isLivePlaylistContextType('fragment')).toBe(false);
+  });
+});
+
+describe('initial live route', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('tries http and https streams directly by default', () => {
+    expect(resolveInitialLiveRoute('http://1.2.3.4:9901/live.m3u8')).toBe(
+      'browser',
+    );
+    expect(resolveInitialLiveRoute('https://cdn.example/live.m3u8')).toBe(
+      'browser',
+    );
+    expect(resolveInitialLiveRoute('rtmp://cdn.example/live')).toBe('server');
+  });
+
+  it('tries streams directly until the host is remembered as failing', () => {
+    const url = 'https://cdn-a.example/live.m3u8';
+    expect(resolveInitialLiveRoute(url)).toBe('browser');
+
+    rememberLiveServerRoute('https://cdn-a.example/other.m3u8', 1_000);
+    expect(resolveInitialLiveRoute(url, 2_000)).toBe('server');
+    expect(
+      resolveInitialLiveRoute('https://cdn-b.example/live.m3u8', 2_000),
+    ).toBe('browser');
+    expect(resolveInitialLiveRoute(url, 1_000 + 31 * 60 * 1000)).toBe(
+      'browser',
+    );
+  });
+
+  it('distinguishes direct requests from proxied ones', () => {
+    const origin = 'https://tv.example';
+    expect(isDirectLiveRequestUrl('https://cdn.example/seg.ts', origin)).toBe(
+      true,
+    );
+    expect(isDirectLiveRequestUrl('/api/proxy/segment?url=x', origin)).toBe(
+      false,
+    );
+    expect(isDirectLiveRequestUrl(undefined, origin)).toBe(false);
   });
 });

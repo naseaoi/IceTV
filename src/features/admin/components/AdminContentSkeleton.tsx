@@ -8,8 +8,19 @@ import {
   AdminSettingRow,
   AdminSettingsGroup,
 } from '@/features/admin/components/AdminSettings';
+import { TrafficTabSkeleton } from '@/features/admin/components/tabs/traffic/TrafficUsageCard';
 import { RegistrationSummaryCardSkeleton } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
 import type { AdminTabId } from '@/features/admin/lib/admin-tabs';
+import {
+  ANNOUNCEMENT_ACTION_CLASS,
+  ANNOUNCEMENT_COMPOSER_CLASS,
+  ANNOUNCEMENT_COMPOSER_ROWS,
+  ANNOUNCEMENT_EMPTY_CLASS,
+  ANNOUNCEMENT_META_CLASS,
+  ANNOUNCEMENT_ROW_CLASS,
+  ANNOUNCEMENT_SKELETON_MAX_ROWS,
+  ANNOUNCEMENT_TEXT_CLASS,
+} from '@/features/admin/lib/announcement-layout';
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
 import {
   USER_DANMAKU_ACTION_CLASS,
@@ -50,7 +61,7 @@ function Field({
       <Block
         className={
           wide
-            ? 'h-[76px] w-full rounded-lg'
+            ? 'h-9 w-full rounded-lg'
             : inline
               ? 'h-6 w-11 rounded-full'
               : 'h-9 w-full rounded-lg sm:w-80'
@@ -198,6 +209,40 @@ export function AdminUserDanmakuRowsSkeleton() {
   );
 }
 
+export function AdminAnnouncementRowsSkeleton({ count }: { count: number }) {
+  const rows = Math.min(count, ANNOUNCEMENT_SKELETON_MAX_ROWS);
+  return (
+    <div
+      role='status'
+      className='divide-y divide-gray-200 dark:divide-white/[0.06]'
+    >
+      <span className='sr-only'>加载中...</span>
+      {rows === 0 && (
+        <div className={ANNOUNCEMENT_EMPTY_CLASS}>
+          <SkeletonText className='text-sm' barClassName='h-4 w-20 rounded' />
+        </div>
+      )}
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className={ANNOUNCEMENT_ROW_CLASS}>
+          <div className='min-w-0 flex-1'>
+            <SkeletonText
+              className={ANNOUNCEMENT_TEXT_CLASS}
+              barClassName='h-3.5 w-3/4 rounded'
+            />
+            <SkeletonText
+              className={ANNOUNCEMENT_META_CLASS}
+              barClassName='h-3 w-28 rounded'
+            />
+          </div>
+          <Block
+            className={`${ANNOUNCEMENT_ACTION_CLASS} w-8 shrink-0 rounded-lg`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AdminReviewRowsSkeleton() {
   return (
     <div
@@ -244,7 +289,7 @@ export default function AdminContentSkeleton({
                 <Block className='h-10 w-10 shrink-0 rounded-lg' />
               </div>
             </AdminSettingRow>
-            <Field label='站点公告' description='修改后会重新推送给用户' wide />
+            <Field label='站点须知' wide />
             <Field label='底部声明' wide />
           </AdminSettingsGroup>
           <AdminSettingsGroup title='数据与图片代理'>
@@ -328,35 +373,6 @@ export default function AdminContentSkeleton({
         </div>
       );
       break;
-    case 'data-migration':
-      content = (
-        <div className='space-y-8'>
-          <AdminSettingsGroup title='导出备份'>
-            <AdminSettingRow
-              label='加密密码'
-              description='导入时需输入相同密码'
-            >
-              <Block className='h-9 w-full rounded-lg sm:w-96' />
-            </AdminSettingRow>
-            <AdminSettingRow label='备份内容' layout='stacked'>
-              <div className='flex flex-wrap gap-1.5'>
-                {Array.from({ length: 8 }, (_, index) => (
-                  <Block key={index} className='h-5 w-20' />
-                ))}
-              </div>
-              <Block className='mt-2 h-4 w-48 max-w-full' />
-            </AdminSettingRow>
-          </AdminSettingsGroup>
-          <AdminSettingsGroup title='导入备份'>
-            {['备份文件', '解密密码'].map((label) => (
-              <AdminSettingRow key={label} label={label}>
-                <Block className='h-9 w-full rounded-lg sm:w-96' />
-              </AdminSettingRow>
-            ))}
-          </AdminSettingsGroup>
-        </div>
-      );
-      break;
     case 'user':
       content = (
         <div className='space-y-6'>
@@ -384,6 +400,34 @@ export default function AdminContentSkeleton({
         </div>
       );
       break;
+    case 'announcements':
+      content = (
+        <div className='space-y-8'>
+          <AdminSettingsGroup
+            title='发布公告'
+            actions={
+              <>
+                <Block className='h-8 w-20 rounded-lg' />
+                <Block className='h-8 w-[4.5rem] rounded-lg' />
+              </>
+            }
+          >
+            <textarea
+              aria-hidden='true'
+              tabIndex={-1}
+              disabled
+              rows={ANNOUNCEMENT_COMPOSER_ROWS}
+              className={ANNOUNCEMENT_COMPOSER_CLASS}
+            />
+          </AdminSettingsGroup>
+          <AdminSettingsGroup title='公告列表'>
+            <AdminAnnouncementRowsSkeleton
+              count={data?.SiteConfig.AnnouncementCount ?? 4}
+            />
+          </AdminSettingsGroup>
+        </div>
+      );
+      break;
     case 'danmaku':
       content = (
         <div className='space-y-5'>
@@ -396,6 +440,9 @@ export default function AdminContentSkeleton({
           </div>
         </div>
       );
+      break;
+    case 'traffic':
+      content = <TrafficTabSkeleton />;
       break;
     case 'reviews':
       content = (

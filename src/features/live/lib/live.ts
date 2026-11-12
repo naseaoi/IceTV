@@ -12,6 +12,7 @@ import {
   fetchTextThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { createSwrCache } from '@/lib/server-cache';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 import type { AdminConfig } from '@/types/admin';
 
@@ -45,30 +46,37 @@ export interface LiveChannels {
   };
 }
 
-interface CacheEntry {
-  data: LiveChannels;
-  freshUntil: number;
-}
-
 type LiveConfigEntry = NonNullable<AdminConfig['LiveConfig']>[number];
 
 const CACHE_FRESH_MS = 30 * 60 * 1000;
 const DEFAULT_LIVE_REFRESH_CONCURRENCY = 2;
-const cachedLiveChannels: { [key: string]: CacheEntry } = {};
-const inflightRequests: { [key: string]: Promise<number> } = {};
+const cachedLiveChannels = createSwrCache<{
+  configKey: string;
+  data: LiveChannels;
+}>({
+  name: 'live-channels',
+  freshMs: CACHE_FRESH_MS,
+  staleMs: 90 * 60 * 1000,
+  maxSize: 64,
+  maxWeightBytes: 32 * 1024 * 1024,
+});
+const inflightRequests = new Map<
+  string,
+  { configKey: string; promise: Promise<LiveChannels> }
+>();
 
-export function deleteCachedLiveChannels(key: string) {
-  delete cachedLiveChannels[key];
-  delete inflightRequests[key];
+function getLiveConfigCacheKey(liveInfo: LiveConfigEntry) {
+  return JSON.stringify([
+    liveInfo.key,
+    liveInfo.url.trim(),
+    liveInfo.ua?.trim() || defaultUA,
+    liveInfo.epg?.trim() || '',
+  ]);
 }
 
-export function clearCachedLiveChannels() {
-  for (const key of new Set([
-    ...Object.keys(cachedLiveChannels),
-    ...Object.keys(inflightRequests),
-  ])) {
-    deleteCachedLiveChannels(key);
-  }
+export function deleteCachedLiveChannels(key: string) {
+  cachedLiveChannels.invalidate(key);
+  inflightRequests.delete(key);
 }
 
 export function isLiveEntryEnabledInConfig(config: {
@@ -85,57 +93,48 @@ export async function isLiveEntryEnabled() {
 export async function getCachedLiveChannels(
   key: string,
 ): Promise<LiveChannels | null> {
-  const entry = cachedLiveChannels[key];
-  if (entry && Date.now() < entry.freshUntil) {
-    return entry.data;
-  }
-
   const config = await getConfigForRead();
-  if (!isLiveEntryEnabledInConfig(config)) {
-    return null;
-  }
+  if (!isLiveEntryEnabledInConfig(config)) return null;
 
   const liveInfo = config.LiveConfig?.find((live) => live.key === key);
-  if (!liveInfo) {
-    return null;
+  if (!liveInfo || liveInfo.disabled) return null;
+
+  const entry = cachedLiveChannels.peek(key);
+  if (entry && entry.value.configKey === getLiveConfigCacheKey(liveInfo)) {
+    if (!entry.fresh) {
+      void loadLiveChannels(liveInfo).catch((error) => {
+        console.warn(`后台刷新直播源失败 [${liveInfo.name || key}]:`, error);
+      });
+    }
+    return entry.value.data;
   }
 
-  if (entry) {
-    void refreshLiveChannels(liveInfo).catch((error) => {
-      console.warn(`后台刷新直播源失败 [${liveInfo.name || key}]:`, error);
-    });
-    return entry.data;
-  }
-
-  const channelNum = await refreshLiveChannels(liveInfo);
-  if (channelNum === 0) {
-    return null;
-  }
-  return cachedLiveChannels[key]?.data || null;
+  const data = await loadLiveChannels(liveInfo);
+  return data.channelNumber > 0 ? data : null;
 }
 
 export async function refreshLiveChannels(
-  liveInfo: {
-    key: string;
-    name: string;
-    url: string;
-    ua?: string;
-    epg?: string;
-    from: 'config' | 'custom';
-    channelNumber?: number;
-    disabled?: boolean;
-  },
+  liveInfo: LiveConfigEntry,
   persistCount = true,
 ): Promise<number> {
-  if (persistCount && liveInfo.key in inflightRequests) {
-    return inflightRequests[liveInfo.key];
+  return (await loadLiveChannels(liveInfo, persistCount)).channelNumber;
+}
+
+function loadLiveChannels(
+  liveInfo: LiveConfigEntry,
+  persistCount = true,
+): Promise<LiveChannels> {
+  const configKey = getLiveConfigCacheKey(liveInfo);
+  const existing = inflightRequests.get(liveInfo.key);
+  if (persistCount && existing?.configKey === configKey) {
+    return existing.promise;
   }
 
-  const doRefresh = async (): Promise<number> => {
+  const doRefresh = async (): Promise<LiveChannels> => {
     const ua = liveInfo.ua?.trim() || defaultUA;
     const sourceUrl = liveInfo.url.trim();
-    const data = await fetchLivePlaylistText(sourceUrl, ua);
-    const result = parseLivePlaylist(liveInfo.key, data);
+    const text = await fetchLivePlaylistText(sourceUrl, ua);
+    const result = parseLivePlaylist(liveInfo.key, text);
     const epgUrl = liveInfo.epg?.trim() || result.tvgUrl;
     const epgs = await parseEpg(
       epgUrl,
@@ -145,48 +144,63 @@ export async function refreshLiveChannels(
         name: channel.name,
       })),
     );
-    if (persistCount && inflightRequests[liveInfo.key] === refreshRequest) {
-      cachedLiveChannels[liveInfo.key] = {
-        data: {
-          channelNumber: result.channels.length,
-          channels: result.channels,
-          epgUrl: epgUrl,
-          epgs: epgs,
-        },
-        freshUntil: Date.now() + CACHE_FRESH_MS,
-      };
-      await db.setLiveSourceChannelCount(liveInfo, result.channels.length);
+    const data: LiveChannels = {
+      channelNumber: result.channels.length,
+      channels: result.channels,
+      epgUrl,
+      epgs,
+    };
+    // 删除缓存或配置切换后，迟到的刷新只交付原调用者。
+    if (
+      persistCount &&
+      inflightRequests.get(liveInfo.key)?.promise === refreshRequest
+    ) {
+      cachedLiveChannels.set(liveInfo.key, { configKey, data });
+      await db.setLiveSourceChannelCount(liveInfo, data.channelNumber);
     }
-    return result.channels.length;
+    return data;
   };
 
   if (!persistCount) return doRefresh();
   const refreshRequest = doRefresh().finally(() => {
-    if (inflightRequests[liveInfo.key] === refreshRequest) {
-      delete inflightRequests[liveInfo.key];
+    if (inflightRequests.get(liveInfo.key)?.promise === refreshRequest) {
+      inflightRequests.delete(liveInfo.key);
     }
   });
-  inflightRequests[liveInfo.key] = refreshRequest;
+  inflightRequests.set(liveInfo.key, { configKey, promise: refreshRequest });
   return refreshRequest;
 }
 
 export async function refreshLiveChannelSources(
   liveInfos: LiveConfigEntry[],
-): Promise<void> {
+): Promise<{
+  refreshed: number;
+  failed: { key: string; name: string }[];
+}> {
+  const result = {
+    refreshed: 0,
+    failed: [] as { key: string; name: string }[],
+  };
   const tasks = liveInfos
     .filter((liveInfo) => !liveInfo.disabled)
     .map((liveInfo) => async () => {
       try {
         await refreshLiveChannels(liveInfo);
+        result.refreshed += 1;
       } catch (error) {
         console.error(
           `刷新直播源失败 [${liveInfo.name || liveInfo.key}]:`,
           error,
         );
+        result.failed.push({
+          key: liveInfo.key,
+          name: liveInfo.name || liveInfo.key,
+        });
       }
     });
 
   await runWithConcurrency(tasks, getLiveRefreshConcurrency());
+  return result;
 }
 
 function getLiveRefreshConcurrency() {

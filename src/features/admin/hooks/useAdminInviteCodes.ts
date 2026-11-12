@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
@@ -8,6 +7,7 @@ import type {
   InviteCodeFilter,
   InviteCodePage,
 } from '@/lib/invite-code-storage';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 const EMPTY_PAGE: InviteCodePage = {
   items: [],
@@ -80,7 +80,7 @@ export function useAdminInviteCodes(
         );
       } catch (cause) {
         if (id === generation.current && !abort.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : '加载邀请码失败');
+          setError(getErrorMessage(cause, '加载邀请码失败'));
         }
       } finally {
         if (id === generation.current) setLoading(false);

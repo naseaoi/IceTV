@@ -20,9 +20,9 @@ import PageLayout from '@/components/PageLayout';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import {
   buildLoginHref,
-  logout,
   ROLE_TEXT,
   useHasUpdate,
+  useLogout,
 } from '@/components/user-menu/account';
 import {
   ChangePasswordPanel,
@@ -31,6 +31,7 @@ import {
 } from '@/components/user-menu/lazy-panels';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { UserAvatar } from '@/components/user-menu/UserAvatar';
+import { AdminAlertBadge } from '@/features/admin/components/AdminAlertBadge';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { CURRENT_VERSION } from '@/lib/version';
 
@@ -143,6 +144,7 @@ export function SettingsPageClient() {
   const router = useRouter();
   const { session } = useAuthSession();
   const hasUpdate = useHasUpdate();
+  const { loggingOut, handleLogout } = useLogout();
   const [panel, setPanel] = useState<Panel>(null);
   const close = () => setPanel(null);
 
@@ -210,7 +212,12 @@ export function SettingsPageClient() {
               />
             )}
             {isAdmin && (
-              <ActionRow icon={Shield} label='管理后台' href='/admin' />
+              <ActionRow
+                icon={Shield}
+                label='管理后台'
+                href='/admin'
+                trailing={<AdminAlertBadge />}
+              />
             )}
           </div>
         )}
@@ -237,10 +244,11 @@ export function SettingsPageClient() {
           <div className={GROUP_CLASS}>
             <button
               type='button'
+              disabled={loggingOut}
               onClick={() => setPanel('logout')}
               className={`${PRESSABLE_ROW_CLASS} justify-center font-medium text-red-600 dark:text-red-400`}
             >
-              退出登录
+              {loggingOut ? '退出中…' : '退出登录'}
             </button>
           </div>
         )}
@@ -249,17 +257,18 @@ export function SettingsPageClient() {
       {panel === 'profile' && <ProfilePanel onClose={close} />}
       {panel === 'local' && <SettingsPanel onClose={close} />}
       {panel === 'password' && (
-        <ChangePasswordPanel onClose={close} onLogout={logout} />
+        <ChangePasswordPanel onClose={close} onLogout={handleLogout} />
       )}
       {panel === 'version' && <VersionPanel isOpen onClose={close} />}
       <ConfirmModal
         isOpen={panel === 'logout'}
         title='退出登录'
         message='确定要退出当前账号吗？'
-        confirmText='退出'
+        confirmText={loggingOut ? '退出中…' : '退出'}
+        confirmDisabled={loggingOut}
         danger
         onClose={close}
-        onConfirm={() => void logout()}
+        onConfirm={() => void handleLogout()}
       />
     </PageLayout>
   );

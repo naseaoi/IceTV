@@ -1,22 +1,24 @@
+import {
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
 import type { SourceCoverProxyMode } from '@/lib/source-cover-proxy';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 export interface RuntimeConfig {
   STORAGE_TYPE: string;
   OPEN_REGISTER: boolean;
+  LINUXDO_LOGIN: boolean;
   REQUIRE_INVITE_CODE: boolean;
   UPDATE_REPOS: string;
   UPDATE_BRANCH: string;
   DOUBAN_PROXY_TYPE: string;
   DOUBAN_PROXY: string;
-  BANGUMI_DATA_SOURCE: string;
-  BANGUMI_PROXY: string;
   DOUBAN_IMAGE_PROXY_TYPE: string;
   DOUBAN_IMAGE_PROXY: string;
   ENABLE_LIVE_ENTRY: boolean;
   DEFAULT_AGGREGATE_SEARCH: boolean;
   ENABLE_OPTIMIZATION: boolean;
-  LIVE_DIRECT_CONNECT: boolean;
   AUTO_SWITCH_SOURCE: boolean;
   ENABLE_DANMAKU: boolean;
   ENABLE_USER_DANMAKU: boolean;
@@ -25,7 +27,6 @@ export interface RuntimeConfig {
   VOD_PAGE_TIMEOUT_SECONDS: number;
   VOD_FRAGMENT_TIMEOUT_SECONDS: number;
   PLAYBACK_HISTORY_PAGE_SIZE: number;
-  PLAYBACK_HISTORY_LIMIT: number;
   SEARCH_HISTORY_LIMIT: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
@@ -37,19 +38,17 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   STORAGE_TYPE:
     process.env.NEXT_PUBLIC_STORAGE_TYPE === 'mysql' ? 'mysql' : 'localdb',
   OPEN_REGISTER: false,
+  LINUXDO_LOGIN: false,
   REQUIRE_INVITE_CODE: false,
   UPDATE_REPOS: 'naseaoi/IceTV',
   UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
-  DOUBAN_PROXY_TYPE: 'direct',
+  DOUBAN_PROXY_TYPE: DEFAULT_DOUBAN_PROXY_TYPE,
   DOUBAN_PROXY: '',
-  BANGUMI_DATA_SOURCE: 'direct',
-  BANGUMI_PROXY: '',
-  DOUBAN_IMAGE_PROXY_TYPE: 'direct',
+  DOUBAN_IMAGE_PROXY_TYPE: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DOUBAN_IMAGE_PROXY: '',
   ENABLE_LIVE_ENTRY: false,
   DEFAULT_AGGREGATE_SEARCH: true,
   ENABLE_OPTIMIZATION: true,
-  LIVE_DIRECT_CONNECT: false,
   AUTO_SWITCH_SOURCE: false,
   ENABLE_DANMAKU: false,
   ENABLE_USER_DANMAKU: false,
@@ -58,7 +57,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   VOD_PAGE_TIMEOUT_SECONDS: 15,
   VOD_FRAGMENT_TIMEOUT_SECONDS: 10,
   PLAYBACK_HISTORY_PAGE_SIZE: 10,
-  PLAYBACK_HISTORY_LIMIT: 500,
   SEARCH_HISTORY_LIMIT: 20,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
@@ -81,19 +79,17 @@ export type ServerConfigPayload = {
   FooterText?: string;
   StorageType?: string;
   OpenRegister?: boolean;
+  LinuxDoLogin?: boolean;
   RequireInviteCode?: boolean;
   UpdateRepos?: string;
   UpdateBranch?: string;
   DoubanProxyType?: string;
   DoubanProxy?: string;
-  BangumiDataSource?: string;
-  BangumiProxy?: string;
   DoubanImageProxyType?: string;
   DoubanImageProxy?: string;
   EnableLiveEntry?: boolean;
   DefaultAggregateSearch?: boolean;
   EnableOptimization?: boolean;
-  LiveDirectConnect?: boolean;
   AutoSwitchSource?: boolean;
   EnableDanmaku?: boolean;
   EnableUserDanmaku?: boolean;
@@ -102,7 +98,6 @@ export type ServerConfigPayload = {
   VodPageTimeoutSeconds?: number;
   VodFragmentTimeoutSeconds?: number;
   PlaybackHistoryPageSize?: number;
-  PlaybackHistoryLimit?: number;
   SearchHistoryLimit?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
@@ -129,6 +124,7 @@ function runtimeConfigFromServerConfig(
 ): RuntimeConfig {
   return {
     STORAGE_TYPE: data.StorageType || DEFAULT_RUNTIME_CONFIG.STORAGE_TYPE,
+    LINUXDO_LOGIN: data.LinuxDoLogin ?? false,
     OPEN_REGISTER:
       data.OpenRegister === undefined
         ? DEFAULT_RUNTIME_CONFIG.OPEN_REGISTER
@@ -142,9 +138,6 @@ function runtimeConfigFromServerConfig(
     DOUBAN_PROXY_TYPE:
       data.DoubanProxyType || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE,
     DOUBAN_PROXY: data.DoubanProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
-    BANGUMI_DATA_SOURCE:
-      data.BangumiDataSource || DEFAULT_RUNTIME_CONFIG.BANGUMI_DATA_SOURCE,
-    BANGUMI_PROXY: data.BangumiProxy || DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
     DOUBAN_IMAGE_PROXY_TYPE:
       data.DoubanImageProxyType ||
       DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,
@@ -162,10 +155,6 @@ function runtimeConfigFromServerConfig(
       data.EnableOptimization === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_OPTIMIZATION
         : data.EnableOptimization,
-    LIVE_DIRECT_CONNECT:
-      data.LiveDirectConnect === undefined
-        ? DEFAULT_RUNTIME_CONFIG.LIVE_DIRECT_CONNECT
-        : data.LiveDirectConnect,
     AUTO_SWITCH_SOURCE:
       data.AutoSwitchSource === undefined
         ? DEFAULT_RUNTIME_CONFIG.AUTO_SWITCH_SOURCE
@@ -193,9 +182,6 @@ function runtimeConfigFromServerConfig(
     PLAYBACK_HISTORY_PAGE_SIZE:
       data.PlaybackHistoryPageSize ??
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,
-    PLAYBACK_HISTORY_LIMIT:
-      data.PlaybackHistoryLimit ??
-      DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_LIMIT,
     SEARCH_HISTORY_LIMIT:
       data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
     CONTINUE_WATCHING_LIMIT:
@@ -275,12 +261,14 @@ async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getClientAuthRuntimeConfig(): Promise<{
   storageType: string;
   openRegister: boolean;
+  linuxDoLogin: boolean;
   requireInviteCode: boolean;
 }> {
   const runtimeConfig = await ensureClientRuntimeConfig();
   return {
     storageType: runtimeConfig.STORAGE_TYPE,
     openRegister: runtimeConfig.OPEN_REGISTER,
+    linuxDoLogin: runtimeConfig.LINUXDO_LOGIN,
     requireInviteCode: runtimeConfig.REQUIRE_INVITE_CODE,
   };
 }

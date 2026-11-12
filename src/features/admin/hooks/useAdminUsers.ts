@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
@@ -8,6 +7,7 @@ import {
   type AdminUserQuery,
   ADMIN_USER_PAGE_SIZE,
 } from '@/features/admin/lib/user-query';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 export function useAdminUsers(query: AdminUserQuery) {
   const key = JSON.stringify(query);
@@ -55,7 +55,7 @@ export function useAdminUsers(query: AdminUserQuery) {
         }));
       } catch (cause) {
         if (id === generation.current && !abort.signal.aborted)
-          setError(cause instanceof Error ? cause.message : '加载用户失败');
+          setError(getErrorMessage(cause, '加载用户失败'));
       } finally {
         if (id === generation.current) setLoading(false);
       }

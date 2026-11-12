@@ -45,6 +45,10 @@ describe('douban rating route', () => {
     });
 
     const first = await GET(request('23748525'));
+    expect(first.headers.get('Cache-Control')).toBe('private, max-age=300');
+    expect(first.headers.has('CDN-Cache-Control')).toBe(false);
+    expect(first.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+    expect(first.headers.has('Netlify-Vary')).toBe(false);
     await expect(first.json()).resolves.toEqual({ rate: 9.4 });
 
     const second = await GET(request('23748525'));

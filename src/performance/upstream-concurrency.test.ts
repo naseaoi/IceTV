@@ -54,7 +54,7 @@ jest.mock('@/lib/config', () => ({
   getPublicConfig: async () => ({ DoubanImageProxyType: 'direct' }),
 }));
 jest.mock('@/features/bangumi/lib/bangumi', () => ({
-  getCachedBangumiCalendarData: () => [],
+  getBangumiCalendarData: async () => [],
 }));
 jest.mock('@/lib/douban-image-url.server', () => ({
   readServerDoubanImageProxyType: async () => 'direct',
@@ -70,9 +70,6 @@ jest.mock('@/lib/url-guard', () => ({
     init: RequestInit & { resourceContext?: object },
   ) => mockFetch(url, init),
   validateProxyUrlForRequest: async (url: string) => ({ ok: true, url }),
-}));
-jest.mock('@/features/play/lib/ad-segment-detector', () => ({
-  filterM3U8AdsForSource: async (content: string) => content,
 }));
 jest.mock('@/features/live/lib/live', () => ({
   isLiveEntryEnabled: async () => true,
@@ -171,7 +168,8 @@ runSuite('synthetic upstream concurrency', () => {
     }> = [
       {
         name: 'home',
-        demand: 3,
+        // 首页冷读包含三组推荐与五条轮播简介。
+        demand: 8,
         call: async () => {
           const data = await getHomeInitialData();
           expect(data.hotMovies).toHaveLength(20);
@@ -259,6 +257,10 @@ runSuite('synthetic upstream concurrency', () => {
                       bytes: (await response.arrayBuffer()).byteLength,
                     };
                   } catch (error) {
+                    console.error(
+                      `[upstream-concurrency] ${scenario.name} ${phase} clients=${users} user=${user}`,
+                      error,
+                    );
                     return {
                       status: (error as { status?: number }).status ?? 500,
                       bytes: 0,

@@ -34,8 +34,13 @@ import {
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
+import {
+  getKnownMyReviewCount,
+  rememberMyReviewCount,
+} from '@/lib/my-review-count';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { MyVideoReviewPage, VideoReview } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 import {
   MY_REVIEWS_PAGE_SIZE,
@@ -62,9 +67,6 @@ const SORT_OPTIONS: { value: ReviewSort; label: string }[] = [
   { value: 'low', label: '评分从低到高' },
 ];
 
-const SKELETON_COUNT = MY_REVIEWS_PAGE_SIZE;
-const reviewCounts = new Map<string, number>();
-
 function matchesReviewFilter(review: VideoReview, filter: ReviewFilter) {
   return (
     filter === 'all' ||
@@ -76,21 +78,18 @@ function matchesReviewFilter(review: VideoReview, filter: ReviewFilter) {
 
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
-function useReviewSkeletonCount() {
+// initialCount 是服务端读到的计数快照，供首屏 HTML 使用；挂载后改用本标签页内更新的已知值
+function useReviewSkeletonCount(initialCount: number) {
   const { session } = useAuthSession();
   const profileId =
     session.status === 'authenticated' ? session.profileId : null;
-  const [count, setCount] = useState(SKELETON_COUNT);
+  const [count, setCount] = useState(() =>
+    Math.min(initialCount, MY_REVIEWS_PAGE_SIZE),
+  );
   useIsomorphicLayoutEffect(() => {
-    setCount(
-      profileId
-        ? Math.min(
-            reviewCounts.get(profileId) ?? SKELETON_COUNT,
-            MY_REVIEWS_PAGE_SIZE,
-          )
-        : SKELETON_COUNT,
-    );
-  }, [profileId]);
+    const known = profileId ? getKnownMyReviewCount(profileId) : null;
+    setCount(Math.min(known ?? initialCount, MY_REVIEWS_PAGE_SIZE));
+  }, [initialCount, profileId]);
   return { count, profileId, setCount };
 }
 const CARD_CLASS =
@@ -117,7 +116,7 @@ function buildFilterOptions(counts: Record<ReviewFilter, number> | null) {
 
 function noop() {}
 
-function ReviewListSkeleton({ count = SKELETON_COUNT }: { count?: number }) {
+function ReviewListSkeleton({ count }: { count: number }) {
   if (count === 0) return <LibraryEmptySkeleton />;
   return (
     <ul
@@ -155,8 +154,12 @@ function ReviewListSkeleton({ count = SKELETON_COUNT }: { count?: number }) {
   );
 }
 
-export function MyReviewsPageSkeleton() {
-  const { count } = useReviewSkeletonCount();
+export function MyReviewsPageSkeleton({
+  initialCount = 0,
+}: {
+  initialCount?: number;
+}) {
+  const { count } = useReviewSkeletonCount(initialCount);
   return (
     <LibraryPageFrame
       title='我的评价'
@@ -315,12 +318,16 @@ function ReviewCard({
   );
 }
 
-export default function MyReviewsPageClient() {
+export default function MyReviewsPageClient({
+  initialSkeletonCount = 0,
+}: {
+  initialSkeletonCount?: number;
+}) {
   const {
     count: skeletonCount,
     profileId,
     setCount,
-  } = useReviewSkeletonCount();
+  } = useReviewSkeletonCount(initialSkeletonCount);
   const [mutationError, setMutationError] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ReviewFilter>('all');
@@ -351,6 +358,7 @@ export default function MyReviewsPageClient() {
     error: queryError,
     loadMore,
     refresh: refreshPage,
+    retry: retryPage,
     updateData,
   } = usePagedQuery({
     scopeKey: profileId,
@@ -371,9 +379,10 @@ export default function MyReviewsPageClient() {
   }, [refreshPage]);
 
   useEffect(() => {
-    if (!data) return;
-    setCount(Math.min(data.total, MY_REVIEWS_PAGE_SIZE));
-    if (profileId) reviewCounts.set(profileId, data.total);
+    // 只有未搜索时的「全部」计数才是本人评价总数
+    if (!data || data.countsQuery !== '') return;
+    setCount(Math.min(data.counts.all, MY_REVIEWS_PAGE_SIZE));
+    if (profileId) rememberMyReviewCount(profileId, data.counts.all);
   }, [data, profileId, setCount]);
 
   useEffect(() => {
@@ -477,8 +486,10 @@ export default function MyReviewsPageClient() {
       );
       refresh();
       setPending(null);
-    } catch {
-      setMutationError('删除失败，请重试');
+    } catch (error) {
+      if (!isAbortError(error))
+        setMutationError(getErrorMessage(error, '删除失败，请重试'));
+      throw error;
     } finally {
       inFlight.current = false;
       setDeleting(false);
@@ -568,7 +579,11 @@ export default function MyReviewsPageClient() {
       {error && (
         <p role='alert' className='mb-4 text-sm text-red-500'>
           {error}
-          <button type='button' onClick={refresh} className='ml-3 underline'>
+          <button
+            type='button'
+            onClick={queryError ? retryPage : refresh}
+            className='ml-3 underline'
+          >
             重新加载
           </button>
         </p>
@@ -610,7 +625,7 @@ export default function MyReviewsPageClient() {
         danger
         confirmText='确认删除'
         confirmDisabled={deleting}
-        onConfirm={() => void remove()}
+        onConfirm={remove}
         onClose={() => {
           if (!deleting) setPending(null);
         }}

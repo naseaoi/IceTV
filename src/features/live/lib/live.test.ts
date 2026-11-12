@@ -1,7 +1,6 @@
 import { gzipSync } from 'node:zlib';
 
 import {
-  clearCachedLiveChannels,
   deleteCachedLiveChannels,
   getCachedLiveChannels,
   parseEpgXmlForChannels,
@@ -87,46 +86,51 @@ describe('refreshLiveChannels', () => {
     }
   });
 
-  it.each([deleteCachedLiveChannels, () => clearCachedLiveChannels()])(
-    '清理缓存后丢弃迟到刷新且保留新一轮在途请求',
-    async (invalidate) => {
-      const source = {
-        key: 'atomic-source',
-        name: 'Atomic',
-        url: 'https://example.com/live.m3u',
-        from: 'custom' as const,
-      };
-      const pendingReads: Array<() => void> = [];
-      (global.fetch as jest.Mock).mockImplementation(() =>
-        Promise.resolve(
-          createDeferredTextResponse(
-            '频道,https://example.com/live.m3u8',
-            (release) => pendingReads.push(release),
-          ),
+  it('清理缓存后丢弃迟到刷新且保留新一轮在途请求', async () => {
+    const source = {
+      key: 'atomic-source',
+      name: 'Atomic',
+      url: 'https://example.com/live.m3u',
+      from: 'custom' as const,
+    };
+    const pendingReads: Array<() => void> = [];
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve(
+        createDeferredTextResponse(
+          '频道,https://example.com/live.m3u8',
+          (release) => pendingReads.push(release),
         ),
-      );
-      mockedGetConfigForRead.mockResolvedValue({
-        SiteConfig: { EnableLiveEntry: true },
-        LiveConfig: [],
-      } as unknown as Awaited<ReturnType<typeof getConfigForRead>>);
-      const oldRefresh = refreshLiveChannels(source);
-      await waitForCondition(() => pendingReads.length === 1);
-      invalidate(source.key);
-      const newRefresh = refreshLiveChannels(source);
-      await waitForCondition(() => pendingReads.length === 2);
-      pendingReads[0]();
-      await oldRefresh;
-      expect(await getCachedLiveChannels(source.key)).toBeNull();
-      const coalesced = refreshLiveChannels(source);
-      await flushAsyncWork();
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-      pendingReads[1]();
-      await Promise.all([newRefresh, coalesced]);
-      expect((await getCachedLiveChannels(source.key))?.channelNumber).toBe(1);
-      clearCachedLiveChannels();
-      expect(await getCachedLiveChannels(source.key)).toBeNull();
-    },
-  );
+      ),
+    );
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [],
+    } as unknown as Awaited<ReturnType<typeof getConfigForRead>>);
+    const oldRefresh = refreshLiveChannels(source);
+    await waitForCondition(() => pendingReads.length === 1);
+    deleteCachedLiveChannels(source.key);
+    const newRefresh = refreshLiveChannels(source);
+    await waitForCondition(() => pendingReads.length === 2);
+    pendingReads[0]();
+    await oldRefresh;
+    expect(await getCachedLiveChannels(source.key)).toBeNull();
+    const coalesced = refreshLiveChannels(source);
+    await flushAsyncWork();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    pendingReads[1]();
+    await Promise.all([newRefresh, coalesced]);
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [source],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
+    expect((await getCachedLiveChannels(source.key))?.channelNumber).toBe(1);
+    deleteCachedLiveChannels(source.key);
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [],
+    } as unknown as Awaited<ReturnType<typeof getConfigForRead>>);
+    expect(await getCachedLiveChannels(source.key)).toBeNull();
+  });
 
   it.each(['playlist', 'epg'])('上游 %s 错误时取消正文', async (kind) => {
     const cancel = jest.fn().mockResolvedValue(undefined);
@@ -323,6 +327,89 @@ describe('refreshLiveChannels', () => {
     ]);
   });
 
+  it.each([
+    { url: 'https://example.com/new.m3u' },
+    { ua: 'NewPlayer/2' },
+    { epg: 'https://example.com/new.xml' },
+  ])('源配置变化后不复用新鲜缓存 %o', async (change) => {
+    const source = {
+      key: 'atomic-source',
+      name: 'Atomic',
+      url: 'https://example.com/old.m3u',
+      from: 'custom' as const,
+    };
+    (global.fetch as jest.Mock).mockImplementation(async (url: string) =>
+      createTextResponse(
+        url.endsWith('.xml')
+          ? '<tv></tv>'
+          : '频道,https://example.com/live.m3u8',
+      ),
+    );
+    await refreshLiveChannels(source);
+    const changed = { ...source, ...change };
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [changed],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
+    const results = await Promise.all([
+      getCachedLiveChannels(source.key),
+      getCachedLiveChannels(source.key),
+    ]);
+    expect(results[0]).toBe(results[1]);
+    expect(global.fetch).toHaveBeenCalledTimes('epg' in change ? 3 : 2);
+    expect(db.setLiveSourceChannelCount).toHaveBeenCalledWith(changed, 1);
+  });
+
+  it('最长保留两小时后拒绝持续失败的旧缓存', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const source = {
+      key: 'stale-source',
+      name: 'Stale',
+      url: 'https://example.com/stale.m3u',
+      from: 'custom' as const,
+    };
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [source],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
+    (global.fetch as jest.Mock).mockResolvedValueOnce(
+      createTextResponse('频道,https://example.com/a.m3u8'),
+    );
+    await refreshLiveChannels(source);
+    clock.mockReturnValue(1000 + 2 * 60 * 60 * 1000);
+    (global.fetch as jest.Mock).mockRejectedValue(
+      new UrlValidationError('origin failed'),
+    );
+    await expect(getCachedLiveChannels(source.key)).rejects.toThrow(
+      'origin failed',
+    );
+  });
+
+  it.each(['removed', 'disabled', 'closed'])(
+    '缓存命中前检查当前直播配置 %s',
+    async (state) => {
+      const source = {
+        key: 'atomic-source',
+        name: 'Atomic',
+        url: 'https://example.com/live.m3u',
+        from: 'custom' as const,
+      };
+      (global.fetch as jest.Mock).mockResolvedValue(
+        createTextResponse('频道,https://example.com/a.m3u8'),
+      );
+      await refreshLiveChannels(source);
+      mockedGetConfigForRead.mockResolvedValue({
+        SiteConfig: { EnableLiveEntry: state !== 'closed' },
+        LiveConfig:
+          state === 'removed'
+            ? []
+            : [{ ...source, disabled: state === 'disabled' }],
+      } as Awaited<ReturnType<typeof getConfigForRead>>);
+      await expect(getCachedLiveChannels(source.key)).resolves.toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('批量刷新最多同时处理两个直播源', async () => {
     const pendingReads: Array<() => void> = [];
     (global.fetch as jest.Mock).mockImplementation(() =>
@@ -413,6 +500,10 @@ describe('refreshLiveChannels', () => {
         }),
       );
 
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [source],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
     await refreshLiveChannels(source);
     const cached = await getCachedLiveChannels(source.key);
 
@@ -448,6 +539,10 @@ describe('refreshLiveChannels', () => {
       )
       .mockResolvedValueOnce(createChunkedResponse([Buffer.from(epgXml)], {}));
 
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [source],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
     let refreshSettled = false;
     const refreshPromise = refreshLiveChannels(source).finally(() => {
       refreshSettled = true;

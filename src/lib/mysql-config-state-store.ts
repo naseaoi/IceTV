@@ -34,7 +34,7 @@ export class MysqlConfigStateStore {
     await this.connection.execute(
       ignore
         ? SUBSCRIPTION_INSERT.replace('INSERT INTO', 'INSERT IGNORE INTO')
-        : `${SUBSCRIPTION_INSERT} ON DUPLICATE KEY UPDATE url = VALUES(url), auto_update = VALUES(auto_update), last_check = VALUES(last_check), config_file = VALUES(config_file)`,
+        : `${SUBSCRIPTION_INSERT} ON DUPLICATE KEY UPDATE url = VALUES(url), auto_update = VALUES(auto_update), last_check = VALUES(last_check), config_file = VALUES(config_file), failure_since = VALUES(failure_since)`,
       subscriptionValues(value),
     );
   }
@@ -66,6 +66,20 @@ export class MysqlConfigStateStore {
           'DELETE FROM live_source_state WHERE source_key = ?',
           [live.key],
         );
+    }
+  }
+
+  async migrateSchema() {
+    const [columns] = await this.connection.query<RowDataPacket[]>(
+      "SHOW COLUMNS FROM config_subscription LIKE 'failure_since'",
+    );
+    if (columns.length) return;
+    try {
+      await this.connection.execute(
+        "ALTER TABLE config_subscription ADD COLUMN failure_since VARCHAR(32) NOT NULL DEFAULT ''",
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw error;
     }
   }
 

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
@@ -22,9 +21,6 @@ export async function GET(request: NextRequest) {
   const doubanProxyType = canReadSensitiveConfig
     ? normalizeSiteDoubanProxyType(config.SiteConfig.DoubanProxyType)
     : publicConfig.DoubanProxyType;
-  const bangumiDataSource = canReadSensitiveConfig
-    ? normalizeSiteBangumiDataSource(config.SiteConfig.BangumiDataSource)
-    : publicConfig.BangumiDataSource;
   const doubanImageProxyType = canReadSensitiveConfig
     ? normalizeSiteDoubanImageProxyType(config.SiteConfig.DoubanImageProxyType)
     : publicConfig.DoubanImageProxyType;
@@ -36,19 +32,17 @@ export async function GET(request: NextRequest) {
     StorageType: getStorageType(),
     Version: CURRENT_VERSION,
     OpenRegister: publicConfig.OpenRegister,
+    LinuxDoLogin: publicConfig.LinuxDoLogin,
     RequireInviteCode: publicConfig.RequireInviteCode,
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UpdateBranch: CURRENT_UPDATE_BRANCH,
     DoubanProxyType: doubanProxyType,
     DoubanProxy: DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
-    BangumiDataSource: bangumiDataSource,
-    BangumiProxy: DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
     DoubanImageProxyType: doubanImageProxyType,
     DoubanImageProxy: DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     EnableLiveEntry: await canUserWatchLive(activeUser?.username, config),
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
     EnableOptimization: publicConfig.EnableOptimization,
-    LiveDirectConnect: publicConfig.LiveDirectConnect,
     AutoSwitchSource: publicConfig.AutoSwitchSource,
     EnableDanmaku: publicConfig.EnableDanmaku,
     EnableUserDanmaku: publicConfig.EnableUserDanmaku,
@@ -57,7 +51,6 @@ export async function GET(request: NextRequest) {
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,
     VodFragmentTimeoutSeconds: publicConfig.VodFragmentTimeoutSeconds,
     PlaybackHistoryPageSize: publicConfig.PlaybackHistoryPageSize,
-    PlaybackHistoryLimit: publicConfig.PlaybackHistoryLimit,
     SearchHistoryLimit: publicConfig.SearchHistoryLimit,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,

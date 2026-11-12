@@ -7,12 +7,17 @@ jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest.fn(),
   isGuardFailure: (result: object) => 'response' in result,
 }));
+jest.mock('@/lib/config', () => ({
+  getConfigForRead: jest.fn().mockResolvedValue({}),
+  getAvailableApiSites: jest.fn().mockResolvedValue([{ key: 'source' }]),
+}));
+jest.mock('@/lib/detail-cache', () => ({ getCachedDetail: jest.fn() }));
 jest.mock('@/lib/upstream-resource-guard.server', () => ({
   withUpstreamResponse: jest.fn(),
 }));
 installStreamPolyfills();
 const { NextRequest } = require('next/server') as typeof import('next/server');
-const { withSourceProbeBudget } =
+const { withSourceProbeBudget, withAuthenticatedSourceProbeBudget } =
   require('@/features/play/lib/sourceProbeGuard.server') as typeof import('@/features/play/lib/sourceProbeGuard.server');
 
 describe('source probe route budget', () => {
@@ -22,6 +27,70 @@ describe('source probe route budget', () => {
     (withUpstreamResponse as jest.Mock).mockImplementation((_url, loader) =>
       loader(new AbortController().signal),
     );
+  });
+
+  it.each([false, true])(
+    '内部 handler 仅鉴权一次并复用快照，测速=%s',
+    async (probe) => {
+      const controller = new AbortController();
+      const auth = {
+        username: 'viewer',
+        role: 'user',
+        isOwner: false,
+        userAccess: { username: 'viewer', role: 'user' },
+      };
+      (requireActiveUser as jest.Mock).mockResolvedValue(auth);
+      (withUpstreamResponse as jest.Mock).mockImplementation((_url, loader) =>
+        loader(controller.signal),
+      );
+      const request = new NextRequest('http://localhost/api/detail', {
+        headers: probe ? { 'X-IceTV-Probe': '1' } : {},
+        signal: controller.signal,
+      });
+      const handler = jest.fn(async (forwarded, context) => {
+        expect(context).toBe(auth);
+        controller.abort();
+        expect(forwarded.signal.aborted).toBe(true);
+        return new Response('detail');
+      });
+      await withAuthenticatedSourceProbeBudget(request, handler);
+      expect(requireActiveUser).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('真实详情入口复用包装鉴权并传递权限快照和取消信号', async () => {
+    const { GET } = await import('@/app/api/detail/route');
+    const { getAvailableApiSites, getConfigForRead } =
+      await import('@/lib/config');
+    const { getCachedDetail } = await import('@/lib/detail-cache');
+    const snapshot = { username: 'viewer', role: 'user' };
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'viewer',
+      userAccess: snapshot,
+    });
+    (getConfigForRead as jest.Mock).mockResolvedValue({});
+    (getAvailableApiSites as jest.Mock).mockResolvedValue([{ key: 'source' }]);
+    const controller = new AbortController();
+    (withUpstreamResponse as jest.Mock).mockImplementation((_url, loader) =>
+      loader(controller.signal),
+    );
+    (getCachedDetail as jest.Mock).mockImplementation(
+      async (_site, _id, signal) => {
+        controller.abort();
+        expect(signal.aborted).toBe(true);
+        return { id: '1' };
+      },
+    );
+    const response = await GET(
+      new NextRequest('http://localhost/api/detail?id=1&source=source', {
+        headers: { 'X-IceTV-Probe': '1' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(requireActiveUser).toHaveBeenCalledTimes(1);
+    expect(getAvailableApiSites).toHaveBeenCalledWith('viewer', {}, snapshot);
+    expect(getCachedDetail).toHaveBeenCalledTimes(1);
   });
 
   it('keeps ordinary playback outside the probe budget', async () => {

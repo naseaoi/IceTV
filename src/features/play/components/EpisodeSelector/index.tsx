@@ -309,7 +309,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const hasEpisodesTab = totalEpisodes > 1 || variantSources.length > 1;
   const showDesktopEpisodes = detailLoading || hasEpisodesTab;
 
-  // 消息面板的评价详情可带 tab=reviews 进入，直接展示评价；播放页之间跳转不会重新挂载，按整串参数重新触发
+  // 消息面板的评价详情可带 tab=reviews 进入，直接展示评价。参数打开面板后即从地址移除，
+  // 否则换源同步地址时参数串变化会再次抢回评价；播放页之间跳转不会重新挂载，再次带参进入仍能触发
   const searchParams = useSearchParams();
   const reviewsRequest =
     searchParams.get('tab') === 'reviews' ? searchParams.toString() : null;
@@ -321,6 +322,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     if (!reviewsRequest) return;
     setDesktopTab('reviews');
     if (window.matchMedia(MOBILE_QUERY).matches) setMobileSheet('reviews');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('tab');
+    window.history.replaceState(null, '', url);
   }, [reviewsRequest]);
   const [reviewEditRequested, setReviewEditRequested] = useState(false);
 

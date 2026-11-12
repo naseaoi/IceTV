@@ -11,9 +11,11 @@ import {
 import { loadDanmakuForEpisode } from '@/features/play/lib/danmaku/resolve';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
 import { sendUserDanmaku } from '@/features/play/lib/danmaku/user-client';
+import { DisplayableError } from '@/lib/user-facing-error';
 
 jest.mock('@/features/play/lib/danmaku/plugin', () => ({
   createDanmakuPlugin: jest.fn(),
+  loadDanmakuPluginModule: jest.fn(),
 }));
 jest.mock('@/features/play/lib/danmaku/resolve', () => ({
   loadDanmakuForEpisode: jest.fn(),
@@ -139,7 +141,9 @@ describe('user danmaku emitter', () => {
       options?.onUserTarget?.({ key: 'dandan:42', offset: 0 });
       return [];
     });
-    mockSend.mockRejectedValueOnce(new Error('发送太频繁，请稍后再试'));
+    mockSend.mockRejectedValueOnce(
+      new DisplayableError('发送太频繁，请稍后再试'),
+    );
     const { emit, player, initialTask } = await createPlayer();
     await initialTask;
 

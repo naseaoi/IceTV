@@ -34,6 +34,7 @@ import {
   getCachedPlayRecordsSnapshot,
   saveFavorite,
 } from '@/lib/db.client';
+import { showToast } from '@/lib/toast';
 
 interface PlaybackPosterCardProps {
   title: string;
@@ -98,16 +99,21 @@ export function PlaybackPosterCard({
   }, [ensureFavoritesLoaded, hasTarget, onPrefetch, selectable]);
 
   const toggleFavorite = useCallback(
-    async (current: boolean) => {
+    async (current: boolean, notify = false) => {
       if (!hasTarget) return;
       if (current) {
         showConfirm(interactionId, {
+          objectKey: `${source}+${videoId}`,
+          operation: 'favorite',
           title: '确认取消收藏？',
           message: `确认取消收藏「${title}」吗？`,
           danger: true,
           cancelText: '再想想',
           confirmText: '取消收藏',
-          onConfirm: () => deleteFavorite(source, videoId),
+          onConfirm: async () => {
+            await deleteFavorite(source, videoId);
+            if (notify) showToast('已取消收藏', 'success');
+          },
         });
         return;
       }
@@ -122,6 +128,7 @@ export function PlaybackPosterCard({
         save_time: Date.now(),
         search_title: record?.search_title || '',
       });
+      if (notify) showToast('已加入收藏', 'success');
     },
     [
       cover,
@@ -147,12 +154,16 @@ export function PlaybackPosterCard({
         ? getCachedPlayRecordsSnapshot()?.[generateStorageKey(source, videoId)]
         : undefined;
       showActionSheet(interactionId, {
+        objectKey: `${source}+${videoId}`,
         title,
         poster: cover,
         actions: buildCardActions({
           play: { onClick: onPlay },
           favorite: hasTarget
-            ? { favorited: current, onToggle: () => toggleFavorite(current) }
+            ? {
+                favorited: current,
+                onToggle: () => toggleFavorite(current, true),
+              }
             : undefined,
           watchRecord:
             openWatchRecord && hasTarget
@@ -171,6 +182,7 @@ export function PlaybackPosterCard({
           remove: onDelete
             ? () =>
                 showConfirm(interactionId, {
+                  objectKey: `${source}+${videoId}`,
                   title: '确认删除该记录？',
                   message: `确认删除「${title}」的观看记录吗？删除后无法恢复。`,
                   danger: true,

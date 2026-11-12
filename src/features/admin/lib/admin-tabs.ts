@@ -1,8 +1,9 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Database,
   FileText,
   FolderOpen,
+  Gauge,
+  Megaphone,
   MessageSquare,
   MessageSquareText,
   Settings,
@@ -15,6 +16,7 @@ import {
 export type AdminTabId =
   | 'config-file'
   | 'site'
+  | 'announcements'
   | 'runtime'
   | 'user'
   | 'reviews'
@@ -22,7 +24,7 @@ export type AdminTabId =
   | 'video-source'
   | 'live-source'
   | 'category'
-  | 'data-migration';
+  | 'traffic';
 
 export type AdminTabGroupId = 'site' | 'content' | 'community' | 'maintenance';
 
@@ -53,6 +55,13 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     id: 'site',
     label: '站点设置',
     icon: Settings,
+    group: 'site',
+    ownerOnly: false,
+  },
+  {
+    id: 'announcements',
+    label: '公告',
+    icon: Megaphone,
     group: 'site',
     ownerOnly: false,
   },
@@ -106,16 +115,16 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     ownerOnly: false,
   },
   {
-    id: 'config-file',
-    label: '配置文件',
-    icon: FileText,
+    id: 'traffic',
+    label: '流量',
+    icon: Gauge,
     group: 'maintenance',
     ownerOnly: true,
   },
   {
-    id: 'data-migration',
-    label: '数据迁移',
-    icon: Database,
+    id: 'config-file',
+    label: '配置文件',
+    icon: FileText,
     group: 'maintenance',
     ownerOnly: true,
   },

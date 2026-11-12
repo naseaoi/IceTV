@@ -1,10 +1,9 @@
-﻿'use client';
-
-import { useState } from 'react';
+'use client';
+import { useEffect, useRef, useState } from 'react';
 
 import type { SourceValidationStatus } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import { DataSource } from '@/features/admin/types/internal';
-import { useAlertModal } from '@/hooks/useAlertModal';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 interface ValidationResult {
   key: string;
@@ -16,13 +15,12 @@ interface ValidationResult {
 
 interface UseSourceValidationOptions {
   sources: DataSource[];
-  showAlert: ReturnType<typeof useAlertModal>['showAlert'];
 }
 
-export function useSourceValidation({
-  sources,
-  showAlert,
-}: UseSourceValidationOptions) {
+export function useSourceValidation({ sources }: UseSourceValidationOptions) {
+  const cleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanupRef.current?.(), []);
+  const [error, setError] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [validationResults, setValidationResults] = useState<
     ValidationResult[]
@@ -33,11 +31,7 @@ export function useSourceValidation({
     sourceKeys?: string | string[],
   ) => {
     if (!searchKeyword.trim()) {
-      showAlert({
-        type: 'warning',
-        title: '请输入搜索关键词',
-        message: '搜索关键词不能为空',
-      });
+      setError('搜索关键词不能为空');
       return;
     }
 
@@ -54,14 +48,12 @@ export function useSourceValidation({
       : sources;
 
     if (requestedKeySet && targets.length !== requestedKeySet.size) {
-      showAlert({
-        type: 'error',
-        title: '验证失败',
-        message: '源不存在',
-      });
+      setError('源不存在');
       return;
     }
 
+    cleanupRef.current?.();
+    setError('');
     setIsValidating(true);
     const initialResults: ValidationResult[] = targets.map((source) => ({
       key: source.key,
@@ -91,6 +83,17 @@ export function useSourceValidation({
       return next;
     });
 
+    const finishRows = (message: string) => {
+      setIsValidating(false);
+      setValidationResults((previous) =>
+        previous.map((row) =>
+          targets.some((source) => source.key === row.key) &&
+          row.status === 'validating'
+            ? { ...row, status: 'invalid', message }
+            : row,
+        ),
+      );
+    };
     try {
       const params = new URLSearchParams({
         q: searchKeyword.trim(),
@@ -104,7 +107,22 @@ export function useSourceValidation({
         `/api/admin/source/validate?${params.toString()}`,
       );
 
+      let done = false;
+      const timer = setTimeout(() => finish('检测超时，请重试'), 60000);
+      const close = () => {
+        done = true;
+        clearTimeout(timer);
+        eventSource.close();
+      };
+      const finish = (message: string) => {
+        if (done) return;
+        close();
+        finishRows(message || '未收到检测结果，请重试');
+        setError(message);
+      };
+      cleanupRef.current = close;
       eventSource.onmessage = (event) => {
+        if (done) return;
         try {
           const data = JSON.parse(event.data);
 
@@ -139,45 +157,19 @@ export function useSourceValidation({
               break;
 
             case 'complete':
-              eventSource.close();
-              setIsValidating(false);
+              finish('');
               break;
           }
         } catch {
-          eventSource.close();
-          setIsValidating(false);
+          finish('检测结果读取失败，请重试');
         }
       };
 
-      eventSource.onerror = () => {
-        eventSource.close();
-        setIsValidating(false);
-        showAlert({
-          type: 'error',
-          title: '验证失败',
-          message: '连接错误，请重试',
-        });
-      };
-
-      setTimeout(() => {
-        if (eventSource.readyState === EventSource.OPEN) {
-          eventSource.close();
-          setIsValidating(false);
-          showAlert({
-            type: 'warning',
-            title: '验证超时',
-            message: '检测超时，请重试',
-          });
-        }
-      }, 60000);
+      eventSource.onerror = () => finish('连接错误，请重试');
     } catch (error) {
-      setIsValidating(false);
-      showAlert({
-        type: 'error',
-        title: '验证失败',
-        message: error instanceof Error ? error.message : '未知错误',
-      });
-      throw error;
+      const message = getErrorMessage(error, '检测失败，请重试');
+      finishRows(message);
+      setError(message);
     }
   };
 
@@ -227,6 +219,7 @@ export function useSourceValidation({
 
   return {
     isValidating,
+    error,
     startValidation,
     getValidationStatus,
   };

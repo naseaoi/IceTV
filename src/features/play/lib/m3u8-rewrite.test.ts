@@ -1,15 +1,25 @@
 import type { NextRequest } from 'next/server';
 
+import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
+import { appendProxySignature } from '@/lib/proxy-auth';
+
 import { getRewrittenM3U8Content } from './m3u8-rewrite';
 
-jest.mock('@/lib/proxy-auth', () => ({
-  appendProxySignature: jest.fn(async (params: URLSearchParams) => {
-    params.set('signature', 'test-signature');
-  }),
-}));
+installWebPolyfills();
 
-jest.mock('@/lib/source-capability', () => ({
-  isSourceCorsCapable: jest.fn(() => false),
+jest.mock('@/lib/proxy-auth', () => ({
+  appendProxySignature: jest.fn(
+    async (
+      params: URLSearchParams,
+      _purpose: string,
+      _target: string,
+      sticky?: string,
+    ) => {
+      params.set('signature', 'test-signature');
+      if (sticky) params.set('icetv-sticky', sticky);
+    },
+  ),
 }));
 
 function createRequest(search = ''): NextRequest {
@@ -43,6 +53,149 @@ const extendedPlaylist = [
 ].join('\n');
 
 describe('m3u8 rewrite', () => {
+  function rewriteSingle(key: string) {
+    const url = `https://stream.example.com/${key}/index.m3u8`;
+    return getRewrittenM3U8Content(
+      {
+        content: '#EXTM3U\n#EXTINF:6,\nsegment.ts',
+        finalUrl: url,
+        loadedAt: 1,
+      },
+      url,
+      createRequest(),
+      false,
+      true,
+      'demo',
+      false,
+      true,
+    );
+  }
+
+  it('coalesces concurrent misses and retains successful output', async () => {
+    jest.mocked(appendProxySignature).mockClear();
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => rewriteSingle('concurrent')),
+    );
+    expect(new Set(results).size).toBe(1);
+    expect(appendProxySignature).toHaveBeenCalledTimes(1);
+    expect(await rewriteSingle('concurrent')).toBe(results[0]);
+    expect(appendProxySignature).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes failed work so the same key can retry', async () => {
+    jest.mocked(appendProxySignature).mockClear();
+    jest
+      .mocked(appendProxySignature)
+      .mockRejectedValueOnce(new Error('sign failed'));
+    const results = await Promise.allSettled([
+      rewriteSingle('failed'),
+      rewriteSingle('failed'),
+    ]);
+    expect(results.map((result) => result.status)).toEqual([
+      'rejected',
+      'rejected',
+    ]);
+    expect(appendProxySignature).toHaveBeenCalledTimes(1);
+    expect(await rewriteSingle('failed')).toContain('signature=test-signature');
+    expect(appendProxySignature).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds tracked keys while preserving existing coalescing and releases slots', async () => {
+    const sign = jest.mocked(appendProxySignature);
+    const original = sign.getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    sign.mockClear();
+    sign.mockImplementation(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    try {
+      const limit = getServerCacheBudget('proxy-m3u8-rewrite').maxSize;
+      const pending = Array.from({ length: limit }, (_, index) =>
+        rewriteSingle(`bounded-${index}`),
+      );
+      pending.push(rewriteSingle('bounded-0'));
+      pending.push(rewriteSingle('overflow'), rewriteSingle('overflow'));
+      expect(sign).toHaveBeenCalledTimes(limit + 2);
+      release();
+      await Promise.all(pending);
+      sign.mockClear();
+      await Promise.all([rewriteSingle('released'), rewriteSingle('released')]);
+      expect(sign).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      sign.mockImplementation(original);
+    }
+  });
+
+  it('partitions rewritten output by trusted sticky context and reuses each partition', async () => {
+    const entry = {
+      content: mediaPlaylist,
+      finalUrl: 'https://stream.example.com/sticky/index.m3u8',
+      loadedAt: 999,
+    };
+    const rewrite = (sticky: string) =>
+      getRewrittenM3U8Content(
+        entry,
+        entry.finalUrl,
+        createRequest('?icetv-sticky=untrusted'),
+        false,
+        true,
+        'demo',
+        false,
+        true,
+        sticky,
+      );
+    jest.mocked(appendProxySignature).mockClear();
+    const first = await rewrite('a'.repeat(64));
+    const count = jest.mocked(appendProxySignature).mock.calls.length;
+    expect(count).toBeGreaterThan(0);
+    expect(await rewrite('a'.repeat(64))).toBe(first);
+    expect(appendProxySignature).toHaveBeenCalledTimes(count);
+    const other = await rewrite('b'.repeat(64));
+    expect(other).not.toBe(first);
+    expect(first).toContain(`icetv-sticky=${'a'.repeat(64)}`);
+    expect(other).toContain(`icetv-sticky=${'b'.repeat(64)}`);
+    expect(first).not.toContain('untrusted');
+    expect(other).not.toContain('untrusted');
+  });
+
+  it.each([
+    { allowCORS: true, forceServer: false, direct: true },
+    { allowCORS: true, forceServer: true, direct: false },
+    { allowCORS: false, forceServer: false, direct: false },
+  ])(
+    'honors explicit VOD rewrite flags: %j',
+    async ({ allowCORS, forceServer, direct }) => {
+      const result = await getRewrittenM3U8Content(
+        {
+          content: mediaPlaylist,
+          finalUrl: 'https://stream.example.com/vod/index.m3u8',
+          loadedAt: 1,
+        },
+        'https://stream.example.com/vod/index.m3u8',
+        createRequest(),
+        allowCORS,
+        forceServer,
+        'vod-source',
+        false,
+        false,
+      );
+      if (direct) {
+        expect(result).toContain('https://stream.example.com/vod/segment-1.ts');
+        expect(result).toContain(
+          'URI="https://stream.example.com/vod/key.bin"',
+        );
+        expect(result).not.toContain('/api/proxy/');
+      } else {
+        expect(result).toContain('/api/proxy/segment?');
+        expect(result).toContain('/api/proxy/key?');
+      }
+    },
+  );
   it('keeps live media resources direct when browser direct mode is enabled', async () => {
     const result = await getRewrittenM3U8Content(
       {

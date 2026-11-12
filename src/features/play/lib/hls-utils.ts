@@ -3,15 +3,23 @@ import {
   createFragmentEntryFromResponse,
   isCacheableFragmentUrl,
 } from '@/features/play/lib/fragmentMemoryCache';
+import { throwIfPlaybackCancelled } from '@/features/play/lib/sharedPlaybackTask';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
-import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
+import {
+  isSourceProbeNetworkError,
+  readSourceProbeBody,
+  SourceProbeDeferredError,
+  SourceProbeNetworkError,
+} from '@/features/play/lib/sourceProbeRequestPolicy';
+import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { formatBytesPerSecond } from '@/lib/player-utils';
 import {
+  type SourcePlaybackRoute,
   clearSourceProxyOverride,
   rememberSourceServerProxy,
-  shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
 type VideoProbeResult = {
   quality: string;
@@ -56,8 +64,13 @@ class ProbeError extends Error {
   }
 }
 
-async function loadProbePlaylist(url: string, timeoutMs = 8000) {
-  const abortState = createTimedAbortController(undefined, timeoutMs);
+async function loadProbePlaylist(
+  url: string,
+  timeoutMs = 8000,
+  signal?: AbortSignal,
+) {
+  throwIfPlaybackCancelled(signal);
+  const abortState = createTimedAbortController(signal, timeoutMs);
   const startedAt = performance.now();
   try {
     const response = await fetchSourceProbe(url, {
@@ -67,9 +80,18 @@ async function loadProbePlaylist(url: string, timeoutMs = 8000) {
     const pingTime = Math.round(performance.now() - startedAt);
     if (!response.ok) {
       await response.body?.cancel();
-      throw new ProbeError('Failed to load playlist');
+      throw new SourceProbeNetworkError('Failed to load playlist');
     }
-    return { content: await response.text(), pingTime };
+    return {
+      content: await readSourceProbeBody(() => response.text()),
+      pingTime,
+      url: response.url || new URL(url, window.location.href).href,
+    };
+  } catch (error) {
+    throwIfPlaybackCancelled(signal);
+    if ((error as Error)?.name === 'AbortError' && abortState.signal.aborted)
+      throw new SourceProbeNetworkError('Timeout loading playlist');
+    throw error;
   } finally {
     abortState.cleanup();
   }
@@ -79,9 +101,10 @@ async function loadProbePlaylist(url: string, timeoutMs = 8000) {
 export async function checkM3u8PlaylistAvailable(
   playlistUrl: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   try {
-    const { content } = await loadProbePlaylist(playlistUrl, timeoutMs);
+    const { content } = await loadProbePlaylist(playlistUrl, timeoutMs, signal);
     return content.includes('#EXTM3U');
   } catch {
     return false;
@@ -116,7 +139,10 @@ function getNonCommentLines(content: string): string[] {
     .filter((line) => line && !line.startsWith('#'));
 }
 
-function parseMasterVariants(content: string): MasterVariant[] {
+function parseMasterVariants(
+  content: string,
+  baseUrl: string,
+): MasterVariant[] {
   const lines = content.split('\n');
   const variants: MasterVariant[] = [];
 
@@ -134,7 +160,7 @@ function parseMasterVariants(content: string): MasterVariant[] {
       ? Number.parseInt(bandwidthMatch[1], 10)
       : 0;
     variants.push({
-      url: nextLine,
+      url: new URL(nextLine, baseUrl).href,
       width,
       bandwidth,
     });
@@ -219,8 +245,9 @@ function ensureCodecsPlayable(playlistContent: string): void {
   }
 }
 
-function getFirstSegmentUrl(content: string): string | null {
-  return getNonCommentLines(content)[0] || null;
+function getFirstSegmentUrl(content: string, baseUrl: string): string | null {
+  const uri = getNonCommentLines(content)[0];
+  return uri ? new URL(uri, baseUrl).href : null;
 }
 
 function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
@@ -500,24 +527,25 @@ export function takeProbeSegmentSample(
  */
 async function measureSegmentBandwidth(
   segmentUrl: string,
+  signal?: AbortSignal,
 ): Promise<SegmentProbeResult> {
-  const controller = new AbortController();
-  const timeoutTimer = setTimeout(
-    () => controller.abort(),
+  throwIfPlaybackCancelled(signal);
+  const abortState = createTimedAbortController(
+    signal,
     BANDWIDTH_PROBE_TIMEOUT_MS,
   );
   try {
     const requestStartedAt = performance.now();
     const response = await fetchSourceProbe(segmentUrl, {
       cache: 'no-store',
-      signal: controller.signal,
+      signal: abortState.signal,
       headers: {
         Range: `bytes=0-${BANDWIDTH_SAMPLE_MAX_BYTES - 1}`,
       },
     });
     const responseAt = performance.now();
     if (!response.ok && response.status !== 206) {
-      throw new Error('Failed to load first segment');
+      throw new SourceProbeNetworkError('Failed to load first segment');
     }
     const createSample = (
       data: Uint8Array,
@@ -534,7 +562,7 @@ async function measureSegmentBandwidth(
     const reader = response.body?.getReader();
     if (!reader) {
       // 老浏览器无 ReadableStream，退回到一次性下载（精度会差但能跑）
-      const buf = await response.arrayBuffer();
+      const buf = await readSourceProbeBody(() => response.arrayBuffer());
       const sample = new Uint8Array(buf);
       const sampleEntry = createSample(sample, true, performance.now());
       if (buf.byteLength < BANDWIDTH_MIN_VALID_BYTES) {
@@ -557,7 +585,7 @@ async function measureSegmentBandwidth(
     let streamEnded = false;
     const chunks: Uint8Array[] = [];
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readSourceProbeBody(() => reader.read());
       if (done) {
         streamEnded = true;
         break;
@@ -599,8 +627,9 @@ async function measureSegmentBandwidth(
       sample: sampleEntry,
     };
   } catch (err) {
+    throwIfPlaybackCancelled(signal);
     if ((err as Error)?.name === 'AbortError') {
-      throw new Error('Timeout loading first segment');
+      throw new SourceProbeNetworkError('Timeout loading first segment');
     }
     throw err instanceof Error
       ? err
@@ -608,27 +637,8 @@ async function measureSegmentBandwidth(
           (err as { message?: string })?.message || 'Segment probe failed',
         );
   } finally {
-    clearTimeout(timeoutTimer);
+    abortState.cleanup();
   }
-}
-
-function buildProxyUrl(
-  m3u8Url: string,
-  useProxy: boolean,
-  sourceKey?: string,
-): string {
-  const params = new URLSearchParams({
-    url: m3u8Url,
-  });
-  if (!useProxy) {
-    params.set('allowCORS', 'true');
-  } else {
-    params.set('forceServer', 'true');
-  }
-  if (sourceKey) {
-    params.set('icetv-source', sourceKey);
-  }
-  return `/api/proxy/m3u8?${params.toString()}`;
 }
 
 function pickBestPartial(
@@ -655,18 +665,27 @@ function normalizeProbeError(
 
 async function probeWithMode(
   m3u8Url: string,
-  useProxy: boolean,
-  sourceKey?: string,
+  route: SourcePlaybackRoute,
+  sourceKey: string,
+  signal?: AbortSignal,
 ): Promise<VideoProbeResult> {
-  const proxyUrl = buildProxyUrl(m3u8Url, useProxy, sourceKey);
+  const proxyUrl = buildVodProxyUrl({
+    rawUrl: m3u8Url,
+    ...route,
+    sourceKey,
+    playbackRequestMode: 'initial',
+  });
 
   let partial: PartialProbeResult | undefined;
 
   try {
-    const { content: playlistContent, pingTime } =
-      await loadProbePlaylist(proxyUrl);
+    const {
+      content: playlistContent,
+      pingTime,
+      url: playlistUrl,
+    } = await loadProbePlaylist(proxyUrl, undefined, signal);
     ensureCodecsPlayable(playlistContent);
-    const variants = parseMasterVariants(playlistContent);
+    const variants = parseMasterVariants(playlistContent, playlistUrl);
     const pickedVariant = pickProbeVariant(variants);
     const quality =
       pickedVariant && pickedVariant.resolutionTrusted
@@ -674,15 +693,22 @@ async function probeWithMode(
         : '未知';
 
     let mediaPlaylistContent = playlistContent;
+    let mediaPlaylistUrl = playlistUrl;
 
     if (pickedVariant?.probePlaylistUrl) {
       const mediaPlaylist = await loadProbePlaylist(
         pickedVariant.probePlaylistUrl,
+        undefined,
+        signal,
       );
       mediaPlaylistContent = mediaPlaylist.content;
+      mediaPlaylistUrl = mediaPlaylist.url;
     }
 
-    const firstSegmentUrl = getFirstSegmentUrl(mediaPlaylistContent);
+    const firstSegmentUrl = getFirstSegmentUrl(
+      mediaPlaylistContent,
+      mediaPlaylistUrl,
+    );
     if (!firstSegmentUrl) {
       throw new ProbeError('Missing media segment url');
     }
@@ -693,7 +719,8 @@ async function probeWithMode(
     //      TCP 慢启动 + TLS/代理首包延迟占据耗时主导，算出的 KB/s 会严重偏低。
     //   2) 排除握手开销：从「首字节到达」开始计时，而非 fetch 发起时刻。
     //   3) 滑动达标：累计到 ≥ 512KB 或流结束即停止，避免长尾请求拖长总时长。
-    const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl);
+    const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl, signal);
+    throwIfPlaybackCancelled(signal);
     const loadSpeed = segmentProbe.loadSpeed;
 
     const detectedQuality = segmentProbe.dimensions
@@ -719,36 +746,84 @@ async function probeWithMode(
     }
     return result;
   } catch (error) {
-    if (error instanceof SourceProbeDeferredError) throw error;
+    throwIfPlaybackCancelled(signal);
+    if (
+      error instanceof SourceProbeDeferredError ||
+      isSourceProbeNetworkError(error)
+    )
+      throw error;
+    if ((error as Error)?.name === 'AbortError') throw error;
     throw normalizeProbeError(error, partial);
   }
 }
 
 export async function getVideoResolutionFromM3u8(
   m3u8Url: string,
-  useProxy = true,
+  route: SourcePlaybackRoute,
   sourceKey = '',
+  signal?: AbortSignal,
 ): Promise<VideoProbeResult> {
   try {
-    const result = await probeWithMode(m3u8Url, useProxy, sourceKey);
-    if (!useProxy && sourceKey) {
+    const result = await probeWithMode(m3u8Url, route, sourceKey, signal);
+    throwIfPlaybackCancelled(signal);
+    reportSourceRouteStat(
+      sourceKey,
+      route.useServerProxy ? 'server' : 'browser',
+      true,
+    );
+    if (!route.useServerProxy && sourceKey) {
       clearSourceProxyOverride(sourceKey, m3u8Url);
     }
     return result;
   } catch (error) {
-    if (error instanceof SourceProbeDeferredError) throw error;
+    throwIfPlaybackCancelled(signal);
+    if (
+      error instanceof SourceProbeDeferredError ||
+      (error as Error)?.name === 'AbortError'
+    )
+      throw error;
     const firstError = normalizeProbeError(error);
 
-    if (!useProxy && sourceKey && shouldAutoFallbackToServer(sourceKey)) {
+    const networkFailure = isSourceProbeNetworkError(error);
+    if (networkFailure)
+      reportSourceRouteStat(
+        sourceKey,
+        route.useServerProxy ? 'server' : 'browser',
+        false,
+      );
+    if (networkFailure && sourceKey && route.allowAutoFallback) {
       try {
-        const fallbackResult = await probeWithMode(m3u8Url, true, sourceKey);
-        if (sourceKey) {
-          rememberSourceServerProxy(sourceKey, m3u8Url);
-        }
+        const fallbackResult = await probeWithMode(
+          m3u8Url,
+          {
+            ...route,
+            useServerProxy: !route.useServerProxy,
+            directManifest: route.useServerProxy,
+          },
+          sourceKey,
+          signal,
+        );
+        throwIfPlaybackCancelled(signal);
+        reportSourceRouteStat(
+          sourceKey,
+          route.useServerProxy ? 'browser' : 'server',
+          true,
+        );
+        if (route.useServerProxy) clearSourceProxyOverride(sourceKey, m3u8Url);
+        else rememberSourceServerProxy(sourceKey, m3u8Url);
         return fallbackResult;
       } catch (fallbackError) {
+        throwIfPlaybackCancelled(signal);
+        if ((fallbackError as Error)?.name === 'AbortError')
+          throw fallbackError;
         if (fallbackError instanceof SourceProbeDeferredError)
           throw fallbackError;
+        if (isSourceProbeNetworkError(fallbackError))
+          reportSourceRouteStat(
+            sourceKey,
+            route.useServerProxy ? 'browser' : 'server',
+            false,
+          );
         const normalizedFallbackError = normalizeProbeError(fallbackError);
         const partial = pickBestPartial(
           normalizedFallbackError.partial,

@@ -1,4 +1,20 @@
-import type { PlaybackSession } from '@/lib/types';
+import { PLAYBACK_BUCKET_MS } from '@/features/playback-stats/types';
+import type { PlaybackSession, PlaybackWatchBucket } from '@/lib/types';
+
+export function buildDevPlaybackBuckets(
+  session: PlaybackSession,
+): PlaybackWatchBucket[] {
+  const buckets: PlaybackWatchBucket[] = [];
+  let time = session.started_at;
+  const end = time + session.watch_seconds * 1000;
+  while (time < end) {
+    const start = Math.floor(time / PLAYBACK_BUCKET_MS) * PLAYBACK_BUCKET_MS;
+    const next = Math.min(end, start + PLAYBACK_BUCKET_MS);
+    buckets.push({ start, watch_ms: next - time });
+    time = next;
+  }
+  return buckets;
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_SECONDS = 60 * 60;

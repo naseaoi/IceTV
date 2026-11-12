@@ -39,7 +39,7 @@ it('使用四个设置分组，保留字段标签并由外层提供保存按钮'
   expect(
     screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent),
   ).toEqual(['基本信息', '数据与图片代理', '功能', '本地设置默认值']);
-  for (const name of ['站点名称', '站点图标', '站点公告', '底部声明']) {
+  for (const name of ['站点名称', '站点图标', '站点须知', '底部声明']) {
     expect(screen.getByRole('textbox', { name })).toBeInTheDocument();
   }
   expect(screen.getAllByRole('switch')).toHaveLength(switchNames.length);
@@ -108,6 +108,40 @@ it.each([
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+it('仅在服务端配置代理池时显示分片走代理池开关，默认关闭', () => {
+  const { unmount } = render(
+    <SiteConfigTab config={config} refreshConfig={jest.fn()} />,
+  );
+  expect(
+    screen.queryByRole('switch', { name: '切换视频分片走代理池' }),
+  ).not.toBeInTheDocument();
+  unmount();
+
+  const onDirtyChange = jest.fn();
+  render(
+    <SiteConfigTab
+      config={
+        {
+          ...config,
+          SiteConfig: {
+            ...config.SiteConfig,
+            UpstreamProxyPoolConfigured: true,
+          },
+        } as AdminConfig
+      }
+      refreshConfig={jest.fn()}
+      onDirtyChange={onDirtyChange}
+    />,
+  );
+  const toggle = screen.getByRole('switch', {
+    name: '切换视频分片走代理池',
+    checked: false,
+  });
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 });
 
 it('配置未就绪时保持空内容', () => {

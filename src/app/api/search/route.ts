@@ -4,12 +4,13 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getSearchSourceConcurrency } from '@/lib/cache-budget-profile';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
-import { runSearchAggregation } from '@/lib/search-aggregate';
+import { collectSearchAggregation } from '@/lib/search-aggregate';
 import {
   loadCachedSearchAggregate,
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
 } from '@/lib/search-cache';
+import { describeFailedSearchSources } from '@/lib/search-failed-sources';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { rankSourcesByHealth } from '@/lib/source-quality-policy';
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
   const config = await getConfigForRead();
   const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   const [availableSites, sourceHealthTiers] = await Promise.all([
-    getAvailableApiSites(guardResult.username, config),
+    getAvailableApiSites(guardResult.username, config, guardResult.userAccess),
     getSourceHealthTiers(),
   ]);
   const apiSites = rankSourcesByHealth(availableSites, sourceHealthTiers);
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
   if (cachedAggregate) {
     if (!cachedAggregate.fresh) {
       void refreshCachedSearchAggregate(aggregateCacheParams, () =>
-        runSearchAggregation({
+        collectSearchAggregation({
           apiSites,
           query,
           maxSearchPages,
@@ -73,16 +74,23 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { results: cachedAggregate.entry.results },
+      {
+        results: cachedAggregate.entry.results,
+        totalSources: apiSites.length,
+        failedSources: describeFailedSearchSources(
+          apiSites,
+          cachedAggregate.entry.failedSources,
+        ),
+      },
       { headers: { 'Cache-Control': 'private, no-store' } },
     );
   }
 
   try {
-    const flattenedResults = await loadCachedSearchAggregate(
+    const aggregate = await loadCachedSearchAggregate(
       aggregateCacheParams,
       () =>
-        runSearchAggregation({
+        collectSearchAggregation({
           apiSites,
           query,
           maxSearchPages,
@@ -94,7 +102,14 @@ export async function GET(request: NextRequest) {
         }),
     );
     return NextResponse.json(
-      { results: flattenedResults },
+      {
+        results: aggregate.results,
+        totalSources: apiSites.length,
+        failedSources: describeFailedSearchSources(
+          apiSites,
+          aggregate.failedSources,
+        ),
+      },
       { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {

@@ -1,5 +1,6 @@
 import { PROFILE_REQUIRED_EVENT } from '@/lib/profile.client';
 import type { AdminReviewReportPage } from '@/lib/types';
+import { DisplayableError, getHttpErrorMessage } from '@/lib/user-facing-error';
 
 type ErrorPayload = {
   error?: string;
@@ -30,10 +31,10 @@ async function resolveErrorMessage(
   const payload = await parseJsonSafely<ErrorPayload>(response);
   if (response.status === 403 && payload?.code === 'NICKNAME_REQUIRED')
     window.dispatchEvent(new Event(PROFILE_REQUIRED_EVENT));
-  if (payload?.error) {
+  if (typeof payload?.error === 'string' && payload.error) {
     return payload.error;
   }
-  return `${fallbackPrefix}: ${response.status}`;
+  return getHttpErrorMessage(response.status, fallbackPrefix);
 }
 
 export async function adminGet<T>(
@@ -44,7 +45,10 @@ export async function adminGet<T>(
   const response = await fetch(endpoint, { cache: 'no-store', signal });
 
   if (!response.ok) {
-    throw new Error(await resolveErrorMessage(response, fallbackPrefix));
+    throw new DisplayableError(
+      await resolveErrorMessage(response, fallbackPrefix),
+      { status: response.status },
+    );
   }
 
   const payload = await parseJsonSafely<T>(response);
@@ -63,7 +67,10 @@ export async function adminDelete(
   });
 
   if (!response.ok) {
-    throw new Error(await resolveErrorMessage(response, fallbackPrefix));
+    throw new DisplayableError(
+      await resolveErrorMessage(response, fallbackPrefix),
+      { status: response.status },
+    );
   }
 }
 
@@ -79,7 +86,32 @@ export async function adminPost<T = Record<string, unknown>>(
   });
 
   if (!response.ok) {
-    throw new Error(await resolveErrorMessage(response, fallbackPrefix));
+    throw new DisplayableError(
+      await resolveErrorMessage(response, fallbackPrefix),
+      { status: response.status },
+    );
+  }
+
+  const payload = await parseJsonSafely<T>(response);
+  return (payload ?? ({} as T)) as T;
+}
+
+export async function adminPatch<T = Record<string, unknown>>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  fallbackPrefix = '操作失败',
+): Promise<T> {
+  const response = await fetch(endpoint, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new DisplayableError(
+      await resolveErrorMessage(response, fallbackPrefix),
+      { status: response.status },
+    );
   }
 
   const payload = await parseJsonSafely<T>(response);

@@ -306,6 +306,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           if (currentFavorited) {
             if (from === 'favorite' || from === 'playrecord') {
               showConfirm(interactionId, {
+                objectKey: `${actualSource}+${actualId}`,
+                operation: 'favorite',
                 title: '确认取消收藏？',
                 message: `确认取消收藏「${actualTitle}」吗？`,
                 danger: true,
@@ -401,6 +403,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         }
       }
     }, [isAggregate, aggregateGroup]);
+
+    const posterAlternates = useMemo(
+      () =>
+        isAggregate && aggregateGroup && aggregateGroup.length > 1
+          ? aggregateGroup.map((item) => item.poster)
+          : undefined,
+      [isAggregate, aggregateGroup],
+    );
 
     const isSingleAggregate = isAggregate && aggregateGroup?.length === 1;
     const aggregateSourceCount = isAggregate
@@ -804,6 +814,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                   from === 'search' ? searchFavorited : visibleFavorited,
                 onToggle: () =>
                   handleToggleFavorite(noopEvent, (nextFavorited) => {
+                    if (from === 'favorite' && !nextFavorited) return;
                     showToast(
                       nextFavorited ? '已加入收藏' : '已取消收藏',
                       'success',
@@ -816,6 +827,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             ? () =>
                 openWatchRecord({
                   ...recordTarget,
+                  feedback: {
+                    watchStateVisible: from === 'favorite',
+                    favoriteVisible: from === 'favorite',
+                  },
                   title: actualTitle,
                   year: actualYear,
                   cover: actualPoster,
@@ -875,6 +890,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       showActionSheet(
         interactionId,
         {
+          objectKey: favoriteStorageKey ?? `work:${actualTitle}:${actualYear}`,
           title: actualTitle,
           poster: actualPoster,
           actions: buildMobileActions(),
@@ -891,6 +907,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       };
     }, [
       actionSheetAnchorRect,
+      actualYear,
+      favoriteStorageKey,
       actualPoster,
       actualTitle,
       buildMobileActions,
@@ -950,6 +968,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           <VideoCardPoster
             title={actualTitle}
             poster={actualPoster}
+            posterAlternates={posterAlternates}
             priority={priority}
             origin={origin}
             from={from}

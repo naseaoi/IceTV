@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 
-import { withTimeout } from '@/lib/concurrency';
+import { createThrottledMaintenance, withTimeout } from '@/lib/concurrency';
 import { db } from '@/lib/db';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SharedResourceStore } from '@/lib/shared-resource-store';
@@ -32,7 +32,7 @@ interface QuotaPool {
 }
 
 const quotaPools = new WeakMap<SharedResourceStore, Map<string, QuotaPool>>();
-let lastPruneAt = 0;
+const schedulePrune = createThrottledMaintenance(60_000);
 let lastSweepAt = 0;
 
 export function resourceKey(scope: string, identity: string): string {
@@ -42,11 +42,7 @@ export function resourceKey(scope: string, identity: string): string {
 export async function sharedResourceStore(): Promise<SharedResourceStore> {
   try {
     const store = await db.getSharedResourceStore();
-    const now = Date.now();
-    if (now - lastPruneAt >= 60_000) {
-      lastPruneAt = now;
-      await store.prune(now);
-    }
+    schedulePrune(() => store.prune(Date.now()));
     return store;
   } catch {
     throw new ResourceLimitError();
