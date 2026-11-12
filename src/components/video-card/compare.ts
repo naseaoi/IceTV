@@ -86,6 +86,7 @@ export function areVideoCardPropsEqual(
     prev.currentEpisode === next.currentEpisode &&
     prev.hasUpdate === next.hasUpdate &&
     prev.trackingEnabled === next.trackingEnabled &&
+    prev.trackingTarget === next.trackingTarget &&
     prev.availableEpisodes === next.availableEpisodes &&
     prev.resumeEpisodeIndex === next.resumeEpisodeIndex &&
     isSameResumeGroup(prev.resumeGroup, next.resumeGroup) &&

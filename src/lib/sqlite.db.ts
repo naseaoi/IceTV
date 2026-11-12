@@ -21,6 +21,7 @@ import {
   favoriteMessageQueries,
   favoriteMessagesFromRows,
   favoriteReadStatement,
+  favoriteTrackingStatement,
 } from '@/features/favorites/lib/favorite-tracking';
 import {
   applyFavoriteStatus,
@@ -2210,6 +2211,21 @@ export class LocalSqliteStorage implements IStorage {
       JSON.stringify(favorite),
       ...favoriteProjection(key, JSON.stringify(favorite)),
     );
+  }
+
+  async setFavoriteTracking(
+    userName: string,
+    key: string,
+    trackingEnabled: boolean,
+  ): Promise<Favorite | null> {
+    const row = this.db
+      .prepare(`${favoriteTrackingStatement('sqlite')} RETURNING favorite_json`)
+      .get(
+        JSON.stringify(trackingEnabled),
+        normalizeUsername(userName),
+        key,
+      ) as { favorite_json: string } | undefined;
+    return parseJsonValue<Favorite>(row?.favorite_json);
   }
 
   async saveMergedFavorite(

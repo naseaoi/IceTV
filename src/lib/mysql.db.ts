@@ -25,6 +25,8 @@ import {
   favoriteMessageQueries,
   favoriteMessagesFromRows,
   favoriteReadStatement,
+  favoriteTrackingSql,
+  favoriteTrackingStatement,
 } from '@/features/favorites/lib/favorite-tracking';
 import {
   applyFavoriteStatus,
@@ -1335,6 +1337,35 @@ export class MySqlStorage implements IStorage {
         ...favoriteProjection(key, JSON.stringify(favorite)),
       ],
     );
+  }
+
+  async setFavoriteTracking(
+    userName: string,
+    key: string,
+    trackingEnabled: boolean,
+  ): Promise<Favorite | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(favoriteTrackingStatement('mysql'), [
+        JSON.stringify(trackingEnabled),
+        username,
+        key,
+      ]);
+      const [rows] = await connection.query<JsonRow[]>(
+        `SELECT f.favorite_json FROM favorites f WHERE f.username = ? AND f.favorite_key = ? AND ${favoriteTrackingSql('mysql').trackable} FOR UPDATE`,
+        [username, key],
+      );
+      await connection.commit();
+      return parseJsonValue<Favorite>(rows[0]?.favorite_json);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async saveMergedFavorite(

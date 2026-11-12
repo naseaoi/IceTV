@@ -4,7 +4,9 @@ import type {
 } from '@/features/favorites/lib/favorite-library';
 import type { FavoriteLibraryPage } from '@/features/favorites/lib/library-query';
 import type { FavoriteItem } from '@/features/favorites/types';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { fetchWithAuth } from '@/lib/db.client.internal';
+import { isTrackingEnabled } from '@/lib/play-records';
 import type { FavoritePageItem } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -58,5 +60,17 @@ export function toFavoriteItem({
         : 0,
     search_title: favorite.search_title,
     origin: favorite.origin,
+    ...(playRecord
+      ? {
+          trackingTarget: 'record',
+          trackingEnabled: isTrackingEnabled(playRecord),
+        }
+      : (favorite.origin ?? 'vod') === 'vod' &&
+          !isCatalogFavoriteSource(parsed.source)
+        ? {
+            trackingTarget: 'favorite',
+            trackingEnabled: favorite.tracking_enabled !== false,
+          }
+        : {}),
   };
 }

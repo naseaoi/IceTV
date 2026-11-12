@@ -23,6 +23,7 @@ export function buildFavoriteUpdateMessage(
     !parsed ||
     isCatalogFavoriteSource(parsed.source) ||
     (favorite.origin ?? 'vod') !== 'vod' ||
+    favorite.tracking_enabled === false ||
     baseline === undefined ||
     !Number.isSafeInteger(baseline) ||
     baseline < 0 ||
@@ -72,15 +73,21 @@ export function favoriteTrackingSql(dialect: 'sqlite' | 'mysql') {
     dialect === 'sqlite'
       ? "substr(f.favorite_key, 1, instr(f.favorite_key, '+') - 1) COLLATE BINARY"
       : "SUBSTRING_INDEX(f.favorite_key, '+', 1) COLLATE utf8mb4_bin";
+  const trackable = `COALESCE(${origin}, 'vod') = 'vod'
+    AND ${source} NOT IN ('douban', 'bangumi')`;
+  const trackingEnabled =
+    dialect === 'sqlite'
+      ? "COALESCE(json_extract(f.favorite_json, '$.tracking_enabled'), 1) <> 0"
+      : "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.tracking_enabled')), 'null'), 'true') <> 'false'";
   const eligible = `f.library_valid = 1
-    AND COALESCE(${origin}, 'vod') = 'vod'
-    AND ${source} NOT IN ('douban', 'bangumi')
+    AND ${trackable} AND ${trackingEnabled}
     AND NOT EXISTS (SELECT 1 FROM play_records p WHERE p.username = f.username AND p.record_key = f.favorite_key)`;
   return {
     total,
     baseline,
     createdAt,
     eligible,
+    trackable,
     unread: `${eligible} AND ${baseline} >= 0 AND ${baseline} = FLOOR(${baseline}) AND ${total} <= 9007199254740991 AND ${total} = FLOOR(${total}) AND ${total} > ${baseline} AND ${createdAt} > 0`,
   };
 }
@@ -106,6 +113,12 @@ export function favoriteMessageQueries(
       limit,
     ],
   };
+}
+
+export function favoriteTrackingStatement(dialect: 'sqlite' | 'mysql') {
+  const value = dialect === 'sqlite' ? 'json(?)' : 'CAST(? AS JSON)';
+  return `UPDATE favorites AS f SET favorite_json = JSON_SET(f.favorite_json, '$.tracking_enabled', ${value})
+    WHERE f.username = ? AND f.favorite_key = ? AND ${favoriteTrackingSql(dialect).trackable}`;
 }
 
 // 只更新基线，不覆盖并发刷新、观看状态或取消收藏；新发现的集数留待下一次确认。

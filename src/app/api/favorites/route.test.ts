@@ -10,6 +10,8 @@ const mockSaveFavorite = jest.fn();
 const mockGetFavoriteForWork = jest.fn();
 const mockGetFavoriteLibraryPage = jest.fn();
 const mockGetAllFavorites = jest.fn();
+const mockGetFavorite = jest.fn();
+const mockSetFavoriteTracking = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest
@@ -25,10 +27,15 @@ jest.mock('@/lib/db', () => ({
       mockGetFavoriteLibraryPage(...args),
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
     saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
+    getFavorite: (...args: unknown[]) => mockGetFavorite(...args),
+    setFavoriteTracking: (...args: unknown[]) =>
+      mockSetFavoriteTracking(...args),
+    deleteFavorite: jest.fn(),
+    deleteAllFavorites: jest.fn(),
   },
 }));
 
-const { GET, POST } = require('./route') as typeof import('./route');
+const { GET, POST, PATCH } = require('./route') as typeof import('./route');
 
 function createRequest(url: string): NextRequest {
   return new Request(url) as unknown as NextRequest;
@@ -67,6 +74,7 @@ describe('favorites route', () => {
           total_episodes: 12,
           update_baseline_episodes: 0,
           update_detected_at: 999,
+          tracking_enabled: false,
         },
       }),
     );
@@ -75,7 +83,98 @@ describe('favorites route', () => {
       total_episodes: 12,
       update_baseline_episodes: undefined,
       update_detected_at: undefined,
+      tracking_enabled: undefined,
     });
+  });
+
+  it.each([
+    null,
+    [],
+    { key: 123, trackingEnabled: true },
+    { key: 'invalid', trackingEnabled: true },
+    { key: 'source+1', trackingEnabled: 'false' },
+    { key: 'source+1' },
+    { key: 'douban+1', trackingEnabled: false },
+    { key: 'bangumi+1', trackingEnabled: true },
+  ])('PATCH 拒绝非法参数或目录收藏 %j', async (body) => {
+    expect((await PATCH(createJsonRequest(body))).status).toBe(400);
+    expect(mockSetFavoriteTracking).not.toHaveBeenCalled();
+  });
+
+  it('PATCH 拒绝直播和不存在的收藏', async () => {
+    const request = () =>
+      createJsonRequest({ key: 'source+1', trackingEnabled: false });
+    mockGetFavorite.mockResolvedValueOnce({ origin: 'live' });
+    expect((await PATCH(request())).status).toBe(400);
+    mockGetFavorite.mockResolvedValueOnce(null);
+    expect((await PATCH(request())).status).toBe(404);
+    expect(mockSetFavoriteTracking).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'PATCH 原子设置追更 %j 并返回完整收藏',
+    async (trackingEnabled) => {
+      const favorite = {
+        title: '剧集',
+        source_name: '源',
+        year: '2026',
+        cover: '',
+        total_episodes: 12,
+        save_time: 1,
+        update_baseline_episodes: 10,
+        tracking_enabled: trackingEnabled,
+      };
+      mockGetFavorite.mockResolvedValueOnce(favorite);
+      mockSetFavoriteTracking.mockResolvedValueOnce(favorite);
+      const response = await PATCH(
+        createJsonRequest({ key: 'source+1', trackingEnabled }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ favorite });
+      expect(mockSetFavoriteTracking).toHaveBeenCalledWith(
+        'demo',
+        'source+1',
+        trackingEnabled,
+      );
+      expect(mockSaveFavorite).not.toHaveBeenCalled();
+    },
+  );
+
+  it('PATCH 收藏并发删除后返回 404，非法 JSON 返回 400', async () => {
+    mockGetFavorite.mockResolvedValueOnce({ origin: 'vod' });
+    mockSetFavoriteTracking.mockResolvedValueOnce(null);
+    expect(
+      (
+        await PATCH(
+          createJsonRequest({ key: 'source+1', trackingEnabled: true }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await PATCH({
+          json: async () => {
+            throw new SyntaxError();
+          },
+        } as unknown as NextRequest)
+      ).status,
+    ).toBe(400);
+  });
+
+  it('PATCH 执行登录门禁', async () => {
+    const { requireActiveUser } = await import('@/lib/api-auth');
+    jest.mocked(requireActiveUser).mockResolvedValueOnce({
+      response: new Response(null, { status: 401 }),
+    } as Awaited<ReturnType<typeof requireActiveUser>>);
+    expect(
+      (
+        await PATCH(
+          createJsonRequest({ key: 'source+1', trackingEnabled: true }),
+        )
+      ).status,
+    ).toBe(401);
+    expect(mockGetFavorite).not.toHaveBeenCalled();
+    expect(mockSetFavoriteTracking).not.toHaveBeenCalled();
   });
 
   it('保存收藏时由服务端记录元数据检查时间', async () => {

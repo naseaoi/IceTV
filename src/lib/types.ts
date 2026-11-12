@@ -60,6 +60,7 @@ export interface Favorite {
   metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
+  tracking_enabled?: boolean; // 缺省开启，由服务端维护
   update_baseline_episodes?: number;
   update_detected_at?: number;
   watch_status?: FavoriteWatchStatus;
@@ -601,6 +602,11 @@ export interface IStorage extends ListStore {
   ): Promise<void>;
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
+  setFavoriteTracking(
+    userName: string,
+    key: string,
+    trackingEnabled: boolean,
+  ): Promise<Favorite | null>;
   saveMergedFavorite(
     userName: string,
     key: string,

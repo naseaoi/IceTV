@@ -5,6 +5,8 @@ import {
   buildFavoriteUpdateMessage,
   favoriteMessageQueries,
 } from '@/features/favorites/lib/favorite-tracking';
+import { CATALOG_BIND_SNAPSHOT } from '@/features/favorites/lib/library-mutations';
+import { assertTrackingCalendar } from '@/lib/__tests__/__fixtures__/tracking-calendar-contract';
 import { MySqlStorage } from '@/lib/mysql.db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import type { Favorite } from '@/lib/types';
@@ -41,6 +43,67 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           await (
             storage as unknown as { pool: { end(): Promise<void> } }
           ).pool.end();
+      });
+
+      it('收藏追更开关与周历、消息计数及已读共用契约', async () => {
+        await assertTrackingCalendar(storage);
+      });
+
+      it('追更设置在重存、状态修改、目录合并与绑定时保留', async () => {
+        await storage.setFavorite(user, 'source+1', {
+          ...base,
+          tracking_enabled: false,
+          total_episodes: 12,
+          update_baseline_episodes: 10,
+          update_detected_at: 100,
+        });
+        const snapshot = (
+          await storage.getStaleFavoritePage(user, Date.now(), 1, 10)
+        ).items[0].snapshot;
+        await storage.saveMergedFavorite(user, 'source+1', {
+          ...base,
+          tracking_enabled: true,
+          watch_status: 'watching',
+        });
+        await storage.saveMergedFavorite(user, 'douban+2', {
+          ...base,
+          tracking_enabled: true,
+        });
+        await storage.batchFavorites(user, {
+          action: 'set-status',
+          target: { keys: ['source+1'] },
+          watchStatus: 'completed',
+        });
+        expect(await storage.getFavorite(user, 'source+1')).toMatchObject({
+          tracking_enabled: false,
+          watch_status: 'completed',
+          update_baseline_episodes: 10,
+        });
+        await storage.setFavoriteTracking(user, 'source+1', true);
+        expect(
+          await storage.setFavoriteIfUnchanged(
+            user,
+            'source+1',
+            { ...base, tracking_enabled: false },
+            snapshot,
+          ),
+        ).toBe(false);
+        expect(
+          (await storage.getFavorite(user, 'source+1'))?.tracking_enabled,
+        ).toBe(true);
+        const catalog = { ...base, title: '目录作品', tracking_enabled: false };
+        await storage.setFavorite(user, 'douban+3', catalog);
+        await storage.saveMergedFavorite(user, 'source+bound', {
+          ...catalog,
+          tracking_enabled: undefined,
+          total_episodes: 3,
+          [CATALOG_BIND_SNAPSHOT]: { key: 'douban+3', snapshot: catalog },
+        } as Favorite);
+        expect(await storage.getFavorite(user, 'source+bound')).toMatchObject({
+          tracking_enabled: false,
+          update_baseline_episodes: 3,
+        });
+        expect(await storage.getFavorite(user, 'douban+3')).toBeNull();
       });
 
       it('新增收藏建立基线，重存与目录合并保留基线，缺基线旧收藏不回灌', async () => {
@@ -107,6 +170,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           'bangumi+2': unread,
           'source+live': { ...unread, origin: 'live' as const },
           'source+played': unread,
+          'source+disabled': { ...unread, tracking_enabled: false },
         }))
           await storage.setFavorite(user, key, value);
         await storage.setPlayRecord(user, 'source+played', {
@@ -224,6 +288,14 @@ for (const backend of ['sqlite', 'mysql'] as const) {
 }
 
 it('收藏消息复用追更展示且保留独立标识', () => {
+  expect(
+    buildFavoriteUpdateMessage('source+1', {
+      ...base,
+      update_baseline_episodes: 8,
+      update_detected_at: 200,
+      tracking_enabled: false,
+    }),
+  ).toBeNull();
   expect(
     buildFavoriteUpdateMessage('source+1', {
       ...base,

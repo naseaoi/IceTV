@@ -8,6 +8,7 @@ import {
   deleteFavorite,
   getFavoriteForWork,
   saveFavorite,
+  setFavoriteTracking,
   setPlayRecordTracking,
 } from '@/lib/db.client';
 import { showToast } from '@/lib/toast';
@@ -72,6 +73,7 @@ jest.mock('@/lib/db.client', () => ({
   saveFavorite: jest.fn(),
   deleteFavorite: jest.fn(),
   setPlayRecordTracking: jest.fn(),
+  setFavoriteTracking: jest.fn(),
 }));
 
 function result(source: string, id: string): SearchResult {
@@ -260,3 +262,46 @@ it.each([true, false])(
     );
   },
 );
+
+it.each([
+  ['favorite', setFavoriteTracking, setPlayRecordTracking],
+  ['record', setPlayRecordTracking, setFavoriteTracking],
+] as const)(
+  '收藏卡片按追更归属 %s 切换追更',
+  async (trackingTarget, called, untouched) => {
+    jest.clearAllMocks();
+    jest
+      .mocked(called)
+      .mockResolvedValueOnce({ tracking_enabled: false } as never);
+    render(
+      <CardInteractionProvider>
+        <VideoCard
+          from='favorite'
+          source='src'
+          id='1'
+          title='三体'
+          trackingTarget={trackingTarget}
+        />
+      </CardInteractionProvider>,
+    );
+    await openMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: '取消追更' }));
+    });
+    expect(called).toHaveBeenCalledWith('src', '1', false);
+    expect(untouched).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('已取消追更', 'success');
+    expect(screen.queryByRole('menuitem', { name: '开启追更' })).not.toBeNull();
+  },
+);
+
+it('目录或直播收藏不提供追更', async () => {
+  jest.clearAllMocks();
+  render(
+    <CardInteractionProvider>
+      <VideoCard from='favorite' source='douban' id='1' title='三体' />
+    </CardInteractionProvider>,
+  );
+  await openMenu();
+  expect(screen.queryByRole('menuitem', { name: /追更/ })).toBeNull();
+});

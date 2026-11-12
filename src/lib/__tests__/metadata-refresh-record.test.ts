@@ -58,6 +58,7 @@ describe('buildRefreshedFavorite', () => {
       total_episodes: 22,
       update_baseline_episodes: 22,
       catalog_origin: { key: 'douban+1', title: '目录标题', year: '2026' },
+      tracking_enabled: false,
     };
     expect(
       buildRefreshedFavorite(
@@ -71,6 +72,7 @@ describe('buildRefreshedFavorite', () => {
       update_baseline_episodes: 22,
       total_episodes: 26,
       update_detected_at: 100,
+      tracking_enabled: false,
     });
   });
   it('缺基线旧收藏从刷新前集数起算，刷新失败或不变不制造事件', () => {

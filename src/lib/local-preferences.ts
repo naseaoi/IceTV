@@ -19,6 +19,7 @@ export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const NOTIFIED_RELEASE_VERSION_STORAGE_KEY = 'notifiedReleaseVersion';
+export const SEEN_RELEASE_VERSION_STORAGE_KEY = 'seenReleaseVersion';
 export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
   'notifiedMessageRevision:';
 export const DANMAKU_ENABLED_STORAGE_KEY = 'danmakuEnabled';
@@ -180,6 +181,14 @@ export function readNotifiedReleaseVersion(): string | undefined {
 
 export function writeNotifiedReleaseVersion(version: string) {
   return writeStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY, version);
+}
+
+export function readSeenReleaseVersion(): string | undefined {
+  return readStoredString(SEEN_RELEASE_VERSION_STORAGE_KEY);
+}
+
+export function writeSeenReleaseVersion(version: string) {
+  return writeStoredString(SEEN_RELEASE_VERSION_STORAGE_KEY, version);
 }
 
 function getNotifiedMessageRevisionStorageKey(username: string): string | null {

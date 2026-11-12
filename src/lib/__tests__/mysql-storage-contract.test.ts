@@ -1162,6 +1162,42 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized.startsWith(
+        'UPDATE favorites AS f SET favorite_json = JSON_SET(',
+      )
+    ) {
+      const [value, username, key] = params as [
+        string | number,
+        string,
+        string,
+      ];
+      const favorites = currentState.favorites.get(username);
+      const json = favorites?.get(key);
+      if (!json) return [{ affectedRows: 0 }, []];
+      const favorite = JSON.parse(json) as Favorite;
+      if (
+        /^(douban|bangumi)\+/.test(key) ||
+        (favorite.origin ?? 'vod') !== 'vod'
+      )
+        return [{ affectedRows: 0 }, []];
+      if (normalized.includes("'$.tracking_enabled', CAST(? AS JSON)")) {
+        favorite.tracking_enabled = JSON.parse(String(value));
+      } else {
+        const message = buildFavoriteUpdateMessage(key, favorite);
+        if (
+          !message ||
+          currentState.playRecords.get(username)?.has(key) ||
+          message.fromEpisodes >= Number(value) ||
+          message.toEpisodes < Number(value)
+        )
+          return [{ affectedRows: 0 }, []];
+        favorite.update_baseline_episodes = Number(value);
+      }
+      favorites!.set(key, JSON.stringify(favorite));
+      return [{ affectedRows: 1 }, []];
+    }
+
     if (normalized.startsWith('UPDATE favorites SET favorite_json = ?,')) {
       const value = params[0] as string;
       const [username, key, snapshot] = params.slice(-3) as [
@@ -1932,6 +1968,7 @@ function createFakePool() {
           !records.has(key) &&
           !/^(douban|bangumi)+/.test(key) &&
           (favorite.origin ?? 'vod') === 'vod' &&
+          favorite.tracking_enabled !== false &&
           favoriteProjection(key, json)[5]
         )
           rows.push({
@@ -2402,6 +2439,54 @@ function createFakePool() {
       const [username] = params as [string];
       return [
         [{ count: currentState.playRecords.get(username)?.size || 0 }],
+        [],
+      ];
+    }
+
+    if (
+      normalized.startsWith('SELECT f.favorite_json FROM favorites f WHERE')
+    ) {
+      const [username, key] = params as [string, string];
+      const json = currentState.favorites.get(username)?.get(key);
+      if (
+        !json ||
+        /^(douban|bangumi)\+/.test(key) ||
+        (JSON.parse(json).origin ?? 'vod') !== 'vod'
+      )
+        return [[], []];
+      return [[{ favorite_json: json }], []];
+    }
+    if (
+      normalized.includes(
+        'FROM favorites f WHERE f.username = ? AND f.library_valid = 1',
+      ) &&
+      normalized.includes("'$.update_baseline_episodes'")
+    ) {
+      const username = String(params[0]);
+      const rows = [...(currentState.favorites.get(username)?.entries() ?? [])]
+        .map(([favorite_key, favorite_json]) => ({
+          favorite_key,
+          favorite_json,
+          message: buildFavoriteUpdateMessage(
+            favorite_key,
+            JSON.parse(favorite_json),
+          ),
+        }))
+        .filter(
+          (row) =>
+            row.message &&
+            !currentState.playRecords.get(username)?.has(row.favorite_key),
+        );
+      if (normalized.startsWith('SELECT COUNT(*)'))
+        return [[{ count: rows.length }], []];
+      return [
+        rows
+          .sort(
+            (a, b) =>
+              b.message!.createdAt - a.message!.createdAt ||
+              b.favorite_key.localeCompare(a.favorite_key),
+          )
+          .slice(0, Number(params.at(-1))),
         [],
       ];
     }

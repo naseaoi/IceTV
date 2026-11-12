@@ -639,6 +639,39 @@ export async function saveFavorite(
   }
 }
 
+export async function setFavoriteTracking(
+  source: string,
+  id: string,
+  enabled: boolean,
+): Promise<Favorite> {
+  const key = generateStorageKey(source, id);
+  try {
+    const response = await fetchWithAuth('/api/favorites', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, trackingEnabled: enabled }),
+    });
+    const { favorite } = (await response.json()) as { favorite: Favorite };
+    const cached = cacheManager.getCachedFavorites();
+    if (cached?.[key]) {
+      const next = { ...cached, [key]: favorite };
+      cacheManager.cacheFavorites(next);
+      window.dispatchEvent(
+        new CustomEvent('favoritesUpdated', { detail: next }),
+      );
+    }
+    notifyMessagesUpdated();
+    return favorite;
+  } catch (error) {
+    await handleDatabaseOperationFailure(
+      'favorites',
+      error,
+      '追更设置保存失败，请重试',
+    );
+    throw error;
+  }
+}
+
 export async function deleteFavorite(
   source: string,
   id: string,

@@ -36,6 +36,7 @@ const favorite: Favorite = {
   save_time: 10,
   cover: 'catalog.jpg',
   watch_status: 'watching',
+  tracking_enabled: false,
 };
 const detail = {
   source: 'allowed',
@@ -77,6 +78,7 @@ it('binds a matching playable source with catalog identity and the new episode b
     save_time: 10,
     total_episodes: 2,
     update_baseline_episodes: 2,
+    tracking_enabled: false,
     catalog_origin: { key: 'douban+1', title: 'Show', year: '2026' },
   });
   expect(merged.removeKeys).toEqual(['douban+1']);

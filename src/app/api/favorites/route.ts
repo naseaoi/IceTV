@@ -172,6 +172,7 @@ export async function POST(request: NextRequest) {
     const finalFavorite = {
       ...favorite,
       total_episodes: favorite.total_episodes ?? 0,
+      tracking_enabled: undefined,
       update_baseline_episodes: undefined,
       update_detected_at: undefined,
       catalog_bind: undefined,
@@ -205,6 +206,57 @@ export async function POST(request: NextRequest) {
       { error: 'Internal Server Error' },
       { status: 500 },
     );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
+    const body = await request.json();
+    const parsed =
+      body &&
+      typeof body.key === 'string' &&
+      body.key.length <= 255 &&
+      parseStorageKey(body.key);
+    if (!parsed || typeof body.trackingEnabled !== 'boolean') {
+      return NextResponse.json({ error: '追更请求格式无效' }, { status: 400 });
+    }
+    if (isCatalogFavoriteSource(parsed.source)) {
+      return NextResponse.json(
+        { error: '仅源站点播收藏支持追更设置' },
+        { status: 400 },
+      );
+    }
+    const existing = await db.getFavorite(
+      guardResult.username,
+      parsed.source,
+      parsed.id,
+    );
+    if (!existing) {
+      return NextResponse.json({ error: '收藏不存在' }, { status: 404 });
+    }
+    if ((existing.origin ?? 'vod') !== 'vod') {
+      return NextResponse.json(
+        { error: '仅源站点播收藏支持追更设置' },
+        { status: 400 },
+      );
+    }
+    const favorite = await db.setFavoriteTracking(
+      guardResult.username,
+      body.key,
+      body.trackingEnabled,
+    );
+    if (!favorite) {
+      return NextResponse.json({ error: '收藏不存在' }, { status: 404 });
+    }
+    return NextResponse.json({ favorite }, { headers: NO_STORE_HEADERS });
+  } catch (err) {
+    if (err instanceof SyntaxError)
+      return NextResponse.json({ error: '追更请求格式无效' }, { status: 400 });
+    console.error('更新收藏追更设置失败', err);
+    return NextResponse.json({ error: '更新追更设置失败' }, { status: 500 });
   }
 }
 

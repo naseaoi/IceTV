@@ -18,6 +18,8 @@ export interface VideoCardProps {
   currentEpisode?: number;
   hasUpdate?: boolean;
   trackingEnabled?: boolean;
+  /** 收藏卡片的追更开关写到哪里；缺省时收藏卡片不提供追更 */
+  trackingTarget?: 'record' | 'favorite';
   availableEpisodes?: number;
   /** 播放记录的真实集索引（0-based）；分组源展示集数与真实索引不一致时使用 */
   resumeEpisodeIndex?: number;

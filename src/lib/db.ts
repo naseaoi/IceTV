@@ -561,6 +561,12 @@ class DbManager {
     return (await this.getStorage()).getFavoriteUpdateMessagePage(...args);
   }
 
+  async setFavoriteTracking(
+    ...args: Parameters<IStorage['setFavoriteTracking']>
+  ): Promise<Favorite | null> {
+    return (await this.getStorage()).setFavoriteTracking(...args);
+  }
+
   async readFavoriteUpdate(
     ...args: Parameters<IStorage['readFavoriteUpdate']>
   ) {

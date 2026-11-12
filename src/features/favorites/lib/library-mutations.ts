@@ -190,6 +190,11 @@ export function mergeFavorite(
     target?.favorite.total_episodes ??
     merged.total_episodes;
   merged.update_detected_at = target?.favorite.update_detected_at;
+  merged.tracking_enabled = (
+    target?.favorite ??
+    binding?.snapshot ??
+    catalogs[0]?.favorite
+  )?.tracking_enabled;
   merged.catalog_origin =
     target?.favorite.catalog_origin ??
     favorite.catalog_origin ??

@@ -100,6 +100,47 @@ export async function assertTrackingCalendar(storage: IStorage) {
     hasUpdate: true,
   });
   expect(await storage.getTrackingCalendarItems('empty-user')).toEqual([]);
+  const disabled = await storage.setFavoriteTracking(
+    'CALENDAR-USER',
+    'source+favorite',
+    false,
+  );
+  expect(disabled).toEqual({ ...favorite, tracking_enabled: false });
+  expect(
+    (await storage.getTrackingCalendarItems('calendar-user')).map(
+      (item) => item.key,
+    ),
+  ).not.toContain('source+favorite');
+  expect(
+    await storage.getFavoriteUpdateMessagePage('calendar-user', 10),
+  ).toEqual({ items: [], total: 0 });
+  await storage.readFavoriteUpdate('calendar-user', 'source+favorite', 5);
+  expect(
+    (await storage.getFavorite('calendar-user', 'source+favorite'))
+      ?.update_baseline_episodes,
+  ).toBe(4);
+  expect(
+    await storage.setFavoriteTracking('calendar-user', 'source+favorite', true),
+  ).toEqual({ ...favorite, tracking_enabled: true });
+  expect(
+    await storage.setFavoriteTracking('calendar-user', 'source+favorite', true),
+  ).toMatchObject({ tracking_enabled: true });
+  expect(
+    (await storage.getFavoriteUpdateMessagePage('calendar-user', 10)).total,
+  ).toBe(1);
+  expect(
+    (await storage.getTrackingCalendarItems('calendar-user')).find(
+      (item) => item.key === 'source+favorite',
+    ),
+  ).toMatchObject({ hasUpdate: true });
+  for (const key of ['source+missing', 'source+live', 'douban+catalog'])
+    expect(
+      await storage.setFavoriteTracking('calendar-user', key, false),
+    ).toBeNull();
+  expect(
+    (await storage.getFavorite('calendar-user', 'source+live'))
+      ?.tracking_enabled,
+  ).toBeUndefined();
   for (let i = 0; i < 205; i++)
     await storage.setPlayRecord('calendar-limit', `source+${i}`, {
       ...base,

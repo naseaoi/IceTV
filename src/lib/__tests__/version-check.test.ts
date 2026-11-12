@@ -61,7 +61,8 @@ describe('version check', () => {
       .mockResolvedValueOnce({ ok: false })
       .mockResolvedValueOnce(createVersionResponse('999.0.0'));
     global.fetch = fetchMock as unknown as typeof fetch;
-    const { checkForUpdates, UpdateStatus } = loadVersionCheckModule();
+    const { checkLatestRelease, UpdateStatus } = loadVersionCheckModule();
+    const checkForUpdates = async () => (await checkLatestRelease()).status;
 
     await expect(checkForUpdates()).resolves.toBe(UpdateStatus.FETCH_FAILED);
     await expect(checkForUpdates()).resolves.toBe(UpdateStatus.FETCH_FAILED);
@@ -78,7 +79,8 @@ describe('version check', () => {
       .fn()
       .mockResolvedValue(createVersionResponse('999.0.0'));
     global.fetch = fetchMock as unknown as typeof fetch;
-    const { checkForUpdates, UpdateStatus } = loadVersionCheckModule();
+    const { checkLatestRelease, UpdateStatus } = loadVersionCheckModule();
+    const checkForUpdates = async () => (await checkLatestRelease()).status;
 
     await expect(checkForUpdates()).resolves.toBe(UpdateStatus.HAS_UPDATE);
     await expect(checkForUpdates()).resolves.toBe(UpdateStatus.HAS_UPDATE);
@@ -99,7 +101,8 @@ describe('version check', () => {
     jest.spyOn(Date, 'now').mockReturnValue(3_000);
     const fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
-    const { checkForUpdates, UpdateStatus } = loadVersionCheckModule();
+    const { checkLatestRelease, UpdateStatus } = loadVersionCheckModule();
+    const checkForUpdates = async () => (await checkLatestRelease()).status;
 
     await expect(checkForUpdates()).resolves.toBe(UpdateStatus.FETCH_FAILED);
 
@@ -125,5 +128,33 @@ describe('version check', () => {
       latestVersion: '999.0.0',
     });
     expect(refetch).not.toHaveBeenCalled();
+  });
+
+  it('hides the update dot after the latest release is seen', async () => {
+    localStorage.clear();
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(
+        createVersionResponse('999.0.0'),
+      ) as unknown as typeof fetch;
+    const versionCheck = loadVersionCheckModule();
+    const onSeen = jest.fn();
+    window.addEventListener(versionCheck.RELEASE_SEEN_EVENT, onSeen);
+
+    await expect(versionCheck.checkForUnseenUpdate()).resolves.toBe(true);
+    await versionCheck.markLatestReleaseSeen();
+    await expect(versionCheck.checkForUnseenUpdate()).resolves.toBe(false);
+    expect(onSeen).toHaveBeenCalledTimes(1);
+    window.removeEventListener(versionCheck.RELEASE_SEEN_EVENT, onSeen);
+
+    sessionStorage.clear();
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(
+        createVersionResponse('999.1.0'),
+      ) as unknown as typeof fetch;
+    const newer = loadVersionCheckModule();
+    await expect(newer.checkForUnseenUpdate()).resolves.toBe(true);
+    localStorage.clear();
   });
 });

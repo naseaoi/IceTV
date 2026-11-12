@@ -378,12 +378,13 @@ it('保存失败时提示并恢复为服务端设置', async () => {
     fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
   });
   await act(async () => {
-    fireEvent.click(screen.getByRole('switch', { name: '追更与收藏更新' }));
+    fireEvent.click(screen.getByRole('switch', { name: '追更更新' }));
   });
   expect(screen.getByRole('alert')).toHaveTextContent('保存失败，请重试');
-  expect(
-    screen.getByRole('switch', { name: '追更与收藏更新' }),
-  ).toHaveAttribute('aria-checked', 'true');
+  expect(screen.getByRole('switch', { name: '追更更新' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
 });
 
 it('子视图中 Escape 先返回列表，再次 Escape 才关闭面板', async () => {

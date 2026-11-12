@@ -23,7 +23,11 @@ import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { changelog, ChangelogEntry } from '@/lib/changelog';
 import { getPrimaryRepoUrl } from '@/lib/update-source';
 import { CURRENT_VERSION } from '@/lib/version';
-import { compareVersions, UpdateStatus } from '@/lib/version-check';
+import {
+  compareVersions,
+  markLatestReleaseSeen,
+  UpdateStatus,
+} from '@/lib/version-check';
 
 interface VersionPanelProps {
   isOpen: boolean;
@@ -114,6 +118,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     if (isOpen) {
       const controller = new AbortController();
       fetchRemoteChangelog(controller.signal);
+      void markLatestReleaseSeen();
       return () => controller.abort();
     }
     setShowAllEntries(false);
