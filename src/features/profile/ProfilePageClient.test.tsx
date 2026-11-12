@@ -56,6 +56,7 @@ const profile: UserProfileView = {
   followingCount: 1,
   publicReviewCount: 0,
   favoriteCount: 0,
+  listCount: 0,
   libraryVisibility: 0,
   recap: null,
 };

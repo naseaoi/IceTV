@@ -24,6 +24,7 @@ const NAV_ITEMS: MobileNavItem[] = [
     href: '/',
     match: (pathname) =>
       pathname === '/' ||
+      pathname === '/lists' ||
       ['/continue-watching', '/douban', '/live'].some((path) =>
         pathname.startsWith(path),
       ),

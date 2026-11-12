@@ -44,6 +44,7 @@ const PageLayout = ({
     !isPlayerPage &&
     (activePath === '/' ||
       activePath.startsWith('/douban') ||
+      activePath === '/lists' ||
       activePath === '/search');
 
   return (

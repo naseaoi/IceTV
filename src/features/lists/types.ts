@@ -1,16 +1,38 @@
 import type { PublicUserRef } from '@/lib/types';
 
+// members 仅登录用户可见；everyone 含游客，可凭链接查看
+export type ListVisibility = 'private' | 'members' | 'everyone';
+
 export interface ListSummary {
   id: string;
   name: string;
   description: string;
-  isPublic: boolean;
+  visibility: ListVisibility;
   itemCount: number;
+  viewCount: number;
+  likeCount: number;
   covers: string[];
   version: number;
   updatedAt: number;
   contains?: boolean;
   containsItemId?: string | null;
+}
+
+export type PlazaSort = 'hot' | 'new';
+export const PLAZA_PAGE_SIZE = 24;
+
+export interface PlazaListSummary extends ListSummary {
+  owner: PublicUserRef;
+}
+
+export interface PlazaPage {
+  lists: PlazaListSummary[];
+  nextCursor: string | null;
+}
+
+export interface ListLikeState {
+  liked: boolean;
+  likeCount: number;
 }
 
 export interface ListItem {
@@ -37,13 +59,15 @@ export interface ListDetail {
   list: ListSummary;
   owner: PublicUserRef;
   isOwner: boolean;
+  // 游客恒为 false
+  liked: boolean;
   items: ListItem[];
 }
 
 export interface ListPatch {
   name?: string;
   description?: string;
-  isPublic?: boolean;
+  visibility?: ListVisibility;
 }
 
 export interface CreateListInput extends ListPatch {

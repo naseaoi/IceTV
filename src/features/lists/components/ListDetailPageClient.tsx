@@ -4,8 +4,9 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Clapperboard,
+  Clock,
   Link2,
-  Lock,
+  ListVideo,
   Pencil,
   Trash2,
 } from 'lucide-react';
@@ -13,11 +14,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import { useAuthSession } from '@/components/AuthProvider';
+import CoverImage from '@/components/CoverImage';
 import ExpandableText from '@/components/ExpandableText';
 import {
   LIBRARY_PILL_BUTTON_CLASS,
   LIBRARY_STICKY_TOOLBAR_CLASS,
   LIBRARY_TOOLBAR_BUTTON_CLASS,
+  LibraryEmptySkeleton,
   LibraryEmptyState,
 } from '@/components/LibraryPage';
 import LoadErrorState from '@/components/LoadErrorState';
@@ -41,6 +46,7 @@ import type { ListDetail, ListItem, ListSummary } from '@/features/lists/types';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { formatRelativeTime } from '@/lib/relative-time';
 import { showToast } from '@/lib/toast';
 import type { PublicUserRef } from '@/lib/types';
 import {
@@ -49,17 +55,31 @@ import {
   isAbortError,
 } from '@/lib/user-facing-error';
 
+import { ListCover, ListStats } from './ListCard';
 import { type ListFormValues, ListFormDialog } from './ListFormDialog';
 import {
   EditableListItemCard,
   ListItemCard,
   ListItemGridSkeleton,
 } from './ListItemCard';
+import { ListLikeButton } from './ListLikeButton';
+import { ListVisibilityBadge } from './ListVisibilityBadge';
 
-const NAME_CLASS = 'text-2xl leading-8 sm:text-[28px] sm:leading-9';
-const META_CLASS = 'mt-2 text-sm leading-5';
-const SKELETON_ITEM_COUNT = 12;
-const ACTIONS_CLASS = 'flex shrink-0 items-center gap-1 pt-0.5';
+// 头部与骨架共用几何类，改动时两侧同步
+const HEADER_CLASS = 'relative mb-8 sm:mb-10';
+const HEADER_BODY_CLASS = 'relative flex items-end gap-8';
+const HEADER_COVER_CLASS =
+  'hidden aspect-[16/9] w-72 shrink-0 rounded-2xl shadow-xl shadow-black/25 md:block lg:w-[360px]';
+const NAME_CLASS = 'text-2xl leading-8 sm:text-[32px] sm:leading-10';
+const DESCRIPTION_CLASS = 'mt-2 text-sm leading-6';
+const META_CLASS = 'mt-3 text-sm leading-5';
+const ACTIONS_CLASS = 'mt-5 flex h-9 items-center gap-1';
+const BACK_BUTTON_CLASS = 'relative -ml-2 mb-3 hidden md:flex';
+// 游客只能经分享链接直接进入，返回会落到受保护的「我的片单」，因此不提供返回
+const mobileHeader = (authenticated: boolean) => ({
+  title: '片单',
+  showBack: authenticated,
+});
 const ICON_BUTTON_CLASS =
   'flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-900/[0.06] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-white';
 
@@ -73,8 +93,16 @@ function isMissing(error: unknown) {
   return error instanceof DisplayableError && error.status === 404;
 }
 
-export function ListDetailPageClient({ listId }: { listId: string }) {
+export function ListDetailPageClient({
+  listId,
+  initialItemCount,
+}: {
+  listId: string;
+  // 服务端按当前访客可读性读出的条目数，null 表示未知或不可读
+  initialItemCount: number | null;
+}) {
   const router = useRouter();
+  const authenticated = useAuthSession().session.status === 'authenticated';
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [reloadKey, setReloadKey] = useState(0);
   const [editingInfo, setEditingInfo] = useState<ListFormValues | null>(null);
@@ -96,7 +124,7 @@ export function ListDetailPageClient({ listId }: { listId: string }) {
         );
       });
     return () => controller.abort();
-  }, [listId, reloadKey]);
+  }, [listId, reloadKey, authenticated]);
 
   const detail = state.status === 'ready' ? state.detail : null;
   // 从列表页进入时已有摘要，加载期间先渲染标题并按条目数铺骨架
@@ -201,13 +229,33 @@ export function ListDetailPageClient({ listId }: { listId: string }) {
     }
   }
 
+  // 游客读不到的片单可能只对登录用户公开，按受保护页面提示登录
+  if (state.status === 'missing' && !authenticated) {
+    return (
+      <AuthenticatedRoute
+        activePath='/me'
+        message='请先登录后再查看片单。'
+        mobileHeader={mobileHeader(false)}
+      >
+        {null}
+      </AuthenticatedRoute>
+    );
+  }
+
   return (
     <PageLayout
       activePath='/me'
-      mobileHeader={{ title: '片单', showBack: true }}
+      mobileHeader={mobileHeader(authenticated)}
+      transparentTopNav
     >
       <div className={`${PAGE_CONTAINER_CLASS} pb-12 pt-4 sm:pt-8`}>
-        {state.status === 'loading' && <ListDetailSkeleton summary={summary} />}
+        {state.status === 'loading' && (
+          <ListDetailSkeleton
+            summary={summary}
+            itemCount={summary?.itemCount ?? initialItemCount}
+            showBack={authenticated}
+          />
+        )}
         {state.status === 'missing' && (
           <LibraryEmptyState
             icon={Clapperboard}
@@ -233,16 +281,35 @@ export function ListDetailPageClient({ listId }: { listId: string }) {
             <ListHeader
               list={detail.list}
               owner={detail.owner}
+              showBack={authenticated}
               actions={
                 <ListActions
                   detail={detail}
+                  like={
+                    <ListLikeButton
+                      listId={listId}
+                      state={{
+                        liked: detail.liked,
+                        likeCount: detail.list.likeCount,
+                      }}
+                      isOwner={detail.isOwner}
+                      authenticated={authenticated}
+                      onChange={({ liked, likeCount }) =>
+                        patchDetail((current) => ({
+                          ...current,
+                          liked,
+                          list: { ...current.list, likeCount },
+                        }))
+                      }
+                    />
+                  }
                   editing={draft !== null}
                   onCopyLink={() => void copyLink()}
                   onEditInfo={() =>
                     setEditingInfo({
                       name: detail.list.name,
                       description: detail.list.description,
-                      isPublic: detail.list.isPublic,
+                      visibility: detail.list.visibility,
                     })
                   }
                   onEditItems={() => setDraft(detail.items)}
@@ -275,6 +342,7 @@ export function ListDetailPageClient({ listId }: { listId: string }) {
             )}
             <ListItems
               detail={detail}
+              guest={!authenticated}
               draft={draft}
               busy={savingDraft}
               onDraftChange={setDraft}
@@ -305,6 +373,7 @@ export function ListDetailPageClient({ listId }: { listId: string }) {
 
 function ListActions({
   detail,
+  like,
   editing,
   onCopyLink,
   onEditInfo,
@@ -312,6 +381,7 @@ function ListActions({
   onDelete,
 }: {
   detail: ListDetail;
+  like: ReactNode;
   editing: boolean;
   onCopyLink: () => void;
   onEditInfo: () => void;
@@ -319,9 +389,12 @@ function ListActions({
   onDelete: () => void;
 }) {
   const { list, isOwner } = detail;
+  const showLike = list.visibility !== 'private' && !isOwner;
   return (
-    <>
-      {(list.isPublic || isOwner) && (
+    // 首个按钮是图标按钮时左移内边距，让图标与上方文字左对齐
+    <div className={`flex items-center gap-1 ${showLike ? '' : '-ml-2.5'}`}>
+      {showLike && like}
+      {(list.visibility !== 'private' || isOwner) && (
         <button
           type='button'
           aria-label='复制片单链接'
@@ -353,7 +426,7 @@ function ListActions({
           ]}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -366,7 +439,7 @@ function DesktopBackButton() {
       aria-label='返回'
       title='返回'
       onClick={goBack}
-      className={`${ICON_BUTTON_CLASS} -ml-2 hidden shrink-0 md:flex`}
+      className={`${ICON_BUTTON_CLASS} ${BACK_BUTTON_CLASS}`}
     >
       <ArrowLeft className='h-5 w-5' />
     </button>
@@ -377,70 +450,96 @@ function DesktopBackButton() {
 function ListHeader({
   list,
   owner,
+  showBack = true,
   actions,
 }: {
   list: ListSummary;
   owner: PublicUserRef | null;
+  showBack?: boolean;
   actions?: ReactNode;
 }) {
+  const description = list.description.trim();
   return (
-    <header className='mb-6 sm:mb-8'>
-      <div className='flex items-start gap-3'>
-        <DesktopBackButton />
-        <h1
-          className={`${NAME_CLASS} min-w-0 flex-1 break-words font-semibold text-gray-900 dark:text-gray-50`}
-        >
-          {list.name}
-        </h1>
-        <div className={ACTIONS_CLASS}>
-          {actions ?? <span aria-hidden='true' className='h-9' />}
+    <header className={HEADER_CLASS}>
+      <ListAmbient cover={list.covers[0]} />
+      {showBack && <DesktopBackButton />}
+      <div className={HEADER_BODY_CLASS}>
+        <ListCover
+          covers={list.covers}
+          title={list.name}
+          className={HEADER_COVER_CLASS}
+        />
+        <div className='min-w-0 flex-1'>
+          <h1
+            className={`${NAME_CLASS} break-words font-semibold text-gray-900 dark:text-gray-50`}
+          >
+            {list.name}
+          </h1>
+          {description && (
+            <ExpandableText
+              text={description}
+              lines={3}
+              className={`${DESCRIPTION_CLASS} max-w-2xl whitespace-pre-line text-gray-600 dark:text-gray-300`}
+            />
+          )}
+          <div
+            className={`${META_CLASS} flex flex-wrap items-center gap-x-4 gap-y-1.5 text-gray-500 dark:text-gray-400`}
+          >
+            {owner ? (
+              <Link
+                href={`/u/${encodeURIComponent(owner.profileId)}`}
+                className='inline-flex items-center gap-1.5 font-medium text-gray-800 transition-colors hover:text-brand-600 dark:text-gray-200 dark:hover:text-brand-400'
+              >
+                <ProfileAvatar user={owner} className='h-5 w-5' />
+                {owner.nickname ?? '未设置昵称'}
+              </Link>
+            ) : (
+              <span
+                aria-hidden='true'
+                className='skeleton h-5 w-20 rounded-full'
+              />
+            )}
+            <span className='inline-flex items-center gap-1 tabular-nums'>
+              <ListVideo aria-hidden='true' className='h-3.5 w-3.5' />
+              {list.itemCount} 部
+            </span>
+            <ListStats list={list} iconClassName='h-3.5 w-3.5' />
+            <ListVisibilityBadge visibility={list.visibility} />
+            <span className='inline-flex items-center gap-1'>
+              <Clock aria-hidden='true' className='h-3.5 w-3.5' />
+              更新于 {formatRelativeTime(list.updatedAt)}
+            </span>
+          </div>
+          <div className={ACTIONS_CLASS}>{actions}</div>
         </div>
       </div>
-      <div
-        className={`${META_CLASS} flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-500 dark:text-gray-400`}
-      >
-        {owner ? (
-          <Link
-            href={`/u/${encodeURIComponent(owner.profileId)}`}
-            className='inline-flex items-center gap-1.5 text-gray-700 transition-colors hover:text-brand-600 dark:text-gray-300 dark:hover:text-brand-400'
-          >
-            <ProfileAvatar user={owner} className='h-5 w-5' />
-            {owner.nickname ?? '未设置昵称'}
-          </Link>
-        ) : (
-          <span aria-hidden='true' className='skeleton h-5 w-20 rounded-full' />
-        )}
-        <span aria-hidden='true'>·</span>
-        <span className='tabular-nums'>{list.itemCount} 部</span>
-        {!list.isPublic && (
-          <>
-            <span aria-hidden='true'>·</span>
-            <span className='inline-flex items-center gap-1'>
-              <Lock aria-hidden='true' className='h-3.5 w-3.5' />
-              私密
-            </span>
-          </>
-        )}
-      </div>
-      {list.description && (
-        <ExpandableText
-          text={list.description}
-          lines={3}
-          className='mt-3 max-w-2xl whitespace-pre-line text-sm leading-6 text-gray-600 dark:text-gray-300'
-        />
-      )}
     </header>
+  );
+}
+
+// 取首张海报模糊成氛围光，与首页轮播的背景同一手法；桌面端向上铺进透明顶栏
+function ListAmbient({ cover }: { cover: string | undefined }) {
+  if (!cover) return null;
+  return (
+    <div
+      aria-hidden='true'
+      className='pointer-events-none absolute -left-16 -top-16 bottom-0 right-1/3 opacity-30 blur-3xl [mask-image:radial-gradient(closest-side,black_40%,transparent)] dark:opacity-40 md:-top-32'
+    >
+      <CoverImage src={cover} alt='' sizes='128px' fallbackLabel='' />
+    </div>
   );
 }
 
 function ListItems({
   detail,
+  guest,
   draft,
   busy,
   onDraftChange,
   onRemoveItem,
 }: {
   detail: ListDetail;
+  guest: boolean;
   draft: ListItem[] | null;
   busy: boolean;
   onDraftChange: (items: ListItem[]) => void;
@@ -496,6 +595,7 @@ function ListItems({
           ) : (
             <ListItemCard
               item={item}
+              guest={guest}
               onRemove={
                 detail.isOwner ? () => onRemoveItem(item.id) : undefined
               }
@@ -507,24 +607,44 @@ function ListItems({
   );
 }
 
-function ListDetailSkeleton({ summary }: { summary: ListSummary | null }) {
-  if (summary) {
-    return (
-      <div aria-hidden='true'>
-        <ListHeader list={summary} owner={null} />
-        {summary.itemCount > 0 && (
-          <ListItemGridSkeleton count={summary.itemCount} />
-        )}
-      </div>
-    );
-  }
+function ListDetailSkeleton({
+  summary,
+  itemCount,
+  showBack,
+}: {
+  summary: ListSummary | null;
+  itemCount: number | null;
+  showBack: boolean;
+}) {
   return (
     <div aria-hidden='true'>
-      <div className='mb-6 sm:mb-8'>
-        <SkeletonText className={NAME_CLASS} barClassName='h-7 w-48 rounded' />
-        <SkeletonText className={META_CLASS} barClassName='h-4 w-40 rounded' />
-      </div>
-      <ListItemGridSkeleton count={SKELETON_ITEM_COUNT} />
+      {summary ? (
+        <ListHeader list={summary} owner={null} showBack={showBack} />
+      ) : (
+        <div className={HEADER_CLASS}>
+          {showBack && <div className={`h-9 ${BACK_BUTTON_CLASS}`} />}
+          <div className={HEADER_BODY_CLASS}>
+            <div className={`skeleton ${HEADER_COVER_CLASS}`} />
+            <div className='min-w-0 flex-1'>
+              <SkeletonText
+                className={NAME_CLASS}
+                barClassName='h-7 w-48 rounded'
+              />
+              <SkeletonText
+                className={META_CLASS}
+                barClassName='h-4 w-56 rounded'
+              />
+              <div className={ACTIONS_CLASS} />
+            </div>
+          </div>
+        </div>
+      )}
+      {itemCount === 0 ? (
+        // 空片单多为作者本人查看，按带操作按钮的空状态占位
+        <LibraryEmptySkeleton />
+      ) : (
+        itemCount !== null && <ListItemGridSkeleton count={itemCount} />
+      )}
     </div>
   );
 }

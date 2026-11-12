@@ -69,8 +69,28 @@ const CATALOG_SOURCE_NAMES: Record<string, string> = {
   bangumi: 'Bangumi',
 };
 
-// 点击直达播放；右键或长按展开与其他海报卡片一致的操作菜单
+// 点击直达播放；登录后右键或长按展开与其他海报卡片一致的操作菜单
 export function ListItemCard({
+  item,
+  guest = false,
+  onRemove,
+}: {
+  item: ListItem;
+  guest?: boolean;
+  onRemove?: () => Promise<void>;
+}) {
+  if (guest) {
+    return (
+      <Link href={listItemPlayUrl(item)} className='group block'>
+        <Cover item={item} />
+        <CardBody item={item} />
+      </Link>
+    );
+  }
+  return <InteractiveListItemCard item={item} onRemove={onRemove} />;
+}
+
+function InteractiveListItemCard({
   item,
   onRemove,
 }: {

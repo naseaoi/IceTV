@@ -42,7 +42,7 @@
 
 `deleteUser` 与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。表内有多个用户名列时（如 `user_follows`）每一列都要覆盖。
 
-片单删除覆盖 `user_lists` 及其 `user_list_items`：删号与非活跃清理在同一事务先清条目再清片单。SQLite 大小写迁移将 `user_lists.username` 纳入用户名收集并转移归属，条目通过不变的 `list_id` 保留，片单与条目均不依赖收藏键。
+片单删除覆盖 `user_lists`、`user_list_items` 与 `list_likes`：删号与非活跃清理在同一事务清除该用户的点赞及其片单下的全部点赞，重算受影响片单的 `like_count` 后清条目和片单。SQLite 大小写迁移收集 `user_lists.username` 与 `list_likes.username`，转移片单归属、合并重复点赞并重算受影响计数；条目通过不变的 `list_id` 保留，片单与条目均不依赖收藏键。
 
 随用户数据增长的列表在 SQL 层按游标分页（排序键 + 唯一键打破平局），不要全量查询后在内存切页。
 

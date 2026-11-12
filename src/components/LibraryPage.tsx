@@ -20,7 +20,7 @@ export const LIBRARY_TOOLBAR_BUTTON_CLASS =
 export const LIBRARY_DANGER_BUTTON_CLASS =
   'inline-flex h-9 items-center rounded-full bg-red-500 px-4 text-sm font-medium text-white transition hover:bg-red-600 disabled:pointer-events-none disabled:opacity-40';
 
-export function LibraryEmptySkeleton() {
+export function LibraryEmptySkeleton({ action = true }: { action?: boolean }) {
   return (
     <div aria-hidden='true' className='flex flex-col items-center px-6 py-20'>
       <div className='skeleton h-14 w-14 rounded-2xl' />
@@ -28,7 +28,7 @@ export function LibraryEmptySkeleton() {
         className={EMPTY_TITLE_TEXT_CLASS}
         barClassName='h-4 w-28 rounded'
       />
-      <div className='skeleton mt-5 h-9 w-28 rounded-full' />
+      {action && <div className='skeleton mt-5 h-9 w-28 rounded-full' />}
     </div>
   );
 }

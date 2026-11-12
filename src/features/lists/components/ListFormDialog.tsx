@@ -17,19 +17,20 @@ import {
   LIST_DESCRIPTION_MAX_LENGTH,
   LIST_NAME_MAX_LENGTH,
 } from '@/features/lists/lib/limits';
+import type { ListVisibility } from '@/features/lists/types';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 export interface ListFormValues {
   name: string;
   description: string;
-  isPublic: boolean;
+  visibility: ListVisibility;
 }
 
 const EMPTY_VALUES: ListFormValues = {
   name: '',
   description: '',
-  isPublic: false,
+  visibility: 'private',
 };
 
 // initial 为 null 时关闭；有 id 视为编辑
@@ -84,6 +85,7 @@ function ListForm({
   const [error, setError] = useState('');
   const title = mode === 'create' ? '新建片单' : '编辑片单';
   const name = values.name.trim();
+  const isPublic = values.visibility !== 'private';
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -153,15 +155,34 @@ function ListForm({
             className={`${MODAL_INPUT_CLASS} h-auto resize-none py-2.5 leading-relaxed`}
           />
         </div>
-        <OptionSwitchRow
-          label='公开'
-          description='展示在个人主页'
-          checked={values.isPublic}
-          onChange={(isPublic) =>
-            setValues((current) => ({ ...current, isPublic }))
-          }
-          className='w-full'
-        />
+        <div>
+          <OptionSwitchRow
+            label='公开'
+            description='展示在个人主页'
+            checked={isPublic}
+            onChange={(next) =>
+              setValues((current) => ({
+                ...current,
+                visibility: next ? 'members' : 'private',
+              }))
+            }
+            className='w-full'
+          />
+          {isPublic && (
+            <OptionSwitchRow
+              label='游客可见'
+              description='未登录也能通过链接查看'
+              checked={values.visibility === 'everyone'}
+              onChange={(next) =>
+                setValues((current) => ({
+                  ...current,
+                  visibility: next ? 'everyone' : 'members',
+                }))
+              }
+              className='w-full'
+            />
+          )}
+        </div>
       </fieldset>
       {error && (
         <p role='alert' className='mt-3 text-sm text-red-500'>

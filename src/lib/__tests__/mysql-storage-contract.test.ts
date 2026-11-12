@@ -106,6 +106,7 @@ function cloneState(state: FakeState): FakeState {
   return {
     lists: state.lists.map((row) => ({ ...row })),
     listItems: state.listItems.map((row) => ({ ...row })),
+    listLikes: state.listLikes.map((row) => ({ ...row })),
     announcements: new Map(
       [...state.announcements].map(([id, row]) => [id, { ...row }]),
     ),
@@ -162,6 +163,7 @@ function createState(): FakeState {
   return {
     lists: [],
     listItems: [],
+    listLikes: [],
     announcements: new Map(),
     healthSearch: [],
     healthPlay: [],
@@ -1520,6 +1522,10 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")
+      return [[{ Field: 'like_count' }], []];
+    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'view_count'")
+      return [[{ Field: 'view_count' }], []];
     if (normalized === "SHOW COLUMNS FROM users LIKE 'password_set'")
       return [[{ Field: 'password_set' }], []];
     if (normalized.startsWith('SHOW COLUMNS FROM user_danmaku'))
@@ -1946,7 +1952,12 @@ function createFakePool() {
         [],
       ];
     }
-    const listRows = queryLists(normalized, params, currentState);
+    const listRows = queryLists(
+      normalized,
+      params,
+      currentState,
+      currentState.social.user_profiles,
+    );
     if (listRows !== undefined) return [listRows, []];
     if (
       normalized ===

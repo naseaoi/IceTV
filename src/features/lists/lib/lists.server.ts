@@ -5,15 +5,29 @@ import type {
   ListItemInput,
   ListPatch,
 } from '@/features/lists/types';
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import {
+  getOptionalActiveUser,
+  isGuardFailure,
+  requireActiveUser,
+} from '@/lib/api-auth';
+import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { requireNickname } from '@/lib/user-profile.server';
 import { normalizeUsername } from '@/lib/username';
 
 import { ListError, listNotFound } from './list-storage';
+import { listViewCounter } from './list-view-counter';
 
 type Context = { params: Promise<{ id: string; itemId?: string }> };
-type Action = 'collection' | 'detail' | 'items' | 'item' | 'order';
+type Action =
+  | 'collection'
+  | 'detail'
+  | 'items'
+  | 'item'
+  | 'order'
+  | 'plaza'
+  | 'like';
 function json(value: unknown, status = 200) {
   return NextResponse.json(value, { status, headers: NO_STORE_HEADERS });
 }
@@ -27,15 +41,64 @@ async function body(request: NextRequest): Promise<Record<string, unknown>> {
     throw new ListError('请求体必须为有效 JSON 对象');
   }
 }
+async function detailResponse(
+  id: string,
+  viewer: string | null,
+  request: NextRequest,
+) {
+  const detail = await db.getList(id, viewer);
+  const profile = await db.getUserProfile(detail.username);
+  if (!profile) listNotFound();
+  if (detail.username !== viewer) {
+    try {
+      const ip = viewer === null ? getClientIp(request) : null;
+      const visitor =
+        viewer !== null
+          ? `user:${viewer}`
+          : ip && ip !== 'unknown'
+            ? `ip:${ip}`
+            : null;
+      if (
+        visitor &&
+        (await listViewCounter.record(id, visitor, () => db.recordListView(id)))
+      )
+        detail.list.viewCount += 1;
+    } catch (error) {
+      console.error('片单浏览计数失败', error);
+    }
+  }
+  return json({
+    list: detail.list,
+    items: detail.items,
+    liked: detail.liked,
+    isOwner: detail.username === viewer,
+    owner: {
+      profileId: profile.profile_id,
+      nickname: profile.nickname,
+      avatarSeed: profile.avatar_seed,
+    },
+  });
+}
 export async function handleLists(
   request: NextRequest,
   action: Action,
   context?: Context,
 ) {
   try {
-    const guard = await requireActiveUser(request);
-    if (isGuardFailure(guard)) return guard.response;
-    const username = normalizeUsername(guard.username);
+    if (action === 'plaza' && request.method === 'GET') {
+      const viewer = await getOptionalActiveUser(request);
+      const query = request.nextUrl.searchParams;
+      const sort = query.get('sort') ?? 'hot';
+      if (sort !== 'hot' && sort !== 'new')
+        throw new ListError('排序方式不正确');
+      return json(
+        await db.getPlazaLists(
+          viewer ? normalizeUsername(viewer.username) : null,
+          sort,
+          query.get('cursor'),
+        ),
+      );
+    }
     const params = context ? await context.params : undefined;
     if (
       params &&
@@ -44,6 +107,23 @@ export async function handleLists(
     )
       listNotFound();
     const id = params?.id ?? '';
+    // 片单详情对游客开放，存储层只返回对所有人可见的片单
+    if (action === 'detail' && request.method === 'GET') {
+      const viewer = await getOptionalActiveUser(request);
+      return await detailResponse(
+        id,
+        viewer ? normalizeUsername(viewer.username) : null,
+        request,
+      );
+    }
+    const guard = await requireActiveUser(request);
+    if (isGuardFailure(guard)) return guard.response;
+    const username = normalizeUsername(guard.username);
+    if (action === 'like' && ['PUT', 'DELETE'].includes(request.method)) {
+      const nicknameFailure = await requireNickname(username);
+      if (nicknameFailure) return nicknameFailure;
+      return json(await db.setListLike(username, id, request.method === 'PUT'));
+    }
     if (action === 'collection' && request.method === 'GET') {
       const query = request.nextUrl.searchParams;
       const profileId = query.get('profileId');
@@ -70,21 +150,6 @@ export async function handleLists(
           username,
           input as unknown as CreateListInput,
         ),
-      });
-    }
-    if (action === 'detail' && request.method === 'GET') {
-      const detail = await db.getList(id, username);
-      const profile = await db.getUserProfile(detail.username);
-      if (!profile) listNotFound();
-      return json({
-        list: detail.list,
-        items: detail.items,
-        isOwner: detail.username === username,
-        owner: {
-          profileId: profile.profile_id,
-          nickname: profile.nickname,
-          avatarSeed: profile.avatar_seed,
-        },
       });
     }
     if (action === 'detail' && request.method === 'PATCH')

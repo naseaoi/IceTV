@@ -63,6 +63,31 @@ class DbManager {
   ): ReturnType<IStorage['getTrackingCalendarItems']> {
     return (await this.getStorage()).getTrackingCalendarItems(...args);
   }
+  async countPlazaLists(
+    ...args: Parameters<IStorage['countPlazaLists']>
+  ): ReturnType<IStorage['countPlazaLists']> {
+    return (await this.getStorage()).countPlazaLists(...args);
+  }
+  async getListItemCount(
+    ...args: Parameters<IStorage['getListItemCount']>
+  ): ReturnType<IStorage['getListItemCount']> {
+    return (await this.getStorage()).getListItemCount(...args);
+  }
+  async setListLike(
+    ...args: Parameters<IStorage['setListLike']>
+  ): ReturnType<IStorage['setListLike']> {
+    return (await this.getStorage()).setListLike(...args);
+  }
+  async recordListView(
+    ...args: Parameters<IStorage['recordListView']>
+  ): ReturnType<IStorage['recordListView']> {
+    return (await this.getStorage()).recordListView(...args);
+  }
+  async getPlazaLists(
+    ...args: Parameters<IStorage['getPlazaLists']>
+  ): ReturnType<IStorage['getPlazaLists']> {
+    return (await this.getStorage()).getPlazaLists(...args);
+  }
   async getLists(
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {

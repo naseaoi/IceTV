@@ -649,6 +649,21 @@ export class MySqlStorage implements IStorage {
           throw error;
       }
     }
+    for (const column of ['view_count', 'like_count']) {
+      const [listColumns] = await this.pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM user_lists LIKE '${column}'`,
+      );
+      if (!listColumns.length) {
+        try {
+          await this.pool.execute(
+            `ALTER TABLE user_lists ADD COLUMN ${column} INT NOT NULL DEFAULT 0`,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+            throw error;
+        }
+      }
+    }
     await new MysqlConfigStateStore(this.pool).migrateSchema();
 
     for (const [name, size] of [
@@ -1557,21 +1572,26 @@ export class MySqlStorage implements IStorage {
     ]);
   }
 
-  private async runListPlan<T>(plan: ListPlan<T>): Promise<T> {
-    return this.withTransaction(async (connection) => {
-      let step = plan.next();
-      while (!step.done) {
-        const { sql, params } = step.value;
-        if (sql.startsWith('SELECT')) {
-          const [rows] = await connection.query(sql, params);
-          step = plan.next(rows as ListRow[]);
-        } else {
-          await connection.execute(sql, params);
-          step = plan.next([]);
-        }
+  private async runListPlan<T>(
+    plan: ListPlan<T>,
+    connection?: PoolConnection,
+  ): Promise<T> {
+    if (!connection)
+      return this.withTransaction((transaction) =>
+        this.runListPlan(plan, transaction),
+      );
+    let step = plan.next();
+    while (!step.done) {
+      const { sql, params } = step.value;
+      if (sql.startsWith('SELECT')) {
+        const [rows] = await connection.query(sql, params);
+        step = plan.next(rows as ListRow[]);
+      } else {
+        await connection.execute(sql, params);
+        step = plan.next([]);
       }
-      return step.value;
-    });
+    }
+    return step.value;
   }
   async getTrackingCalendarItems(
     userName: string,
@@ -1585,6 +1605,31 @@ export class MySqlStorage implements IStorage {
     return trackingCalendarItems(rows as TrackingCalendarRow[]);
   }
 
+  async countPlazaLists(
+    ...args: Parameters<IStorage['countPlazaLists']>
+  ): ReturnType<IStorage['countPlazaLists']> {
+    return this.runListPlan(new ListPlans('mysql').countPlazaLists(...args));
+  }
+  async getListItemCount(
+    ...args: Parameters<IStorage['getListItemCount']>
+  ): ReturnType<IStorage['getListItemCount']> {
+    return this.runListPlan(new ListPlans('mysql').getListItemCount(...args));
+  }
+  async setListLike(
+    ...args: Parameters<IStorage['setListLike']>
+  ): ReturnType<IStorage['setListLike']> {
+    return this.runListPlan(new ListPlans('mysql').setListLike(...args));
+  }
+  async recordListView(
+    ...args: Parameters<IStorage['recordListView']>
+  ): ReturnType<IStorage['recordListView']> {
+    return this.runListPlan(new ListPlans('mysql').recordListView(...args));
+  }
+  async getPlazaLists(
+    ...args: Parameters<IStorage['getPlazaLists']>
+  ): ReturnType<IStorage['getPlazaLists']> {
+    return this.runListPlan(new ListPlans('mysql').getPlazaLists(...args));
+  }
   async getLists(
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
@@ -2408,6 +2453,10 @@ export class MySqlStorage implements IStorage {
       await connection.query(
         'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE',
         [username],
+      );
+      await this.runListPlan(
+        new ListPlans('mysql').deleteUserLikes(username),
+        connection,
       );
       await connection.execute(
         'DELETE FROM user_list_items WHERE list_id IN (SELECT id FROM user_lists WHERE username = ?)',

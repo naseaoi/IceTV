@@ -309,16 +309,19 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       followers: number;
       following: number;
       reviews: number;
+      lists: number;
       followed: number;
       favorites: number;
     }>(
       `SELECT
+      (SELECT COUNT(*) FROM user_lists WHERE username = ?${isSelf ? '' : ' AND is_public >= 1'}) AS lists,
       (SELECT COUNT(*) FROM user_follows WHERE followee = ?) AS followers,
       (SELECT COUNT(*) FROM user_follows WHERE follower = ?) AS following,
       (SELECT COUNT(*) FROM video_reviews WHERE username = ? AND is_public = 1) AS reviews,
       (SELECT COUNT(*) FROM user_follows WHERE follower = ? AND followee = ?) AS followed,
       ${favoritesVisible ? `(SELECT COUNT(*) FROM favorites WHERE username = ? AND library_valid = 1 AND ${profileFavoriteOriginSql(this.sql.dialect)})` : '0'} AS favorites`,
       [
+        username,
         username,
         username,
         username,
@@ -339,6 +342,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       followerCount: Number(counts.followers),
       followingCount: Number(counts.following),
       publicReviewCount: Number(counts.reviews),
+      listCount: Number(counts.lists),
       favoriteCount: Number(counts.favorites),
     };
   }

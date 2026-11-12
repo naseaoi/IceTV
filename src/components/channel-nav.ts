@@ -1,6 +1,7 @@
 import { getCustomCategoryLabel, RuntimeConfig } from '@/lib/runtime-config';
 
 export const LIVE_ROUTE = '/live';
+export const LIST_PLAZA_ROUTE = '/lists';
 
 export type ChannelItem = { label: string; href: string };
 
@@ -20,6 +21,7 @@ export function getChannelItems(runtimeConfig?: RuntimeConfig): ChannelItem[] {
       href: '/douban?type=custom',
     });
   }
+  items.push({ label: '片单', href: LIST_PLAZA_ROUTE });
   if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
     items.push({ label: '直播', href: LIVE_ROUTE });
   }
@@ -27,9 +29,11 @@ export function getChannelItems(runtimeConfig?: RuntimeConfig): ChannelItem[] {
   return items;
 }
 
-// 带频道条的页面：首页与豆瓣分类页
+// 带频道条的页面：首页、豆瓣分类页与片单广场
 export function isChannelPath(path: string): boolean {
-  return path === '/' || path.startsWith('/douban');
+  return (
+    path === '/' || path.startsWith('/douban') || path === LIST_PLAZA_ROUTE
+  );
 }
 
 // 分类页的筛选参数不在 pathname 中，靠页面传入的 activePath 区分类型
@@ -44,6 +48,8 @@ export function isNavItemActive(
     const type = href.split('type=')[1];
     return pathname === '/douban' && activePath.includes(`type=${type}`);
   }
+  // 片单详情归属创建者，不高亮广场
+  if (href === LIST_PLAZA_ROUTE) return pathname === LIST_PLAZA_ROUTE;
   if (href === '/me') {
     return pathname.startsWith('/me') || pathname.startsWith('/u/');
   }

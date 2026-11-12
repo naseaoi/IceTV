@@ -3,6 +3,7 @@ import type { VideoReview } from '@/lib/types';
 type Row = Record<string, any>;
 export type SocialFakeState = {
   social: Record<string, Row[]>;
+  lists: Row[];
   users: Map<string, string>;
   userAccess: Map<string, Row>;
   videoReviews: Map<
@@ -387,13 +388,18 @@ export function querySocial(
   if (sql.includes('AS followers'))
     return [
       {
-        followers: follows.filter((row) => row.followee === params[0]).length,
-        following: follows.filter((row) => row.follower === params[1]).length,
+        lists: state.lists.filter(
+          (row) =>
+            row.username === params[0] &&
+            (!sql.includes('AND is_public >= 1') || Number(row.is_public) >= 1),
+        ).length,
+        followers: follows.filter((row) => row.followee === params[1]).length,
+        following: follows.filter((row) => row.follower === params[2]).length,
         reviews: [...state.videoReviews.values()].filter(
-          (row) => row.username === params[2] && row.review.is_public,
+          (row) => row.username === params[3] && row.review.is_public,
         ).length,
         followed: follows.filter(
-          (row) => row.follower === params[3] && row.followee === params[4],
+          (row) => row.follower === params[4] && row.followee === params[5],
         ).length,
       },
     ];

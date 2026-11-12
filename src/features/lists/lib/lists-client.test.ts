@@ -43,7 +43,7 @@ it('请求函数与路径、方法一一对应', async () => {
     '/api/lists',
     expect.objectContaining({ method: 'POST' }),
   );
-  expect(await updateList('list', { isPublic: true })).toEqual(list);
+  expect(await updateList('list', { visibility: 'members' })).toEqual(list);
   expect(fetchMock).toHaveBeenLastCalledWith(
     '/api/lists/list',
     expect.objectContaining({ method: 'PATCH' }),

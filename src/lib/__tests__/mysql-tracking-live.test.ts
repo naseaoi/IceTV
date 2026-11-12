@@ -1456,6 +1456,41 @@ describeLive('MySQL 片单并发（真实实例）', () => {
       { reason: { code: 'LIST_VERSION_CONFLICT' } },
     );
   });
+  it('并发点赞幂等，删号重算计数，删片单清除点赞行', async () => {
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    await storage.ensureUserProfile('likes-owner');
+    const list = await storage.createList('likes-owner', {
+      name: '点赞并发',
+      visibility: 'everyone',
+    });
+    await storage.ensureUserProfile('lists-liker');
+    const before = (await storage.getList(list.id, 'lists-owner')).list;
+    const liked = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        storage.setListLike('lists-liker', list.id, true),
+      ),
+    );
+    expect(liked).toEqual(
+      Array.from({ length: 4 }, () => ({ liked: true, likeCount: 1 })),
+    );
+    expect((await storage.getList(list.id, 'lists-owner')).list).toEqual({
+      ...before,
+      likeCount: 1,
+    });
+    await storage.deleteUser('lists-liker');
+    expect((await storage.getList(list.id, 'lists-owner')).list.likeCount).toBe(
+      0,
+    );
+    await storage.ensureUserProfile('lists-liker');
+    await storage.setListLike('lists-liker', list.id, true);
+    await storage.deleteList('likes-owner', list.id);
+    const [rows] = await pool.query<import('mysql2/promise').RowDataPacket[]>(
+      'SELECT COUNT(*) AS total FROM list_likes WHERE list_id = ?',
+      [list.id],
+    );
+    expect(Number(rows[0].total)).toBe(0);
+  });
 });
 
 describeLive('MySQL 追剧周历契约（真实实例）', () => {

@@ -620,6 +620,20 @@ export class LocalSqliteStorage implements IStorage {
     }
     for (const statement of userNoticeSchema('sqlite')) this.db.exec(statement);
     for (const statement of listSchema('sqlite')) this.db.exec(statement);
+    runWithBusyRetry('迁移 SQLite 片单浏览量', () => {
+      this.db
+        .transaction(() => {
+          const columns = this.db.pragma('table_info(user_lists)') as {
+            name: string;
+          }[];
+          for (const column of ['view_count', 'like_count'])
+            if (!columns.some((entry) => entry.name === column))
+              this.db.exec(
+                `ALTER TABLE user_lists ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
+              );
+        })
+        .immediate();
+    });
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
@@ -1587,6 +1601,23 @@ export class LocalSqliteStorage implements IStorage {
       for (const { legacy, canonical } of plan) {
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
+        const likedLists = this.db
+          .prepare('SELECT list_id FROM list_likes WHERE username = ?')
+          .all(legacy) as { list_id: string }[];
+        this.db
+          .prepare(
+            'UPDATE OR IGNORE list_likes SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM list_likes WHERE username = ?')
+          .run(legacy);
+        for (const { list_id } of likedLists)
+          this.db
+            .prepare(
+              'UPDATE user_lists SET like_count = (SELECT COUNT(*) FROM list_likes WHERE list_id = ?) WHERE id = ?',
+            )
+            .run(list_id, list_id);
         this.db
           .prepare('UPDATE user_lists SET username = ? WHERE username = ?')
           .run(canonical, legacy);
@@ -1760,6 +1791,7 @@ export class LocalSqliteStorage implements IStorage {
       'user_danmaku',
       'user_profiles',
       'user_lists',
+      'list_likes',
       'user_access',
       'user_group_members',
       'search_history',
@@ -2364,6 +2396,31 @@ export class LocalSqliteStorage implements IStorage {
     return trackingCalendarItems(rows as TrackingCalendarRow[]);
   }
 
+  async countPlazaLists(
+    ...args: Parameters<IStorage['countPlazaLists']>
+  ): ReturnType<IStorage['countPlazaLists']> {
+    return this.runListPlan(new ListPlans('sqlite').countPlazaLists(...args));
+  }
+  async getListItemCount(
+    ...args: Parameters<IStorage['getListItemCount']>
+  ): ReturnType<IStorage['getListItemCount']> {
+    return this.runListPlan(new ListPlans('sqlite').getListItemCount(...args));
+  }
+  async setListLike(
+    ...args: Parameters<IStorage['setListLike']>
+  ): ReturnType<IStorage['setListLike']> {
+    return this.runListPlan(new ListPlans('sqlite').setListLike(...args));
+  }
+  async recordListView(
+    ...args: Parameters<IStorage['recordListView']>
+  ): ReturnType<IStorage['recordListView']> {
+    return this.runListPlan(new ListPlans('sqlite').recordListView(...args));
+  }
+  async getPlazaLists(
+    ...args: Parameters<IStorage['getPlazaLists']>
+  ): ReturnType<IStorage['getPlazaLists']> {
+    return this.runListPlan(new ListPlans('sqlite').getPlazaLists(...args));
+  }
   async getLists(
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
@@ -3090,6 +3147,7 @@ export class LocalSqliteStorage implements IStorage {
         )
           return false;
       }
+      this.runListPlan(new ListPlans('sqlite').deleteUserLikes(targetUser));
       this.db
         .prepare(
           'DELETE FROM user_list_items WHERE list_id IN (SELECT id FROM user_lists WHERE username = ?)',

@@ -541,6 +541,7 @@ export default function ProfilePageClient({
                   key={`${profileId}:${version}`}
                   profileId={profileId}
                   isSelf={profile.isSelf}
+                  skeletonCount={skeletonCount(profile.listCount)}
                 />
               ) : tab === 'reviews' ? (
                 <ProfileReviews

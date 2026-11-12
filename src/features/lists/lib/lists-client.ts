@@ -3,8 +3,12 @@ import type {
   ListDetail,
   ListItem,
   ListItemInput,
+  ListLikeState,
   ListPatch,
   ListSummary,
+  PlazaListSummary,
+  PlazaPage,
+  PlazaSort,
 } from '@/features/lists/types';
 import { socialRequest } from '@/lib/profile.client';
 
@@ -64,6 +68,27 @@ export async function fetchProfileLists(
   );
   lists.forEach(remember);
   return lists;
+}
+export async function fetchPlazaLists(
+  sort: PlazaSort,
+  cursor: string | undefined,
+  signal?: AbortSignal,
+): Promise<{ items: PlazaListSummary[]; nextCursor: string | null }> {
+  const query = new URLSearchParams({ sort, ...(cursor ? { cursor } : {}) });
+  const page = await request<PlazaPage>(`/plaza?${query}`, { signal });
+  page.lists.forEach(remember);
+  return { items: page.lists, nextCursor: page.nextCursor };
+}
+export async function setListLiked(
+  id: string,
+  liked: boolean,
+): Promise<ListLikeState> {
+  const state = await request<ListLikeState>(`${pathFor(id)}/like`, {
+    method: liked ? 'PUT' : 'DELETE',
+  });
+  const cached = summaryCache.get(id);
+  if (cached) remember({ ...cached, likeCount: state.likeCount });
+  return state;
 }
 export async function createList(input: CreateListInput): Promise<ListSummary> {
   return remember(

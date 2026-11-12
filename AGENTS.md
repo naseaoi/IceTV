@@ -39,7 +39,7 @@
 - 根布局经 `src/lib/auth-session.server.ts` 校验后把初始会话注入 `AuthProvider`，客户端统一用 `useAuthSession()` 消费。`/api/auth/session` 只用于显式重新验证，首次渲染与普通路由切换不调用。登录态失效派发 `AUTH_SESSION_LOST_EVENT`，由 `AuthProvider` 统一处理。
 - 受保护路由在对应 `layout.tsx` 挂 `AuthenticatedRoute`，确保门禁先于 `loading.tsx` 和页面内 `Suspense`。
 - 游客点受保护入口时先进目标页展示统一登录提示，**不在入口组件直接跳 `/login`**。
-- 前端拦截不算防线，服务端仍需对应 Guard。代理模式、播放路由统计等辅助接口同属登录后能力。公开能力仅限：首页、分类、版本信息、登录注册、受限封面缓存、Bangumi 日历（固定地址的共享缓存）。
+- 前端拦截不算防线，服务端仍需对应 Guard。代理模式、播放路由统计等辅助接口同属登录后能力。公开能力仅限：首页、分类、版本信息、登录注册、受限封面缓存、Bangumi 日历（固定地址的共享缓存）、设为游客可见的片单详情与片单广场（仅游客可见等级，见 [评价与收藏](docs/reviews-favorites.md#片单)）。
 
 ## 外部请求与客户端 IP
 
@@ -62,6 +62,7 @@
 - `@tailwindcss/forms` 按控件类型给原生 input / select / textarea 加边框、内边距和背景（select 另有背景箭头）。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则浅色模式出现灰框或文字被裁切。下拉统一用 `src/components/Select.tsx`，不写原生 `<select>`。
 - 页面滚动可能发生在 `window`、`documentElement` 或 `body` 上，监听或回顶统一用 `src/hooks/usePageScroll.ts`，只监听其中一处会静默失效。需要捕获任意容器滚动的虚拟列表、无限加载可在 `document` 上用捕获监听。换页滚动位置由根布局的 `PageScrollRestorer` 接管（新页面回顶、前进后退恢复），不要在页面里另写换页回顶。
 - 加载反馈与骨架有统一入口，骨架与真实组件共用布局常量，不手写 `animate-pulse` / `animate-spin` 或像素高度，见 [前端界面](docs/frontend.md#加载反馈与骨架)。
+- 本站数据的列表骨架条数跟随真实条数（快照、计数 cookie 或服务端同次渲染的轻量计数），已知为 0 时渲染空状态骨架；固定默认条数仅限搜索结果、分类等外部数据源列表。新增或改造列表页时同次接入计数来源，见 [前端界面](docs/frontend.md#加载反馈与骨架)。
 
 ## 本地设置
 

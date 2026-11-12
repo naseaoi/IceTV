@@ -9,14 +9,15 @@ import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 import { ListGrid, ListGridSkeleton } from './ListCard';
 
-const DEFAULT_SKELETON_COUNT = 3;
-
 export function ProfileLists({
   profileId,
   isSelf,
+  skeletonCount,
 }: {
   profileId: string;
   isSelf: boolean;
+  // 资料接口按同一可见范围给出的片单数
+  skeletonCount: number;
 }) {
   const [lists, setLists] = useState<ListSummary[] | null>(null);
   const [error, setError] = useState('');
@@ -43,8 +44,10 @@ export function ProfileLists({
       />
     );
   }
-  if (!lists) return <ListGridSkeleton count={DEFAULT_SKELETON_COUNT} />;
-  if (lists.length === 0) {
+  if (!lists && skeletonCount > 0) {
+    return <ListGridSkeleton count={skeletonCount} />;
+  }
+  if (!lists || lists.length === 0) {
     return (
       <div className='py-5 text-center text-gray-500 dark:text-gray-400'>
         {isSelf ? '还没有片单' : '暂无公开片单'}
