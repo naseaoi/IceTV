@@ -44,6 +44,7 @@ import {
 } from '@/features/play/lib/lazyEpisode';
 import { cancelNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import { getVodStartupNow } from '@/features/play/lib/playerLoading';
+import { clearMatchingPlaybackCheckpoint } from '@/features/play/lib/playProgressRestore';
 import {
   holdBackgroundSourceProbes,
   releaseBackgroundSourceProbes,
@@ -813,6 +814,7 @@ function AuthenticatedPlayPageClient({
         };
         releaseBackgroundSourceProbes();
         recordPlaybackStarted();
+        clearMatchingPlaybackCheckpoint(currentSourceRef, currentIdRef);
         if (playbackIntentRef)
           reportVodPlaybackOutcome(
             playbackIntentRef.current,

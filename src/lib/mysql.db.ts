@@ -1072,6 +1072,18 @@ export class MySqlStorage implements IStorage {
     return result;
   }
 
+  async getPlayRecordSnapshot(
+    userName: string,
+    key: string,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1',
+      [normalizeUsername(userName), key],
+    );
+    return rows[0]?.record_json ?? null;
+  }
+
   async setPlayRecord(
     userName: string,
     key: string,
@@ -1091,10 +1103,22 @@ export class MySqlStorage implements IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
-    snapshot: string,
+    snapshot: string | null,
   ): Promise<boolean> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
+    if (snapshot === null) {
+      try {
+        await this.pool.execute(
+          'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
+          [username, key, JSON.stringify(record)],
+        );
+        return true;
+      } catch (error) {
+        if ((error as { code?: string }).code === 'ER_DUP_ENTRY') return false;
+        throw error;
+      }
+    }
     const [result] = await this.pool.execute(
       `UPDATE play_records
        SET record_json = ?

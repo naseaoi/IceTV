@@ -4,6 +4,7 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
@@ -104,6 +105,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       'access-reader',
     ]);
     expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('播放记录会话序号与并发 CAS 契约', async () => {
+    await assertPlayRecordOrdering(storage);
   });
 
   it('按标题读取本人最近进度', async () => {

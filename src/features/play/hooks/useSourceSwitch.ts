@@ -28,7 +28,7 @@ import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
 import {
   type SourceSwitchEpisodeAnchor,
-  resolveSourceSwitchCurrentPlayTime,
+  resolveActivePlayTime,
   resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
@@ -248,16 +248,25 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     setRealtimeLoadSpeed('');
   }, [artPlayerRef, setRealtimeLoadSpeed]);
 
+  const resolveCurrentPlayTime = useCallback(
+    () =>
+      resolveActivePlayTime({
+        targetEpisodePending: clearTargetEpisodeProgressRef.current,
+        playerCurrentTime: artPlayerRef.current?.currentTime || 0,
+        pendingResumeTime: resumeTimeRef.current,
+        stableCurrentTime: stableCurrentTimeRef.current,
+      }),
+    [
+      artPlayerRef,
+      resumeTimeRef,
+      stableCurrentTimeRef,
+      clearTargetEpisodeProgressRef,
+    ],
+  );
+
   // 按当前进度重新拉起同一地址；重试和拒绝换源共用
   const restartCurrentPlayback = useCallback(() => {
-    // 清进度标记未解除说明目标集还没起播，播放器上的时间属于上一集，只能沿用原恢复点
-    const resumeTime = clearTargetEpisodeProgressRef.current
-      ? (resumeTimeRef.current ?? 0)
-      : resolveSourceSwitchCurrentPlayTime({
-          playerCurrentTime: artPlayerRef.current?.currentTime || 0,
-          pendingResumeTime: resumeTimeRef.current,
-          stableCurrentTime: stableCurrentTimeRef.current,
-        });
+    const resumeTime = resolveCurrentPlayTime();
     if (resumeTime > 1) {
       resumeTimeRef.current = resumeTime;
       resumeModeRef.current = 'forced';
@@ -267,11 +276,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     setVideoLoadingAttempt((prev) => prev + 1);
     setPlaybackRetryNonce((prev) => prev + 1);
   }, [
-    artPlayerRef,
+    resolveCurrentPlayTime,
     resumeTimeRef,
     resumeModeRef,
-    stableCurrentTimeRef,
-    clearTargetEpisodeProgressRef,
     setError,
     setIsVideoLoading,
     setVideoLoadingAttempt,
@@ -338,11 +345,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       const previousId = currentIdRef.current;
       const previousDetail = detailRef.current;
       const previousSkipConfig: SkipConfig = { ...skipConfigRef.current };
-      const currentPlayTime = resolveSourceSwitchCurrentPlayTime({
-        playerCurrentTime: artPlayerRef.current?.currentTime || 0,
-        pendingResumeTime: resumeTimeRef.current,
-        stableCurrentTime: stableCurrentTimeRef.current,
-      });
+      const currentPlayTime = resolveCurrentPlayTime();
 
       pendingSourceSwitchCleanupRef.current = null;
 
@@ -566,7 +569,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         const nextResumeState = resolveSourceSwitchResumeState({
           currentPlayTime,
           preserveProgress,
-          clearTargetEpisodeProgress,
         });
 
         savePlayIntent({
@@ -710,7 +712,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       skipConfigRef,
       resumeTimeRef,
       resumeModeRef,
-      stableCurrentTimeRef,
       clearTargetEpisodeProgressRef,
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
@@ -737,6 +738,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       resetAutoSourceSwitch,
       stopActiveHlsLoading,
       restartCurrentPlayback,
+      resolveCurrentPlayTime,
     ],
   );
 

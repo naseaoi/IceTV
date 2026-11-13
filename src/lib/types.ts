@@ -23,6 +23,8 @@ export interface PlayRecord {
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
+  progress_session_id?: string;
+  progress_sequence?: number;
   metadata_checked_at?: number;
   update_baseline_episodes?: number;
   update_baseline_group_total?: number;
@@ -550,6 +552,7 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     year: string,
   ): Promise<Record<string, PlayRecord>>;
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
+  getPlayRecordSnapshot(userName: string, key: string): Promise<string | null>;
   getPlayRecordsByKeys(
     userName: string,
     keys: string[],
@@ -563,7 +566,7 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     userName: string,
     key: string,
     record: PlayRecord,
-    snapshot: string,
+    snapshot: string | null,
   ): Promise<boolean>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
   getStalePlayRecordPage(

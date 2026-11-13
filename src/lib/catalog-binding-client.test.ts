@@ -13,6 +13,7 @@ jest.mock('@/lib/db.client.internal', () => ({
   cacheManager: { cacheFavorites: jest.fn() },
   createCacheFirstReader: jest.fn(),
   createKeyedCacheFirstReader: jest.fn(),
+  createKeyedNetworkReader: jest.fn(),
   createOptimisticWriter: jest.fn(),
   fetchFromApi: jest.fn(async () => ({})),
   fetchWithAuth: jest.fn(),

@@ -518,6 +518,38 @@ class DbManager {
     return (await this.getStorage()).getPlayRecordsByKeys(userName, keys);
   }
 
+  async savePlayProgress(
+    userName: string,
+    source: string,
+    id: string,
+    record: PlayRecord,
+  ) {
+    const { savePlayProgressWithRetry } =
+      await import('@/lib/play-record-write');
+    return savePlayProgressWithRetry(
+      await this.getStorage(),
+      userName,
+      generateStorageKey(source, id),
+      record,
+    );
+  }
+
+  async updatePlayRecord(
+    userName: string,
+    source: string,
+    id: string,
+    update: (current: PlayRecord | null) => PlayRecord | null,
+  ) {
+    const { updatePlayRecordWithRetry } =
+      await import('@/lib/play-record-write');
+    return updatePlayRecordWithRetry(
+      await this.getStorage(),
+      userName,
+      generateStorageKey(source, id),
+      update,
+    );
+  }
+
   async savePlayRecord(
     userName: string,
     source: string,

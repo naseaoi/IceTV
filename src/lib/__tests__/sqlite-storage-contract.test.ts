@@ -4,6 +4,7 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
@@ -1258,4 +1259,8 @@ it('通知写入失败回滚评价删除，用户名合并迁移通知并解决�
     raw.prepare('SELECT recipient_username FROM user_notice_events').get(),
   ).toEqual({ recipient_username: 'alice' });
   raw.close();
+});
+
+it('播放记录会话序号与并发 CAS 契约', async () => {
+  await assertPlayRecordOrdering(new LocalSqliteStorage(':memory:'));
 });

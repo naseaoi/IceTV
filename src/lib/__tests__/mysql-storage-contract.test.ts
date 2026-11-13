@@ -1,7 +1,9 @@
 /** @jest-environment node */
+
 import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
 import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
@@ -1168,6 +1170,35 @@ function createFakePool() {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.playRecords, username, key, value);
       return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)'
+    ) {
+      const [username, key, value] = params as [string, string, string];
+      if (currentState.playRecords.get(username)?.has(key)) {
+        throw Object.assign(new Error('Duplicate record'), {
+          code: 'ER_DUP_ENTRY',
+        });
+      }
+      upsertJsonRecord(currentState.playRecords, username, key, value);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
+      'DELETE FROM play_records WHERE username = ? AND record_key = ?'
+    ) {
+      const [username, key] = params as [string, string];
+      return [
+        {
+          affectedRows: Number(
+            currentState.playRecords.get(username)?.delete(key) ?? false,
+          ),
+        },
+        [],
+      ];
     }
 
     if (
@@ -4155,6 +4186,12 @@ describe('MySQL 片单契约（fake pool）', () => {
 
 it('MySQL 追剧周历契约（fake pool）', async () => {
   await assertTrackingCalendar(
+    new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+  );
+});
+
+it('播放记录会话序号与并发 CAS 契约', async () => {
+  await assertPlayRecordOrdering(
     new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
   );
 });

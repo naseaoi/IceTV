@@ -27,7 +27,7 @@ const mockGetUserMessageState = jest.fn();
 const mockUpdateUserMessageState = jest.fn();
 const mockGetPlayRecord = jest.fn();
 const mockSavePlayRecord = jest.fn();
-const mockSavePlayRecordsByKey = jest.fn();
+const mockUpdatePlayRecord = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
@@ -70,9 +70,7 @@ jest.mock('@/lib/db', () => ({
     updateUserMessageState: (...args: unknown[]) =>
       mockUpdateUserMessageState(...args),
     getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
-    savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
-    savePlayRecordsByKey: (...args: unknown[]) =>
-      mockSavePlayRecordsByKey(...args),
+    updatePlayRecord: (...args: unknown[]) => mockUpdatePlayRecord(...args),
   },
 }));
 
@@ -287,7 +285,13 @@ describe('messages server', () => {
     mockUpdateUserMessageState.mockResolvedValue(undefined);
     mockGetPlayRecord.mockResolvedValue(updatedRecord);
     mockSavePlayRecord.mockResolvedValue(undefined);
-    mockSavePlayRecordsByKey.mockResolvedValue(undefined);
+    mockUpdatePlayRecord.mockImplementation(
+      async (user, source, id, update) => {
+        const next = update(await mockGetPlayRecord(user, source, id));
+        if (next) await mockSavePlayRecord(user, source, id, next);
+        return next;
+      },
+    );
   });
 
   it('收藏与播放同毫秒分页不重漏，摘要和已读使用收藏基线', async () => {
@@ -950,7 +954,7 @@ describe('messages server', () => {
     );
   });
 
-  it('marks tracking updates in batches without reading every record separately', async () => {
+  it('marks tracking updates against the latest record', async () => {
     mockGetUnreadTrackingPlayRecordPage
       .mockResolvedValueOnce({
         items: { 'source-a+video-1': updatedRecord },
@@ -968,12 +972,12 @@ describe('messages server', () => {
     expect(result.updatedRecords['source-a+video-1']).toMatchObject({
       update_baseline_episodes: 12,
     });
-    expect(mockSavePlayRecordsByKey).toHaveBeenCalledWith('demo', {
-      'source-a+video-1': expect.objectContaining({
-        update_baseline_episodes: 12,
-      }),
-    });
-    expect(mockGetPlayRecord).not.toHaveBeenCalled();
+    expect(mockUpdatePlayRecord).toHaveBeenCalledWith(
+      'demo',
+      'source-a',
+      'video-1',
+      expect.any(Function),
+    );
   });
 });
 

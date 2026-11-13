@@ -13,10 +13,12 @@ import {
   cacheManager,
   createCacheFirstReader,
   createKeyedCacheFirstReader,
+  createKeyedNetworkReader,
   createOptimisticWriter,
   fetchFromApi,
   fetchWithAuth,
   handleDatabaseOperationFailure,
+  reportPlaybackRecordsReadFailure,
   retryClientRequest,
 } from './db.client.internal';
 import type { PlayRecordPage } from './play-records';
@@ -75,29 +77,33 @@ const _getAllFavorites = createCacheFirstReader<Record<string, Favorite>>({
   fallback: {},
 });
 
-const _getPlayRecordsByKeys = createKeyedCacheFirstReader<PlayRecord>({
+async function fetchPlayRecordsByKeys(
+  keys: string[],
+  signal: AbortSignal,
+): Promise<Record<string, PlayRecord>> {
+  const records: Record<string, PlayRecord> = {};
+  for (let index = 0; index < keys.length; index += MAX_READ_PLAY_RECORD_KEYS) {
+    if (signal.aborted)
+      throw signal.reason ?? new DOMException('Request aborted', 'AbortError');
+    const params = new URLSearchParams();
+    keys
+      .slice(index, index + MAX_READ_PLAY_RECORD_KEYS)
+      .forEach((key) => params.append('keys', key));
+    Object.assign(
+      records,
+      await fetchFromApi<Record<string, PlayRecord>>(
+        `/api/playrecords?${params}`,
+        { signal },
+      ),
+    );
+  }
+  return records;
+}
+
+const _readPlayRecordsForPlayback = createKeyedNetworkReader<PlayRecord>({
   getCached: () => cacheManager.getCachedPlayRecords(),
   setCached: (data) => cacheManager.cachePlayRecords(data),
-  fetchApi: async (keys) => {
-    const records: Record<string, PlayRecord> = {};
-    for (
-      let index = 0;
-      index < keys.length;
-      index += MAX_READ_PLAY_RECORD_KEYS
-    ) {
-      const params = new URLSearchParams();
-      keys
-        .slice(index, index + MAX_READ_PLAY_RECORD_KEYS)
-        .forEach((key) => params.append('keys', key));
-      Object.assign(
-        records,
-        await fetchFromApi<Record<string, PlayRecord>>(
-          `/api/playrecords?${params}`,
-        ),
-      );
-    }
-    return records;
-  },
+  fetchApi: fetchPlayRecordsByKeys,
   eventName: 'playRecordsUpdated',
 });
 
@@ -168,10 +174,18 @@ const _writeSkipConfigs = createOptimisticWriter<Record<string, SkipConfig>>({
 
 // ---- 播放记录 ----
 
-export async function getPlayRecordsByKeys(
+export interface PlaybackRecordsRead {
+  cached: Record<string, PlayRecord> | null;
+  fresh: Promise<Record<string, PlayRecord>>;
+}
+
+export { reportPlaybackRecordsReadFailure };
+
+export function readPlayRecordsForPlayback(
   keys: string[],
-): Promise<Record<string, PlayRecord>> {
-  return _getPlayRecordsByKeys(keys);
+  options?: { timeoutMs?: number },
+): PlaybackRecordsRead {
+  return _readPlayRecordsForPlayback(keys, options);
 }
 
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {

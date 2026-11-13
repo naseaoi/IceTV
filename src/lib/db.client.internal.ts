@@ -331,8 +331,11 @@ export async function fetchWithAuth(
   });
 }
 
-export async function fetchFromApi<T>(path: string): Promise<T> {
-  const res = await fetchWithAuth(path);
+export async function fetchFromApi<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const res = await fetchWithAuth(path, options);
   return (await res.json()) as T;
 }
 
@@ -355,6 +358,17 @@ export async function handleDatabaseOperationFailure(
   if (message) {
     triggerGlobalError(message);
   }
+}
+
+// 播放页读取记录持续失败时，保存处于阻断状态，不会触发保存失败提示；登录失效交给统一会话处理
+export function reportPlaybackRecordsReadFailure(error: unknown): void {
+  if (
+    isClientRequestError(error) &&
+    (error.kind === 'session_lost' || error.kind === 'auth_rejected')
+  ) {
+    return;
+  }
+  triggerGlobalError('播放进度暂时无法同步，服务恢复后会回到上次看到的位置');
 }
 
 function getDatabaseOperationFailureMessage(
@@ -447,6 +461,89 @@ function mergeReadFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
   });
   readFlights.set(key, request);
   return request;
+}
+
+export function createKeyedNetworkReader<T>(options: {
+  getCached: () => Record<string, T> | null;
+  setCached: (data: Record<string, T>) => void;
+  fetchApi: (keys: string[], signal: AbortSignal) => Promise<Record<string, T>>;
+  eventName: CacheUpdateEvent;
+}): (
+  keys: string[],
+  options?: { timeoutMs?: number },
+) => {
+  cached: Record<string, T> | null;
+  fresh: Promise<Record<string, T>>;
+} {
+  return (requestedKeys, readOptions) => {
+    const keys = [...new Set(requestedKeys)].sort();
+    if (typeof window === 'undefined' || !keys.length)
+      return { cached: null, fresh: Promise.resolve({}) };
+    const scope = getReaderScope();
+    if (!getAuthInfoFromBrowserCookie()?.username)
+      return { cached: null, fresh: Promise.resolve({}) };
+
+    const { getCached, setCached, fetchApi, eventName } = options;
+    const select = (data: Record<string, T> | null) =>
+      Object.fromEntries(
+        keys
+          .filter((key) => data?.[key] !== undefined)
+          .map((key) => [key, data![key]]),
+      );
+    const cached = getCached();
+    const baseline = JSON.stringify(select(cached));
+    const revision = writeRevisions.get(eventName);
+    const timeoutMs = readOptions?.timeoutMs ?? 8000;
+    // 独立命名空间避免复用旧 reader 吞掉错误的请求；超时不同的调用独立计时。
+    const fresh = mergeReadFlight(
+      `${scope}:${eventName}:network:${timeoutMs}:${JSON.stringify(keys)}`,
+      async () => {
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const error = new DOMException(
+              'Playback records read timed out',
+              'TimeoutError',
+            );
+            reject(error);
+            controller.abort(error);
+          }, timeoutMs);
+        });
+        try {
+          const result = await Promise.race([
+            fetchApi(keys, controller.signal),
+            timeout,
+          ]);
+          if (getReaderScope() !== scope) return {};
+          const current = getCached();
+          if (
+            writeRevisions.get(eventName) !== revision ||
+            JSON.stringify(select(current)) !== baseline
+          )
+            return select(current);
+          if (current) {
+            const merged = { ...current };
+            for (const key of keys) {
+              if (result[key] !== undefined) merged[key] = result[key];
+              else delete merged[key];
+            }
+            setCached(merged);
+            window.dispatchEvent(
+              new CustomEvent(eventName, { detail: merged }),
+            );
+          }
+          return result;
+        } catch (error) {
+          if (getReaderScope() !== scope) return {};
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    );
+    return { cached: cached === null ? null : select(cached), fresh };
+  };
 }
 
 // 定向结果只合并已有快照，避免把部分条目冒充全账户缓存。

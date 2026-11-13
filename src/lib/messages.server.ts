@@ -579,16 +579,14 @@ export async function readUserMessage(
     fromEpisodes: parsedMessage.fromEpisodes,
     toEpisodes: parsedMessage.toEpisodes,
   };
-  const updatedRecord = markPlayRecordUpdateRead(
-    currentRecord,
-    message.toEpisodes,
-  );
-  await db.savePlayRecord(
+  const updatedRecord = await db.updatePlayRecord(
     userName,
     message.source,
     message.videoId,
-    updatedRecord,
+    (current) =>
+      current ? markPlayRecordUpdateRead(current, message.toEpisodes) : null,
   );
+  if (!updatedRecord) return null;
   return {
     message,
     updatedRecord: { key: message.recordKey, record: updatedRecord },
@@ -623,10 +621,20 @@ export async function readAllUserMessages(
     for (const [recordKey, record] of Object.entries(page.items)) {
       const message = buildTrackingMessage(recordKey, record);
       if (!message) continue;
-      batch[recordKey] = markPlayRecordUpdateRead(record, message.toEpisodes);
+      const parsed = parseStorageKey(recordKey);
+      if (!parsed) continue;
+      const updated = await db.updatePlayRecord(
+        userName,
+        parsed.source,
+        parsed.id,
+        (current) =>
+          current
+            ? markPlayRecordUpdateRead(current, message.toEpisodes)
+            : null,
+      );
+      if (updated) batch[recordKey] = updated;
     }
     if (Object.keys(batch).length === 0) break;
-    await db.savePlayRecordsByKey(userName, batch);
     Object.assign(updatedRecords, batch);
   }
 

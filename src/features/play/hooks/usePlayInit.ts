@@ -55,7 +55,7 @@ import { waitForSharedLoad, withAbortableTimeout } from '@/lib/concurrency';
 import {
   generateStorageKey,
   getCachedPlayRecordsSnapshot,
-  getPlayRecordsByKeys,
+  readPlayRecordsForPlayback,
 } from '@/lib/db.client';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
@@ -905,13 +905,20 @@ export function usePlayInit({
     // 候选身份确定后定向读取；测速不等待远端历史，仍可使用本地快照。
     let startupPlayRecordsRequest: Promise<Record<string, PlayRecord>> | null =
       null;
+    let startupPlayRecordsFresh: Promise<Record<string, PlayRecord>> | null =
+      null;
     let startupPlayRecords: Record<string, PlayRecord> | null = null;
     const requestStartupRecords = (
       sources: { source: string; id: string }[],
     ) => {
-      startupPlayRecordsRequest = getPlayRecordsByKeys(
+      const read = readPlayRecordsForPlayback(
         sources.map((source) => generateStorageKey(source.source, source.id)),
       );
+      startupPlayRecordsRequest = read.cached
+        ? Promise.resolve(read.cached)
+        : read.fresh;
+      startupPlayRecordsFresh = read.cached ? read.fresh : null;
+      void startupPlayRecordsFresh?.catch(() => undefined);
       void startupPlayRecordsRequest.then(
         (records) => {
           startupPlayRecords = records;
@@ -1003,6 +1010,7 @@ export function usePlayInit({
       if (detailData.episodes.length > 0) {
         const historyRestoreGate = historyRestoreGateRef.current;
         historyRestoreGate.playRecords = startupPlayRecordsRequest;
+        historyRestoreGate.playRecordsFresh = startupPlayRecordsFresh;
         await waitForHistoryRestore(
           historyRestoreGate,
           detailData,
@@ -1010,6 +1018,7 @@ export function usePlayInit({
           signal,
         );
         historyRestoreGate.playRecords = null;
+        historyRestoreGate.playRecordsFresh = null;
         if (signal.aborted) return;
       }
       setLoading(false);
@@ -1083,6 +1092,7 @@ export function usePlayInit({
           requestedId = target.id;
           startupPlayRecords = records;
           startupPlayRecordsRequest = Promise.resolve(records);
+          startupPlayRecordsFresh = null;
           quickController.abort();
           savePlayIntent({
             source: target.source,

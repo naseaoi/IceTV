@@ -406,6 +406,8 @@ export async function initializeArtPlayer(
         skipConfigRef,
         resumeTimeRef,
         resumeModeRef,
+        stableCurrentTimeRef,
+        clearTargetEpisodeProgressRef,
         setBlockAdEnabled,
         setAutoPlayNextEnabled,
         handleSkipConfigChange,

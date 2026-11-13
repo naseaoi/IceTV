@@ -32,6 +32,12 @@ export function recordExplicitPlaybackSeek(
   explicitSeekTimes.set(stableTime, stableTime.current);
 }
 
+export function hasExplicitPlaybackSeek(
+  stableTime: MutableRefObject<number>,
+): boolean {
+  return explicitSeekTimes.has(stableTime);
+}
+
 export function resolveSavedPlaybackTime(
   playerTime: number,
   stableTime: MutableRefObject<number>,
@@ -189,6 +195,16 @@ export function readMatchingPlaybackCheckpoint(
   }
 
   return checkpoint;
+}
+
+// 恢复点只在当前作品真正起播后消费：读取时就删，起播失败再刷新会退回服务器上更旧的进度
+export function clearMatchingPlaybackCheckpoint(
+  currentSourceRef: MutableRefObject<string>,
+  currentIdRef: MutableRefObject<string>,
+) {
+  if (readMatchingPlaybackCheckpoint(currentSourceRef, currentIdRef)) {
+    clearPlaybackCheckpointStorage();
+  }
 }
 
 function clampRestoreEpisodeIndex(

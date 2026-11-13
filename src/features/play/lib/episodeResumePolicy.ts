@@ -14,7 +14,6 @@ export interface SourceSwitchEpisodeAnchor {
 interface ResolveSourceSwitchResumeStateOptions {
   currentPlayTime: number;
   preserveProgress: boolean;
-  clearTargetEpisodeProgress: boolean;
 }
 
 interface ResolveSourceSwitchCurrentPlayTimeOptions {
@@ -45,6 +44,18 @@ export function resolveSourceSwitchCurrentPlayTime({
   return stableCurrentTime > 1 ? stableCurrentTime : 0;
 }
 
+// 换源、重试与播放器重建共用；目标集尚未起播时播放器上的时间属于上一集，只能沿用目标集的原恢复点
+export function resolveActivePlayTime({
+  targetEpisodePending,
+  ...times
+}: ResolveSourceSwitchCurrentPlayTimeOptions & {
+  targetEpisodePending: boolean;
+}): number {
+  return targetEpisodePending
+    ? (times.pendingResumeTime ?? 0)
+    : resolveSourceSwitchCurrentPlayTime(times);
+}
+
 export function resolveSourceSwitchEpisodeAnchor({
   currentAnchor,
   activeDetail,
@@ -65,12 +76,7 @@ export function resolveSourceSwitchEpisodeAnchor({
 export function resolveSourceSwitchResumeState({
   currentPlayTime,
   preserveProgress,
-  clearTargetEpisodeProgress,
 }: ResolveSourceSwitchResumeStateOptions): SourceSwitchResumeState {
-  if (clearTargetEpisodeProgress) {
-    return { resumeTime: 0, resumeMode: 'forced' };
-  }
-
   if (preserveProgress && currentPlayTime > 1) {
     return {
       resumeTime: currentPlayTime,

@@ -4,7 +4,7 @@ import { useCallback, useRef } from 'react';
 
 import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
 import {
-  clearPlaybackCheckpointStorage,
+  hasExplicitPlaybackSeek,
   hasMeaningfulPlaybackTime,
   isPlaybackCheckpointCompatibleWithDetail,
   isPlayRecordCompatibleWithDetail,
@@ -19,14 +19,12 @@ import {
   WakeLockSentinel,
 } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import {
-  applyResumeTime,
-  isWithinAutoResumeWindow,
-} from '@/features/play/lib/resumePlayback';
+import { applyResumeTime } from '@/features/play/lib/resumePlayback';
 import {
   generateStorageKey,
-  getPlayRecordsByKeys,
   PlayRecord,
+  readPlayRecordsForPlayback,
+  reportPlaybackRecordsReadFailure,
   savePlayRecord,
 } from '@/lib/db.client';
 import { consumeMatchingPlayIntent } from '@/lib/play-intent';
@@ -56,6 +54,8 @@ type PendingPlayProgressSave = {
 };
 
 export interface PlayProgressSaveState {
+  sessionId?: string;
+  sequence?: number;
   inFlight: boolean;
   pending: PendingPlayProgressSave | null;
   lastSavedFingerprint: string | null;
@@ -200,6 +200,14 @@ export async function saveCurrentPlayProgress(
     return;
   }
 
+  const state = saveStateRef.current;
+  state.sessionId ??=
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  record.progress_session_id = state.sessionId;
+  record.progress_sequence = state.sequence = (state.sequence ?? 0) + 1;
+
   const payload = {
     source: currentSourceRef.current,
     id: currentIdRef.current,
@@ -257,12 +265,41 @@ export function peekHistoryRestoreEpisodeIndex(
 // 起播等历史恢复写好续播的集与时间再放行；起播前提前发起的播放记录读取交给这次恢复复用
 export interface HistoryRestoreGate {
   playRecords: Promise<Record<string, PlayRecord>> | null;
+  // playRecords 来自本地缓存时的网络核对结果；缓存可能落后于其他设备
+  playRecordsFresh?: Promise<Record<string, PlayRecord>> | null;
   settledKey: string;
   listeners: Set<(key: string) => void>;
+  // 正在等权威播放记录的作品与集；起播等待超时后按默认集播放，这段进度不能覆盖还没读到的记录
+  pending?: { key: string; episodeIndex: number } | null;
 }
+
+const HISTORY_READ_RETRY_MAX_DELAY_MS = 30_000;
 
 function getHistoryRestoreKey(source: string, id: string): string {
   return `${source}+${id}`;
+}
+
+// 用户选了别的集或拖动过进度，恢复会被放弃，这段进度属于用户自己的选择，可以保存
+function isProgressWriteBlocked(
+  gate: HistoryRestoreGate,
+  source: string,
+  id: string,
+  episodeIndex: number,
+  stableTime: MutableRefObject<number>,
+): boolean {
+  const pending = gate.pending;
+  return (
+    pending?.key === getHistoryRestoreKey(source, id) &&
+    pending.episodeIndex === episodeIndex &&
+    !hasExplicitPlaybackSeek(stableTime)
+  );
+}
+
+function isNewerPlayRecord(
+  fresh: PlayRecord | undefined,
+  previous: PlayRecord | undefined,
+): fresh is PlayRecord {
+  return !!fresh && (!previous || fresh.save_time > previous.save_time);
 }
 
 function settleHistoryRestore(gate: HistoryRestoreGate, key: string) {
@@ -359,8 +396,19 @@ export function usePlayProgress({
   }, [searchTitle]);
 
   const doSave = useCallback(
-    (immediate = false) =>
-      saveCurrentPlayProgress(
+    async (immediate = false) => {
+      if (
+        isProgressWriteBlocked(
+          historyRestoreGateRef.current,
+          currentSourceRef.current,
+          currentIdRef.current,
+          currentEpisodeIndexRef.current,
+          stableCurrentTimeRef,
+        )
+      ) {
+        return;
+      }
+      await saveCurrentPlayProgress(
         artPlayerRef,
         currentSourceRef,
         currentIdRef,
@@ -373,9 +421,11 @@ export function usePlayProgress({
         lastSaveTimeRef,
         searchTitleRef.current,
         immediate,
-      ),
+      );
+    },
     [
       artPlayerRef,
+      historyRestoreGateRef,
       clearTargetEpisodeProgressRef,
       currentEpisodeIndexRef,
       currentIdRef,
@@ -389,7 +439,18 @@ export function usePlayProgress({
   );
 
   const doCheckpoint = useCallback(
-    (reason?: SessionLostReason) =>
+    (reason?: SessionLostReason) => {
+      if (
+        isProgressWriteBlocked(
+          historyRestoreGateRef.current,
+          currentSourceRef.current,
+          currentIdRef.current,
+          currentEpisodeIndexRef.current,
+          stableCurrentTimeRef,
+        )
+      ) {
+        return;
+      }
       savePlaybackCheckpoint(
         currentSourceRef,
         currentIdRef,
@@ -399,9 +460,11 @@ export function usePlayProgress({
         stableCurrentTimeRef,
         clearTargetEpisodeProgressRef,
         reason,
-      ),
+      );
+    },
     [
       artPlayerRef,
+      historyRestoreGateRef,
       clearTargetEpisodeProgressRef,
       currentEpisodeIndexRef,
       currentIdRef,
@@ -531,15 +594,53 @@ export function usePlayProgress({
         currentIdRef,
       );
 
-      recordsPending = true;
-      try {
-        const allRecords = await (historyRestoreGate.playRecords ??
-          getPlayRecordsByKeys([generateStorageKey(currentSource, currentId)]));
-        if (disposed) {
-          return;
-        }
+      const key = generateStorageKey(currentSource, currentId);
+      let restoreEpisodeIndex = requestedEpisodeIndex;
+      let initialRead: Promise<Record<string, PlayRecord>>;
+      let freshRead: Promise<Record<string, PlayRecord>> | null;
+      if (historyRestoreGate.playRecords) {
+        initialRead = historyRestoreGate.playRecords;
+        freshRead = historyRestoreGate.playRecordsFresh ?? null;
+      } else {
+        const read = readPlayRecordsForPlayback([key]);
+        initialRead = read.cached ? Promise.resolve(read.cached) : read.fresh;
+        freshRead = read.cached ? read.fresh : null;
+      }
 
-        const key = generateStorageKey(currentSource, currentId);
+      // 读取失败不能当作没有记录，否则默认集的进度会覆盖服务器上的记录；先放行起播，保存继续阻断并重试
+      let readFailureReported = false;
+      const readWithRetry = async (
+        firstRead: Promise<Record<string, PlayRecord>>,
+      ) => {
+        let request = firstRead;
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            return await request;
+          } catch (err) {
+            if (disposed) throw err;
+            console.warn('读取播放记录失败，稍后重试:', err);
+            // 偶发失败下次重试即恢复，连续失败才提示，每次恢复只提示一次
+            if (attempt === 1 && !readFailureReported) {
+              readFailureReported = true;
+              reportPlaybackRecordsReadFailure(err);
+            }
+            settleHistoryRestore(historyRestoreGate, restoreKey);
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                Math.min(1000 * 2 ** attempt, HISTORY_READ_RETRY_MAX_DELAY_MS),
+              ),
+            );
+            if (disposed) throw err;
+            request = readPlayRecordsForPlayback([key]).fresh;
+          }
+        }
+      };
+
+      const applyRecords = (
+        allRecords: Record<string, PlayRecord>,
+        historyOnly: boolean,
+      ) => {
         const record = isPlayRecordCompatibleWithDetail(
           allRecords[key],
           activeDetail,
@@ -559,11 +660,10 @@ export function usePlayProgress({
           episodeGroups: detailRef.current?.episode_groups,
         });
 
-        if (checkpoint) {
-          clearPlaybackCheckpointStorage();
-        }
-
-        if (!restoreCandidate) {
+        if (
+          !restoreCandidate ||
+          (historyOnly && restoreCandidate.source !== 'history')
+        ) {
           return;
         }
 
@@ -575,21 +675,25 @@ export function usePlayProgress({
         if (
           requestedSource !== currentSourceRef.current ||
           requestedId !== currentIdRef.current ||
-          requestedEpisodeIndex !== currentEpisodeIndexRef.current
+          restoreEpisodeIndex !== currentEpisodeIndexRef.current
         ) {
           return;
         }
+
+        const player = artPlayerRef.current;
+        // 记录晚于起播到达时，默认集的自然播放不代表用户选择，只有用户拖动进度才放弃恢复
+        if (player && hasExplicitPlaybackSeek(stableCurrentTimeRef)) return;
 
         if (
           targetSource === 'history' &&
           !shouldApplyHistoryRestore({
             requestedSource,
             requestedId,
-            requestedEpisodeIndex,
+            requestedEpisodeIndex: restoreEpisodeIndex,
             activeSource: currentSourceRef.current,
             activeId: currentIdRef.current,
             activeEpisodeIndex: currentEpisodeIndexRef.current,
-            allowAutoResume: allowAutoResumeRef.current,
+            allowAutoResume: allowAutoResumeRef.current || !!player,
             pendingResumeTime: resumeTimeRef.current,
             pendingResumeMode: resumeModeRef.current,
           })
@@ -598,20 +702,13 @@ export function usePlayProgress({
         }
 
         const activeEpisodeIndex = currentEpisodeIndexRef.current;
-        const player = artPlayerRef.current;
-        const canApplyImmediately =
-          targetTime > 0 &&
-          targetIndex === activeEpisodeIndex &&
-          player &&
-          (targetSource === 'checkpoint' ||
-            isWithinAutoResumeWindow(player.currentTime || 0));
-
-        if (canApplyImmediately) {
+        if (player && targetTime > 0 && targetIndex === activeEpisodeIndex) {
           try {
             if (applyResumeTime(player, targetTime)) {
               allowAutoResumeRef.current = false;
               resumeTimeRef.current = null;
               resumeModeRef.current = null;
+              player.notice.show = '已回到上次看到的位置';
               return;
             }
           } catch (err) {
@@ -624,11 +721,38 @@ export function usePlayProgress({
           resumeTime: targetTime,
           resumeMode: targetMode,
         });
+      };
+
+      recordsPending = true;
+      const pendingRestore = {
+        key: restoreKey,
+        episodeIndex: restoreEpisodeIndex,
+      };
+      historyRestoreGate.pending = pendingRestore;
+      try {
+        const initialRecords = await readWithRetry(initialRead);
+        if (disposed) return;
+        applyRecords(initialRecords, false);
+
+        if (freshRead) {
+          // 起播先用本地缓存，网络结果比缓存新时按迟到记录再恢复一次
+          settleHistoryRestore(historyRestoreGate, restoreKey);
+          restoreEpisodeIndex = currentEpisodeIndexRef.current;
+          pendingRestore.episodeIndex = restoreEpisodeIndex;
+          const freshRecords = await readWithRetry(freshRead);
+          if (disposed) return;
+          if (isNewerPlayRecord(freshRecords[key], initialRecords[key])) {
+            applyRecords(freshRecords, true);
+          }
+        }
       } catch (err) {
-        console.error('读取播放记录失败:', err);
+        if (!disposed) console.error('读取播放记录失败:', err);
       } finally {
         recordsPending = false;
-        // 放弃、失败与已写好集和时间都算已决定；被打断的这轮交给重跑放行
+        if (historyRestoreGate.pending === pendingRestore) {
+          historyRestoreGate.pending = null;
+        }
+        // 放弃与已写好集和时间都算已决定；被打断的这轮交给重跑放行
         if (!disposed) settleHistoryRestore(historyRestoreGate, restoreKey);
       }
     };

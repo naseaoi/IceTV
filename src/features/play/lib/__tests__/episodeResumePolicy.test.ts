@@ -129,25 +129,11 @@ describe('episodeResumePolicy', () => {
     });
   });
 
-  it('切集后的换源不会继承上一集进度', () => {
-    expect(
-      resolveSourceSwitchResumeState({
-        currentPlayTime: 1320,
-        preserveProgress: true,
-        clearTargetEpisodeProgress: true,
-      }),
-    ).toEqual({
-      resumeTime: 0,
-      resumeMode: 'forced',
-    });
-  });
-
   it('普通换源仍会保留当前集进度', () => {
     expect(
       resolveSourceSwitchResumeState({
         currentPlayTime: 1320,
         preserveProgress: true,
-        clearTargetEpisodeProgress: false,
       }),
     ).toEqual({
       resumeTime: 1320,
@@ -160,7 +146,6 @@ describe('episodeResumePolicy', () => {
       resolveSourceSwitchResumeState({
         currentPlayTime: 1,
         preserveProgress: true,
-        clearTargetEpisodeProgress: false,
       }),
     ).toEqual({
       resumeTime: 0,

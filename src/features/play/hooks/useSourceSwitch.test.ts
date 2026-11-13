@@ -1052,6 +1052,46 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     expect(readDanmakuEpisodeId('c:c-id:2')).toBe(777);
   });
 
+  it('目标集尚未起播时换源沿用目标集恢复点，不取上一集留在播放器上的时间', async () => {
+    const { video } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+      video,
+      playerCurrentTime: 900,
+    });
+    // 继续观看恢复到其他集后原源起播失败：清进度标记仍在，恢复点是目标集的历史进度
+    options.clearTargetEpisodeProgressRef.current = true;
+    options.resumeTimeRef.current = 792;
+    options.resumeModeRef.current = 'history';
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+
+    expect(options.setCurrentSource).toHaveBeenCalledWith('b');
+    expect(options.resumeTimeRef.current).toBe(792);
+    expect(options.resumeModeRef.current).toBe('forced');
+  });
+
+  it('切集后目标集尚未起播时换源从头播放', async () => {
+    const { video } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+      video,
+      playerCurrentTime: 900,
+    });
+    options.clearTargetEpisodeProgressRef.current = true;
+    options.resumeTimeRef.current = 0;
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+
+    expect(options.setCurrentSource).toHaveBeenCalledWith('b');
+    expect(options.resumeTimeRef.current).toBe(0);
+    expect(options.resumeModeRef.current).toBe('forced');
+  });
+
   it('新源对应的不是同一集时不沿用弹幕剧集', async () => {
     writeDanmakuEpisodeId('a:a-id:2', 4242);
     const { result, options } = setupHook({

@@ -2024,6 +2024,17 @@ export class LocalSqliteStorage implements IStorage {
     return result;
   }
 
+  async getPlayRecordSnapshot(
+    userName: string,
+    key: string,
+  ): Promise<string | null> {
+    const row = this.stmts.getPlayRecord.get(
+      normalizeUsername(userName),
+      key,
+    ) as { record_json: string } | undefined;
+    return row?.record_json ?? null;
+  }
+
   async setPlayRecord(
     userName: string,
     key: string,
@@ -2037,9 +2048,17 @@ export class LocalSqliteStorage implements IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
-    snapshot: string,
+    snapshot: string | null,
   ): Promise<boolean> {
     const username = normalizeUsername(userName);
+    if (snapshot === null) {
+      const result = this.db
+        .prepare(
+          'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?) ON CONFLICT(username, record_key) DO NOTHING',
+        )
+        .run(username, key, JSON.stringify(record));
+      return result.changes > 0;
+    }
     const result = this.stmts.setPlayRecordIfUnchanged.run(
       JSON.stringify(record),
       username,

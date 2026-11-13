@@ -410,8 +410,8 @@ describe('PlayPageClient 起播等历史恢复', () => {
   });
 
   it('播放记录接口失败时立即放行，从第 1 集起播', async () => {
-    const consoleError = jest
-      .spyOn(console, 'error')
+    const consoleWarn = jest
+      .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
     installFetch({ '/api/playrecords': reply({ error: '失败' }, 500) });
 
@@ -423,8 +423,8 @@ describe('PlayPageClient 起播等历史恢复', () => {
       episodeIndex: 0,
       resumeTime: null,
     });
-    expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
+    expect(consoleWarn).toHaveBeenCalled();
+    consoleWarn.mockRestore();
   });
 
   describe('带源和 id 直接进入', () => {
