@@ -562,6 +562,12 @@ export class MySqlStorage implements IStorage {
         code VARCHAR(191) NOT NULL PRIMARY KEY,
         used_count INT NOT NULL DEFAULT 0
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS invite_code_redemptions (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        code VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
+        redeemed_at BIGINT NOT NULL,
+        KEY idx_invite_code_redemptions_code (code)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS source_route_stats (
         source VARCHAR(191) NOT NULL,
         route_mode VARCHAR(16) NOT NULL,
@@ -2279,10 +2285,12 @@ export class MySqlStorage implements IStorage {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void> {
     await this.ensureInitialized();
     const username = assertValidUsernameFormat(userName);
     const hashed = await hashPassword(password);
+    const now = Date.now();
     await this.withTransaction(async (connection) => {
       // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
       await connection.execute(
@@ -2296,8 +2304,13 @@ export class MySqlStorage implements IStorage {
         );
       await connection.execute(
         'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
-        [username, Date.now()],
+        [username, now],
       );
+      if (inviteCode)
+        await connection.execute(
+          'INSERT INTO invite_code_redemptions (username, code, redeemed_at) VALUES (?, ?, ?)',
+          [username, inviteCode, now],
+        );
       await this.socialFor(connection).ensureUserProfile(username);
       await new MysqlUserAccessStore(connection, true).put({
         username,
@@ -2581,6 +2594,10 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM user_login_activity WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM invite_code_redemptions WHERE username = ?',
         [username],
       );
       await connection.execute(

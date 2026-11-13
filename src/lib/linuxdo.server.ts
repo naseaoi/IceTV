@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeInviteCode } from '@/features/admin/services/inviteCodes';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { isSecureRequest } from '@/lib/auth.server';
 import { getConfigForRead, invalidateConfigCache } from '@/lib/config';
@@ -445,6 +446,7 @@ async function createAccount(
               ? [config.UserConfig.DefaultUserGroup]
               : undefined,
             identity(profile, candidate),
+            reserved ? normalizeInviteCode(inviteCode) : undefined,
           );
         try {
           await register();

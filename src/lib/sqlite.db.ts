@@ -1038,6 +1038,13 @@ export class LocalSqliteStorage implements IStorage {
         used_count INTEGER NOT NULL DEFAULT 0
       );
 
+      CREATE TABLE IF NOT EXISTS invite_code_redemptions (
+        username TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        redeemed_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_invite_code_redemptions_code ON invite_code_redemptions(code);
+
       CREATE TABLE IF NOT EXISTS source_route_stats (
         source TEXT NOT NULL,
         route_mode TEXT NOT NULL,
@@ -2976,6 +2983,7 @@ export class LocalSqliteStorage implements IStorage {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void> {
     const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
@@ -2990,6 +2998,7 @@ export class LocalSqliteStorage implements IStorage {
         nickname,
         userGroups,
         identity,
+        inviteCode,
       );
     } catch (error) {
       if (isSqliteUniqueConstraintError(error)) {
@@ -3007,6 +3016,7 @@ export class LocalSqliteStorage implements IStorage {
     nickname?: string,
     userGroups?: string[],
     identity?: OAuthIdentity,
+    inviteCode?: string,
   ): void {
     this.db.transaction(() => {
       // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
@@ -3020,6 +3030,12 @@ export class LocalSqliteStorage implements IStorage {
           }),
         );
       this.stmts.recordUserLogin.run(username, now);
+      if (inviteCode)
+        this.db
+          .prepare(
+            'INSERT INTO invite_code_redemptions (username, code, redeemed_at) VALUES (?, ?, ?)',
+          )
+          .run(username, inviteCode, now);
       this.insertUserProfile(username, nickname);
       new SqliteUserAccessStore(this.db).put({
         username,
@@ -3234,6 +3250,9 @@ export class LocalSqliteStorage implements IStorage {
         .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
         .run(targetUser);
       this.stmts.deleteLoginActivityByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM invite_code_redemptions WHERE username = ?')
+        .run(targetUser);
       this.db
         .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
         .run(targetUser);

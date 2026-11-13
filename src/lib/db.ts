@@ -697,6 +697,7 @@ class DbManager {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void> {
     const storage = await this.getStorage();
     await storage.registerUser(
@@ -705,6 +706,7 @@ class DbManager {
       nickname,
       userGroups,
       identity,
+      inviteCode,
     );
   }
 

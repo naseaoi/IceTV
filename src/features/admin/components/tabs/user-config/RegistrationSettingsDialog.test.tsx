@@ -29,6 +29,7 @@ function renderDialog(
     ...list,
   };
   const onDeleteCode = jest.fn();
+  const onViewCodeUsers = jest.fn();
   const onPurgeInactiveCodes = jest.fn();
   render(
     <RegistrationSettingsDialog
@@ -56,17 +57,18 @@ function renderDialog(
       onInviteFilterChange={jest.fn()}
       onCreateCodes={onCreateCodes}
       onDeleteCode={onDeleteCode}
+      onViewCodeUsers={onViewCodeUsers}
       onPurgeInactiveCodes={onPurgeInactiveCodes}
       onClose={jest.fn()}
     />,
   );
-  return { inviteList, onDeleteCode, onPurgeInactiveCodes };
+  return { inviteList, onDeleteCode, onViewCodeUsers, onPurgeInactiveCodes };
 }
 
 describe('RegistrationSettingsDialog invite code list', () => {
   it('renders paged rows with status, remaining uses and load more', () => {
     const now = Date.now();
-    const { inviteList, onDeleteCode } = renderDialog({
+    const { inviteList, onDeleteCode, onViewCodeUsers } = renderDialog({
       items: [
         {
           code: 'ACTIVE01',
@@ -101,6 +103,14 @@ describe('RegistrationSettingsDialog invite code list', () => {
       screen.getByRole('button', { name: '删除邀请码 OLD00001' }),
     );
     expect(onDeleteCode).toHaveBeenCalledWith('OLD00001');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '查看使用邀请码 ACTIVE01 的用户' }),
+    );
+    expect(onViewCodeUsers).toHaveBeenCalledWith('ACTIVE01');
+    expect(
+      screen.queryByRole('button', { name: '查看使用邀请码 OLD00001 的用户' }),
+    ).not.toBeInTheDocument();
   });
 
   it('offers purging only when inactive codes exist', () => {

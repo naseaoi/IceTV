@@ -91,6 +91,7 @@ type FakeState = ListFakeState & {
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
+  inviteCodeRedemptions: Map<string, string>;
   inviteCodes: Map<string, Record<string, any>>;
   danmakuEpisodes: Map<string, Map<string, number>>;
   danmakuEnabled: Map<string, boolean>;
@@ -146,6 +147,7 @@ function cloneState(state: FakeState): FakeState {
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
     inviteCodeUsage: new Map(state.inviteCodeUsage),
+    inviteCodeRedemptions: new Map(state.inviteCodeRedemptions),
     inviteCodes: new Map(
       [...state.inviteCodes].map(([code, item]) => [code, { ...item }]),
     ),
@@ -197,6 +199,7 @@ function createState(): FakeState {
     messageStates: new Map(),
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
+    inviteCodeRedemptions: new Map(),
     inviteCodes: new Map(),
     danmakuEpisodes: new Map(),
     danmakuEnabled: new Map(),
@@ -1092,6 +1095,26 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM invite_code_usage') {
       currentState.inviteCodeUsage.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO invite_code_redemptions (username, code, redeemed_at) VALUES (?, ?, ?)'
+    ) {
+      const [username, code] = params as [string, string];
+      if (currentState.inviteCodeRedemptions.has(username))
+        throw Object.assign(new Error('Duplicate entry'), {
+          code: 'ER_DUP_ENTRY',
+        });
+      currentState.inviteCodeRedemptions.set(username, code);
+      return [[], []];
+    }
+
+    if (
+      normalized === 'DELETE FROM invite_code_redemptions WHERE username = ?'
+    ) {
+      currentState.inviteCodeRedemptions.delete(params[0] as string);
       return [[], []];
     }
 

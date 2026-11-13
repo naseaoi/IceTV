@@ -120,6 +120,40 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           (await storage.getAdminUserPage({ ...query, group: 'vip' })).total,
         ).toBe(0);
       });
+      it('records the invite code used at registration until the user is deleted', async () => {
+        const name = 'page-erin';
+        await storage.deleteUser(name);
+        try {
+          await storage.registerUser(
+            name,
+            'password',
+            undefined,
+            undefined,
+            undefined,
+            'PAGEINV1',
+          );
+          const byCode = await storage.getAdminUserPage({
+            ...query,
+            q: 'pageinv1',
+          });
+          expect(byCode.items).toEqual([
+            expect.objectContaining({ username: name, inviteCode: 'PAGEINV1' }),
+          ]);
+          expect(
+            (await storage.getAdminUserPage({ ...query, q: 'pageinv' })).total,
+          ).toBe(0);
+
+          await storage.deleteUser(name);
+          await storage.registerUser(name, 'password');
+          const page = await storage.getAdminUserPage({ ...query, q: name });
+          expect(page.items[0]).toMatchObject({
+            username: name,
+            inviteCode: null,
+          });
+        } finally {
+          await storage.deleteUser(name);
+        }
+      });
       it('binds cursors to filters', async () => {
         const page = await storage.getAdminUserPage(query);
         await expect(

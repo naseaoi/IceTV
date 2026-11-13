@@ -839,6 +839,7 @@ export interface IStorage extends ListStore {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）

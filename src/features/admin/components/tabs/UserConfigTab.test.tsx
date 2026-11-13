@@ -374,7 +374,7 @@ describe('UserConfigTab user search and selection', () => {
     render(
       <UserConfigTab config={config} role={role} refreshConfig={jest.fn()} />,
     );
-    return screen.getByRole('searchbox', { name: '搜索用户名或昵称' });
+    return screen.getByRole('searchbox', { name: '搜索用户名、昵称或邀请码' });
   }
 
   function filterUsers(label: string) {

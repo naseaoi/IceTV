@@ -22,6 +22,7 @@ export type AdminUserRow = {
   enabledApis: string | string[] | null;
   nickname: string | null;
   lastActiveAt: number | string | null;
+  inviteCode: string | null;
   sort_key: number | string;
 };
 
@@ -54,10 +55,12 @@ export function adminUserStatements(
       CASE WHEN n.username = ? THEN 'owner' ELSE COALESCE(m.role, 'user') END AS role,
       CASE WHEN n.username = ? THEN 0 ELSE COALESCE(m.banned, 0) END AS banned,
       ${tags} AS tags, m.enabled_apis AS enabledApis,
-      p.nickname, p.nickname_norm, a.last_login_at AS lastActiveAt
+      p.nickname, p.nickname_norm, a.last_login_at AS lastActiveAt,
+      i.code AS inviteCode
     FROM names n LEFT JOIN user_access m ON m.username = n.username
     LEFT JOIN user_profiles p ON p.username = n.username
     LEFT JOIN user_login_activity a ON a.username = n.username
+    LEFT JOIN invite_code_redemptions i ON i.username = n.username
   ), ranked AS (
     SELECT base.*, ${query.sort === 'username' ? '0' : query.sort === 'activeAsc' || query.sort === 'activeDesc' ? 'COALESCE(lastActiveAt, 0)' : "CASE WHEN username = ? THEN 0 WHEN role = 'owner' THEN 1 WHEN role = 'admin' THEN 2 ELSE 3 END"} AS sort_key FROM base
   )`;
@@ -66,12 +69,13 @@ export function adminUserStatements(
   const where: string[] = ['1 = 1'];
   if (query.q) {
     // Search is literal; '%' and '_' never become wildcard operators.
+    // 邀请码只做整码匹配，避免普通的用户名搜索混入无关结果
     where.push(
       mysql
-        ? `(LOCATE(CAST(? AS BINARY), CAST(LOWER(username) AS BINARY)) > 0 OR LOCATE(CAST(? AS BINARY), CAST(COALESCE(nickname_norm, '') AS BINARY)) > 0)`
-        : `(instr(LOWER(username), ?) > 0 OR instr(COALESCE(nickname_norm, ''), ?) > 0)`,
+        ? `(LOCATE(CAST(? AS BINARY), CAST(LOWER(username) AS BINARY)) > 0 OR LOCATE(CAST(? AS BINARY), CAST(COALESCE(nickname_norm, '') AS BINARY)) > 0 OR CAST(LOWER(inviteCode) AS BINARY) = CAST(? AS BINARY))`
+        : `(instr(LOWER(username), ?) > 0 OR instr(COALESCE(nickname_norm, ''), ?) > 0 OR LOWER(inviteCode) = ?)`,
     );
-    params.push(query.q, query.q);
+    params.push(query.q, query.q, query.q);
   }
   if (query.filter === 'banned') where.push('banned = 1');
   else if (query.filter && query.filter !== 'all') {
@@ -176,6 +180,7 @@ export function adminUserPage(
       enabledApis: stringList(row.enabledApis),
       nickname: row.nickname,
       lastActiveAt: row.lastActiveAt === null ? null : Number(row.lastActiveAt),
+      inviteCode: row.inviteCode ?? null,
     })),
     total,
     nextCursor:
