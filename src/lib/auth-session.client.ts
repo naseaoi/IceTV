@@ -1,10 +1,12 @@
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { AuthSessionRole, ClientAuthSession } from '@/lib/auth-session';
+import { isWatchLevel } from '@/lib/watch-level';
 
 export type { ClientAuthSession } from '@/lib/auth-session';
 
 type SessionResponse = {
   authenticated?: boolean;
+  level?: unknown;
   username?: string | null;
   role?: AuthSessionRole | null;
   profileId?: string;
@@ -45,7 +47,8 @@ export async function getClientAuthSession(): Promise<ClientAuthSession> {
       typeof session.profileId !== 'string' ||
       !session.profileId ||
       (session.nickname !== null && typeof session.nickname !== 'string') ||
-      (session.avatarSeed !== null && typeof session.avatarSeed !== 'string')
+      (session.avatarSeed !== null && typeof session.avatarSeed !== 'string') ||
+      !isWatchLevel(session.level)
     ) {
       return { status: 'error' };
     }
@@ -56,6 +59,7 @@ export async function getClientAuthSession(): Promise<ClientAuthSession> {
       profileId: session.profileId,
       nickname: session.nickname,
       avatarSeed: session.avatarSeed,
+      level: session.level,
       role: session.role,
     };
   } catch {

@@ -11,6 +11,7 @@ import type { FollowReviewQuery } from '@/lib/follow-review-identity';
 import type { FollowRecapUserMessage } from '@/lib/message-types';
 import type { SocialExecutor } from '@/lib/review-social-storage';
 import { normalizeUsername } from '@/lib/username';
+import { watchLevelForMs } from '@/lib/watch-level';
 
 export type StoredAnnualRecap = AnnualRecapShareState & {
   report: PublicAnnualReport;
@@ -130,7 +131,7 @@ export class AnnualRecapStorage {
       .map(parseFollowRecapMessageId)
       .filter((id) => id !== null);
     return {
-      from: `FROM user_follows f JOIN user_annual_recaps r ON r.username = f.followee JOIN user_profiles p ON p.username = r.username
+      from: `FROM user_follows f JOIN user_annual_recaps r ON r.username = f.followee JOIN user_profiles p ON p.username = r.username LEFT JOIN user_watch_totals wt ON wt.username = p.username
       WHERE f.follower = ? AND r.published_at > f.created_at AND r.published_at > ?
       ${ids.map(() => 'AND NOT (p.profile_id = ? AND r.year = ? AND r.published_at = ?)').join(' ')}`,
       params: [
@@ -189,10 +190,11 @@ export class AnnualRecapStorage {
       profile_id: string;
       nickname: string | null;
       avatar_seed: string | null;
+      counted_ms: number | null;
       year: number;
       published_at: number;
     }>(
-      `SELECT p.profile_id, p.nickname, p.avatar_seed, r.year, r.published_at ${from}${filter} ORDER BY r.published_at DESC, p.profile_id DESC, r.year DESC LIMIT ?`,
+      `SELECT p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms, r.year, r.published_at ${from}${filter} ORDER BY r.published_at DESC, p.profile_id DESC, r.year DESC LIMIT ?`,
       [...params, Math.max(1, Math.min(201, Math.floor(query.limit ?? 30)))],
     );
     return rows.map((row) => ({
@@ -206,6 +208,7 @@ export class AnnualRecapStorage {
         profileId: row.profile_id,
         nickname: row.nickname,
         avatarSeed: row.avatar_seed,
+        level: watchLevelForMs(Number(row.counted_ms ?? 0)),
       },
       year: Number(row.year),
       at: Number(row.published_at),

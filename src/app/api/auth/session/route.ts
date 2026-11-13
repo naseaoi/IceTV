@@ -33,6 +33,7 @@ async function sessionResponse(
       profileId: profile?.profile_id ?? null,
       nickname: profile?.nickname ?? null,
       avatarSeed: profile?.avatar_seed ?? null,
+      level: profile ? (profile.level ?? 1) : null,
       authenticated,
       reason,
       username: username || null,

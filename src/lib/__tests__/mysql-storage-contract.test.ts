@@ -1,5 +1,4 @@
 /** @jest-environment node */
-
 import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
 import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
@@ -13,6 +12,7 @@ import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-r
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
+import { assertWatchLevelContract } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
 import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
@@ -86,6 +86,9 @@ type FakeState = ListFakeState & {
   playbackSessions: Map<string, Record<string, unknown>>;
   watchHistory: Record<string, any>[];
   watchBuckets: Record<string, any>[];
+  watchTotals: Map<string, number>;
+  levelEvents: Record<string, any>[];
+  levelMigrated: boolean;
   historyMigrated: boolean;
   reviewPublishedMigrated: boolean;
   searchHistory: SearchHistoryRow[];
@@ -142,6 +145,9 @@ function cloneState(state: FakeState): FakeState {
     ),
     watchHistory: state.watchHistory.map((row) => ({ ...row })),
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
+    watchTotals: new Map(state.watchTotals),
+    levelEvents: state.levelEvents.map((row) => ({ ...row })),
+    levelMigrated: state.levelMigrated,
     historyMigrated: state.historyMigrated,
     reviewPublishedMigrated: state.reviewPublishedMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
@@ -194,6 +200,9 @@ function createState(): FakeState {
     playbackSessions: new Map(),
     watchHistory: [],
     watchBuckets: [],
+    watchTotals: new Map(),
+    levelEvents: [],
+    levelMigrated: false,
     historyMigrated: false,
     reviewPublishedMigrated: false,
     searchHistory: [],
@@ -445,6 +454,50 @@ function createFakePool() {
       if (row) row.review = JSON.parse(String(params[0]));
       return [{ affectedRows: row ? 1 : 0 }, []];
     }
+    if (normalized.startsWith('INSERT INTO user_watch_totals')) {
+      if (!currentState.watchTotals.has(String(params[0])))
+        currentState.watchTotals.set(String(params[0]), 0);
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('UPDATE user_watch_totals SET counted_ms')) {
+      const user = String(params[2]);
+      currentState.watchTotals.set(
+        user,
+        (currentState.watchTotals.get(user) ?? 0) + Number(params[0]),
+      );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO user_level_events')) {
+      const columns = [
+        'username',
+        'level',
+        'reached_at',
+        'source',
+        'video_id',
+        'title',
+        'year',
+        'episode_index',
+      ];
+      if (
+        !currentState.levelEvents.some(
+          (row) => row.username === params[0] && row.level === params[1],
+        )
+      )
+        currentState.levelEvents.push(
+          Object.fromEntries(columns.map((column, i) => [column, params[i]])),
+        );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM user_watch_totals WHERE username = ?') {
+      currentState.watchTotals.delete(String(params[0]));
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM user_level_events WHERE username = ?') {
+      currentState.levelEvents = currentState.levelEvents.filter(
+        (row) => row.username !== params[0],
+      );
+      return [{ affectedRows: 1 }, []];
+    }
     if (normalized.startsWith('INSERT IGNORE INTO storage_migrations'))
       return [{ affectedRows: 0 }, []];
     if (normalized.startsWith('UPDATE video_reviews SET first_published_at')) {
@@ -455,6 +508,8 @@ function createFakePool() {
     if (normalized.startsWith('UPDATE storage_migrations')) {
       if (params[1] === 'review_first_published_v1')
         currentState.reviewPublishedMigrated = true;
+      else if (params[1] === 'watch_level_v1')
+        currentState.levelMigrated = true;
       else currentState.historyMigrated = true;
       return [{ affectedRows: 1 }, []];
     }
@@ -1408,7 +1463,10 @@ function createFakePool() {
         year,
         started_at: startedAt,
         ended_at: endedAt,
-        watch_seconds: watchSeconds,
+        watch_seconds: Math.max(
+          Number(existing?.watch_seconds ?? 0),
+          watchSeconds,
+        ),
         last_position: lastPosition,
         total_time: totalTime,
         created_at: createdAt,
@@ -1816,7 +1874,9 @@ function createFakePool() {
             completed_at: (
               params[0] === 'review_first_published_v1'
                 ? currentState.reviewPublishedMigrated
-                : currentState.historyMigrated
+                : params[0] === 'watch_level_v1'
+                  ? currentState.levelMigrated
+                  : currentState.historyMigrated
             )
               ? 1
               : 0,
@@ -1843,6 +1903,23 @@ function createFakePool() {
       const row = currentState.playbackSessions.get(String(params[0]));
       return [row ? [row] : [], []];
     }
+    if (normalized.startsWith('SELECT counted_ms FROM user_watch_totals')) {
+      const value = currentState.watchTotals.get(String(params[0]));
+      return [value === undefined ? [] : [{ counted_ms: value }], []];
+    }
+    if (normalized.startsWith('SELECT * FROM user_level_events'))
+      return [
+        currentState.levelEvents
+          .filter((row) => row.username === params[0])
+          .sort((a, b) => a.level - b.level),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT username, source, video_id, title, year, episode_index, CASE WHEN counted_ms',
+      )
+    )
+      return [[], []];
     if (normalized.startsWith('SELECT COALESCE(SUM(watch_ms)'))
       return [
         [
@@ -1850,7 +1927,10 @@ function createFakePool() {
             total: currentState.watchBuckets
               .filter(
                 (row) =>
-                  row.username === params[0] && row.session_id === params[1],
+                  row.username === params[0] &&
+                  (normalized.includes('bucket_start = ?')
+                    ? row.bucket_start === params[1]
+                    : row.session_id === params[1]),
               )
               .reduce((sum, row) => sum + Number(row.watch_ms), 0),
           },
@@ -4005,6 +4085,12 @@ describe('mysql storage contract', () => {
     ).resolves.toEqual([
       expect.objectContaining({ watch_seconds: playbackSession.watch_seconds }),
     ]);
+  });
+
+  it('观影等级存储契约', async () => {
+    await assertWatchLevelContract(
+      new MySqlStorage('mysql://root:password@localhost:3306/icetv'),
+    );
   });
 
   it('历史与桶统计双后端契约', async () => {

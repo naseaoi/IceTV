@@ -7,6 +7,7 @@ import { useCallback } from 'react';
 import ModalShell from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import Spinner from '@/components/Spinner';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import { useProfilePage } from '@/features/profile/hooks/useProfilePage';
 import { getUserFollows } from '@/lib/profile.client';
 
@@ -108,7 +109,10 @@ function FollowListContent({
             className='flex items-center gap-3 rounded-xl p-3 hover:bg-gray-100 dark:hover:bg-white/5'
           >
             <ProfileAvatar user={item} />
-            <span>{item.nickname ?? '未设置昵称'}</span>
+            <span className='flex min-w-0 items-center gap-1.5'>
+              <span className='truncate'>{item.nickname ?? '未设置昵称'}</span>
+              <WatchLevelBadge level={item.level} />
+            </span>
           </Link>
         ))}
         {!page.loading && !page.error && page.items.length === 0 && (

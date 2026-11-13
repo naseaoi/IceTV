@@ -322,7 +322,7 @@ export function querySocial(
   }
   if (
     sql.startsWith(
-      'SELECT r.*, p.profile_id, p.nickname, p.avatar_seed FROM video_review_reports',
+      'SELECT r.*, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms FROM video_review_reports',
     )
   ) {
     return reports

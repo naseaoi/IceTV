@@ -3,6 +3,9 @@ import type { IStorage, PlaybackSession } from '@/lib/types';
 export async function assertWatchHistoryContract(
   storage: IStorage,
 ): Promise<void> {
+  const saveReport = async (
+    ...args: Parameters<IStorage['saveWatchSessionReport']>
+  ) => (await storage.saveWatchSessionReport(...args)).historyId;
   const username = 'history-contract';
   const other = 'history-other';
   const session: PlaybackSession = {
@@ -30,21 +33,14 @@ export async function assertWatchHistoryContract(
     group_total: 12,
   };
   try {
-    expect(
-      await storage.saveWatchSessionReport(username, session, [], history),
-    ).toBeNull();
+    expect(await saveReport(username, session, [], history)).toBeNull();
     expect(
       await storage.getPlaybackPeriodSessions(username, 0, 2000000),
     ).toEqual([]);
-    const id = await storage.saveWatchSessionReport(
-      username,
-      session,
-      [bucket],
-      history,
-    );
+    const id = await saveReport(username, session, [bucket], history);
     expect(id).toMatch(/^[a-zA-Z0-9_-]{8,80}$/);
     expect(
-      await storage.saveWatchSessionReport(
+      await saveReport(
         username,
         session,
         [bucket, { ...bucket, watch_ms: 20000 }],
@@ -59,9 +55,7 @@ export async function assertWatchHistoryContract(
       ...session,
       watch_seconds: 1000,
     });
-    expect(
-      await storage.saveWatchSessionReport(other, session, [bucket], history),
-    ).toBeNull();
+    expect(await saveReport(other, session, [bucket], history)).toBeNull();
     expect(await storage.getPlaybackPeriodSessions(other, 0, 2000000)).toEqual(
       [],
     );
@@ -81,9 +75,7 @@ export async function assertWatchHistoryContract(
       last_position: 80,
       updated_at: 970000,
     };
-    expect(
-      await storage.saveWatchSessionReport(username, second, [bucket], history),
-    ).toBe(id);
+    expect(await saveReport(username, second, [bucket], history)).toBe(id);
     expect(await storage.getWatchHistoryPage(username, { limit: 10 })).toEqual([
       expect.objectContaining({
         id,
@@ -100,12 +92,7 @@ export async function assertWatchHistoryContract(
       source: 'source',
       updated_at: 970000,
     };
-    const id2 = await storage.saveWatchSessionReport(
-      username,
-      third,
-      [bucket],
-      history,
-    );
+    const id2 = await saveReport(username, third, [bucket], history);
     expect(id2).not.toBe(id);
     const firstPage = await storage.getWatchHistoryPage(username, {
       limit: 1,
@@ -134,12 +121,10 @@ export async function assertWatchHistoryContract(
     ).toHaveLength(2);
     await storage.deleteWatchHistoryEntry(username, id!);
     expect(
-      await storage.saveWatchSessionReport(
-        username,
-        second,
-        [{ ...bucket, watch_ms: 40000 }],
-        { ...history, id: id! },
-      ),
+      await saveReport(username, second, [{ ...bucket, watch_ms: 40000 }], {
+        ...history,
+        id: id!,
+      }),
     ).toBeNull();
     expect(
       await storage.getWatchHistoryPage(username, { limit: 10 }),
@@ -151,7 +136,7 @@ export async function assertWatchHistoryContract(
       ),
     ).toBe(100);
     expect(
-      await storage.saveWatchSessionReport(username, third, [bucket], {
+      await saveReport(username, third, [bucket], {
         ...history,
         id: 'missing-history',
       }),
@@ -166,9 +151,7 @@ export async function assertWatchHistoryContract(
       await storage.getPlaybackPeriodSessions(username, 0, 2000000),
     ).toEqual([]);
     // 同会话再次写入不会继承已随保留期清理的桶。
-    await storage.saveWatchSessionReport(username, third, [
-      { ...bucket, watch_ms: 1000 },
-    ]);
+    await saveReport(username, third, [{ ...bucket, watch_ms: 1000 }]);
     expect(
       (await storage.getPlaybackPeriodSessions(username, 0, 2000000))[0]
         .watch_seconds,

@@ -5,6 +5,7 @@ import type {
   PublicVideoReview,
   VideoReview,
 } from '@/lib/types';
+import { type WatchLevel, watchLevelForMs } from '@/lib/watch-level';
 
 // 前后端共用；存储列为 MEDIUMTEXT，放宽上限无需迁移
 export const REVIEW_CONTENT_MAX_LENGTH = 5000;
@@ -191,6 +192,8 @@ export function reviewPageParams(cursor?: string, q = '') {
 }
 
 export type VideoReviewRow = {
+  level?: WatchLevel;
+  counted_ms?: number | null;
   username: string;
   review_json: string;
   profile_id?: string;
@@ -210,6 +213,7 @@ export function publicReview(row: VideoReviewRow): PublicVideoReview {
       profileId: row.profile_id ?? '',
       nickname: row.nickname ?? null,
       avatarSeed: row.avatar_seed ?? null,
+      level: row.level ?? watchLevelForMs(Number(row.counted_ms ?? 0)),
       ...(row.role ? { role: row.role } : {}),
     },
     authorFollowed: row.author_followed ?? false,

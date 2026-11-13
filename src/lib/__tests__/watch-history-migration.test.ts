@@ -99,13 +99,13 @@ it('迁移中断整体回滚，重试完整回填', async () => {
 it('大小写合并保留较新历史并迁移仅存在新表中的用户', async () => {
   const storage = new LocalSqliteStorage(':memory:');
   const impl = internal(storage);
-  const id = await storage.saveWatchSessionReport(
+  const { historyId: id } = await storage.saveWatchSessionReport(
     'alice',
     session,
     [{ start: 0, watch_ms: 1000 }],
     { total_episodes: 2 },
   );
-  const old = await storage.saveWatchSessionReport(
+  const { historyId: old } = await storage.saveWatchSessionReport(
     'legacy',
     { ...session, id: 'legacy-session-b', last_position: 70, updated_at: 300 },
     [{ start: 0, watch_ms: 2000 }],

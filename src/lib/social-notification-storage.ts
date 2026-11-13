@@ -12,8 +12,10 @@ import {
 } from '@/lib/social-notification-identity';
 import type { VideoReview } from '@/lib/types';
 import { normalizeUsername } from '@/lib/username';
+import { watchLevelForMs } from '@/lib/watch-level';
 
 type MessageRow = {
+  counted_ms: number | null;
   profile_id: string;
   nickname: string | null;
   avatar_seed: string | null;
@@ -34,18 +36,19 @@ export class SocialNotificationStorage {
     username = normalizeUsername(username);
     if (kind === 'new-follower')
       return {
-        from: `FROM (SELECT p.profile_id, p.nickname, p.avatar_seed, '' AS title_norm, '' AS year, f.created_at FROM user_follows f JOIN user_profiles p ON p.username = f.follower WHERE f.followee = ? AND f.follower <> ? AND f.created_at > ?) n`,
+        from: `FROM (SELECT p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms, '' AS title_norm, '' AS year, f.created_at FROM user_follows f JOIN user_profiles p ON p.username = f.follower LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE f.followee = ? AND f.follower <> ? AND f.created_at > ?) n`,
         params: [username, username, now - 30 * 86400000] as unknown[],
       };
     // 聚合先于已读排除：新点赞到达后重新生成消息，计数仍包含整个窗口内的点赞者。
     return {
       from: `FROM (SELECT p.profile_id, g.title_norm, g.year, g.created_at, g.like_count, v.review_json,
-        liker.profile_id AS liker_id, liker.nickname AS liker_nickname, liker.avatar_seed AS liker_avatar
+        liker.profile_id AS liker_id, liker.nickname AS liker_nickname, liker.avatar_seed AS liker_avatar, wt.counted_ms
         FROM (SELECT author, title_norm, year, MAX(created_at) AS created_at, COUNT(*) AS like_count FROM video_review_likes WHERE author = ? AND liker <> ? AND created_at > ? GROUP BY author, title_norm, year) g
         JOIN video_reviews v ON v.username = g.author AND v.title_norm = g.title_norm AND v.year = g.year AND v.is_public = 1
         JOIN user_profiles p ON p.username = g.author
         JOIN video_review_likes latest ON latest.author = g.author AND latest.title_norm = g.title_norm AND latest.year = g.year AND latest.created_at = g.created_at AND latest.liker <> g.author
         JOIN user_profiles liker ON liker.username = latest.liker
+        LEFT JOIN user_watch_totals wt ON wt.username = liker.username
         WHERE NOT EXISTS (SELECT 1 FROM video_review_likes tie WHERE tie.author = g.author AND tie.title_norm = g.title_norm AND tie.year = g.year AND tie.created_at = g.created_at AND tie.liker <> g.author AND tie.liker > latest.liker)) n`,
       params: [username, username, now - 30 * 86400000] as unknown[],
     };
@@ -145,6 +148,7 @@ export class SocialNotificationStorage {
             profileId: row.profile_id,
             nickname: row.nickname,
             avatarSeed: row.avatar_seed,
+            level: watchLevelForMs(Number(row.counted_ms ?? 0)),
           },
           createdAt,
         };
@@ -156,6 +160,7 @@ export class SocialNotificationStorage {
           profileId: row.liker_id,
           nickname: row.liker_nickname,
           avatarSeed: row.liker_avatar,
+          level: watchLevelForMs(Number(row.counted_ms ?? 0)),
         },
         likeCount: Number(row.like_count),
         review: {

@@ -1155,9 +1155,13 @@ class DbManager {
   async savePlaybackSession(
     userName: string,
     session: PlaybackSession,
-  ): Promise<void> {
+  ): ReturnType<IStorage['setPlaybackSession']> {
     const storage = await this.getStorage();
-    await storage.setPlaybackSession(userName, session);
+    return storage.setPlaybackSession(userName, session);
+  }
+
+  async getWatchLevel(userName: string): ReturnType<IStorage['getWatchLevel']> {
+    return (await this.getStorage()).getWatchLevel(userName);
   }
 
   async saveWatchSessionReport(

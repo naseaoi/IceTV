@@ -53,6 +53,7 @@ import {
   WORK_REVIEWS_PAGE_SIZE,
 } from '@/lib/video-reviews';
 import { tasteMatchScore } from '@/lib/viewing-insights';
+import { watchLevelForMs } from '@/lib/watch-level';
 
 export class NicknameTakenError extends Error {
   constructor() {
@@ -99,9 +100,12 @@ export interface SocialExecutor {
   run(sql: string, params?: unknown[]): Promise<number>;
 }
 
-export function profileFromRow(row: UserProfile): UserProfile {
+export function profileFromRow(
+  row: UserProfile & { counted_ms?: number | null },
+): UserProfile {
   return {
     username: row.username,
+    level: watchLevelForMs(Number(row.counted_ms ?? 0)),
     profile_id: row.profile_id,
     nickname: row.nickname,
     avatar_seed: row.avatar_seed,
@@ -189,14 +193,14 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
 
   async getUserProfile(username: string): Promise<UserProfile | null> {
     const rows = await this.sql.rows<UserProfile>(
-      'SELECT * FROM user_profiles WHERE username = ?',
+      'SELECT p.*, wt.counted_ms FROM user_profiles p LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE p.username = ?',
       [normalizeUsername(username)],
     );
     return rows[0] ? profileFromRow(rows[0]) : null;
   }
   async getUserProfileById(id: string): Promise<UserProfile | null> {
     const rows = await this.sql.rows<UserProfile>(
-      'SELECT * FROM user_profiles WHERE profile_id = ?',
+      'SELECT p.*, wt.counted_ms FROM user_profiles p LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE p.profile_id = ?',
       [id],
     );
     return rows[0] ? profileFromRow(rows[0]) : null;
@@ -341,6 +345,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,
+      level: profile.level ?? 1,
       libraryVisibility: profile.favorites_public,
       isSelf,
       isFollowing: Number(counts.followed) > 0,
@@ -390,10 +395,12 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       profile_id: string;
       nickname: string | null;
       avatar_seed: string | null;
+      counted_ms: number | null;
       created_at: number;
     }>(
-      `SELECT p.profile_id, p.nickname, p.avatar_seed, f.created_at
+      `SELECT p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms, f.created_at
        FROM user_follows f JOIN user_profiles p ON p.username = f.${target}
+       LEFT JOIN user_watch_totals wt ON wt.username = p.username
        WHERE f.${column} = ?
        ${after ? 'AND (f.created_at < ? OR (f.created_at = ? AND p.profile_id < ?))' : ''}
        ORDER BY f.created_at DESC, p.profile_id DESC LIMIT ?`,
@@ -408,6 +415,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         profileId: row.profile_id,
         nickname: row.nickname,
         avatarSeed: row.avatar_seed,
+        level: watchLevelForMs(Number(row.counted_ms ?? 0)),
         followedAt: Number(row.created_at),
       })),
       pageSize,
@@ -463,6 +471,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
           profile_id: profile.profile_id,
           nickname: profile.nickname,
           avatar_seed: profile.avatar_seed,
+          level: profile.level ?? 1,
           like_count: Number(likes.count),
           liked_by_me: Number(likes.liked) > 0,
         };
@@ -614,15 +623,16 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     year: string,
   ): ReturnType<IStorage['getFollowOpinions']> {
     type OpinionRow = UserProfile & {
+      counted_ms: number | null;
       status: import('@/lib/types').FavoriteWatchStatus | null;
       review_json: string | null;
       recent: number;
     };
     const rows = await this.sql.rows<OpinionRow>(
-      `SELECT profile.*, CASE WHEN profile.favorites_public >= 2 THEN (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true)}) ELSE NULL END AS status,
+      `SELECT profile.*, wt.counted_ms, CASE WHEN profile.favorites_public >= 2 THEN (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true)}) ELSE NULL END AS status,
        (SELECT CASE WHEN r.is_public = 1 THEN r.review_json ELSE NULL END FROM video_reviews r WHERE r.username = profile.username AND r.title_norm = ? AND (? = '' OR r.year IN (?, '')) ORDER BY CASE WHEN r.year = ? THEN 0 ELSE 1 END, r.updated_at DESC, r.year DESC LIMIT 1) AS review_json,
        (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true, 'recent')}) AS recent
-       FROM user_follows follow JOIN user_profiles profile ON profile.username = follow.followee WHERE follow.follower = ?`,
+       FROM user_follows follow JOIN user_profiles profile ON profile.username = follow.followee LEFT JOIN user_watch_totals wt ON wt.username = profile.username WHERE follow.follower = ?`,
       [
         titleNorm,
         year,
@@ -648,6 +658,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
             profileId: row.profile_id,
             nickname: row.nickname,
             avatarSeed: row.avatar_seed,
+            level: watchLevelForMs(Number(row.counted_ms ?? 0)),
           },
           status: row.status,
           rating: review?.rating ?? null,
@@ -957,11 +968,12 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         profile_id: string;
         nickname: string | null;
         avatar_seed: string | null;
+        counted_ms: number | null;
         reason: ReviewReportReason;
         detail: string;
         created_at: number;
       }>(
-        `SELECT r.*, p.profile_id, p.nickname, p.avatar_seed FROM ${row.kind === 'reply' ? 'video_review_reply_reports' : 'video_review_reports'} r JOIN user_profiles p ON p.username = r.reporter WHERE ${row.kind === 'reply' ? 'r.reply_id = ?' : 'r.author = ? AND r.title_norm = ? AND r.year = ?'} ORDER BY r.created_at DESC, r.reporter DESC LIMIT 5`,
+        `SELECT r.*, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms FROM ${row.kind === 'reply' ? 'video_review_reply_reports' : 'video_review_reports'} r JOIN user_profiles p ON p.username = r.reporter LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE ${row.kind === 'reply' ? 'r.reply_id = ?' : 'r.author = ? AND r.title_norm = ? AND r.year = ?'} ORDER BY r.created_at DESC, r.reporter DESC LIMIT 5`,
         row.kind === 'reply'
           ? [row.reply_id]
           : [row.author, row.title_norm, row.year],
@@ -981,6 +993,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
             profileId: report.profile_id,
             nickname: report.nickname,
             avatarSeed: report.avatar_seed,
+            level: watchLevelForMs(Number(report.counted_ms ?? 0)),
           },
           reason: report.reason,
           detail: report.detail,
@@ -1018,7 +1031,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       .map(parseFollowReviewMessageId)
       .filter((id) => id !== null);
     return {
-      from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username
+      from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username LEFT JOIN user_watch_totals wt ON wt.username = p.username
         WHERE f.follower = ? AND v.is_public = 1 AND v.first_published_at > f.created_at AND v.first_published_at > ?
         ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?)').join(' ')}`,
       params: [
@@ -1092,7 +1105,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         first_published_at: number;
       }
     >(
-      `SELECT v.username, v.review_json, v.first_published_at, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
+      `SELECT v.username, v.review_json, v.first_published_at, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms ${from}${filter}
        ORDER BY v.first_published_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
       [...params, limit],
     );
@@ -1115,6 +1128,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
           profileId: row.profile_id,
           nickname: row.nickname,
           avatarSeed: row.avatar_seed ?? null,
+          level: watchLevelForMs(Number(row.counted_ms ?? 0)),
         },
         title: r.title,
         year: r.year,

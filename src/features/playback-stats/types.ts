@@ -4,6 +4,7 @@ import type {
   WatchHistoryEntry,
   WatchHistoryWrite,
 } from '@/lib/types';
+import type { WatchLevelUp } from '@/lib/watch-level-types';
 
 export const PLAYBACK_TOP_WORKS_LIMIT = 10;
 
@@ -28,6 +29,7 @@ export type PlaybackSessionReport = {
 export type PlaybackSessionReportResponse = {
   success: true;
   historyId: string | null;
+  levelUp: WatchLevelUp;
 };
 
 export type PlaybackPeriodType = 'week' | 'month' | 'year';

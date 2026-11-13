@@ -130,6 +130,7 @@ export async function handlePublicAnnualRecap(
         profileId: profile.profile_id,
         nickname: profile.nickname,
         avatarSeed: profile.avatar_seed,
+        level: profile.level ?? 1,
       },
       isSelf: profile.username === normalizeUsername(guard.username),
       report: recap.report,

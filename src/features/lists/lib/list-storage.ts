@@ -15,6 +15,7 @@ import { PLAZA_PAGE_SIZE } from '@/features/lists/types';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import { normalizeUsername } from '@/lib/username';
+import { watchLevelForMs } from '@/lib/watch-level';
 
 import {
   LIST_DESCRIPTION_MAX_LENGTH,
@@ -379,7 +380,7 @@ export class ListPlans {
     const order =
       sort === 'hot' ? '(l.view_count + l.like_count * 10)' : 'l.updated_at';
     const rows = yield statement(
-      `SELECT l.*, p.profile_id, p.nickname, p.avatar_seed FROM user_lists l INNER JOIN user_profiles p ON p.username = l.username WHERE l.item_count > 0 AND l.is_public >= ?${after ? ` AND (${order} < ? OR (${order} = ? AND l.id > ?))` : ''} ORDER BY ${order} DESC, l.id ASC LIMIT ${PLAZA_PAGE_SIZE + 1}`,
+      `SELECT l.*, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms FROM user_lists l INNER JOIN user_profiles p ON p.username = l.username LEFT JOIN user_watch_totals wt ON wt.username = l.username WHERE l.item_count > 0 AND l.is_public >= ?${after ? ` AND (${order} < ? OR (${order} = ? AND l.id > ?))` : ''} ORDER BY ${order} DESC, l.id ASC LIMIT ${PLAZA_PAGE_SIZE + 1}`,
       viewer === null ? VISIBILITY_LEVEL.everyone : VISIBILITY_LEVEL.members,
       ...(after ? [after[0], after[0], after[1]] : []),
     );
@@ -396,6 +397,7 @@ export class ListPlans {
           profileId: String(row.profile_id),
           nickname: row.nickname === null ? null : String(row.nickname),
           avatarSeed: row.avatar_seed === null ? null : String(row.avatar_seed),
+          level: watchLevelForMs(Number(row.counted_ms ?? 0)),
         },
       })),
       nextCursor:

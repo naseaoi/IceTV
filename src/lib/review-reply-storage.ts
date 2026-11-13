@@ -14,6 +14,7 @@ import {
   REVIEW_REPLY_MAX_LENGTH,
   ReviewValidationError,
 } from '@/lib/video-reviews';
+import { watchLevelForMs } from '@/lib/watch-level';
 
 export interface ReviewReplyRow {
   id: string;
@@ -27,6 +28,8 @@ export interface ReviewReplyRow {
 }
 
 type PublicReplyRow = ReviewReplyRow & {
+  counted_ms: number | null;
+  reply_counted_ms: number | null;
   profile_id: string;
   nickname: string | null;
   avatar_seed: string | null;
@@ -88,10 +91,15 @@ function publicReply(row: PublicReplyRow, viewer: string): PublicReviewReply {
       profileId: row.profile_id,
       nickname: row.nickname,
       avatarSeed: row.avatar_seed,
+      level: watchLevelForMs(Number(row.counted_ms ?? 0)),
       ...(role ? { role } : {}),
     },
     replyTo: row.reply_profile_id
-      ? { profileId: row.reply_profile_id, nickname: row.reply_nickname }
+      ? {
+          profileId: row.reply_profile_id,
+          nickname: row.reply_nickname,
+          level: watchLevelForMs(Number(row.reply_counted_ms ?? 0)),
+        }
       : null,
     content: row.content,
     created_at: Number(row.created_at),
@@ -100,9 +108,9 @@ function publicReply(row: PublicReplyRow, viewer: string): PublicReviewReply {
 }
 
 const REPLY_FROM = `FROM video_review_replies r JOIN video_reviews v ON v.username = r.author AND v.title_norm = r.title_norm AND v.year = r.year
- JOIN user_profiles owner ON owner.username = r.author JOIN user_profiles p ON p.username = r.username LEFT JOIN user_profiles t ON t.username = r.reply_to LEFT JOIN user_access a ON a.username = r.username`;
+ JOIN user_profiles owner ON owner.username = r.author JOIN user_profiles p ON p.username = r.username LEFT JOIN user_profiles t ON t.username = r.reply_to LEFT JOIN user_access a ON a.username = r.username LEFT JOIN user_watch_totals wt ON wt.username = r.username LEFT JOIN user_watch_totals reply_wt ON reply_wt.username = r.reply_to`;
 const REPLY_SELECT =
-  'r.*, v.review_json, owner.profile_id AS review_profile_id, p.profile_id, p.nickname, p.avatar_seed, a.role AS access_role, t.profile_id AS reply_profile_id, t.nickname AS reply_nickname';
+  'r.*, v.review_json, owner.profile_id AS review_profile_id, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms, reply_wt.counted_ms AS reply_counted_ms, a.role AS access_role, t.profile_id AS reply_profile_id, t.nickname AS reply_nickname';
 
 export class ReviewReplyStorage {
   constructor(protected readonly sql: SocialExecutor) {}

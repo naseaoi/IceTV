@@ -40,6 +40,7 @@ import { ChangePasswordPanel } from './user-menu/ChangePasswordPanel';
 import { SettingsPanel, VersionPanel } from './user-menu/lazy-panels';
 import { ProfilePanel } from './user-menu/ProfilePanel';
 import { UserAvatar } from './user-menu/UserAvatar';
+import WatchLevelBadge from './WatchLevelBadge';
 
 const MENU_DIVIDER_CLASS =
   'mx-1.5 my-1 h-px bg-gray-200/70 dark:bg-white/[0.06]';
@@ -206,8 +207,11 @@ export const UserMenu: React.FC = () => {
             >
               {renderAvatar('h-10 w-10')}
               <div className='min-w-0 flex-1'>
-                <div className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
-                  {displayName}
+                <div className='flex min-w-0 items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                  <span className='truncate'>{displayName}</span>
+                  {session.status === 'authenticated' && (
+                    <WatchLevelBadge level={session.level} />
+                  )}
                 </div>
                 <div className='mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400'>
                   {ROLE_TEXT[role]}

@@ -31,6 +31,7 @@ const resolveServerAuthSession = cache(async function resolveServerAuthSession(
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,
+      level: profile.level ?? 1,
       username: result.username,
       role: result.role,
     };

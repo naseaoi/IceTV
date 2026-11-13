@@ -228,6 +228,37 @@ div[data-media-provider] video {
 }
 
 @layer components {
+  /* 票根：左右两侧各挖一个半圆缺口 */
+  .ticket-stub {
+    --stub-notch: 2.5px;
+    -webkit-mask:
+      radial-gradient(
+          circle at 0 50%,
+          transparent var(--stub-notch),
+          #000 calc(var(--stub-notch) + 0.5px)
+        )
+        left / 51% 100% no-repeat,
+      radial-gradient(
+          circle at 100% 50%,
+          transparent var(--stub-notch),
+          #000 calc(var(--stub-notch) + 0.5px)
+        )
+        right / 51% 100% no-repeat;
+    mask:
+      radial-gradient(
+          circle at 0 50%,
+          transparent var(--stub-notch),
+          #000 calc(var(--stub-notch) + 0.5px)
+        )
+        left / 51% 100% no-repeat,
+      radial-gradient(
+          circle at 100% 50%,
+          transparent var(--stub-notch),
+          #000 calc(var(--stub-notch) + 0.5px)
+        )
+        right / 51% 100% no-repeat;
+  }
+
   /* 放在 components 层，absolute 等定位工具类仍能覆盖 relative */
   .skeleton {
     position: relative;

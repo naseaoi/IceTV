@@ -674,6 +674,7 @@ export function videoReviewContract(createStorage: () => IStorage) {
       profileId: author.profile_id,
       nickname: 'Author',
       avatarSeed,
+      level: 1,
     };
     expect(await storage.getUserProfileView('author', 'reader')).toMatchObject(
       publicAuthor,

@@ -9,6 +9,7 @@ jest.mock('@/lib/db', () => ({
     ensureUserProfile: jest.fn().mockResolvedValue({
       profile_id: 'AbCdEf012345',
       avatar_seed: 'Avatar012345',
+      level: 3,
       nickname: 'Alice',
     }),
   },
@@ -65,6 +66,7 @@ describe('getServerAuthSession', () => {
       status: 'authenticated',
       profileId: 'AbCdEf012345',
       avatarSeed: 'Avatar012345',
+      level: 3,
       nickname: 'Alice',
       username: 'alice',
       role: 'user',

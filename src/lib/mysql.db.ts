@@ -131,6 +131,24 @@ import {
   reviewSql,
   VideoReviewRow,
 } from '@/lib/video-reviews';
+import { WATCH_LEVEL_BUCKET_CAP_MS, watchLevelForMs } from '@/lib/watch-level';
+import type {
+  WatchLevelBackfillRow,
+  WatchLevelEventRow,
+} from '@/lib/watch-level-storage';
+import {
+  levelEventValues,
+  levelUpForDelta,
+  mapWatchLevelEvent,
+  newlyReachedLevels,
+  WATCH_LEVEL_EVENT_INSERT,
+  watchLevelBackfillSql,
+} from '@/lib/watch-level-storage';
+import type {
+  WatchLevelResponse,
+  WatchLevelUp,
+  WatchSessionSaveResult,
+} from '@/lib/watch-level-types';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -739,6 +757,7 @@ export class MySqlStorage implements IStorage {
     await this.migratePlaybackSchema();
     await this.migrateReviewFirstPublished();
     await this.migrateWatchHistory();
+    await this.migrateWatchLevel();
     await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
     await this.backfillUserProfiles();
@@ -826,6 +845,14 @@ export class MySqlStorage implements IStorage {
     await this.pool.execute(`CREATE TABLE IF NOT EXISTS storage_migrations (
       name VARCHAR(191) PRIMARY KEY, completed_at BIGINT NOT NULL
     ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS user_watch_totals (
+      username VARCHAR(191) PRIMARY KEY, counted_ms BIGINT NOT NULL, updated_at BIGINT NOT NULL
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS user_level_events (
+      username VARCHAR(191) NOT NULL, level INT NOT NULL, reached_at BIGINT NOT NULL,
+      source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL,
+      year VARCHAR(32) NOT NULL, episode_index INT NOT NULL, PRIMARY KEY(username, level)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
     await this.pool.execute(`CREATE TABLE IF NOT EXISTS playback_watch_buckets (
       username VARCHAR(191) NOT NULL, session_id VARCHAR(80) NOT NULL, bucket_start BIGINT NOT NULL,
       watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
@@ -841,6 +868,105 @@ export class MySqlStorage implements IStorage {
       PRIMARY KEY(username, id), UNIQUE KEY idx_watch_history_work(username, source, video_id),
       KEY idx_watch_history_page(username, last_watched_at, id)
     ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+  }
+
+  private async migrateWatchLevel(): Promise<void> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['watch_level_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['watch_level_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        const [rows] = await connection.query<
+          (RowDataPacket & WatchLevelBackfillRow)[]
+        >(watchLevelBackfillSql);
+        for (const row of rows)
+          await this.addWatchLevel(
+            connection,
+            row.username,
+            Number(row.counted_ms),
+            row,
+            Number(row.reached_at),
+          );
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'watch_level_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // 账号累计行也是跨会话的写锁，必须先于读取桶总量获取。
+  private async lockWatchLevel(
+    connection: PoolConnection,
+    username: string,
+  ): Promise<number> {
+    await connection.execute(
+      'INSERT INTO user_watch_totals (username, counted_ms, updated_at) VALUES (?, 0, 0) ON DUPLICATE KEY UPDATE username = username',
+      [username],
+    );
+    const [rows] = await connection.query<RowDataPacket[]>(
+      'SELECT counted_ms FROM user_watch_totals WHERE username = ? FOR UPDATE',
+      [username],
+    );
+    return Number(rows[0]?.counted_ms ?? 0);
+  }
+
+  private async addWatchLevel(
+    connection: PoolConnection,
+    username: string,
+    delta: number,
+    session: Pick<
+      PlaybackSession,
+      'source' | 'video_id' | 'title' | 'year' | 'episode_index'
+    >,
+    reachedAt: number,
+  ): Promise<WatchLevelUp> {
+    if (delta <= 0) return null;
+    const before = await this.lockWatchLevel(connection, username);
+    await connection.execute(
+      'UPDATE user_watch_totals SET counted_ms = counted_ms + ?, updated_at = GREATEST(updated_at, ?) WHERE username = ?',
+      [delta, reachedAt, username],
+    );
+    for (const { level } of newlyReachedLevels(before, before + delta))
+      await connection.execute(
+        WATCH_LEVEL_EVENT_INSERT + ' ON DUPLICATE KEY UPDATE level = level',
+        levelEventValues(username, level, reachedAt, session),
+      );
+    return levelUpForDelta(before, delta);
+  }
+
+  async getWatchLevel(userName: string): Promise<WatchLevelResponse> {
+    const username = normalizeUsername(userName);
+    return this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT counted_ms FROM user_watch_totals WHERE username = ?',
+        [username],
+      );
+      const countedMs = Number(rows[0]?.counted_ms ?? 0);
+      const [events] = await connection.query<
+        (RowDataPacket & WatchLevelEventRow)[]
+      >('SELECT * FROM user_level_events WHERE username = ? ORDER BY level', [
+        username,
+      ]);
+      return {
+        level: watchLevelForMs(countedMs),
+        countedMs,
+        events: events.map(mapWatchLevelEvent),
+      };
+    });
   }
 
   private async migrateWatchHistory(): Promise<void> {
@@ -2712,6 +2838,14 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM skip_configs WHERE username = ?', [
         username,
       ]);
+      await connection.execute(
+        'DELETE FROM user_watch_totals WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_level_events WHERE username = ?',
+        [username],
+      );
       await connection.execute('DELETE FROM watch_history WHERE username = ?', [
         username,
       ]);
@@ -3430,11 +3564,23 @@ export class MySqlStorage implements IStorage {
   async setPlaybackSession(
     userName: string,
     session: PlaybackSession,
-  ): Promise<void> {
+  ): Promise<WatchLevelUp> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
-    await this.pool.execute(
-      `INSERT INTO playback_sessions (
+    return this.withTransaction(async (connection) => {
+      await this.lockWatchLevel(connection, username);
+      const [existing] = await connection.query<RowDataPacket[]>(
+        'SELECT username, watch_seconds, measurement_version FROM playback_sessions WHERE id = ? FOR UPDATE',
+        [session.id],
+      );
+      if (
+        existing[0] &&
+        (existing[0].username !== username ||
+          Number(existing[0].measurement_version) !== 1)
+      )
+        return null;
+      await connection.execute(
+        `INSERT INTO playback_sessions (
         id, username, source, video_id, episode_index, title, source_name,
         cover, year, started_at, ended_at, watch_seconds, last_position,
         total_time, created_at, updated_at
@@ -3449,30 +3595,41 @@ export class MySqlStorage implements IStorage {
         year = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(year), year),
         started_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(started_at), started_at),
         ended_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(ended_at), ended_at),
-        watch_seconds = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(watch_seconds), watch_seconds),
+        watch_seconds = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, GREATEST(watch_seconds, VALUES(watch_seconds)), watch_seconds),
         last_position = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(last_position), last_position),
         total_time = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(total_time), total_time),
         created_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(created_at), created_at),
         updated_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(updated_at), updated_at)`,
-      [
-        session.id,
+        [
+          session.id,
+          username,
+          session.source,
+          session.video_id,
+          session.episode_index,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.started_at,
+          session.ended_at,
+          session.watch_seconds,
+          session.last_position,
+          session.total_time,
+          session.created_at,
+          session.updated_at,
+        ],
+      );
+      return this.addWatchLevel(
+        connection,
         username,
-        session.source,
-        session.video_id,
-        session.episode_index,
-        session.title,
-        session.source_name,
-        session.cover,
-        session.year,
-        session.started_at,
+        Math.max(
+          0,
+          session.watch_seconds - Number(existing[0]?.watch_seconds ?? 0),
+        ) * 1000,
+        session,
         session.ended_at,
-        session.watch_seconds,
-        session.last_position,
-        session.total_time,
-        session.created_at,
-        session.updated_at,
-      ],
-    );
+      );
+    });
   }
 
   async saveWatchSessionReport(
@@ -3480,20 +3637,23 @@ export class MySqlStorage implements IStorage {
     session: PlaybackSession,
     buckets: PlaybackWatchBucket[],
     history?: WatchHistoryWrite,
-  ): Promise<string | null> {
+  ): Promise<WatchSessionSaveResult> {
     const username = normalizeUsername(userName);
     return this.withTransaction(async (connection) => {
+      await this.lockWatchLevel(connection, username);
       if (!buckets.some((bucket) => bucket.watch_ms > 0)) {
         const [existing] = await connection.query<RowDataPacket[]>(
-          'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+          'SELECT username, measurement_version FROM playback_sessions WHERE id = ? FOR UPDATE',
           [session.id],
         );
-        if (existing[0]?.username !== username) return null;
+        if (existing[0]?.username !== username)
+          return { historyId: null, levelUp: null };
         const [totals] = await connection.query<RowDataPacket[]>(
           'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
           [username, session.id],
         );
-        if (!Number(totals[0]?.total)) return null;
+        if (!Number(totals[0]?.total))
+          return { historyId: null, levelUp: null };
       }
       await connection.execute(
         `INSERT INTO playback_sessions (
@@ -3520,10 +3680,14 @@ export class MySqlStorage implements IStorage {
         ],
       );
       const [owners] = await connection.query<RowDataPacket[]>(
-        'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+        'SELECT username, measurement_version FROM playback_sessions WHERE id = ? FOR UPDATE',
         [session.id],
       );
-      if (owners[0]?.username !== username) return null;
+      if (
+        owners[0]?.username !== username ||
+        Number(owners[0]?.measurement_version) !== 2
+      )
+        return { historyId: null, levelUp: null };
       await connection.execute(
         `UPDATE playback_sessions SET ended_at = GREATEST(ended_at, ?), last_position = ?, total_time = ?,
         title = ?, source_name = ?, cover = ?, year = ?, updated_at = GREATEST(updated_at, ?), measurement_version = 2
@@ -3541,12 +3705,38 @@ export class MySqlStorage implements IStorage {
           username,
         ],
       );
-      for (const bucket of buckets)
+      let delta = 0;
+      for (const bucket of buckets) {
+        const [beforeRows] = await connection.query<RowDataPacket[]>(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND bucket_start = ?',
+          [username, bucket.start],
+        );
         await connection.execute(
           `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
         VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE watch_ms = GREATEST(watch_ms, VALUES(watch_ms))`,
           [username, session.id, bucket.start, bucket.watch_ms],
         );
+        const [afterRows] = await connection.query<RowDataPacket[]>(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND bucket_start = ?',
+          [username, bucket.start],
+        );
+        delta +=
+          Math.min(
+            Number(afterRows[0]?.total ?? 0),
+            WATCH_LEVEL_BUCKET_CAP_MS,
+          ) -
+          Math.min(
+            Number(beforeRows[0]?.total ?? 0),
+            WATCH_LEVEL_BUCKET_CAP_MS,
+          );
+      }
+      const levelUp = await this.addWatchLevel(
+        connection,
+        username,
+        delta,
+        session,
+        session.ended_at,
+      );
       const [totals] = await connection.query<RowDataPacket[]>(
         'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
         [username, session.id],
@@ -3556,7 +3746,7 @@ export class MySqlStorage implements IStorage {
         'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
         [Math.floor(total / 1000), session.id, username],
       );
-      if (!history || total <= 0) return null;
+      if (!history || total <= 0) return { historyId: null, levelUp };
       const values = [
         session.title,
         session.source_name,
@@ -3576,14 +3766,14 @@ export class MySqlStorage implements IStorage {
           'SELECT id FROM watch_history WHERE username = ? AND id = ? AND source = ? AND video_id = ? FOR UPDATE',
           [username, history.id, session.source, session.video_id],
         );
-        if (!rows.length) return null;
+        if (!rows.length) return { historyId: null, levelUp };
         await connection.execute(
           `UPDATE watch_history SET title = ?, source_name = ?, cover = ?, year = ?,
           episode_index = ?, total_episodes = ?, group_label = ?, group_index = ?, group_total = ?,
           position = ?, duration = ?, last_watched_at = ? WHERE username = ? AND id = ? AND source = ? AND video_id = ?`,
           [...values, username, history.id, session.source, session.video_id],
         );
-        return history.id;
+        return { historyId: history.id, levelUp };
       }
       await connection.execute(
         `INSERT INTO watch_history (
@@ -3607,7 +3797,7 @@ export class MySqlStorage implements IStorage {
         'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
         [username, session.source, session.video_id],
       );
-      return String(rows[0].id);
+      return { historyId: String(rows[0].id), levelUp };
     });
   }
 

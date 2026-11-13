@@ -18,6 +18,10 @@ import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-n
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
+import {
+  assertWatchLevelContract,
+  watchLevelSession,
+} from '@/lib/__tests__/__fixtures__/watch-level-contract';
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
@@ -105,6 +109,96 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       'access-reader',
     ]);
     expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('观影等级增量、重发、跨级、保留期与删号契约', async () => {
+    await assertWatchLevelContract(storage);
+  });
+
+  it('并发多会话同桶封顶且只返回一次升级', async () => {
+    await storage.setPlaybackSession('level-concurrent', {
+      ...watchLevelSession,
+      id: 'level-base',
+      watch_seconds: 6300,
+    });
+    const results = await Promise.all(
+      [1, 2, 3].map((index) =>
+        storage.saveWatchSessionReport(
+          'level-concurrent',
+          { ...watchLevelSession, id: `level-parallel-${index}` },
+          [{ start: 900000, watch_ms: 900000 }],
+        ),
+      ),
+    );
+    expect(results.filter((result) => result.levelUp)).toHaveLength(1);
+    expect(await storage.getWatchLevel('level-concurrent')).toMatchObject({
+      level: 2,
+      countedMs: 7200000,
+    });
+  });
+
+  it('等级混合回填按时间还原足迹，标记幂等且失败回滚', async () => {
+    const impl = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      migrateWatchLevel(): Promise<void>;
+    };
+    const session = watchLevelSession;
+    await storage.setPlaybackSession('level-migrate', {
+      ...session,
+      id: 'level-old-a',
+      started_at: 0,
+      watch_seconds: 6300,
+    });
+    await storage.saveWatchSessionReport(
+      'level-migrate',
+      { ...session, id: 'level-bucket-a', title: '桶升级', ended_at: 1800001 },
+      [{ start: 900000, watch_ms: 800000 }],
+    );
+    await storage.saveWatchSessionReport(
+      'level-migrate',
+      { ...session, id: 'level-bucket-b' },
+      [{ start: 900000, watch_ms: 800000 }],
+    );
+    await storage.setPlaybackSession('level-migrate', {
+      ...session,
+      id: 'level-old-b',
+      title: '旧口径升级',
+      started_at: 2000000,
+      ended_at: 3000000,
+      watch_seconds: 64800,
+    });
+    await impl.pool.execute('DELETE FROM user_watch_totals');
+    await impl.pool.execute('DELETE FROM user_level_events');
+    await impl.pool.execute(
+      "DELETE FROM storage_migrations WHERE name = 'watch_level_v1'",
+    );
+    await impl.pool.query(
+      "CREATE TRIGGER fail_watch_level BEFORE INSERT ON user_level_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'interrupt'",
+    );
+    try {
+      await expect(impl.migrateWatchLevel()).rejects.toThrow('interrupt');
+      expect((await storage.getWatchLevel('level-migrate')).countedMs).toBe(0);
+    } finally {
+      await impl.pool.query('DROP TRIGGER fail_watch_level');
+    }
+    await impl.migrateWatchLevel();
+    const state = await storage.getWatchLevel('level-migrate');
+    expect(state.countedMs).toBe(72000000);
+    expect(state.events).toEqual([
+      expect.objectContaining({
+        level: 2,
+        title: '桶升级',
+        reachedAt: 1800000,
+      }),
+      expect.objectContaining({
+        level: 3,
+        title: '旧口径升级',
+        reachedAt: 3000000,
+      }),
+    ]);
+    await storage.deletePlaybackSessionsBefore(Number.MAX_SAFE_INTEGER);
+    await impl.migrateWatchLevel();
+    expect(await storage.getWatchLevel('level-migrate')).toEqual(state);
   });
 
   it('播放记录会话序号与并发 CAS 契约', async () => {
@@ -362,7 +456,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         ),
       ),
     );
-    expect(new Set(ids).size).toBe(1);
+    expect(new Set(ids.map((result) => result.historyId)).size).toBe(1);
     expect(
       (
         await storage.getPlaybackPeriodSessions('concurrent-user', 0, 1000000)

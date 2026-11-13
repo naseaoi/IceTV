@@ -13,6 +13,7 @@ import ModalShell from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingStars from '@/components/RatingStars';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import {
   type FollowedOpinion,
   type FollowedOpinions as Opinions,
@@ -180,8 +181,11 @@ function OpinionRow({ item }: { item: FollowedOpinion }) {
       >
         <ProfileAvatar user={item.author} className='h-9 w-9 rounded-full' />
         <div className='min-w-0 flex-1'>
-          <p className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-            {item.author.nickname ?? '未设置昵称'}
+          <p className='flex min-w-0 items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-gray-100'>
+            <span className='truncate'>
+              {item.author.nickname ?? '未设置昵称'}
+            </span>
+            <WatchLevelBadge level={item.author.level} />
           </p>
           <p className='mt-0.5 text-xs text-gray-500 dark:text-gray-400'>
             {[status, item.hasPublicReview ? '写了评价' : null]

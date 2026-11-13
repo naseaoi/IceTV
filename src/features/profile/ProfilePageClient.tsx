@@ -18,6 +18,7 @@ import PublicReviewContent, {
 import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import { RecapEntryLink } from '@/features/annual-report/components/RecapEntryLink';
 import {
   FavoriteGrid,
@@ -436,11 +437,14 @@ export default function ProfilePageClient({
                 <div className='flex flex-wrap items-center gap-4'>
                   <ProfileAvatar user={profile} className='h-16 w-16' />
                   <div className='min-w-0 flex-1'>
-                    <h1
-                      className={`break-words ${NICKNAME_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
-                    >
-                      {profile.nickname ?? '未设置昵称'}
-                    </h1>
+                    <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
+                      <h1
+                        className={`min-w-0 break-words ${NICKNAME_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
+                      >
+                        {profile.nickname ?? '未设置昵称'}
+                      </h1>
+                      <WatchLevelBadge level={profile.level} size='md' />
+                    </div>
                     <div
                       className={`${PROFILE_STATS_CLASS} text-gray-500 dark:text-gray-400`}
                     >

@@ -31,7 +31,86 @@ import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
-import { videoReviewContract } from './__fixtures__/video-review-contract';
+import {
+  videoReview,
+  videoReviewContract,
+} from './__fixtures__/video-review-contract';
+
+it.each([null, 20 * 3_600_000])(
+  'public references read current watch totals: %s',
+  async (countedMs) => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const sql = (
+      storage as unknown as { db: import('better-sqlite3').Database }
+    ).db;
+    try {
+      const profile = await storage.ensureUserProfile('author');
+      await storage.ensureUserProfile('reader');
+      await storage.setUserFollow('reader', 'author', true);
+      await storage.setVideoReview('author', videoReview);
+      if (countedMs !== null)
+        sql
+          .prepare(
+            'INSERT INTO user_watch_totals (username, counted_ms, updated_at) VALUES (?, ?, ?)',
+          )
+          .run('author', countedMs, Date.now());
+      const level = countedMs === null ? 1 : 3;
+      expect((await storage.getUserProfile('author'))?.level).toBe(level);
+      expect(
+        (await storage.getUserProfileById(profile.profile_id))?.level,
+      ).toBe(level);
+      expect(
+        (await storage.getUserProfileView('author', 'reader'))?.level,
+      ).toBe(level);
+      expect(
+        (await storage.getUserFollowPage('reader', 'following')).items[0].level,
+      ).toBe(level);
+      expect(
+        (await storage.getUserPublicReviewPage('author', 'reader')).items[0]
+          .author.level,
+      ).toBe(level);
+      expect(
+        (
+          await storage.getFollowOpinions(
+            'reader',
+            videoReview.title_norm,
+            videoReview.year,
+          )
+        ).items[0].author.level,
+      ).toBe(level);
+      const reply = await storage.postReviewReply(
+        'author',
+        videoReview.title_norm,
+        videoReview.year,
+        'author',
+        'Reply',
+      );
+      expect(reply?.author.level).toBe(level);
+      const response = await storage.postReviewReply(
+        'author',
+        videoReview.title_norm,
+        videoReview.year,
+        'reader',
+        'Response',
+        reply!.id,
+      );
+      expect(response?.author.level).toBe(1);
+      expect(response?.replyTo?.level).toBe(level);
+      const notice = (
+        await storage.getSocialNotifications(
+          'new-follower',
+          'author',
+          0,
+          [],
+          Date.now(),
+        )
+      )[0];
+      expect(notice.type === 'new-follower' && notice.follower.level).toBe(1);
+    } finally {
+      sql.close();
+    }
+  },
+);
 
 it('按标题读取本人最近进度并匹配归一化标题和年份', async () => {
   await assertPlayRecordTitleLookup(new LocalSqliteStorage(':memory:'));
@@ -1084,6 +1163,7 @@ describe('sqlite social username migration', () => {
         profile_id: 'Alice0123456',
         nickname: 'Alice',
         avatar_seed: null,
+        level: 1,
         favorites_public: 1 as const,
         updated_at: 123,
       });

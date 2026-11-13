@@ -34,6 +34,7 @@ import PageLayout from '@/components/PageLayout';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import SkeletonText from '@/components/SkeletonText';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import { listItemPlayUrl, listUrl } from '@/features/lists/lib/list-links';
 import {
   deleteList,
@@ -617,6 +618,7 @@ function ListHeader({
               >
                 <ProfileAvatar user={owner} className='h-5 w-5' />
                 {owner.nickname ?? '未设置昵称'}
+                <WatchLevelBadge level={owner.level} />
               </Link>
             ) : (
               <span

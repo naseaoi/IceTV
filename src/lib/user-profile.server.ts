@@ -75,6 +75,7 @@ function ownProfile(profile: UserProfile) {
     profileId: profile.profile_id,
     nickname: profile.nickname,
     avatarSeed: profile.avatar_seed,
+    level: profile.level ?? 1,
     libraryVisibility: profile.favorites_public,
   };
 }

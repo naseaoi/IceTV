@@ -7,6 +7,7 @@ import type {
   StoredUserDanmaku,
   UserDanmakuQuery,
 } from '@/lib/user-danmaku-storage';
+import type { WatchLevel } from '@/lib/watch-level';
 import { AdminConfig } from '@/types/admin';
 
 // 播放记录数据结构
@@ -96,6 +97,7 @@ export type LibraryVisibility = 0 | 1 | 2 | 3;
 
 // 用户资料：登录名只在服务端使用，对外一律用 profile_id + 昵称
 export interface UserProfile {
+  level?: WatchLevel;
   username: string;
   profile_id: string;
   nickname: string | null;
@@ -105,6 +107,7 @@ export interface UserProfile {
 }
 
 export interface PublicUserRef {
+  level?: WatchLevel;
   profileId: string;
   nickname: string | null;
   // null 时头像按 profileId 生成
@@ -182,7 +185,7 @@ export interface ReviewTarget {
 export interface PublicReviewReply {
   id: string;
   author: PublicUserRef;
-  replyTo: { profileId: string; nickname: string | null } | null;
+  replyTo: Pick<PublicUserRef, 'profileId' | 'nickname' | 'level'> | null;
   content: string;
   created_at: number;
   isMine: boolean;
@@ -994,13 +997,19 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
 
-  setPlaybackSession(userName: string, session: PlaybackSession): Promise<void>;
+  setPlaybackSession(
+    userName: string,
+    session: PlaybackSession,
+  ): Promise<import('@/lib/watch-level-types').WatchLevelUp>;
+  getWatchLevel(
+    userName: string,
+  ): Promise<import('@/lib/watch-level-types').WatchLevelResponse>;
   saveWatchSessionReport(
     userName: string,
     session: PlaybackSession,
     buckets: PlaybackWatchBucket[],
     history?: WatchHistoryWrite,
-  ): Promise<string | null>;
+  ): Promise<import('@/lib/watch-level-types').WatchSessionSaveResult>;
   getWatchHistoryPage(
     userName: string,
     query: WatchHistoryQuery,

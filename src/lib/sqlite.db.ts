@@ -130,6 +130,24 @@ import {
   reviewSql,
   VideoReviewRow,
 } from '@/lib/video-reviews';
+import { WATCH_LEVEL_BUCKET_CAP_MS, watchLevelForMs } from '@/lib/watch-level';
+import type {
+  WatchLevelBackfillRow,
+  WatchLevelEventRow,
+} from '@/lib/watch-level-storage';
+import {
+  levelEventValues,
+  levelUpForDelta,
+  mapWatchLevelEvent,
+  newlyReachedLevels,
+  WATCH_LEVEL_EVENT_INSERT,
+  watchLevelBackfillSql,
+} from '@/lib/watch-level-storage';
+import type {
+  WatchLevelResponse,
+  WatchLevelUp,
+  WatchSessionSaveResult,
+} from '@/lib/watch-level-types';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -664,6 +682,7 @@ export class LocalSqliteStorage implements IStorage {
       this.checkpointWal();
     }
     this.migrateWatchHistory();
+    this.migrateWatchLevel();
     this.backfillFavoriteProjection();
     this.backfillUserProfiles();
     new SqliteUserAccessStore(this.db).migrate();
@@ -711,6 +730,14 @@ export class LocalSqliteStorage implements IStorage {
           );
         this.db.exec(`
         CREATE TABLE IF NOT EXISTS storage_migrations (name TEXT PRIMARY KEY, completed_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS user_watch_totals (
+          username TEXT PRIMARY KEY, counted_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS user_level_events (
+          username TEXT NOT NULL, level INTEGER NOT NULL, reached_at INTEGER NOT NULL,
+          source TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, year TEXT NOT NULL,
+          episode_index INTEGER NOT NULL, PRIMARY KEY (username, level)
+        );
         CREATE TABLE IF NOT EXISTS playback_watch_buckets (
           username TEXT NOT NULL, session_id TEXT NOT NULL, bucket_start INTEGER NOT NULL,
           watch_ms INTEGER NOT NULL, PRIMARY KEY (username, session_id, bucket_start)
@@ -729,6 +756,83 @@ export class LocalSqliteStorage implements IStorage {
       `);
       })
       .immediate();
+  }
+
+  private migrateWatchLevel(): void {
+    this.db
+      .transaction(() => {
+        if (
+          this.db
+            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
+            .get('watch_level_v1')
+        )
+          return;
+        const rows = this.db
+          .prepare(watchLevelBackfillSql)
+          .all() as WatchLevelBackfillRow[];
+        for (const row of rows)
+          this.addWatchLevel(
+            row.username,
+            Number(row.counted_ms),
+            row,
+            Number(row.reached_at),
+          );
+        this.db
+          .prepare(
+            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
+          )
+          .run('watch_level_v1', Date.now());
+      })
+      .immediate();
+  }
+
+  private addWatchLevel(
+    username: string,
+    delta: number,
+    session: Pick<
+      PlaybackSession,
+      'source' | 'video_id' | 'title' | 'year' | 'episode_index'
+    >,
+    reachedAt: number,
+  ): WatchLevelUp {
+    if (delta <= 0) return null;
+    const previous = this.db
+      .prepare('SELECT counted_ms FROM user_watch_totals WHERE username = ?')
+      .get(username) as { counted_ms: number } | undefined;
+    const before = previous?.counted_ms ?? 0;
+    this.db
+      .prepare(
+        `INSERT INTO user_watch_totals (username, counted_ms, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET counted_ms = counted_ms + excluded.counted_ms, updated_at = MAX(updated_at, excluded.updated_at)`,
+      )
+      .run(username, delta, reachedAt);
+    for (const { level } of newlyReachedLevels(before, before + delta))
+      this.db
+        .prepare(
+          WATCH_LEVEL_EVENT_INSERT + ' ON CONFLICT(username, level) DO NOTHING',
+        )
+        .run(...levelEventValues(username, level, reachedAt, session));
+    return levelUpForDelta(before, delta);
+  }
+
+  async getWatchLevel(userName: string): Promise<WatchLevelResponse> {
+    const username = normalizeUsername(userName);
+    return this.db.transaction(() => {
+      const row = this.db
+        .prepare('SELECT counted_ms FROM user_watch_totals WHERE username = ?')
+        .get(username) as { counted_ms: number } | undefined;
+      const countedMs = row?.counted_ms ?? 0;
+      const events = this.db
+        .prepare(
+          'SELECT * FROM user_level_events WHERE username = ? ORDER BY level',
+        )
+        .all(username) as WatchLevelEventRow[];
+      return {
+        level: watchLevelForMs(countedMs),
+        countedMs,
+        events: events.map(mapWatchLevelEvent),
+      };
+    })();
   }
 
   private migrateWatchHistory(): void {
@@ -1372,7 +1476,7 @@ export class LocalSqliteStorage implements IStorage {
           year = excluded.year,
           started_at = excluded.started_at,
           ended_at = excluded.ended_at,
-          watch_seconds = excluded.watch_seconds,
+          watch_seconds = MAX(playback_sessions.watch_seconds, excluded.watch_seconds),
           last_position = excluded.last_position,
           total_time = excluded.total_time,
           created_at = excluded.created_at,
@@ -1625,6 +1729,27 @@ export class LocalSqliteStorage implements IStorage {
         this.db
           .prepare('DELETE FROM work_completions WHERE username = ?')
           .run(legacy);
+        this.db
+          .prepare(
+            `INSERT INTO user_watch_totals (username, counted_ms, updated_at)
+          SELECT ?, counted_ms, updated_at FROM user_watch_totals WHERE username = ?
+          ON CONFLICT(username) DO UPDATE SET counted_ms = counted_ms + excluded.counted_ms, updated_at = MAX(updated_at, excluded.updated_at)`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare(
+            `INSERT INTO user_level_events (username, level, reached_at, source, video_id, title, year, episode_index)
+          SELECT ?, level, reached_at, source, video_id, title, year, episode_index FROM user_level_events WHERE username = ?
+          ON CONFLICT(username, level) DO UPDATE SET reached_at = excluded.reached_at, source = excluded.source, video_id = excluded.video_id,
+          title = excluded.title, year = excluded.year, episode_index = excluded.episode_index WHERE excluded.reached_at < user_level_events.reached_at`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM user_watch_totals WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare('DELETE FROM user_level_events WHERE username = ?')
+          .run(legacy);
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
         const likedLists = this.db
@@ -1824,6 +1949,8 @@ export class LocalSqliteStorage implements IStorage {
       'skip_configs',
       'playback_sessions',
       'watch_history',
+      'user_watch_totals',
+      'user_level_events',
       'playback_watch_buckets',
       'user_message_state',
       'user_annual_recaps',
@@ -3389,6 +3516,12 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.db
+        .prepare('DELETE FROM user_watch_totals WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_level_events WHERE username = ?')
+        .run(targetUser);
+      this.db
         .prepare('DELETE FROM user_notice_events WHERE recipient_username = ?')
         .run(targetUser);
       this.db
@@ -3947,26 +4080,53 @@ export class LocalSqliteStorage implements IStorage {
   async setPlaybackSession(
     userName: string,
     session: PlaybackSession,
-  ): Promise<void> {
+  ): Promise<WatchLevelUp> {
     const username = normalizeUsername(userName);
-    this.stmts.setPlaybackSession.run(
-      session.id,
-      username,
-      session.source,
-      session.video_id,
-      session.episode_index,
-      session.title,
-      session.source_name,
-      session.cover,
-      session.year,
-      session.started_at,
-      session.ended_at,
-      session.watch_seconds,
-      session.last_position,
-      session.total_time,
-      session.created_at,
-      session.updated_at,
-    );
+    return this.db
+      .transaction(() => {
+        const existing = this.db
+          .prepare(
+            'SELECT username, watch_seconds, measurement_version FROM playback_sessions WHERE id = ?',
+          )
+          .get(session.id) as
+          | {
+              username: string;
+              watch_seconds: number;
+              measurement_version: number;
+            }
+          | undefined;
+        if (
+          existing &&
+          (existing.username !== username || existing.measurement_version !== 1)
+        )
+          return null;
+        this.stmts.setPlaybackSession.run(
+          session.id,
+          username,
+          session.source,
+          session.video_id,
+          session.episode_index,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.started_at,
+          session.ended_at,
+          session.watch_seconds,
+          session.last_position,
+          session.total_time,
+          session.created_at,
+          session.updated_at,
+        );
+        return this.addWatchLevel(
+          username,
+          Math.max(0, session.watch_seconds - (existing?.watch_seconds ?? 0)) *
+            1000,
+          session,
+          session.ended_at,
+        );
+      })
+      .immediate();
   }
 
   async saveWatchSessionReport(
@@ -3974,18 +4134,26 @@ export class LocalSqliteStorage implements IStorage {
     session: PlaybackSession,
     buckets: PlaybackWatchBucket[],
     history?: WatchHistoryWrite,
-  ): Promise<string | null> {
+  ): Promise<WatchSessionSaveResult> {
     const username = normalizeUsername(userName);
     return this.db
       .transaction(() => {
         const existing = this.db
           .prepare(
-            'SELECT username, watch_seconds FROM playback_sessions WHERE id = ?',
+            'SELECT username, watch_seconds, measurement_version FROM playback_sessions WHERE id = ?',
           )
           .get(session.id) as
-          | { username: string; watch_seconds: number }
+          | {
+              username: string;
+              watch_seconds: number;
+              measurement_version: number;
+            }
           | undefined;
-        if (existing && existing.username !== username) return null;
+        if (
+          existing &&
+          (existing.username !== username || existing.measurement_version !== 2)
+        )
+          return { historyId: null, levelUp: null };
         if (
           !buckets.some((bucket) => bucket.watch_ms > 0) &&
           !this.db
@@ -3994,7 +4162,7 @@ export class LocalSqliteStorage implements IStorage {
             )
             .get(username, session.id)
         )
-          return null;
+          return { historyId: null, levelUp: null };
         this.db
           .prepare(
             `INSERT INTO playback_sessions (
@@ -4027,8 +4195,30 @@ export class LocalSqliteStorage implements IStorage {
         const putBucket = this.db
           .prepare(`INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
         VALUES (?, ?, ?, ?) ON CONFLICT(username, session_id, bucket_start) DO UPDATE SET watch_ms = MAX(watch_ms, excluded.watch_ms)`);
-        for (const bucket of buckets)
+        let delta = 0;
+        const bucketTotal = this.db.prepare(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND bucket_start = ?',
+        );
+        for (const bucket of buckets) {
+          const before = Number(
+            (bucketTotal.get(username, bucket.start) as { total: number })
+              .total,
+          );
           putBucket.run(username, session.id, bucket.start, bucket.watch_ms);
+          const after = Number(
+            (bucketTotal.get(username, bucket.start) as { total: number })
+              .total,
+          );
+          delta +=
+            Math.min(after, WATCH_LEVEL_BUCKET_CAP_MS) -
+            Math.min(before, WATCH_LEVEL_BUCKET_CAP_MS);
+        }
+        const levelUp = this.addWatchLevel(
+          username,
+          delta,
+          session,
+          session.ended_at,
+        );
         const total = this.db
           .prepare(
             'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
@@ -4039,7 +4229,7 @@ export class LocalSqliteStorage implements IStorage {
             'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
           )
           .run(Math.floor(total.total / 1000), session.id, username);
-        if (!history || total.total <= 0) return null;
+        if (!history || total.total <= 0) return { historyId: null, levelUp };
         const values = [
           session.title,
           session.source_name,
@@ -4068,7 +4258,7 @@ export class LocalSqliteStorage implements IStorage {
               session.source,
               session.video_id,
             );
-          return result.changes ? history.id : null;
+          return { historyId: result.changes ? history.id : null, levelUp };
         }
         this.db
           .prepare(
@@ -4090,13 +4280,14 @@ export class LocalSqliteStorage implements IStorage {
             session.video_id,
             session.started_at,
           );
-        return (
+        const historyId = (
           this.db
             .prepare(
               'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
             )
             .get(username, session.source, session.video_id) as { id: string }
         ).id;
+        return { historyId, levelUp };
       })
       .immediate();
   }

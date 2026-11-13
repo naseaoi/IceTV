@@ -89,6 +89,7 @@ it('returns only public profile fields and validates updates', async () => {
     profileId: 'Reader012345',
     nickname: 'Reader',
     avatarSeed: null,
+    level: 1,
     libraryVisibility: 0,
   });
   db.updateUserProfile.mockResolvedValue({
@@ -162,6 +163,7 @@ it.each(['Avatar012345', 'a'.repeat(8), 'Z'.repeat(24), null])(
       profileId: 'Reader012345',
       nickname: null,
       avatarSeed,
+      level: 1,
       libraryVisibility: 0,
     });
     expect(db.updateUserProfile).toHaveBeenCalledWith('reader', { avatarSeed });

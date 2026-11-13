@@ -29,6 +29,7 @@ function mockSession(nickname: string | null) {
   jest.mocked(useAuthSession).mockReturnValue({
     session: {
       status: 'authenticated',
+      level: 1,
       username: 'private-login',
       role: 'user',
       profileId: 'profileAlice',

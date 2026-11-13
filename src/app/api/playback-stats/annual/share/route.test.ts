@@ -186,7 +186,12 @@ it('reads only the owner snapshot and returns opaque identity', async () => {
     params: Promise.resolve({ profileId: 'AbCdEf012345', year: '2025' }),
   });
   expect(await response.json()).toEqual({
-    owner: { profileId: 'AbCdEf012345', nickname: '昵称', avatarSeed: null },
+    owner: {
+      profileId: 'AbCdEf012345',
+      nickname: '昵称',
+      avatarSeed: null,
+      level: 1,
+    },
     isSelf: true,
     report: { year: 2025, rhythmHidden: true },
     years: [2025],

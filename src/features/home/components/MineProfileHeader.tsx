@@ -8,7 +8,9 @@ import { useAuthSession } from '@/components/AuthProvider';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import { FollowList } from '@/features/profile/FollowList';
+import { WatchLevelPanel } from '@/features/watch-level/WatchLevelPanel';
 import { rememberMyReviewCount } from '@/lib/my-review-count';
 import { getUserProfile } from '@/lib/profile.client';
 import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
@@ -82,6 +84,7 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
   );
   const [list, setList] = useState<'followers' | 'following' | null>(null);
   const [editing, setEditing] = useState(false);
+  const [levelOpen, setLevelOpen] = useState(false);
 
   useEffect(() => {
     if (!profileId) return;
@@ -142,6 +145,16 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
           >
             <Link href={profileHref}>{nickname}</Link>
           </h1>
+          {session.level && (
+            <button
+              type='button'
+              aria-label='查看观影等级'
+              onClick={() => setLevelOpen(true)}
+              className='ml-1 shrink-0 rounded transition active:scale-95'
+            >
+              <WatchLevelBadge level={session.level} size='md' />
+            </button>
+          )}
           <button
             type='button'
             aria-label='编辑资料'
@@ -201,6 +214,7 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
         type={list}
         onClose={() => setList(null)}
       />
+      {levelOpen && <WatchLevelPanel onClose={() => setLevelOpen(false)} />}
       {editing && (
         <ProfilePanel
           showSuccessToast={false}
