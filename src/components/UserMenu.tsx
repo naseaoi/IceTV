@@ -5,6 +5,7 @@ import {
   CircleUserRound,
   Heart,
   History,
+  ListVideo,
   LogIn,
   LogOut,
   MessageSquareText,
@@ -24,7 +25,6 @@ import { createPortal } from 'react-dom';
 import { AdminAlertBadge } from '@/features/admin/components/AdminAlertBadge';
 import { usePresence } from '@/hooks/usePresence';
 import { snapToDevicePixel } from '@/lib/pixel-snap';
-import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 
 import { useAuthSession } from './AuthProvider';
@@ -49,10 +49,14 @@ const MENU_ROW_CLASS =
 
 const MENU_ICON_CLASS = 'h-4 w-4 text-gray-400 dark:text-gray-500';
 
+const MENU_FOOTER_ACTION_CLASS =
+  'inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white';
+
 const MENU_EXIT_MS = 200;
 
 const QUICK_LINKS = [
   { icon: Heart, label: '收藏', href: '/me/favorites' },
+  { icon: ListVideo, label: '片单', href: '/me/lists' },
   { icon: History, label: '历史', href: '/me/history' },
   { icon: MessageSquareText, label: '评价', href: '/me/reviews' },
 ];
@@ -69,29 +73,11 @@ export const UserMenu: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
-  const [storageType, setStorageType] = useState<string>('localdb');
   const [mounted, setMounted] = useState(false);
   const hasUpdate = useHasUpdate();
 
   useEffect(() => {
-    let cancelled = false;
-
     setMounted(true);
-
-    const loadClientState = async () => {
-      const { storageType } = await getClientAuthRuntimeConfig();
-      if (cancelled) {
-        return;
-      }
-
-      setStorageType(storageType);
-    };
-
-    loadClientState();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const computeMenuPos = useMemo(() => {
@@ -182,9 +168,6 @@ export const UserMenu: React.FC = () => {
     })),
     { icon: CircleUserRound, label: '资料', onClick: handleProfile },
     { icon: Settings, label: '设置', onClick: handleSettings },
-    ...(showAdminPanel
-      ? [{ icon: Shield, label: '后台', onClick: () => navigateTo('/admin') }]
-      : []),
   ];
 
   const displayName = isAuthenticated
@@ -233,8 +216,7 @@ export const UserMenu: React.FC = () => {
               <ChevronRight className='h-4 w-4 flex-shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 dark:text-gray-600' />
             </button>
 
-            {/* 不足一行的宫格居中 */}
-            <div className='motion-stagger mt-1 flex flex-wrap justify-center gap-y-1'>
+            <div className='motion-stagger mt-1 grid grid-cols-3 gap-y-1'>
               {tileActions.map(({ icon: Icon, label, onClick }, index) => (
                 <button
                   key={label}
@@ -242,16 +224,9 @@ export const UserMenu: React.FC = () => {
                   role='menuitem'
                   onClick={onClick}
                   style={{ '--stagger-index': index } as CSSProperties}
-                  className='flex w-1/3 flex-col items-center gap-1.5 rounded-xl py-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
+                  className='flex flex-col items-center gap-1.5 rounded-xl py-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
                 >
-                  <span className='relative'>
-                    <Icon className='h-[18px] w-[18px]' strokeWidth={1.75} />
-                    {label === '后台' && (
-                      <span className='absolute -right-3 -top-2'>
-                        <AdminAlertBadge />
-                      </span>
-                    )}
-                  </span>
+                  <Icon className='h-[18px] w-[18px]' strokeWidth={1.75} />
                   {label}
                 </button>
               ))}
@@ -306,20 +281,32 @@ export const UserMenu: React.FC = () => {
                 </>
               )}
             </span>
-            <span aria-hidden='true'>·</span>
-            <span className='shrink-0'>{storageType}</span>
           </button>
           {isAuthenticated && (
-            <button
-              type='button'
-              role='menuitem'
-              disabled={loggingOut}
-              onClick={handleLogout}
-              className='inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
-            >
-              <LogOut className='h-3.5 w-3.5' />
-              {loggingOut ? '退出中…' : '退出'}
-            </button>
+            <div className='flex shrink-0 items-center'>
+              {showAdminPanel && (
+                <button
+                  type='button'
+                  role='menuitem'
+                  onClick={() => navigateTo('/admin')}
+                  className={MENU_FOOTER_ACTION_CLASS}
+                >
+                  <Shield className='h-3.5 w-3.5' />
+                  后台
+                  <AdminAlertBadge />
+                </button>
+              )}
+              <button
+                type='button'
+                role='menuitem'
+                disabled={loggingOut}
+                onClick={handleLogout}
+                className={MENU_FOOTER_ACTION_CLASS}
+              >
+                <LogOut className='h-3.5 w-3.5' />
+                {loggingOut ? '退出中…' : '退出'}
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -197,7 +197,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           <div className={INFO_RATING_LINE_CLASS}>
             {rating &&
               (rating.kind === 'none' ? (
-                <span className='text-xs text-gray-400 dark:text-gray-500'>
+                <span className='text-xs leading-none text-gray-400 dark:text-gray-500'>
                   暂无评分
                 </span>
               ) : (
@@ -208,7 +208,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
                     {formatRating(rating.average)}
                   </span>
                   <RatingStars value={rating.average} size='sm' />
-                  <span className='truncate text-xs text-gray-500 dark:text-gray-400'>
+                  <span className='truncate text-xs leading-none text-gray-500 dark:text-gray-400'>
                     {rating.kind === 'site'
                       ? `${rating.count} 人评分`
                       : '豆瓣评分'}
@@ -218,32 +218,40 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           </div>
         </div>
 
-        <div className='-ml-0.5 flex min-w-0 flex-wrap items-center gap-1.5'>
+        <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
           {onOpenReview && (
             <button
               type='button'
               aria-label={myReview ? '编辑我的评价' : '评分'}
-              className='inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-gray-900/[0.05] px-2.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-900/[0.09] dark:bg-white/[0.07] dark:text-gray-200 dark:hover:bg-white/[0.12]'
+              className={`inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-xs transition-colors ${
+                // 无底色时左移内边距，让星标与上方文字左缘对齐
+                myReview
+                  ? '-ml-2.5 text-gray-600 hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.07] dark:hover:text-white'
+                  : 'bg-gray-900/[0.05] font-medium text-gray-700 hover:bg-gray-900/[0.09] dark:bg-white/[0.07] dark:text-gray-200 dark:hover:bg-white/[0.12]'
+              }`}
               onClick={onOpenReview}
             >
-              <Star
-                aria-hidden='true'
-                className={`h-3.5 w-3.5 text-amber-500 ${
-                  myReview?.rating ? 'fill-current' : ''
-                }`.trim()}
-              />
-              {myReview?.rating ? (
-                <>
-                  我的
-                  <span className='font-semibold tabular-nums text-amber-600 dark:text-amber-400'>
-                    {formatRating(myReview.rating)}
-                  </span>
-                </>
-              ) : myReview ? (
-                '已评价'
-              ) : (
-                '评分'
-              )}
+              {/* 高度取文字行高，星标多出部分向上溢出，星尖与文字基线齐平且文字与相邻按钮同高 */}
+              <span className='inline-flex h-3 items-end gap-1 leading-none'>
+                <Star
+                  aria-hidden='true'
+                  className={`h-3.5 w-3.5 text-amber-500 ${
+                    myReview?.rating ? 'fill-current' : ''
+                  }`.trim()}
+                />
+                {myReview?.rating ? (
+                  <>
+                    我的
+                    <span className='font-semibold tabular-nums text-amber-600 dark:text-amber-400'>
+                      {formatRating(myReview.rating)}
+                    </span>
+                  </>
+                ) : myReview ? (
+                  '已评价'
+                ) : (
+                  '评分'
+                )}
+              </span>
             </button>
           )}
           <FollowedOpinionsButton

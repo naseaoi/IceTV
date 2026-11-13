@@ -259,14 +259,12 @@ async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
 }
 
 export async function getClientAuthRuntimeConfig(): Promise<{
-  storageType: string;
   openRegister: boolean;
   linuxDoLogin: boolean;
   requireInviteCode: boolean;
 }> {
   const runtimeConfig = await ensureClientRuntimeConfig();
   return {
-    storageType: runtimeConfig.STORAGE_TYPE,
     openRegister: runtimeConfig.OPEN_REGISTER,
     linuxDoLogin: runtimeConfig.LINUXDO_LOGIN,
     requireInviteCode: runtimeConfig.REQUIRE_INVITE_CODE,
