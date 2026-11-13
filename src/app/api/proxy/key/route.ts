@@ -18,6 +18,7 @@ import {
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -82,6 +83,7 @@ export async function GET(request: NextRequest) {
               userAgent: ua,
               maxBytes: MAX_KEY_BYTES,
               accept: '*/*',
+              signal: request.signal,
             },
           );
           return new Response(bufferToArrayBuffer(response.body), {
@@ -97,6 +99,9 @@ export async function GET(request: NextRequest) {
             },
           });
         } catch (proxyError) {
+          const busy = resourceLimitResponse(proxyError);
+          if (busy) return busy;
+          if (request.signal?.aborted) throw proxyError;
           console.warn('代理 key 环境代理回源失败:', proxyError);
         }
       }
@@ -118,6 +123,7 @@ export async function GET(request: NextRequest) {
       useProxyPool: !isLiveStream,
       skipInitialValidation: true,
       timeoutMs,
+      signal: request.signal,
     });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
@@ -139,6 +145,8 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }

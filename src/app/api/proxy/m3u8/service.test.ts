@@ -41,6 +41,14 @@ const mockRewrite = jest.fn(
 );
 const mockAuthorization = jest.fn();
 installStreamPolyfills();
+Object.assign(globalThis, {
+  DOMException: class extends Error {
+    constructor(message: string, name: string) {
+      super(message);
+      this.name = name;
+    }
+  },
+});
 const { loadM3U8Data, peekM3U8Cache, refreshM3U8Cache } =
   require('@/app/api/proxy/m3u8/service') as typeof import('@/app/api/proxy/m3u8/service');
 const { GET } =
@@ -75,6 +83,59 @@ async function load(url: string, content: string): Promise<void> {
 }
 
 describe('m3u8 upstream identity', () => {
+  it.each([false, true])(
+    'cancels shared upstream only after all consumers leave (skipCache=%s)',
+    async (skipCache) => {
+      const signals: AbortSignal[] = [];
+      mockFetch.mockReset().mockImplementation((_url, init) => {
+        signals.push(init.signal);
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError')),
+          );
+        });
+      });
+      const first = new AbortController();
+      const second = new AbortController();
+      const url = `https://cdn.example/cancel/${skipCache}.m3u8`;
+      const context = {
+        startedAt: Date.now(),
+        proxyMode: 'server-proxy',
+        userAction: null,
+        userInitiated: false,
+      };
+      const a = loadM3U8Data(url, 'test', SOURCE, false, skipCache, {
+        ...context,
+        signal: first.signal,
+      });
+      const b = loadM3U8Data(url, 'test', SOURCE, false, skipCache, {
+        ...context,
+        signal: second.signal,
+      });
+      const rejectedA = expect(a).rejects.toMatchObject({ name: 'AbortError' });
+      const rejectedB = expect(b).rejects.toMatchObject({ name: 'AbortError' });
+      while (!signals.length)
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      first.abort();
+      await rejectedA;
+      expect(signals[0].aborted).toBe(false);
+      second.abort();
+      await rejectedB;
+      await Promise.resolve();
+      expect(signals[0].aborted).toBe(true);
+      mockFetch.mockResolvedValue(new Response(mediaPlaylist('fresh.ts')));
+      const retry = await loadM3U8Data(
+        url,
+        'test',
+        SOURCE,
+        false,
+        skipCache,
+        context,
+      );
+      expect(retry.content).toContain('fresh.ts');
+    },
+  );
+
   it('shares raw results and in-flight loads across sticky contexts', async () => {
     const url = 'https://cdn.example/sticky-shared/master.m3u8';
     let finish!: (value: Response) => void;
@@ -98,7 +159,7 @@ describe('m3u8 upstream identity', () => {
       ...context,
       proxyPoolStickyKey: 'b'.repeat(64),
     });
-    expect(second).toBe(first);
+    expect(second).not.toBe(first);
     while (!finish)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     finish(

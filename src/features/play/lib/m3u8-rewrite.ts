@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { appendProxySignature } from '@/lib/proxy-auth';
 import { createSwrCache } from '@/lib/server-cache';
-import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
+import { resolveUrl } from '@/lib/url-resolve';
 
 export type M3U8RewriteEntry = {
   content: string;
@@ -72,7 +72,7 @@ export async function getRewrittenM3U8Content(
 
   const task = rewriteM3U8Content(
     entry.content,
-    getBaseUrl(entry.finalUrl),
+    entry.finalUrl || originalUrl,
     req,
     allowCORS,
     forceServer,

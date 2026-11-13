@@ -41,6 +41,7 @@ describe('server proxy quota', () => {
     );
     expect(result?.status).toBe(503);
     expect(result?.headers.get('Retry-After')).toBeTruthy();
+    expect(result?.headers.get('X-IceTV-Resource-Limited')).toBe('1');
   });
 
   it('放行额度内的分片请求，超额回 429 且带 Retry-After', async () => {

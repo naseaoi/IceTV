@@ -57,16 +57,9 @@ export class UrlValidationError extends Error {
 }
 
 export function validateProxyUrl(raw: string): UrlValidationResult {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(raw);
-  } catch {
-    return { ok: false, reason: 'Invalid URL encoding' };
-  }
-
   let parsed: URL;
   try {
-    parsed = new URL(decoded);
+    parsed = new URL(raw);
   } catch {
     return { ok: false, reason: 'Invalid URL' };
   }
@@ -80,7 +73,7 @@ export function validateProxyUrl(raw: string): UrlValidationResult {
     return { ok: false, reason: 'Blocked destination' };
   }
 
-  return { ok: true, url: decoded };
+  return { ok: true, url: raw };
 }
 
 export async function validateProxyUrlForRequest(
@@ -140,7 +133,9 @@ export async function fetchWithUrlGuard(
         validation.url,
         fetchInit,
         resourceContext,
-        abortState.signal,
+        fetchInit.signal
+          ? AbortSignal.any([fetchInit.signal, abortState.signal])
+          : abortState.signal,
         useProxyPool,
         proxyPoolStickyKey,
       );
