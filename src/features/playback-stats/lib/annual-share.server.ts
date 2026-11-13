@@ -80,9 +80,10 @@ export async function handleAnnualShare(request: NextRequest) {
       { type: 'year', date: `${year}-01-01`, timeZone: body.tz },
       now,
     );
-    const [data, reviews] = await Promise.all([
+    const [data, reviews, activity] = await Promise.all([
       db.getPlaybackAnnualData(guard.username, period.start, period.end),
       db.getAllVideoReviews(guard.username),
+      db.getAnnualActivity(guard.username, period.start, period.end),
     ]);
     const report = aggregateAnnualReport({
       year,
@@ -90,6 +91,7 @@ export async function handleAnnualShare(request: NextRequest) {
       now,
       data,
       reviews,
+      activity,
       retentionDays: readPlaybackStatsRetentionDays(),
     });
     if (report.totals.watchSeconds <= 0)
@@ -97,7 +99,7 @@ export async function handleAnnualShare(request: NextRequest) {
     await db.ensureUserProfile(guard.username);
     await db.saveAnnualRecap(
       guard.username,
-      publicAnnualReport(report, reviews, body.hideRhythm),
+      publicAnnualReport(report, reviews, body.hideRhythm, activity),
       now,
     );
     return json(

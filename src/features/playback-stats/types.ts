@@ -92,6 +92,50 @@ export type AnnualReportWorkMoment = {
   at: number;
 };
 
+export type AnnualReportCompletion = {
+  title: string;
+  year: string;
+  cover: string;
+  completedAt: number;
+  firstWatchedAt: number;
+  days: number;
+};
+
+export type AnnualActivityData = {
+  completions: { titleNorm: string; year: string; celebratedAt: number }[];
+  completionWatches: {
+    title: string;
+    year: string;
+    cover: string;
+    firstAt: number;
+    lastAt: number;
+  }[];
+  lists: {
+    id: string;
+    name: string;
+    visibility: number;
+    createdAt: number;
+    updatedAt: number;
+    itemCount: number;
+  }[];
+  listItems: {
+    listId: string;
+    cover: string;
+    position: number;
+    addedAt: number;
+  }[];
+  likes: { listId: string; createdAt: number }[];
+  capsules: {
+    title: string;
+    year: string;
+    cover: string;
+    createdAt: number;
+    deliverAt: number;
+    ratingThen: number | null;
+  }[];
+  follows: { createdAt: number }[];
+};
+
 // GET /api/playback-stats/annual?year=YYYY&tz=IANA
 // 所有日期、月份、小时、星期均按请求时区计算；时长单位为秒
 export type AnnualReport = {
@@ -141,6 +185,38 @@ export type AnnualReport = {
   }[];
   firstWork: AnnualReportWorkMoment | null;
   lastWork: AnnualReportWorkMoment | null;
+  completions: {
+    count: number;
+    longest: AnnualReportCompletion | null;
+    fastest: AnnualReportCompletion | null;
+  };
+  lists: {
+    createdCount: number;
+    itemCount: number;
+    featured: {
+      id: string;
+      name: string;
+      likes: number;
+      itemCount: number;
+      covers: string[];
+    } | null;
+  };
+  capsules: {
+    written: number;
+    delivered: number;
+    nextDeliverAt: number | null;
+    biggestChange: {
+      title: string;
+      year: string;
+      cover: string;
+      ratingThen: number;
+      ratingNow: number;
+    } | null;
+  } | null;
+  social: {
+    newFollowing: number;
+    topWorkWatchers: number;
+  } | null;
   // 按评价 created_at 归属年份
   reviews: {
     count: number;

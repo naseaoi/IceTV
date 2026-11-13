@@ -69,6 +69,23 @@ it('returns an empty report with complete histogram shapes', () => {
     episodeCount: 0,
     sourceCount: 0,
   });
+  expect(result.completions).toEqual({
+    count: 0,
+    longest: null,
+    fastest: null,
+  });
+  expect(result.lists).toEqual({
+    createdCount: 0,
+    itemCount: 0,
+    featured: null,
+  });
+  expect(result.capsules).toEqual({
+    written: 0,
+    delivered: 0,
+    nextDeliverAt: null,
+    biggestChange: null,
+  });
+  expect(result.social).toEqual({ newFollowing: 0, topWorkWatchers: 0 });
   expect(result.months).toEqual(Array(12).fill(0));
   expect(result.hours).toEqual(Array(24).fill(0));
   expect(result.weekdays).toEqual(Array(7).fill(0));

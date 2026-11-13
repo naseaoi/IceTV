@@ -1,4 +1,5 @@
 import type {
+  AnnualActivityData,
   AnnualReport,
   AnnualReportWork,
   AnnualReportWorkMoment,
@@ -10,6 +11,10 @@ import type {
   VideoReview,
 } from '@/lib/types';
 
+import {
+  aggregateAnnualActivity,
+  emptyAnnualActivity,
+} from './annual-activity';
 import { buildPlaybackPeriod, localDate } from './period';
 import { visitWatchIntervals } from './watch-intervals';
 import { playbackWorkIdentity } from './work-identity';
@@ -94,6 +99,7 @@ export function aggregateAnnualReport(input: {
   now: number;
   data: PlaybackAnnualData;
   reviews: VideoReview[];
+  activity?: AnnualActivityData;
   retentionDays: number;
   includeUnreleased?: boolean;
 }): AnnualReport {
@@ -256,6 +262,14 @@ export function aggregateAnnualReport(input: {
     (a, b) => b.rating - a.rating || b.created_at - a.created_at,
   )[0];
   return {
+    ...aggregateAnnualActivity(
+      input.activity ?? emptyAnnualActivity(),
+      reviews,
+      period.start,
+      period.end,
+      now,
+      timeZone,
+    ),
     year,
     timeZone,
     generatedAt: now,

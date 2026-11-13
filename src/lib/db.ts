@@ -58,6 +58,11 @@ function generateStorageKey(source: string, id: string): string {
 
 // 导出便捷方法
 class DbManager {
+  async getAnnualActivity(
+    ...args: Parameters<IStorage['getAnnualActivity']>
+  ): ReturnType<IStorage['getAnnualActivity']> {
+    return (await this.getStorage()).getAnnualActivity(...args);
+  }
   async countCapsules(
     ...args: Parameters<IStorage['countCapsules']>
   ): ReturnType<IStorage['countCapsules']> {

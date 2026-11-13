@@ -510,6 +510,11 @@ import type { ListStore } from '@/features/lists/lib/list-storage';
 
 // 存储接口
 export interface IStorage extends ListStore, ViewingHappinessStore {
+  getAnnualActivity(
+    username: string,
+    start: number,
+    end: number,
+  ): Promise<import('@/features/playback-stats/types').AnnualActivityData>;
   getTrackingCalendarItems(
     username: string,
   ): Promise<

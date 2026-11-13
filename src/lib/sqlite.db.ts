@@ -49,6 +49,7 @@ import {
   ListPlans,
   listSchema,
 } from '@/features/lists/lib/list-storage';
+import { annualActivityPlan } from '@/features/playback-stats/lib/annual-activity-storage';
 import {
   type PlaybackSourceUsage,
   type PlaybackSourceUsageRow,
@@ -2474,6 +2475,12 @@ export class LocalSqliteStorage implements IStorage {
       })
       .immediate();
   }
+  async getAnnualActivity(
+    ...args: Parameters<IStorage['getAnnualActivity']>
+  ): ReturnType<IStorage['getAnnualActivity']> {
+    return this.runListPlan(annualActivityPlan('sqlite', ...args));
+  }
+
   async countCapsules(
     ...args: Parameters<IStorage['countCapsules']>
   ): ReturnType<IStorage['countCapsules']> {

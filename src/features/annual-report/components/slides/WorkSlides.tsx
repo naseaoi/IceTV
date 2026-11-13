@@ -1,6 +1,6 @@
 'use client';
 
-import { Star } from 'lucide-react';
+import { Star, Users } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
 import {
@@ -20,13 +20,13 @@ import {
   formatDuration,
   formatDurationShort,
   formatInstantDate,
-  share,
 } from '@/features/annual-report/lib/format';
 
 const COVER_SHADOW = 'shadow-[0_24px_48px_-24px_rgba(15,23,42,0.5)]';
 
 export function TopWorkSlide({ report, audience }: SlideProps) {
   const work = report.topWorks[0];
+  const watchers = report.social?.topWorkWatchers ?? 0;
   return (
     <>
       <RecapBackdrop tint='ice' />
@@ -58,6 +58,15 @@ export function TopWorkSlide({ report, audience }: SlideProps) {
         <Rise d={4} className={`mt-1 text-[13px] ${RECAP_TEXT.muted}`}>
           {formatInstantDate(work.firstWatchedAt, report.timeZone)} 初次相遇
         </Rise>
+        {watchers > 0 && (
+          <Rise
+            d={5}
+            className={`mt-6 inline-flex items-center gap-1.5 text-[13px] ${RECAP_TEXT.secondary}`}
+          >
+            <Users className='h-3.5 w-3.5' strokeWidth={1.75} />
+            关注的人里有 {watchers} 位也看过
+          </Rise>
+        )}
       </SlideBody>
     </>
   );
@@ -65,16 +74,18 @@ export function TopWorkSlide({ report, audience }: SlideProps) {
 
 const RANKING_LIMIT = 5;
 
+// 第 1 名由年度作品页展示，这里从第 2 名列起，进度条仍以第 1 名为满格
 export function RankingSlide({ report, audience }: SlideProps) {
-  const works = report.topWorks.slice(0, RANKING_LIMIT);
-  const max = works[0]?.watchSeconds || 1;
+  const ranked = report.topWorks.slice(0, RANKING_LIMIT);
+  const works = ranked.slice(1);
+  const max = ranked[0]?.watchSeconds || 1;
   return (
     <>
       <RecapBackdrop tint='mist' at='top-left' />
       <SlideBody center>
-        <Kicker>Top {works.length}</Kicker>
+        <Kicker>Top {ranked.length}</Kicker>
         <Headline d={1} className='mt-6'>
-          这些作品，占据了{audience.you}最多的时间
+          紧随年度最爱之后，{audience.you}还常看这些
         </Headline>
         <ol className='mt-8'>
           {works.map((work, index) => (
@@ -85,9 +96,9 @@ export function RankingSlide({ report, audience }: SlideProps) {
               className={`flex items-center gap-4 py-3 ${index > 0 ? `border-t ${RECAP_RULE}` : ''}`}
             >
               <span
-                className={`w-5 shrink-0 text-lg font-extralight tabular-nums ${index === 0 ? RECAP_TEXT.accent : RECAP_TEXT.muted}`}
+                className={`w-5 shrink-0 text-lg font-extralight tabular-nums ${RECAP_TEXT.muted}`}
               >
-                {index + 1}
+                {index + 2}
               </span>
               <RecapCover
                 cover={work.cover}
@@ -100,7 +111,7 @@ export function RankingSlide({ report, audience }: SlideProps) {
                 <div className='mt-2 flex items-center gap-3'>
                   <div className='h-[3px] flex-1 overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]'>
                     <div
-                      className={`recap-grow-x h-full rounded-full ${index === 0 ? 'bg-brand-500 dark:bg-brand-300' : 'bg-gray-400 dark:bg-gray-500'}`}
+                      className='recap-grow-x h-full rounded-full bg-gray-400 dark:bg-gray-500'
                       style={
                         {
                           '--d': 2 + index,
@@ -119,7 +130,7 @@ export function RankingSlide({ report, audience }: SlideProps) {
             </Rise>
           ))}
         </ol>
-        {report.totals.workCount > works.length && (
+        {report.totals.workCount > ranked.length && (
           <Rise
             d={7}
             className={`mt-4 border-t pt-5 text-[13px] ${RECAP_RULE} ${RECAP_TEXT.muted}`}
@@ -197,62 +208,10 @@ export function JourneySlide({ report, audience }: SlideProps) {
   );
 }
 
-export function SourcesSlide({ report, audience }: SlideProps) {
-  const sources = report.topSources;
-  const top = sources[0];
-  return (
-    <>
-      <RecapBackdrop tint='frost' at='top-left' />
-      <SlideBody center>
-        <Kicker>Sources</Kicker>
-        <Headline d={1} className='mt-6'>
-          {top.sourceName} 是{audience.you}最常用的片源
-        </Headline>
-        <Lead d={2} className='mt-2'>
-          占全年观看的 {share(top.watchSeconds, report.totals.watchSeconds)}%
-        </Lead>
-        <div className='mt-10 space-y-5'>
-          {sources.map((source, index) => (
-            <Rise key={source.source} d={3 + index * 0.8}>
-              <div className='flex items-baseline justify-between gap-4 text-[15px]'>
-                <span className='truncate'>{source.sourceName}</span>
-                <span
-                  className={`shrink-0 text-xs tabular-nums ${RECAP_TEXT.secondary}`}
-                >
-                  {source.workCount} 部 ·{' '}
-                  {formatDurationShort(source.watchSeconds)}
-                </span>
-              </div>
-              <div className='mt-2 h-[3px] overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]'>
-                <div
-                  className={`recap-grow-x h-full rounded-full ${index === 0 ? 'bg-brand-500 dark:bg-brand-300' : 'bg-gray-400 dark:bg-gray-500'}`}
-                  style={
-                    {
-                      '--d': 3 + index,
-                      width: `${Math.max(3, share(source.watchSeconds, top.watchSeconds))}%`,
-                    } as CSSProperties
-                  }
-                />
-              </div>
-            </Rise>
-          ))}
-        </div>
-        {report.totals.sourceCount > sources.length && (
-          <Rise
-            d={8}
-            className={`mt-8 border-t pt-5 text-[13px] ${RECAP_RULE} ${RECAP_TEXT.muted}`}
-          >
-            这一年{audience.you}一共用过 {report.totals.sourceCount} 个片源
-          </Rise>
-        )}
-      </SlideBody>
-    </>
-  );
-}
-
 export function ReviewsSlide({ report, audience }: SlideProps) {
   const { reviews } = report;
   const multiple = reviews.ratedCount > 1;
+  const newFollowing = report.social?.newFollowing ?? 0;
   return (
     <>
       <RecapBackdrop tint='sand' at='top-left' />
@@ -296,6 +255,11 @@ export function ReviewsSlide({ report, audience }: SlideProps) {
                 </span>
               </div>
             </div>
+          </Rise>
+        )}
+        {newFollowing > 0 && (
+          <Rise d={5} className={`mt-6 text-[13px] ${RECAP_TEXT.muted}`}>
+            这一年{audience.you}还新关注了 {newFollowing} 位同好
           </Rise>
         )}
       </SlideBody>

@@ -21,19 +21,27 @@ import {
   peakIndex,
 } from '@/features/annual-report/lib/format';
 
+const SUMMARY_STAT_LIMIT = 6;
+
 export function SummarySlide({ report, audience, onRestart }: SlideProps) {
   const { totals } = report;
   const { hours, minutes } = durationParts(totals.watchSeconds);
   const daypart = report.rhythmHidden ? null : dominantDaypart(report.hours);
   const peakHour = report.rhythmHidden ? -1 : peakIndex(report.hours);
+  const completed = report.completions?.count ?? 0;
+  const lists = report.lists?.createdCount ?? 0;
   const stats = [
     { label: '活跃天数', value: `${totals.activeDays}`, unit: '天' },
     { label: '看过作品', value: `${totals.workCount}`, unit: '部' },
+    completed > 0 && { label: '看完作品', value: `${completed}`, unit: '部' },
     {
       label: '最长连续',
       value: `${report.longestStreak?.days ?? 1}`,
       unit: '天',
     },
+    { label: '用过片源', value: `${totals.sourceCount}`, unit: '个' },
+    lists > 0 && { label: '新建片单', value: `${lists}`, unit: '个' },
+    // 身份标签已体现作息，这一格只在前面未排满时补位
     report.rhythmHidden
       ? { label: '看过集数', value: `${totals.episodeCount}`, unit: '集' }
       : {
@@ -42,7 +50,9 @@ export function SummarySlide({ report, audience, onRestart }: SlideProps) {
             peakHour >= 0 ? `${String(peakHour).padStart(2, '0')}:00` : '—',
           unit: '',
         },
-  ];
+  ]
+    .filter((stat): stat is Exclude<typeof stat, false> => stat !== false)
+    .slice(0, SUMMARY_STAT_LIMIT);
   const canShare =
     audience.kind === 'self' && isRecapReleasedLocally(report.year);
 
@@ -90,7 +100,7 @@ export function SummarySlide({ report, audience, onRestart }: SlideProps) {
           </div>
 
           <div
-            className={`mt-6 grid grid-cols-2 gap-y-5 border-t pt-5 ${RECAP_RULE}`}
+            className={`mt-6 grid grid-cols-3 gap-x-3 gap-y-5 border-t pt-5 ${RECAP_RULE}`}
           >
             {stats.map((stat) => (
               <div key={stat.label}>

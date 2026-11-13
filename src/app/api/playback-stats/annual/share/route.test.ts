@@ -2,11 +2,14 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { emptyAnnualActivity } from '@/features/playback-stats/lib/annual-activity';
 import type { VideoReview } from '@/lib/types';
 
 installWebPolyfills();
 const mockGuard = jest.fn();
 const mockData = jest.fn();
+const mockActivity = jest.fn();
+const mockOpinions = jest.fn();
 const mockReviews = jest.fn();
 const mockRecap = jest.fn();
 const mockSave = jest.fn();
@@ -19,6 +22,8 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/lib/db', () => ({
   db: {
+    getAnnualActivity: (...args: unknown[]) => mockActivity(...args),
+    getFollowOpinions: (...args: unknown[]) => mockOpinions(...args),
     getPlaybackAnnualData: (...args: unknown[]) => mockData(...args),
     getAllVideoReviews: (...args: unknown[]) => mockReviews(...args),
     getAnnualRecap: (...args: unknown[]) => mockRecap(...args),
@@ -57,6 +62,8 @@ const review = (is_public: boolean, rating: number): VideoReview => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockActivity.mockResolvedValue(emptyAnnualActivity());
+  mockOpinions.mockResolvedValue({ watchedCount: 3 });
   jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2025-12-20T00:00:00Z'));
   mockGuard.mockResolvedValue({ username: 'private-login', role: 'user' });
   mockData.mockResolvedValue({

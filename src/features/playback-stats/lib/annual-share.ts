@@ -1,4 +1,5 @@
 import type {
+  AnnualActivityData,
   AnnualRecapShareState,
   AnnualReport,
   PublicAnnualReport,
@@ -6,6 +7,7 @@ import type {
 import type { StoredAnnualRecap } from '@/lib/annual-recap-storage';
 import type { VideoReview } from '@/lib/types';
 
+import { aggregateAnnualLists } from './annual-activity';
 import { buildPlaybackPeriod } from './period';
 
 export function annualShareState(
@@ -25,6 +27,7 @@ export function publicAnnualReport(
   report: AnnualReport,
   reviews: VideoReview[],
   hideRhythm: boolean,
+  activity: AnnualActivityData,
 ): PublicAnnualReport {
   const { availableYears: _years, ...snapshot } = report;
   const period = buildPlaybackPeriod(
@@ -46,6 +49,9 @@ export function publicAnnualReport(
   )[0];
   return {
     ...snapshot,
+    capsules: null,
+    social: null,
+    lists: aggregateAnnualLists(activity, period.start, period.end, true),
     rhythmHidden: hideRhythm,
     ...(hideRhythm
       ? {

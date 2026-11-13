@@ -1,4 +1,4 @@
-import type { AnnualReport } from '@/features/playback-stats/types';
+import type { RecapReport } from '@/features/annual-report/lib/audience';
 
 import {
   buildSlides,
@@ -7,6 +7,7 @@ import {
   formatClock,
   formatDuration,
   formatDurationShort,
+  formatInstantDate,
   isLateNight,
   watchComparison,
 } from './format';
@@ -15,7 +16,7 @@ function hoursWith(values: Record<number, number>): number[] {
   return Array.from({ length: 24 }, (_, hour) => values[hour] ?? 0);
 }
 
-function report(changes: Partial<AnnualReport> = {}): AnnualReport {
+function report(changes: Partial<RecapReport> = {}): RecapReport {
   const work = {
     title: 'A',
     year: '2025',
@@ -32,7 +33,6 @@ function report(changes: Partial<AnnualReport> = {}): AnnualReport {
     timeZone: 'Asia/Shanghai',
     generatedAt: 0,
     inProgress: false,
-    availableYears: [2025],
     possiblyIncomplete: false,
     totals: {
       watchSeconds: 3600,
@@ -173,5 +173,73 @@ describe('annual report format', () => {
     expect(slides).toEqual(
       expect.arrayContaining(['months', 'night', 'peak', 'streak']),
     );
+  });
+  it('adds the year only when a date falls outside the report year', () => {
+    const at = Date.UTC(2024, 11, 31, 20);
+    expect(formatInstantDate(at, 'Asia/Shanghai')).toBe('1 月 1 日');
+    expect(formatInstantDate(at, 'Asia/Shanghai', 2025)).toBe('1 月 1 日');
+    expect(formatInstantDate(at, 'UTC', 2025)).toBe('2024 年 12 月 31 日');
+  });
+
+  it('places completion, list and letter slides around reviews', () => {
+    const completion = {
+      title: 'A',
+      year: '2025',
+      cover: '',
+      completedAt: 0,
+      firstWatchedAt: 0,
+      days: 1,
+    };
+    const slides = buildSlides(
+      report({
+        completions: { count: 1, longest: completion, fastest: null },
+        reviews: {
+          count: 1,
+          ratedCount: 0,
+          averageRating: null,
+          topRated: null,
+        },
+        lists: { createdCount: 0, itemCount: 2, featured: null },
+        capsules: {
+          written: 1,
+          delivered: 0,
+          nextDeliverAt: null,
+          biggestChange: null,
+        },
+      }),
+    );
+    expect(slides.slice(-5)).toEqual([
+      'completions',
+      'reviews',
+      'lists',
+      'letters',
+      'summary',
+    ]);
+  });
+
+  it('keeps list and letter slides when nothing was watched', () => {
+    const slides = buildSlides(
+      report({
+        totals: { ...report().totals, watchSeconds: 0 },
+        lists: { createdCount: 1, itemCount: 0, featured: null },
+        capsules: {
+          written: 0,
+          delivered: 0,
+          nextDeliverAt: null,
+          biggestChange: null,
+        },
+      }),
+    );
+    expect(slides).toEqual(['intro', 'lists', 'empty']);
+  });
+
+  it('treats snapshots without the newer fields as having no such activity', () => {
+    expect(buildSlides(report())).toEqual([
+      'intro',
+      'time',
+      'hours',
+      'top',
+      'summary',
+    ]);
   });
 });

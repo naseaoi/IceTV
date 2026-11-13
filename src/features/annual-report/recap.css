@@ -60,25 +60,38 @@
   }
 }
 
+/* 翻页时背景只做交叉淡入淡出，位移只给内容区；背景随页面一起平移会在画框边缘露出一道硬边 */
 .recap-slide-enter {
+  animation: recap-fade 640ms var(--motion-ease-out) both;
+}
+
+.recap-slide-enter .recap-scroll {
   animation: recap-slide-enter 640ms var(--motion-ease-out) both;
 }
 
 @keyframes recap-slide-enter {
   from {
-    opacity: 0;
     transform: translateY(calc(var(--dir, 1) * 7%));
   }
 }
 
 .recap-slide-exit {
   pointer-events: none;
+  animation: recap-slide-fade-out 380ms var(--motion-ease-in) both;
+}
+
+.recap-slide-exit .recap-scroll {
   animation: recap-slide-exit 380ms var(--motion-ease-in) both;
+}
+
+@keyframes recap-slide-fade-out {
+  to {
+    opacity: 0;
+  }
 }
 
 @keyframes recap-slide-exit {
   to {
-    opacity: 0;
     transform: translateY(calc(var(--dir, 1) * -4%));
   }
 }
@@ -120,16 +133,27 @@
   --tint-alpha: 0.2;
 }
 
+/*
+ * 上下留白分别让出顶部标题栏与底部翻页提示，内容滚入这两处时完全淡出。
+ * 末页没有翻页提示，底部只留安全区与少量间距。
+ */
 .recap-scroll {
+  --recap-top: calc(env(safe-area-inset-top) + 5.5rem);
+  --recap-bottom: calc(env(safe-area-inset-bottom) + 6rem);
+  padding-top: var(--recap-top);
+  padding-bottom: var(--recap-bottom);
   scrollbar-width: none;
-  /* 内容在矮视口滚动时，顶部标题栏与底部提示处淡出 */
   mask-image: linear-gradient(
     to bottom,
-    transparent,
-    #000 4.25rem,
-    #000 calc(100% - 4.5rem),
-    transparent
+    transparent calc(var(--recap-top) - 2.25rem),
+    #000 var(--recap-top),
+    #000 calc(100% - var(--recap-bottom)),
+    transparent calc(100% - var(--recap-bottom) + 1.5rem)
   );
+}
+
+[data-recap-last] .recap-scroll {
+  --recap-bottom: calc(env(safe-area-inset-bottom) + 2.5rem);
 }
 
 .recap-scroll::-webkit-scrollbar {
@@ -142,6 +166,7 @@
   .recap-grow-x,
   .recap-fade,
   .recap-slide-enter,
+  .recap-slide-enter .recap-scroll,
   .recap-hint-float {
     animation: none;
   }

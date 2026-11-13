@@ -55,6 +55,7 @@ import {
   ListPlans,
   listSchema,
 } from '@/features/lists/lib/list-storage';
+import { annualActivityPlan } from '@/features/playback-stats/lib/annual-activity-storage';
 import {
   type PlaybackSourceUsage,
   type PlaybackSourceUsageRow,
@@ -1686,6 +1687,12 @@ export class MySqlStorage implements IStorage {
     }
     return step.value;
   }
+  async getAnnualActivity(
+    ...args: Parameters<IStorage['getAnnualActivity']>
+  ): ReturnType<IStorage['getAnnualActivity']> {
+    return this.runListPlan(annualActivityPlan('mysql', ...args));
+  }
+
   async countCapsules(
     ...args: Parameters<IStorage['countCapsules']>
   ): ReturnType<IStorage['countCapsules']> {

@@ -14,6 +14,7 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { readPlaybackStatsRetentionDays } from '@/lib/cron/playback-retention';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 
 export const runtime = 'nodejs';
 
@@ -49,9 +50,10 @@ export async function GET(request: NextRequest) {
       { type: 'year', date: `${year}-01-01`, timeZone: current.timeZone },
       now,
     );
-    const [data, reviews] = await Promise.all([
+    const [data, reviews, activity] = await Promise.all([
       db.getPlaybackAnnualData(guard.username, period.start, period.end),
       db.getAllVideoReviews(guard.username),
+      db.getAnnualActivity(guard.username, period.start, period.end),
     ]);
     const report = aggregateAnnualReport({
       year,
@@ -60,14 +62,24 @@ export async function GET(request: NextRequest) {
       now,
       data,
       reviews,
+      activity,
       retentionDays: readPlaybackStatsRetentionDays(),
     });
+    const topWork = report.topWorks[0];
+    if (topWork && report.social) {
+      const opinions = await db.getFollowOpinions(
+        guard.username,
+        normalizeWorkTitle(topWork.title),
+        normalizeWorkYear(topWork.year),
+      );
+      report.social.topWorkWatchers = opinions.watchedCount;
+    }
     if (isAnnualReportReleased(year, current.date)) {
       const recap = await db.getAnnualRecap(guard.username, year);
       if (recap && recap.publishedAt !== null && recap.updatedAt !== null)
         await db.saveAnnualRecap(
           guard.username,
-          publicAnnualReport(report, reviews, recap.hideRhythm),
+          publicAnnualReport(report, reviews, recap.hideRhythm, activity),
           now,
           { publishedAt: recap.publishedAt, updatedAt: recap.updatedAt },
         );
