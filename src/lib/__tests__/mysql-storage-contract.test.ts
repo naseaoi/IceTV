@@ -182,6 +182,7 @@ function createState(): FakeState {
     liveCounts: new Map(),
     social: {
       user_profiles: [],
+      user_profile_showcase: [],
       user_follows: [],
       video_review_likes: [],
       video_review_reports: [],
@@ -1361,6 +1362,13 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'DELETE FROM favorites WHERE username = ? AND favorite_key = ?'
+    ) {
+      currentState.favorites.get(String(params[0]))?.delete(String(params[1]));
+      return [[], []];
+    }
     if (normalized === 'DELETE FROM favorites WHERE username = ?') {
       const [username] = params as [string];
       currentState.favorites.delete(username);

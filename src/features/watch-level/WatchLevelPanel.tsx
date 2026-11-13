@@ -17,8 +17,10 @@ import {
 import { fetchMyWatchLevel } from '@/features/watch-level/api.client';
 import {
   type WatchLevel,
+  formatWatchHours,
   WATCH_LEVELS,
   watchLevelName,
+  watchLevelProgress,
 } from '@/lib/watch-level';
 import type {
   WatchLevelEvent,
@@ -38,12 +40,6 @@ const SUMMARY_TRACK_CLASS =
   'mt-3 h-1.5 overflow-hidden rounded-full bg-gray-900/[0.06] dark:bg-white/[0.08]';
 const SUMMARY_HINT_CLASS = 'mt-2 text-xs';
 
-function formatHours(ms: number) {
-  const hours = ms / HOUR_MS;
-  if (hours >= 100) return Math.floor(hours).toString();
-  return (Math.floor(hours * 10) / 10).toString();
-}
-
 function formatDate(at: number) {
   const date = new Date(at);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -58,17 +54,11 @@ function footprintText(event: WatchLevelEvent) {
 
 function Summary({ data }: { data: MyWatchLevel }) {
   const level = data.level;
-  const next = WATCH_LEVELS.find((item) => item.level === level + 1);
-  const current = WATCH_LEVELS[level - 1];
-  const progress = next
-    ? Math.min(
-        1,
-        Math.max(
-          0,
-          (data.countedMs - current.minMs) / (next.minMs - current.minMs),
-        ),
-      )
-    : 1;
+  const {
+    next,
+    ratio: progress,
+    remainingMs,
+  } = watchLevelProgress(level, data.countedMs);
   return (
     <div className={SUMMARY_CLASS}>
       <div className='flex items-baseline justify-between gap-3'>
@@ -78,7 +68,7 @@ function Summary({ data }: { data: MyWatchLevel }) {
         <p
           className={`${SUMMARY_TOTAL_CLASS} text-gray-500 dark:text-gray-400`}
         >
-          累计 {formatHours(data.countedMs)} 小时
+          累计 {formatWatchHours(data.countedMs)} 小时
         </p>
       </div>
       <div
@@ -95,7 +85,7 @@ function Summary({ data }: { data: MyWatchLevel }) {
       </div>
       <p className={`${SUMMARY_HINT_CLASS} text-gray-500 dark:text-gray-400`}>
         {next
-          ? `再看 ${formatHours(Math.max(0, next.minMs - data.countedMs))} 小时坐进「${next.name}」`
+          ? `再看 ${formatWatchHours(remainingMs)} 小时坐进「${next.name}」`
           : '已坐进放映室'}
       </p>
     </div>

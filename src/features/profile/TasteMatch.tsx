@@ -2,7 +2,7 @@
 
 import { HeartHandshake, Star, X } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import {
@@ -12,60 +12,34 @@ import {
 import ModalShell from '@/components/modals/ModalShell';
 import { POSTER_BADGE_NEUTRAL_CLASS } from '@/components/poster-card-layout';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
-import { socialRequest } from '@/lib/profile.client';
 import { formatRating } from '@/lib/rating';
-import type { PublicVideoReview } from '@/lib/types';
-
-export interface TasteMatchResult {
-  commonCount: number;
-  // 共同评分不足时为 null
-  score: number | null;
-  picks: PublicVideoReview[];
-}
-
-function fetchTasteMatch(profileId: string) {
-  return socialRequest<TasteMatchResult>(
-    `/api/profile/taste-match?${new URLSearchParams({ profileId })}`,
-  );
-}
+import type { TasteMatch } from '@/lib/viewing-insights';
 
 function playUrl(review: { title: string; year: string }) {
   return `/play?${new URLSearchParams({ title: review.title, year: review.year })}`;
 }
 
-function chipText(result: TasteMatchResult) {
+export function hasTasteMatchContent(
+  result: TasteMatch | null,
+): result is TasteMatch {
+  return Boolean(result && (result.commonCount > 0 || result.picks.length > 0));
+}
+
+function chipText(result: TasteMatch) {
   if (result.score !== null) return `口味相合 ${result.score}%`;
   if (result.commonCount > 0) return `共同评分 ${result.commonCount} 部`;
   return 'TA 的高分推荐';
 }
 
-// 只在他人主页挂载；放在资料统计行内，异步出现不推动下方内容
+// 只在他人主页、且有共同评分或推荐时挂载
 export function TasteMatchChip({
-  profileId,
+  result,
   nickname,
 }: {
-  profileId: string;
+  result: TasteMatch;
   nickname: string;
 }) {
-  const [result, setResult] = useState<TasteMatchResult | null>(null);
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    fetchTasteMatch(profileId)
-      .then((value) => {
-        if (active) setResult(value);
-      })
-      // 辅助信息，失败时不展示入口
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [profileId]);
-
-  if (!result || (result.commonCount === 0 && result.picks.length === 0)) {
-    return null;
-  }
   return (
     <>
       <button
@@ -135,7 +109,7 @@ function TasteMatchModal({
 }: {
   open: boolean;
   nickname: string;
-  result: TasteMatchResult;
+  result: TasteMatch;
   onClose: () => void;
 }) {
   const retained = useRetainedValue(open ? result : null);

@@ -1165,6 +1165,9 @@ describe('sqlite social username migration', () => {
         avatar_seed: null,
         level: 1,
         favorites_public: 1 as const,
+        bio: null,
+        watch_time_public: false,
+        counted_ms: 0,
         updated_at: 123,
       });
       await storage.updateUserProfile('alice', { avatarSeed: 'Avatar012345' });
@@ -1200,7 +1203,21 @@ describe('sqlite social username migration', () => {
     internal.db.exec(
       "INSERT INTO user_follows VALUES ('Alice', 'Bob', 1); INSERT INTO video_review_likes VALUES ('Bob', 'work', '2026', 'Alice', 1); INSERT INTO video_review_reports VALUES ('Alice', 'work', '2026', 'Bob', 'spam', '', 1);",
     );
+    internal.db.exec(
+      "INSERT INTO user_profile_showcase VALUES ('alice', 0, 'vod+canonical'), ('Alice', 0, 'vod+legacy'), ('Alice', 1, 'vod+second'), ('OnlyShowcase', 0, 'vod+orphan');",
+    );
     internal.migrateLegacyUsernameCasing();
+    expect(
+      internal.db
+        .prepare(
+          'SELECT username, position, favorite_key FROM user_profile_showcase ORDER BY username, position',
+        )
+        .all(),
+    ).toEqual([
+      { username: 'alice', position: 0, favorite_key: 'vod+canonical' },
+      { username: 'alice', position: 1, favorite_key: 'vod+second' },
+      { username: 'onlyshowcase', position: 0, favorite_key: 'vod+orphan' },
+    ]);
     expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
       'Canon0123456',
     );

@@ -716,6 +716,24 @@ export class MySqlStorage implements IStorage {
         }
       }
     }
+    for (const [name, definition] of [
+      ['bio', 'VARCHAR(240)'],
+      ['watch_time_public', 'INTEGER NOT NULL DEFAULT 0'],
+    ]) {
+      const [fields] = await this.pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM user_profiles LIKE '${name}'`,
+      );
+      if (!fields.length) {
+        try {
+          await this.pool.execute(
+            `ALTER TABLE user_profiles ADD COLUMN ${name} ${definition}`,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+            throw error;
+        }
+      }
+    }
     const [columns] = await this.pool.query<RowDataPacket[]>(
       "SHOW COLUMNS FROM user_profiles LIKE 'avatar_seed'",
     );
@@ -1999,7 +2017,9 @@ export class MySqlStorage implements IStorage {
     ...args: Parameters<IStorage['updateUserProfile']>
   ): ReturnType<IStorage['updateUserProfile']> {
     await this.ensureInitialized();
-    return this.socialFor().updateUserProfile(...args);
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).updateUserProfile(...args),
+    );
   }
 
   async isNicknameAvailable(
@@ -2045,6 +2065,11 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     return this.socialFor().getFollowRecapMessageCount(...args);
   }
+  async getProfileShowcase(username: string) {
+    await this.ensureInitialized();
+    return this.socialFor().getProfileShowcase(username);
+  }
+
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -2778,6 +2803,10 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_lists WHERE username = ?', [
         username,
       ]);
+      await connection.execute(
+        'DELETE FROM user_profile_showcase WHERE username = ?',
+        [username],
+      );
       await connection.execute('DELETE FROM user_profiles WHERE username = ?', [
         username,
       ]);

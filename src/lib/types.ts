@@ -103,6 +103,9 @@ export interface UserProfile {
   nickname: string | null;
   avatar_seed: string | null;
   favorites_public: LibraryVisibility;
+  bio: string | null;
+  watch_time_public: boolean;
+  counted_ms?: number;
   updated_at: number;
 }
 
@@ -116,7 +119,21 @@ export interface PublicUserRef {
   role?: 'owner' | 'admin';
 }
 
+export interface ProfileShowcaseItem {
+  key: string;
+  title: string;
+  year: string;
+  cover: string;
+  search_title?: string;
+}
+
 export interface UserProfileView extends PublicUserRef {
+  bio: string | null;
+  showcase: ProfileShowcaseItem[];
+  // 本人或对方公开观影时长时返回累计整小时数，否则为 null
+  watchHours: number | null;
+  // 仅他人主页返回，本人为 null
+  tasteMatch: import('@/lib/viewing-insights').TasteMatch | null;
   recap: { year: number } | null;
   isSelf: boolean;
   isFollowing: boolean;
@@ -720,12 +737,16 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
       nickname?: string;
       avatarSeed?: string | null;
       libraryVisibility?: LibraryVisibility;
+      bio?: string | null;
+      showcaseKeys?: string[];
+      watchTimePublic?: boolean;
     },
   ): Promise<UserProfile>;
   isNicknameAvailable(
     nickname: string,
     exceptUsername?: string,
   ): Promise<boolean>;
+  getProfileShowcase(username: string): Promise<ProfileShowcaseItem[]>;
   getUserProfileView(
     username: string,
     viewer: string,

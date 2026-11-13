@@ -29,17 +29,17 @@ import { CURRENT_VERSION } from '@/lib/version';
 
 import { useAuthSession } from './AuthProvider';
 import ProfileAvatar from './ProfileAvatar';
-import {
-  buildLoginHref,
-  ROLE_TEXT,
-  useHasUpdate,
-  useLogout,
-} from './user-menu/account';
+import { buildLoginHref, useHasUpdate, useLogout } from './user-menu/account';
 // 改密由资料弹窗直接切入，按需加载会在资料弹窗卸载后留下一段无遮罩的空档
 import { ChangePasswordPanel } from './user-menu/ChangePasswordPanel';
-import { SettingsPanel, VersionPanel } from './user-menu/lazy-panels';
+import {
+  SettingsPanel,
+  VersionPanel,
+  WatchLevelPanel,
+} from './user-menu/lazy-panels';
 import { ProfilePanel } from './user-menu/ProfilePanel';
 import { UserAvatar } from './user-menu/UserAvatar';
+import { WatchProgressLine } from './user-menu/WatchProgressLine';
 import WatchLevelBadge from './WatchLevelBadge';
 
 const MENU_DIVIDER_CLASS =
@@ -74,6 +74,7 @@ export const UserMenu: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
+  const [isLevelOpen, setIsLevelOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const hasUpdate = useHasUpdate();
 
@@ -141,6 +142,11 @@ export const UserMenu: React.FC = () => {
     setIsSettingsOpen(true);
   };
 
+  const handleLevel = () => {
+    setIsOpen(false);
+    setIsLevelOpen(true);
+  };
+
   const handleVersionPanel = () => {
     setIsOpen(false);
     setIsVersionPanelOpen(true);
@@ -200,25 +206,39 @@ export const UserMenu: React.FC = () => {
       >
         {isAuthenticated ? (
           <>
-            <button
-              type='button'
-              onClick={() => navigateTo('/me')}
-              className='group flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06]'
-            >
-              {renderAvatar('h-10 w-10')}
-              <div className='min-w-0 flex-1'>
+            <div className='group relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06]'>
+              <button
+                type='button'
+                aria-label='进入个人中心'
+                onClick={() => navigateTo('/me')}
+                className='absolute inset-0 rounded-xl'
+              />
+              <span className='pointer-events-none shrink-0'>
+                {renderAvatar('h-10 w-10')}
+              </span>
+              <div className='pointer-events-none min-w-0 flex-1'>
                 <div className='flex min-w-0 items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100'>
                   <span className='truncate'>{displayName}</span>
                   {session.status === 'authenticated' && (
                     <WatchLevelBadge level={session.level} />
                   )}
                 </div>
-                <div className='mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400'>
-                  {ROLE_TEXT[role]}
-                </div>
+                {session.status === 'authenticated' && (
+                  <button
+                    type='button'
+                    aria-label='查看观影等级'
+                    onClick={handleLevel}
+                    className='pointer-events-auto relative block w-full text-left'
+                  >
+                    <WatchProgressLine
+                      profileId={session.profileId}
+                      level={session.level}
+                    />
+                  </button>
+                )}
               </div>
-              <ChevronRight className='h-4 w-4 flex-shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 dark:text-gray-600' />
-            </button>
+              <ChevronRight className='pointer-events-none h-4 w-4 flex-shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 dark:text-gray-600' />
+            </div>
 
             <div className='motion-stagger mt-1 grid grid-cols-3 gap-y-1'>
               {tileActions.map(({ icon: Icon, label, onClick }, index) => (
@@ -365,6 +385,7 @@ export const UserMenu: React.FC = () => {
           }
         />
       )}
+      {isLevelOpen && <WatchLevelPanel onClose={() => setIsLevelOpen(false)} />}
       {isVersionPanelOpen && (
         <VersionPanel
           isOpen={isVersionPanelOpen}

@@ -91,6 +91,7 @@ import {
   NicknameTakenError,
   ReviewSocialStorage,
   socialSchema,
+  updateUserProfilePlan,
 } from '@/lib/review-social-storage';
 import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
@@ -963,6 +964,15 @@ export class LocalSqliteStorage implements IStorage {
         const columns = this.db.pragma('table_info(user_profiles)') as {
           name: string;
         }[];
+        for (const [name, definition] of [
+          ['bio', 'VARCHAR(240)'],
+          ['watch_time_public', 'INTEGER NOT NULL DEFAULT 0'],
+        ]) {
+          if (!columns.some((column) => column.name === name))
+            this.db.exec(
+              `ALTER TABLE user_profiles ADD COLUMN ${name} ${definition}`,
+            );
+        }
         if (!columns.some((column) => column.name === 'avatar_seed'))
           this.db.exec(
             'ALTER TABLE user_profiles ADD COLUMN avatar_seed VARCHAR(24)',
@@ -1911,6 +1921,7 @@ export class LocalSqliteStorage implements IStorage {
         .prepare('UPDATE user_profiles SET username = ? WHERE username = ?')
         .run(canonical, legacy);
     for (const [table, columns] of [
+      ['user_profile_showcase', ['username']],
       ['user_notice_events', ['recipient_username']],
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
@@ -1941,6 +1952,7 @@ export class LocalSqliteStorage implements IStorage {
       'oauth_identities',
       'user_danmaku',
       'user_profiles',
+      'user_profile_showcase',
       'user_lists',
       'list_likes',
       'user_access',
@@ -1970,6 +1982,7 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     for (const [table, columns] of [
+      ['user_profile_showcase', ['username']],
       ['user_notice_events', ['recipient_username']],
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
@@ -2776,7 +2789,14 @@ export class LocalSqliteStorage implements IStorage {
   async updateUserProfile(
     ...args: Parameters<IStorage['updateUserProfile']>
   ): ReturnType<IStorage['updateUserProfile']> {
-    return this.social.updateUserProfile(...args);
+    await this.ensureUserProfile(args[0]);
+    try {
+      this.runListPlan(updateUserProfilePlan('sqlite', ...args));
+    } catch (error) {
+      if (isSqliteUniqueConstraintError(error)) throw new NicknameTakenError();
+      throw error;
+    }
+    return (await this.getUserProfile(args[0]))!;
   }
 
   async isNicknameAvailable(
@@ -2815,6 +2835,10 @@ export class LocalSqliteStorage implements IStorage {
   ): ReturnType<IStorage['getFollowRecapMessageCount']> {
     return this.social.getFollowRecapMessageCount(...args);
   }
+  async getProfileShowcase(username: string) {
+    return this.social.getProfileShowcase(username);
+  }
+
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -3460,6 +3484,9 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.db
         .prepare('DELETE FROM user_lists WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_profile_showcase WHERE username = ?')
         .run(targetUser);
       this.db
         .prepare('DELETE FROM user_profiles WHERE username = ?')

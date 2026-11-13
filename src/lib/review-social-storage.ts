@@ -4,6 +4,7 @@ import {
   profileFavoriteOriginSql,
   workStatusSelection,
 } from '@/features/favorites/lib/library-storage';
+import type { ListPlan } from '@/features/lists/lib/list-storage';
 import {
   annualRecapSchema,
   AnnualRecapStorage,
@@ -22,9 +23,10 @@ import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type { IStorage } from '@/lib/types';
 import type {
   AdminReviewReportPage,
+  Favorite,
   FollowListPage,
-  LibraryVisibility,
   MyVideoReviewPage,
+  ProfileShowcaseItem,
   PublicVideoReviewPage,
   ReviewReportReason,
   UserProfile,
@@ -36,9 +38,14 @@ import type {
 } from '@/lib/types';
 import { REVIEW_REPORT_REASONS } from '@/lib/types';
 import {
+  FOLLOW_PAGE_SIZE,
+  ProfileValidationError,
   validateAvatarSeed,
+  validateBio,
   validateLibraryVisibility,
   validateNickname,
+  validateShowcaseKeys,
+  validateWatchTimePublic,
 } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import {
@@ -75,7 +82,8 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
   return [
     ...replySchema(dialect),
     annualRecapSchema(dialect),
-    `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
+    `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, bio VARCHAR(240), watch_time_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
+    `CREATE TABLE IF NOT EXISTS user_profile_showcase (username ${text} NOT NULL, position INTEGER NOT NULL, favorite_key ${dialect === 'sqlite' ? 'TEXT' : 'VARCHAR(512)'} NOT NULL, PRIMARY KEY (username, position), UNIQUE (username, favorite_key))${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_follows (follower ${text} NOT NULL, followee ${text} NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (follower, followee)${dialect === 'mysql' ? ', KEY idx_user_follows_followee (followee)' : ''})${suffix}`,
     ...['likes', 'reports'].map((kind) => {
       const actor = kind === 'likes' ? 'liker' : 'reporter';
@@ -110,6 +118,9 @@ export function profileFromRow(
     nickname: row.nickname,
     avatar_seed: row.avatar_seed,
     favorites_public: validateLibraryVisibility(Number(row.favorites_public)),
+    bio: row.bio ?? null,
+    watch_time_public: Boolean(Number(row.watch_time_public ?? 0)),
+    counted_ms: Number(row.counted_ms ?? 0),
     updated_at: Number(row.updated_at),
   };
 }
@@ -235,43 +246,51 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
   }
   async updateUserProfile(
     username: string,
-    patch: {
-      nickname?: string;
-      avatarSeed?: string | null;
-      libraryVisibility?: LibraryVisibility;
-    },
+    patch: Parameters<IStorage['updateUserProfile']>[1],
   ): Promise<UserProfile> {
-    username = normalizeUsername(username);
     await this.ensureUserProfile(username);
-    const columns: string[] = [];
-    const params: unknown[] = [];
-    if (patch.nickname !== undefined) {
-      const validated = validateNickname(patch.nickname, {
-        allowReserved: true,
-      });
-      columns.push('nickname = ?', 'nickname_norm = ?');
-      params.push(validated.nickname, validated.nicknameNorm);
-    }
-    if (patch.avatarSeed !== undefined) {
-      columns.push('avatar_seed = ?');
-      params.push(validateAvatarSeed(patch.avatarSeed));
-    }
-    if (patch.libraryVisibility !== undefined) {
-      columns.push('favorites_public = ?');
-      params.push(validateLibraryVisibility(patch.libraryVisibility));
-    }
-    if (columns.length) {
-      try {
-        await this.sql.run(
-          `UPDATE user_profiles SET ${columns.join(', ')}, updated_at = ? WHERE username = ?`,
-          [...params, Date.now(), username],
-        );
-      } catch (error) {
-        if (isUniqueError(error)) throw new NicknameTakenError();
-        throw error;
+    const plan = updateUserProfilePlan(this.sql.dialect, username, patch);
+    let step = plan.next();
+    while (!step.done) {
+      const { sql, params } = step.value;
+      if (sql.startsWith('SELECT'))
+        step = plan.next(await this.sql.rows(sql, params));
+      else {
+        try {
+          await this.sql.run(sql, params);
+        } catch (error) {
+          if (isUniqueError(error)) throw new NicknameTakenError();
+          throw error;
+        }
+        step = plan.next([]);
       }
     }
     return (await this.getUserProfile(username))!;
+  }
+
+  async getProfileShowcase(username: string): Promise<ProfileShowcaseItem[]> {
+    const rows = await this.sql.rows<{
+      favorite_key: string;
+      favorite_json: string;
+    }>(
+      `SELECT f.favorite_key, f.favorite_json FROM user_profile_showcase s
+       JOIN favorites f ON f.username = s.username AND ${this.sql.dialect === 'mysql' ? 'BINARY f.favorite_key = BINARY s.favorite_key' : 'f.favorite_key = s.favorite_key'}
+       WHERE s.username = ? AND f.library_valid = 1 AND ${profileFavoriteOriginSql(this.sql.dialect, 'f.favorite_json')}
+       ORDER BY s.position`,
+      [normalizeUsername(username)],
+    );
+    return rows.map((row) => {
+      const favorite = JSON.parse(row.favorite_json) as Favorite;
+      return {
+        key: row.favorite_key,
+        title: favorite.title,
+        year: favorite.year,
+        cover: favorite.cover,
+        ...(favorite.search_title !== undefined
+          ? { search_title: favorite.search_title }
+          : {}),
+      };
+    });
   }
   async getAnnualRecap(
     ...args: Parameters<IStorage['getAnnualRecap']>
@@ -314,7 +333,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     const isSelf = username === viewer;
     // 收藏不公开时不统计收藏数，避免经由数量泄露
     const favoritesVisible = isSelf || profile.favorites_public > 0;
-    const [counts] = await this.sql.rows<{
+    const countsQuery = this.sql.rows<{
       followers: number;
       following: number;
       reviews: number;
@@ -339,8 +358,21 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         ...(favoritesVisible ? [username] : []),
       ],
     );
-    const year = (await this.getAnnualRecapYears(username))[0];
+    // 相合度随资料一起返回，主页首屏即可确定附加信息行是否出现
+    const [[counts], [year], showcase, tasteMatch] = await Promise.all([
+      countsQuery,
+      this.getAnnualRecapYears(username),
+      this.getProfileShowcase(username),
+      isSelf ? null : this.getTasteMatch(viewer, username),
+    ]);
     return {
+      bio: profile.bio,
+      showcase,
+      watchHours:
+        isSelf || profile.watch_time_public
+          ? Math.floor((profile.counted_ms ?? 0) / 3_600_000)
+          : null,
+      tasteMatch,
       recap: year ? { year } : null,
       profileId: profile.profile_id,
       nickname: profile.nickname,
@@ -387,7 +419,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     type: 'followers' | 'following',
     cursor?: string,
   ): Promise<FollowListPage> {
-    const pageSize = 30;
+    const pageSize = FOLLOW_PAGE_SIZE;
     const after = parseSocialCursor(cursor);
     const column = type === 'followers' ? 'followee' : 'follower';
     const target = type === 'followers' ? 'follower' : 'followee';
@@ -710,8 +742,8 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
        WHERE peer.username = ? AND peer.is_public = 1 AND ${rating('peer')} IS NOT NULL AND ${rating('own')} IS NOT NULL`,
       [viewer, username],
     );
-    const rows = await this.sql.rows<VideoReviewRow>(
-      `SELECT peer.username, peer.review_json FROM video_reviews peer
+    const rows = await this.sql.rows<{ review_json: string }>(
+      `SELECT peer.review_json FROM video_reviews peer
        WHERE peer.username = ? AND peer.is_public = 1 AND ${rating('peer')} >= 8
        AND NOT EXISTS (SELECT 1 FROM video_reviews mine WHERE mine.username = ? AND mine.title_norm = peer.title_norm AND (mine.year = peer.year OR mine.year = '' OR peer.year = ''))
        AND COALESCE((${workStatusSelection(this.sql.dialect, '?', 'peer.title_norm', 'peer.year')}), 'planned') NOT IN ('watching', 'completed')
@@ -724,7 +756,12 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         Number(common.count),
         Number(common.difference ?? 0),
       ),
-      picks: (await this.enrichReviews(rows, viewer)).map(publicReview),
+      picks: rows.map((row) => {
+        const { title_norm, title, year, cover, rating } = JSON.parse(
+          row.review_json,
+        ) as VideoReview;
+        return { title_norm, title, year, cover, rating };
+      }),
     };
   }
 
@@ -1192,4 +1229,69 @@ export function isUniqueError(error: unknown): boolean {
       'ER_DUP_ENTRY',
     ].includes(String(error.code))
   );
+}
+
+// 由两侧事务执行器驱动，资料与本命整组替换共同提交。
+export function* updateUserProfilePlan(
+  dialect: 'sqlite' | 'mysql',
+  username: string,
+  patch: Parameters<IStorage['updateUserProfile']>[1],
+): ListPlan<void> {
+  username = normalizeUsername(username);
+  const columns: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (patch.nickname !== undefined) {
+    const validated = validateNickname(patch.nickname, { allowReserved: true });
+    columns.push('nickname = ?', 'nickname_norm = ?');
+    params.push(validated.nickname, validated.nicknameNorm);
+  }
+  if (patch.avatarSeed !== undefined) {
+    columns.push('avatar_seed = ?');
+    params.push(validateAvatarSeed(patch.avatarSeed));
+  }
+  if (patch.libraryVisibility !== undefined) {
+    columns.push('favorites_public = ?');
+    params.push(validateLibraryVisibility(patch.libraryVisibility));
+  }
+  if (patch.bio !== undefined) {
+    columns.push('bio = ?');
+    params.push(patch.bio === null ? null : validateBio(patch.bio));
+  }
+  if (patch.watchTimePublic !== undefined) {
+    columns.push('watch_time_public = ?');
+    params.push(Number(validateWatchTimePublic(patch.watchTimePublic)));
+  }
+  const keys =
+    patch.showcaseKeys === undefined
+      ? undefined
+      : validateShowcaseKeys(patch.showcaseKeys);
+  yield {
+    sql: `SELECT username FROM user_profiles WHERE username = ?${dialect === 'mysql' ? ' FOR UPDATE' : ''}`,
+    params: [username],
+  };
+  if (keys?.length) {
+    const rows = yield {
+      sql: `SELECT favorite_key FROM favorites WHERE username = ? AND ${dialect === 'mysql' ? 'BINARY favorite_key' : 'favorite_key'} IN (${keys.map(() => '?').join(',')}) AND library_valid = 1 AND ${profileFavoriteOriginSql(dialect)}${dialect === 'mysql' ? ' FOR UPDATE' : ''}`,
+      params: [username, ...keys],
+    };
+    if (rows.length !== keys.length)
+      throw new ProfileValidationError('本命作品须从自己的非直播收藏中选择');
+  }
+  if (columns.length || keys !== undefined) {
+    yield {
+      sql: `UPDATE user_profiles SET ${[...columns, 'updated_at = ?'].join(', ')} WHERE username = ?`,
+      params: [...params, Date.now(), username],
+    };
+  }
+  if (keys !== undefined) {
+    yield {
+      sql: 'DELETE FROM user_profile_showcase WHERE username = ?',
+      params: [username],
+    };
+    for (const [position, key] of keys.entries())
+      yield {
+        sql: 'INSERT INTO user_profile_showcase (username, position, favorite_key) VALUES (?, ?, ?)',
+        params: [username, position, key],
+      };
+  }
 }

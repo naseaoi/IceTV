@@ -39,3 +39,25 @@ export function isWatchLevel(value: unknown): value is WatchLevel {
 
 // 播放上报跨过门槛后派发，AuthProvider 据此刷新会话里的本人等级
 export const WATCH_LEVEL_UP_EVENT = 'watch-level-up';
+
+export function formatWatchHours(ms: number): string {
+  const hours = Math.max(0, ms) / HOUR_MS;
+  if (hours >= 100) return Math.floor(hours).toString();
+  return (Math.floor(hours * 10) / 10).toString();
+}
+
+export function watchLevelProgress(level: WatchLevel, countedMs: number) {
+  const current = WATCH_LEVELS[level - 1];
+  const next = WATCH_LEVELS.find((item) => item.level === level + 1) ?? null;
+  const ratio = next
+    ? Math.min(
+        1,
+        Math.max(0, (countedMs - current.minMs) / (next.minMs - current.minMs)),
+      )
+    : 1;
+  return {
+    next,
+    ratio,
+    remainingMs: next ? Math.max(0, next.minMs - countedMs) : 0,
+  };
+}

@@ -41,6 +41,8 @@
 
 ## 新增按用户分表的数据
 
+`user_profile_showcase` 与用户资料在同一事务更新；用户名大小写合并按位置保留规范账号已有条目，冲突的旧条目移除。
+
 `deleteUser` 与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。表内有多个用户名列时（如 `user_follows`）每一列都要覆盖。
 
 片单删除覆盖 `user_lists`、`user_list_items` 与 `list_likes`：删号与非活跃清理在同一事务清除该用户的点赞及其片单下的全部点赞，重算受影响片单的 `like_count` 后清条目和片单。SQLite 大小写迁移收集 `user_lists.username` 与 `list_likes.username`，转移片单归属、合并重复点赞并重算受影响计数；条目通过不变的 `list_id` 保留，片单与条目均不依赖收藏键。
@@ -105,7 +107,7 @@
 - v2 按账号同一 UTC 时间桶的全部会话合计封顶，累计只加写入前后封顶值之差；桶仍按会话取 MAX。MySQL 先锁账号累计行再读取桶合计，使不同会话并发也遵守封顶。
 - v1 的累计秒数保存单调高水位，按新旧高水位差累计；直接覆盖旧秒数会让乱序下降后的重发重复计入。会话 id 固定计量版本，v1 与 v2 互不覆盖，避免同一会话先按旧秒数、再按桶重复计入。
 - 一次性回填标记为 `storage_migrations.watch_level_v1`，与累计和事件同事务提交。回填仅覆盖尚存统计：v2 按桶时间排序、同桶封顶，作品取最后结束的会话（同结束时间按 id 排序）；v1 按起播时间整段计入。升级时间取桶结束或会话结束，不用回填执行时间。
-- 公开用户引用（`PublicUserRef.level`）与会话只带等级，由各列表查询 `LEFT JOIN user_watch_totals` 同次换算；累计时长与升级足迹只经 `/api/me/watch-level` 返回本人。
+- 公开用户引用（`PublicUserRef.level`）与会话只带等级，由各列表查询 `LEFT JOIN user_watch_totals` 同次换算；精确累计时长与升级足迹只经 `/api/me/watch-level` 返回本人。个人主页的整小时时长与公开开关规则见[用户资料与关注](reviews-favorites.md#用户资料与关注)。
 - 同一等级的足迹只写一次；SQLite 大小写合并累计相加、足迹同级取较早者。门槛下调不改写已经记录的历史足迹。
 
 ## 完结卡片与观后信

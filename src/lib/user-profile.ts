@@ -1,8 +1,13 @@
 import type { LibraryVisibility } from '@/lib/types';
+import { parseStorageKey } from '@/lib/utils';
 
 // 昵称前后端共用校验；唯一性按 nicknameNorm 判定
 export const NICKNAME_MIN_LENGTH = 2;
 export const NICKNAME_MAX_LENGTH = 16;
+export const BIO_MAX_LENGTH = 60;
+export const SHOWCASE_MAX_ITEMS = 3;
+// 关注 / 粉丝列表每页条数，前端按它截断骨架条数
+export const FOLLOW_PAGE_SIZE = 30;
 
 export const NICKNAME_RULE_MESSAGE = `昵称限 ${NICKNAME_MIN_LENGTH}-${NICKNAME_MAX_LENGTH} 个字符，可用文字、数字、下划线、连字符和间隔号`;
 
@@ -77,4 +82,37 @@ export function validateLibraryVisibility(value: unknown): LibraryVisibility {
   )
     throw new ProfileValidationError('收藏公开等级无效');
   return value as LibraryVisibility;
+}
+
+export function validateBio(value: unknown): string | null {
+  if (typeof value !== 'string')
+    throw new ProfileValidationError('简介必须为字符串');
+  const bio = value
+    .normalize('NFKC')
+    .replace(/\s+/gu, ' ')
+    .replace(/\p{Cc}/gu, '')
+    .replace(/ +/g, ' ')
+    .trim();
+  if (Array.from(bio).length > BIO_MAX_LENGTH)
+    throw new ProfileValidationError(`简介最多 ${BIO_MAX_LENGTH} 个字`);
+  return bio || null;
+}
+
+export function validateShowcaseKeys(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((key) => typeof key !== 'string'))
+    throw new ProfileValidationError('本命作品必须为收藏键数组');
+  const keys = [...new Set(value as string[])];
+  if (keys.length > SHOWCASE_MAX_ITEMS)
+    throw new ProfileValidationError(
+      `本命作品最多选择 ${SHOWCASE_MAX_ITEMS} 部`,
+    );
+  if (keys.some((key) => key.length > 512 || !parseStorageKey(key)))
+    throw new ProfileValidationError('本命作品收藏键无效');
+  return keys;
+}
+
+export function validateWatchTimePublic(value: unknown): boolean {
+  if (typeof value !== 'boolean')
+    throw new ProfileValidationError('观影时长公开状态必须为布尔值');
+  return value;
 }

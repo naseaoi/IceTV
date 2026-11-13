@@ -7,7 +7,11 @@ import { fetchProfileLists } from '@/features/lists/lib/lists-client';
 import type { ListSummary } from '@/features/lists/types';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
-import { ListGrid, ListGridSkeleton } from './ListCard';
+import {
+  ListGrid,
+  ListGridSkeleton,
+  SIDEBAR_LIST_GRID_CLASS,
+} from './ListCard';
 
 export function ProfileLists({
   profileId,
@@ -45,7 +49,12 @@ export function ProfileLists({
     );
   }
   if (!lists && skeletonCount > 0) {
-    return <ListGridSkeleton count={skeletonCount} />;
+    return (
+      <ListGridSkeleton
+        count={skeletonCount}
+        gridClassName={SIDEBAR_LIST_GRID_CLASS}
+      />
+    );
   }
   if (!lists || lists.length === 0) {
     return (
@@ -54,5 +63,11 @@ export function ProfileLists({
       </div>
     );
   }
-  return <ListGrid lists={lists} showPrivacy={isSelf} />;
+  return (
+    <ListGrid
+      lists={lists}
+      showPrivacy={isSelf}
+      gridClassName={SIDEBAR_LIST_GRID_CLASS}
+    />
+  );
 }

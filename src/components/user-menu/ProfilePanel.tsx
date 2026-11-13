@@ -13,15 +13,18 @@ import {
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
 import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
+import { OptionSwitchRow } from '@/components/OptionSwitchRow';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import Select from '@/components/Select';
+import UserRoleBadge from '@/components/UserRoleBadge';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
 import { showToast } from '@/lib/toast';
 import type { LibraryVisibility } from '@/lib/types';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import {
+  BIO_MAX_LENGTH,
   createAvatarSeed,
   NICKNAME_MAX_LENGTH,
   validateNickname,
@@ -39,7 +42,13 @@ type SavedProfile = {
   nickname: string;
   avatarSeed: string | null;
   libraryVisibility: LibraryVisibility;
+  bio: string;
+  watchTimePublic: boolean;
 };
+
+function normalizeBio(value: string) {
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
 
 export function ProfileForm({
   required = false,
@@ -69,12 +78,16 @@ export function ProfileForm({
       session.status === 'authenticated' ? (session.nickname ?? '') : '',
     avatarSeed: session.status === 'authenticated' ? session.avatarSeed : null,
     libraryVisibility: 0,
+    bio: '',
+    watchTimePublic: false,
   }));
   const [nickname, setNickname] = useState(saved.nickname);
   const [avatarSeed, setAvatarSeed] = useState(saved.avatarSeed);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [libraryVisibility, setLibraryVisibility] =
     useState<LibraryVisibility>(0);
+  const [bio, setBio] = useState('');
+  const [watchTimePublic, setWatchTimePublic] = useState(false);
   const [loaded, setLoaded] = useState(required);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -89,11 +102,17 @@ export function ProfileForm({
   const nicknameReady = nicknameChanged
     ? availability.status === 'available'
     : trimmedNickname !== '';
+  const trimmedBio = normalizeBio(bio);
+  const bioLength = Array.from(trimmedBio).length;
+  const bioChanged = trimmedBio !== saved.bio;
   const dirty =
     nicknameChanged ||
     avatarSeed !== saved.avatarSeed ||
-    libraryVisibility !== saved.libraryVisibility;
-  const canSave = loaded && !saving && nicknameReady && dirty;
+    libraryVisibility !== saved.libraryVisibility ||
+    bioChanged ||
+    watchTimePublic !== saved.watchTimePublic;
+  const canSave =
+    loaded && !saving && nicknameReady && dirty && bioLength <= BIO_MAX_LENGTH;
   const nicknameLength = Array.from(trimmedNickname).length;
 
   useEffect(() => {
@@ -110,11 +129,15 @@ export function ProfileForm({
           nickname: profile.nickname ?? '',
           avatarSeed: profile.avatarSeed,
           libraryVisibility: profile.libraryVisibility,
+          bio: profile.bio ?? '',
+          watchTimePublic: profile.watchTimePublic,
         };
         setSaved(next);
         setNickname(next.nickname);
         setAvatarSeed(next.avatarSeed);
         setLibraryVisibility(next.libraryVisibility);
+        setBio(next.bio);
+        setWatchTimePublic(next.watchTimePublic);
         setLoaded(true);
       })
       .catch(() => {
@@ -140,6 +163,10 @@ export function ProfileForm({
         ...(avatarSeed !== saved.avatarSeed ? { avatarSeed } : {}),
         ...(!required && libraryVisibility !== saved.libraryVisibility
           ? { libraryVisibility }
+          : {}),
+        ...(!required && bioChanged ? { bio: trimmedBio } : {}),
+        ...(!required && watchTimePublic !== saved.watchTimePublic
+          ? { watchTimePublic }
           : {}),
       });
       await refreshSession();
@@ -180,12 +207,23 @@ export function ProfileForm({
       </div>
       {required && (
         <p className='mt-1.5 text-sm leading-6 text-gray-500 dark:text-gray-400'>
-          昵称会公开显示在评价和个人主页，登录名不会公开
+          仅昵称会公开显示在评价和个人主页
         </p>
       )}
 
       <div className='mt-5 flex flex-col items-center'>
         <ProfileAvatar user={{ profileId, avatarSeed }} className='h-20 w-20' />
+        {session.status === 'authenticated' && (
+          <p className='mt-2.5 flex max-w-full items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500'>
+            登录名
+            <span className='min-w-0 truncate font-mono text-gray-600 dark:text-gray-300'>
+              {session.username}
+            </span>
+            <UserRoleBadge
+              role={session.role === 'user' ? undefined : session.role}
+            />
+          </p>
+        )}
         <div
           role='radiogroup'
           aria-label='选择头像'
@@ -266,7 +304,35 @@ export function ProfileForm({
       </div>
 
       {!required && (
-        <div className='mt-2'>
+        <div className='mt-4'>
+          <label htmlFor='profile-bio' className={MODAL_LABEL_CLASS}>
+            简介
+          </label>
+          <div className='relative'>
+            <input
+              id='profile-bio'
+              value={bio}
+              placeholder='一句话介绍自己'
+              disabled={saving || !loaded}
+              onChange={(event) => setBio(event.target.value)}
+              className={`${MODAL_INPUT_CLASS} pr-14`}
+            />
+            <span
+              aria-hidden='true'
+              className={`pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs tabular-nums ${
+                bioLength > BIO_MAX_LENGTH
+                  ? 'text-rose-500'
+                  : 'text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              {bioLength}/{BIO_MAX_LENGTH}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {!required && (
+        <div className='mt-4'>
           <label htmlFor='profile-visibility' className={MODAL_LABEL_CLASS}>
             收藏公开范围
           </label>
@@ -285,6 +351,14 @@ export function ProfileForm({
               { value: '2', label: '收藏与观看状态' },
               { value: '3', label: '收藏、状态与评分' },
             ]}
+          />
+          <OptionSwitchRow
+            label='在主页展示观影时长'
+            checked={watchTimePublic}
+            pending={!loaded}
+            disabled={saving}
+            onChange={setWatchTimePublic}
+            className='mt-2 w-full'
           />
         </div>
       )}

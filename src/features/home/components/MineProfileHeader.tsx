@@ -212,6 +212,7 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
         isOpen={Boolean(list)}
         profileId={profileId}
         type={list}
+        count={list ? (value(list) ?? null) : null}
         onClose={() => setList(null)}
       />
       {levelOpen && <WatchLevelPanel onClose={() => setLevelOpen(false)} />}

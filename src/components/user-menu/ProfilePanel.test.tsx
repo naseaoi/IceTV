@@ -24,6 +24,9 @@ const savedProfile = {
   nickname: '光影旅人',
   avatarSeed: null,
   libraryVisibility: 1 as const,
+  bio: null,
+  showcase: [],
+  watchTimePublic: false,
 };
 function mockSession(nickname: string | null) {
   jest.mocked(useAuthSession).mockReturnValue({
@@ -143,6 +146,32 @@ it('可以选择收藏、状态与评分并保存数字等级', async () => {
     fireEvent.click(saveButton());
   });
   expect(updateProfile).toHaveBeenCalledWith({ libraryVisibility: 3 });
+});
+
+it('简介折叠空白后提交，超长时禁止保存', async () => {
+  await renderLoadedForm();
+  jest.mocked(updateProfile).mockResolvedValue(savedProfile);
+  const bio = screen.getByLabelText('简介');
+  fireEvent.change(bio, { target: { value: 'x'.repeat(61) } });
+  expect(saveButton()).toBeDisabled();
+  fireEvent.change(bio, { target: { value: '  深夜\t\t只看老港片 ' } });
+  await act(async () => {
+    fireEvent.click(saveButton());
+  });
+  expect(updateProfile).toHaveBeenCalledWith({ bio: '深夜 只看老港片' });
+});
+
+it('切换观影时长公开并显示登录名', async () => {
+  await renderLoadedForm();
+  jest.mocked(updateProfile).mockResolvedValue(savedProfile);
+  expect(screen.getByText('private-login')).toBeInTheDocument();
+  const toggle = screen.getByRole('switch', { name: '在主页展示观影时长' });
+  expect(toggle).toHaveAttribute('aria-checked', 'false');
+  fireEvent.click(toggle);
+  await act(async () => {
+    fireEvent.click(saveButton());
+  });
+  expect(updateProfile).toHaveBeenCalledWith({ watchTimePublic: true });
 });
 
 it('个人主页入口保存资料后不重复提示成功', async () => {

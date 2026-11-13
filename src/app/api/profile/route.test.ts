@@ -4,6 +4,11 @@ import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 
+jest.mock('next/headers', () => ({ cookies: jest.fn() }));
+jest.mock('@/lib/auth-session.server', () => ({
+  getServerAuthSession: jest.fn(),
+}));
+
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest.fn(),
   requireAdmin: jest.fn(),
@@ -13,6 +18,7 @@ jest.mock('@/lib/db', () => ({
   db: {
     ensureUserProfile: jest.fn(),
     updateUserProfile: jest.fn(),
+    getProfileShowcase: jest.fn(),
     isNicknameAvailable: jest.fn(),
     getUserProfileById: jest.fn(),
     getUserProfileView: jest.fn(),
@@ -60,6 +66,7 @@ function request(method = 'GET', body?: unknown, query = ''): NextRequest {
 
 beforeEach(() => {
   jest.resetAllMocks();
+  db.getProfileShowcase.mockResolvedValue([]);
   requireActiveUser.mockResolvedValue({ username: 'reader', role: 'user' });
   requireAdmin.mockResolvedValue({ username: 'admin', role: 'admin' });
   db.ensureUserProfile.mockResolvedValue({
@@ -91,6 +98,9 @@ it('returns only public profile fields and validates updates', async () => {
     avatarSeed: null,
     level: 1,
     libraryVisibility: 0,
+    bio: null,
+    showcase: [],
+    watchTimePublic: false,
   });
   db.updateUserProfile.mockResolvedValue({
     profile_id: 'Reader012345',
@@ -165,6 +175,9 @@ it.each(['Avatar012345', 'a'.repeat(8), 'Z'.repeat(24), null])(
       avatarSeed,
       level: 1,
       libraryVisibility: 0,
+      bio: null,
+      showcase: [],
+      watchTimePublic: false,
     });
     expect(db.updateUserProfile).toHaveBeenCalledWith('reader', { avatarSeed });
   },
@@ -478,4 +491,95 @@ it('enforces the active-user guard for protected routes', async () => {
     expect((await handler(request())).status).toBe(401);
   for (const handler of [user.GET, reviews.GET, favorites.GET, followList.GET])
     expect((await handler(request(), context)).status).toBe(401);
+});
+
+it('保存简介、本命和时长开关并返回同一资料结构', async () => {
+  const showcase = [{ key: 'vod+1', title: '作品', year: '2026', cover: '' }];
+  db.getProfileShowcase.mockResolvedValue(showcase);
+  db.updateUserProfile.mockResolvedValue({
+    profile_id: 'Reader012345',
+    bio: 'A B',
+    watch_time_public: true,
+    favorites_public: 0,
+  });
+  const response = await profile.PUT(
+    request('PUT', {
+      bio: ' Ａ\n  B ',
+      showcaseKeys: ['vod+1', 'vod+1'],
+      watchTimePublic: true,
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect(db.updateUserProfile).toHaveBeenCalledWith('reader', {
+    bio: 'A B',
+    showcaseKeys: ['vod+1'],
+    watchTimePublic: true,
+  });
+  expect(await response.json()).toMatchObject({
+    bio: 'A B',
+    showcase,
+    watchTimePublic: true,
+  });
+  expect(await (await profile.GET(request())).json()).toMatchObject({
+    showcase,
+  });
+});
+
+it.each([
+  [{ bio: null }, '简介必须为字符串'],
+  [{ bio: '字'.repeat(61) }, '简介最多 60 个字'],
+  [{ watchTimePublic: 1 }, '观影时长公开状态必须为布尔值'],
+  [{ showcaseKeys: ['vod+1', 1] }, '本命作品必须为收藏键数组'],
+  [{ showcaseKeys: ['bad'] }, '本命作品收藏键无效'],
+  [
+    { showcaseKeys: ['v+1', 'v+2', 'v+3', 'v+4', 'v+5'] },
+    '本命作品最多选择 3 部',
+  ],
+])('拒绝新资料字段非法输入 %j', async (body, error) => {
+  const response = await profile.PUT(request('PUT', body));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error });
+  expect(db.updateUserProfile).not.toHaveBeenCalled();
+});
+
+it('将收藏归属或直播校验失败映射为可展示的 400', async () => {
+  const { ProfileValidationError } = require('@/lib/user-profile');
+  db.updateUserProfile.mockRejectedValue(
+    new ProfileValidationError('本命作品须从自己的非直播收藏中选择'),
+  );
+  const response = await profile.PUT(
+    request('PUT', { showcaseKeys: ['live+1'] }),
+  );
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    error: '本命作品须从自己的非直播收藏中选择',
+  });
+});
+
+it('公开资料接口透传同一主页投影并保持私密时长为空', async () => {
+  const view = { bio: '简介', showcase: [], watchHours: null };
+  db.getUserProfileView.mockResolvedValue(view);
+  expect(await (await user.GET(request(), context)).json()).toEqual(view);
+  expect(db.getUserProfileView).toHaveBeenCalledWith('author', 'reader');
+});
+
+it('服务端首屏预取与公开接口共用资料投影', async () => {
+  const { cookies } = require('next/headers');
+  const { getServerAuthSession } = require('@/lib/auth-session.server');
+  const { getInitialProfileView } = require('@/lib/user-profile.server');
+  cookies.mockResolvedValue({ get: () => ({ value: 'session-cookie' }) });
+  getServerAuthSession.mockResolvedValue({
+    status: 'authenticated',
+    username: 'reader',
+  });
+  const view = {
+    bio: '简介',
+    showcase: [{ key: 'vod+1', title: '作品', year: '', cover: '' }],
+    watchHours: 12,
+  };
+  db.getUserProfileView.mockResolvedValue(view);
+  expect(await getInitialProfileView(target.profileId)).toEqual(
+    await (await user.GET(request(), context)).json(),
+  );
+  expect(db.getUserProfileView).toHaveBeenCalledWith('author', 'reader');
 });

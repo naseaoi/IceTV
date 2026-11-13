@@ -27,6 +27,7 @@ import {
 } from '@/features/continue-watching/lib/layout';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
+import { replaceSearchParamInUrl } from '@/lib/url-search-param';
 
 import { ContinueWatchingGrid } from './ContinueWatchingGrid';
 import {
@@ -36,15 +37,6 @@ import {
 } from './ContinueWatchingPageFrame';
 import { ContinueWatchingViewSwitch } from './ContinueWatchingViewSwitch';
 import { TrackingCalendar } from './TrackingCalendar';
-
-// 筛选与视图只改地址栏不走路由，避免重新请求服务端组件。state 传 null：带着 Next 内部
-// 标记（__NA）的 state 会被当作路由自身调用而不同步，之后路由重渲染会把地址改回去
-function replaceParamInUrl(name: string, value: string | null) {
-  const url = new URL(window.location.href);
-  if (value === null) url.searchParams.delete(name);
-  else url.searchParams.set(name, value);
-  window.history.replaceState(null, '', url);
-}
 
 export function ContinueWatchingPageClient({
   initialSkeletonCount = 0,
@@ -112,13 +104,13 @@ export function ContinueWatchingPageClient({
   const changeFilter = (next: ContinueWatchingFilter) => {
     if (next === filter) return;
     exitEditing();
-    replaceParamInUrl('filter', next === 'all' ? null : next);
+    replaceSearchParamInUrl('filter', next === 'all' ? null : next);
   };
 
   const changeView = (next: ContinueWatchingView) => {
     if (next === view) return;
     exitEditing();
-    replaceParamInUrl('view', next === 'grid' ? null : next);
+    replaceSearchParamInUrl('view', next === 'grid' ? null : next);
   };
   const viewSwitch = (
     <ContinueWatchingViewSwitch view={view} onChange={changeView} />

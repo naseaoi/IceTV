@@ -1,3 +1,4 @@
+import { watchLevelSession } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import { followReviewSortKey } from '@/lib/follow-review-identity';
 
 import type { IStorage, VideoReview } from '../../types';
@@ -487,6 +488,10 @@ export function videoReviewContract(createStorage: () => IStorage) {
     expect(final.followReviewReadIds?.[0]).toBe(id(303));
   });
 
+  it('保存主页资料并按当前收藏和时长权限读取', async () => {
+    await assertProfileDetails(createStorage());
+  });
+
   it('creates stable profiles and rolls back registration on nickname conflicts', async () => {
     const storage = createStorage();
     await storage.registerUser('social-a', 'test-password', 'Alice');
@@ -887,4 +892,122 @@ export function videoReviewContract(createStorage: () => IStorage) {
       '分页游标无效',
     );
   });
+}
+
+export async function assertProfileDetails(storage: IStorage) {
+  const username = 'profile-details';
+  await storage.registerUser(username, 'test-password');
+  const initial = await storage.ensureUserProfile(username);
+  expect(initial).toMatchObject({ bio: null, watch_time_public: false });
+  expect(
+    (await storage.getUserProfileView(username, username))?.watchHours,
+  ).toBe(0);
+  const favorite = {
+    title: '作品',
+    year: '2026',
+    cover: 'cover',
+    source_name: '源',
+    total_episodes: 12,
+    save_time: 1,
+    search_title: '搜索名',
+  };
+  await storage.setFavorite(username, 'vod+1', favorite);
+  await storage.setFavorite(username, 'vod+2', {
+    ...favorite,
+    title: '另一部',
+  });
+  await storage.setFavorite(username, 'live+1', {
+    ...favorite,
+    origin: 'live',
+  });
+  await storage.setFavorite('other', 'vod+other', favorite);
+  await storage.updateUserProfile(username, {
+    bio: ' Ａ\n\t B ',
+    showcaseKeys: ['vod+2', 'vod+1', 'vod+2'],
+  });
+  const expected = [
+    {
+      key: 'vod+2',
+      title: '另一部',
+      year: '2026',
+      cover: 'cover',
+      search_title: '搜索名',
+    },
+    {
+      key: 'vod+1',
+      title: '作品',
+      year: '2026',
+      cover: 'cover',
+      search_title: '搜索名',
+    },
+  ];
+  expect(await storage.getProfileShowcase(username)).toEqual(expected);
+  expect(await storage.getUserProfileView(username, 'other')).toMatchObject({
+    bio: 'A B',
+    libraryVisibility: 0,
+    showcase: expected,
+    watchHours: null,
+  });
+  for (const key of ['live+1', 'vod+other', 'vod+missing', 'VOD+1', 'vod+1 ']) {
+    await expect(
+      storage.updateUserProfile(username, {
+        bio: '不应写入',
+        showcaseKeys: [key],
+      }),
+    ).rejects.toThrow('本命作品须从自己的非直播收藏中选择');
+    expect((await storage.getUserProfile(username))?.bio).toBe('A B');
+    expect(await storage.getProfileShowcase(username)).toEqual(expected);
+  }
+  await expect(
+    storage.updateUserProfile(username, {
+      showcaseKeys: ['v+1', 'v+2', 'v+3', 'v+4', 'v+5'],
+    }),
+  ).rejects.toThrow('本命作品最多选择 3 部');
+  await storage.deleteFavorite(username, 'vod+2');
+  expect(await storage.getProfileShowcase(username)).toEqual(expected.slice(1));
+  await storage.setPlaybackSession(username, {
+    ...watchLevelSession,
+    id: 'profile-details-session',
+    watch_seconds: 7199,
+  });
+  const tasteReview = (title: string, rating: number) => ({
+    ...videoReview,
+    title,
+    title_norm: title,
+    rating,
+  });
+  await storage.setVideoReview(username, tasteReview('shared', 9));
+  await storage.setVideoReview('other', tasteReview('shared', 7));
+  await storage.setVideoReview(username, tasteReview('ownerpick', 9));
+  await storage.setVideoReview('other', tasteReview('viewerpick', 9));
+  const selfView = await storage.getUserProfileView(username, username);
+  expect(selfView?.watchHours).toBe(1);
+  expect(selfView?.tasteMatch).toBeNull();
+  const otherView = await storage.getUserProfileView(username, 'other');
+  expect(otherView?.watchHours).toBeNull();
+  expect(otherView?.tasteMatch).toEqual({
+    commonCount: 1,
+    score: null,
+    picks: [
+      {
+        title_norm: 'ownerpick',
+        title: 'ownerpick',
+        year: '2026',
+        cover: '',
+        rating: 9,
+      },
+    ],
+  });
+  await storage.updateUserProfile(username, { watchTimePublic: true, bio: '' });
+  expect(await storage.getUserProfileView(username, 'other')).toMatchObject({
+    bio: null,
+    watchHours: 1,
+  });
+  await storage.updateUserProfile(username, { showcaseKeys: [] });
+  expect(await storage.getProfileShowcase(username)).toEqual([]);
+  await storage.updateUserProfile(username, { showcaseKeys: ['vod+1'] });
+  await storage.deleteUser(username);
+  await storage.ensureUserProfile(username);
+  await storage.setFavorite(username, 'vod+1', favorite);
+  expect(await storage.getProfileShowcase(username)).toEqual([]);
 }

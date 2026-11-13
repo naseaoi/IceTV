@@ -52,7 +52,8 @@ export default function WatchLevelBadge({
         strokeWidth={2.25}
       />
       <span className='sr-only'>观影等级 {level} </span>
-      {name}
+      {/* 小字号下中文字形在行框内偏上约 0.08em，下移后与图标、牌面上下居中 */}
+      <span className='relative top-[0.08em]'>{name}</span>
     </span>
   );
 }

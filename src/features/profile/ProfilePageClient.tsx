@@ -1,25 +1,22 @@
 'use client';
 
-import { Link2, UserCheck, UserPlus } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import AnimatedCount from '@/components/AnimatedCount';
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import ProfileAvatar from '@/components/ProfileAvatar';
+import { SIDEBAR_POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import PublicReviewContent, {
   PUBLIC_REVIEW_BODY_SPACING_CLASS,
   PUBLIC_REVIEW_BODY_TEXT_CLASS,
   PUBLIC_REVIEW_META_CLASS,
   PUBLIC_REVIEW_TIME_TEXT_CLASS,
 } from '@/components/PublicReviewContent';
-import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
+import SkeletonText from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
-import WatchLevelBadge from '@/components/WatchLevelBadge';
-import { RecapEntryLink } from '@/features/annual-report/components/RecapEntryLink';
 import {
   FavoriteGrid,
   ReadOnlyFavoriteGridSkeleton,
@@ -31,28 +28,32 @@ import {
   profileButtonClass as buttonClass,
 } from '@/features/profile/FollowList';
 import { useProfilePage } from '@/features/profile/hooks/useProfilePage';
-import { TasteMatchChip } from '@/features/profile/TasteMatch';
-import { copyTextToClipboard } from '@/lib/clipboard';
+import {
+  ProfileHero,
+  ProfileHeroSkeleton,
+} from '@/features/profile/ProfileHero';
+import { useSlidingIndicator } from '@/hooks/useSlidingIndicator';
 import {
   getUserFavorites,
   getUserProfile,
   getUserReviews,
+  PROFILE_UPDATED_EVENT,
   setFollowing,
 } from '@/lib/profile.client';
-import { showToast } from '@/lib/toast';
 import type {
   FavoriteWatchStatus,
   LibraryVisibility,
   UserProfileView,
 } from '@/lib/types';
+import { replaceSearchParamInUrl } from '@/lib/url-search-param';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 
 const REVIEW_TITLE_TEXT_CLASS = 'mb-1.5';
-const NICKNAME_TEXT_CLASS = 'text-2xl font-semibold';
-const PROFILE_STATS_CLASS = 'mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm';
-const PROFILE_STAT_VALUE_CLASS = 'mr-1 font-semibold tabular-nums';
-const PROFILE_STAT_LABELS = ['评价', '关注', '粉丝'] as const;
+const TABS_CLASS =
+  'relative mb-6 flex gap-7 border-b border-gray-200/80 dark:border-white/[0.08]';
+const TAB_CLASS = 'relative -mb-px py-3 text-[15px] transition-colors';
+const TAB_INDICATOR_CLASS = 'h-0.5 rounded-full bg-brand-500 dark:bg-brand-400';
 const LIST_SKELETON_LIMIT = 20;
 const PROFILE_TABS = [
   ['reviews', '评价'],
@@ -60,6 +61,12 @@ const PROFILE_TABS = [
   ['lists', '片单'],
 ] as const;
 type ProfileTab = (typeof PROFILE_TABS)[number][0];
+const DEFAULT_PROFILE_TAB: ProfileTab = 'reviews';
+function parseProfileTab(value: string | null | undefined): ProfileTab {
+  return (
+    PROFILE_TABS.find(([tab]) => tab === value)?.[0] ?? DEFAULT_PROFILE_TAB
+  );
+}
 const DEFAULT_REVIEW_SKELETON_COUNT = 3;
 // 资料返回前无从得知评价数，沿用本次会话里上次看到的数量
 const knownReviewCounts = new Map<string, number>();
@@ -199,7 +206,10 @@ function ProfileFavorites({
         </div>
       )}
       {initialLoading && favoriteCount > 0 ? (
-        <ReadOnlyFavoriteGridSkeleton count={skeletonCount(favoriteCount)} />
+        <ReadOnlyFavoriteGridSkeleton
+          count={skeletonCount(favoriteCount)}
+          gridClassName={SIDEBAR_POSTER_GRID_CLASS}
+        />
       ) : (
         <div
           aria-busy={refreshing}
@@ -207,6 +217,7 @@ function ProfileFavorites({
         >
           <FavoriteGrid
             readOnly
+            gridClassName={SIDEBAR_POSTER_GRID_CLASS}
             emptyText={filter === 'all' ? '暂无收藏内容' : '没有符合条件的作品'}
             items={page.items.flatMap((item) => {
               const parsed = parseStorageKey(item.key);
@@ -274,64 +285,79 @@ function ProfileReviewsSkeleton({ count }: { count: number }) {
   );
 }
 
+// 桌面端左侧资料卡、右侧内容；窄屏上下堆叠
+const PROFILE_LAYOUT_CLASS =
+  'lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-10';
+const PROFILE_MAIN_CLASS = 'min-w-0';
+
 function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
   return (
-    <div aria-label='加载中' role='status'>
-      <div className='mb-6 flex flex-wrap items-center gap-4 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
-        <div className='skeleton h-16 w-16 shrink-0 rounded-full' />
-        <div className='min-w-0 flex-1'>
-          <SkeletonText
-            className={NICKNAME_TEXT_CLASS}
-            barClassName='h-6 w-36 max-w-full rounded'
-          />
-          <div className={`${PROFILE_STATS_CLASS} text-gray-500`}>
-            {PROFILE_STAT_LABELS.map((label) => (
-              <span key={label}>
-                <SkeletonNumber className={PROFILE_STAT_VALUE_CLASS} />
-                {label}
-              </span>
-            ))}
-          </div>
+    <div aria-label='加载中' role='status' className={PROFILE_LAYOUT_CLASS}>
+      <ProfileHeroSkeleton />
+      <div className={PROFILE_MAIN_CLASS}>
+        <div className={TABS_CLASS}>
+          {PROFILE_TABS.map(([value, label]) => (
+            <span key={value} className={`${TAB_CLASS} text-gray-500`}>
+              {label}
+            </span>
+          ))}
         </div>
-        <div className='flex items-center gap-2'>
-          <div className='skeleton h-9 w-9 rounded-xl' />
-          <div className='skeleton h-9 w-[88px] rounded-xl' />
-        </div>
+        <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
       </div>
-      <div className='mb-6 flex gap-2 border-b border-gray-200 dark:border-white/10'>
-        {['评价', '收藏', '片单'].map((label) => (
-          <span
-            key={label}
-            className='border-b-2 border-transparent px-5 py-3 text-sm text-gray-500'
-          >
-            {label}
-          </span>
-        ))}
-      </div>
-      <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
     </div>
   );
 }
 
-function CopyProfileLinkButton({ profileId }: { profileId: string }) {
-  async function copy() {
-    const ok = await copyTextToClipboard(
-      `${window.location.origin}/u/${profileId}`,
-    );
-    if (ok) showToast('已复制主页链接', 'success');
-    else showToast('复制失败，请手动复制地址栏中的链接', 'error');
-  }
-
+function ProfileTabs({
+  tab,
+  onChange,
+}: {
+  tab: ProfileTab;
+  onChange: (tab: ProfileTab) => void;
+}) {
+  const indicator = useSlidingIndicator<HTMLDivElement>(tab);
   return (
-    <button
-      type='button'
-      onClick={() => void copy()}
-      aria-label='复制主页链接'
-      title='复制主页链接'
-      className='flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/15'
+    <div
+      ref={indicator.containerRef}
+      role='tablist'
+      aria-label='个人主页内容'
+      className={TABS_CLASS}
     >
-      <Link2 className='h-4 w-4' />
-    </button>
+      {PROFILE_TABS.map(([value, label]) => {
+        const selected = tab === value;
+        return (
+          <button
+            key={value}
+            type='button'
+            role='tab'
+            aria-selected={selected}
+            data-indicator-target={selected || undefined}
+            onClick={() => onChange(value)}
+            className={`${TAB_CLASS} ${
+              selected
+                ? 'font-semibold text-gray-900 dark:text-white'
+                : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+            }`}
+          >
+            {label}
+            {selected && !indicator.indicatorProps && (
+              <span
+                className={`absolute inset-x-0 bottom-0 ${TAB_INDICATOR_CLASS}`}
+              />
+            )}
+          </button>
+        );
+      })}
+      {indicator.indicatorProps && (
+        <span
+          aria-hidden='true'
+          className='sliding-indicator -mt-0.5 h-0.5'
+          {...indicator.indicatorProps}
+        >
+          <span className={`block h-full ${TAB_INDICATOR_CLASS}`} />
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -347,7 +373,15 @@ export default function ProfilePageClient({
   );
   const [error, setError] = useState('');
   const [version, setVersion] = useState(0);
-  const [tab, setTab] = useState<ProfileTab>('reviews');
+  // 标签写进地址栏，从片单等详情页返回时回到原标签
+  const searchParams = useSearchParams();
+  const [tab, setTabState] = useState(() =>
+    parseProfileTab(searchParams?.get('tab')),
+  );
+  const setTab = (next: ProfileTab) => {
+    setTabState(next);
+    replaceSearchParamInUrl('tab', next === DEFAULT_PROFILE_TAB ? null : next);
+  };
   const [list, setList] = useState<'followers' | 'following' | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -374,6 +408,13 @@ export default function ProfilePageClient({
       active = false;
     };
   }, [initialProfile, profileId, version]);
+  const isSelf = profile?.isSelf === true;
+  useEffect(() => {
+    if (!isSelf) return;
+    const refresh = () => setVersion((value) => value + 1);
+    window.addEventListener(PROFILE_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(PROFILE_UPDATED_EVENT, refresh);
+  }, [isSelf]);
   async function follow() {
     if (!profile || following.current) return;
     following.current = true;
@@ -413,7 +454,7 @@ export default function ProfilePageClient({
       mobileHeader={{ title: profile?.nickname ?? '个人主页', showBack: true }}
     >
       <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-10`}>
-        <div className='mx-auto max-w-4xl'>
+        <div className='mx-auto max-w-4xl lg:max-w-6xl'>
           {error && (
             <div
               role='alert'
@@ -432,160 +473,63 @@ export default function ProfilePageClient({
             </div>
           )}
           {profile ? (
-            <>
-              <header className='mb-6 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
-                <div className='flex flex-wrap items-center gap-4'>
-                  <ProfileAvatar user={profile} className='h-16 w-16' />
-                  <div className='min-w-0 flex-1'>
-                    <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
-                      <h1
-                        className={`min-w-0 break-words ${NICKNAME_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
-                      >
-                        {profile.nickname ?? '未设置昵称'}
-                      </h1>
-                      <WatchLevelBadge level={profile.level} size='md' />
-                    </div>
-                    <div
-                      className={`${PROFILE_STATS_CLASS} text-gray-500 dark:text-gray-400`}
-                    >
-                      {(
-                        [
-                          [
-                            profile.publicReviewCount,
-                            '评价',
-                            () => setTab('reviews'),
-                          ],
-                          [
-                            profile.followingCount,
-                            '关注',
-                            () => setList('following'),
-                          ],
-                          [
-                            profile.followerCount,
-                            '粉丝',
-                            () => setList('followers'),
-                          ],
-                        ] as const
-                      ).map(([count, label, onClick]) => (
-                        <button
-                          key={label}
-                          type='button'
-                          onClick={onClick}
-                          className='transition hover:text-gray-900 dark:hover:text-gray-100'
-                        >
-                          <span
-                            className={`${PROFILE_STAT_VALUE_CLASS} text-gray-900 dark:text-gray-100`}
-                          >
-                            <AnimatedCount key={profileId} value={count} />
-                          </span>
-                          {label}
-                        </button>
-                      ))}
-                      {profile.recap && (
-                        <RecapEntryLink
-                          href={`/u/${encodeURIComponent(profileId)}/recap/${profile.recap.year}`}
-                          year={profile.recap.year}
-                          className='-my-1'
-                        />
-                      )}
-                      {!profile.isSelf && (
-                        <TasteMatchChip
-                          profileId={profileId}
-                          nickname={profile.nickname ?? 'TA'}
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div className='flex items-center gap-2'>
-                    <CopyProfileLinkButton profileId={profileId} />
-                    {profile.isSelf ? (
-                      <button
-                        type='button'
-                        onClick={() => setEditing(true)}
-                        className={buttonClass}
-                      >
-                        编辑资料
-                      </button>
-                    ) : (
-                      <button
-                        type='button'
-                        disabled={busy}
-                        aria-pressed={profile.isFollowing}
-                        onClick={() => void follow()}
-                        className={
-                          profile.isFollowing
-                            ? `inline-flex items-center gap-2 ${buttonClass}`
-                            : 'inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50'
-                        }
-                      >
-                        {profile.isFollowing ? (
-                          <UserCheck className='h-4 w-4' />
-                        ) : (
-                          <UserPlus className='h-4 w-4' />
-                        )}
-                        {profile.isFollowing ? '已关注' : '关注'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </header>
-              <div
-                role='tablist'
-                aria-label='个人主页内容'
-                className='mb-6 flex gap-2 border-b border-gray-200 dark:border-white/10'
-              >
-                {PROFILE_TABS.map(([value, label]) => (
-                  <button
-                    key={value}
-                    type='button'
-                    role='tab'
-                    aria-selected={tab === value}
-                    onClick={() => setTab(value)}
-                    className={`border-b-2 px-5 py-3 text-sm ${tab === value ? 'border-brand-600 font-semibold text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
+            <div className={PROFILE_LAYOUT_CLASS}>
+              <ProfileHero
+                profile={profile}
+                profileId={profileId}
+                busy={busy}
+                onFollow={() => void follow()}
+                onEdit={() => setEditing(true)}
+                onShowReviews={() => setTab('reviews')}
+                onOpenList={setList}
+                onShowcaseChange={(showcase) =>
+                  setProfile((current) => current && { ...current, showcase })
+                }
+              />
+              <div className={PROFILE_MAIN_CLASS}>
+                <ProfileTabs tab={tab} onChange={setTab} />
+                {tab === 'lists' ? (
+                  <ProfileLists
+                    key={`${profileId}:${version}`}
+                    profileId={profileId}
+                    isSelf={profile.isSelf}
+                    skeletonCount={skeletonCount(profile.listCount)}
+                  />
+                ) : tab === 'reviews' ? (
+                  <ProfileReviews
+                    profileId={profileId}
+                    isSelf={profile.isSelf}
+                    reviewCount={profile.publicReviewCount}
+                  />
+                ) : (
+                  <ProfileFavorites
+                    key={`${profileId}:${version}`}
+                    profileId={profileId}
+                    initialVisibility={
+                      profile.isSelf ? 3 : profile.libraryVisibility
+                    }
+                    favoriteCount={profile.favoriteCount}
+                  />
+                )}
               </div>
-              {tab === 'lists' ? (
-                <ProfileLists
-                  key={`${profileId}:${version}`}
-                  profileId={profileId}
-                  isSelf={profile.isSelf}
-                  skeletonCount={skeletonCount(profile.listCount)}
-                />
-              ) : tab === 'reviews' ? (
-                <ProfileReviews
-                  profileId={profileId}
-                  isSelf={profile.isSelf}
-                  reviewCount={profile.publicReviewCount}
-                />
-              ) : (
-                <ProfileFavorites
-                  key={`${profileId}:${version}`}
-                  profileId={profileId}
-                  initialVisibility={
-                    profile.isSelf ? 3 : profile.libraryVisibility
-                  }
-                  favoriteCount={profile.favoriteCount}
-                />
-              )}
               <FollowList
                 isOpen={Boolean(list)}
                 profileId={profileId}
                 type={list}
+                count={
+                  list === 'followers'
+                    ? profile.followerCount
+                    : profile.followingCount
+                }
                 onClose={() => setList(null)}
               />
               {editing && (
                 <ProfilePanel
                   showSuccessToast={false}
-                  onClose={() => {
-                    setEditing(false);
-                    setVersion((value) => value + 1);
-                  }}
+                  onClose={() => setEditing(false)}
                 />
               )}
-            </>
+            </div>
           ) : (
             !error && (
               <ProfileHeaderSkeleton

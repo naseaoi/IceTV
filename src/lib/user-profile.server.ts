@@ -12,7 +12,8 @@ import { db } from '@/lib/db';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
 import { NicknameTakenError } from '@/lib/review-social-storage';
 import type {
-  LibraryVisibility,
+  IStorage,
+  ProfileShowcaseItem,
   PublicFavoriteItem,
   UserProfile,
   UserProfileView,
@@ -20,8 +21,11 @@ import type {
 import {
   ProfileValidationError,
   validateAvatarSeed,
+  validateBio,
   validateLibraryVisibility,
   validateNickname,
+  validateShowcaseKeys,
+  validateWatchTimePublic,
 } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import { ReviewValidationError } from '@/lib/video-reviews';
@@ -70,8 +74,11 @@ export async function requireNickname(
     : socialJson({ error: '请先设置昵称', code: 'NICKNAME_REQUIRED' }, 403);
 }
 
-function ownProfile(profile: UserProfile) {
+function ownProfile(profile: UserProfile, showcase: ProfileShowcaseItem[]) {
   return {
+    bio: profile.bio ?? null,
+    showcase,
+    watchTimePublic: profile.watch_time_public ?? false,
     profileId: profile.profile_id,
     nickname: profile.nickname,
     avatarSeed: profile.avatar_seed,
@@ -85,20 +92,29 @@ export async function handleProfile(request: NextRequest) {
     const guard = await requireActiveUser(request);
     if (isGuardFailure(guard)) return guard.response;
     if (request.method === 'GET')
-      return socialJson(ownProfile(await db.ensureUserProfile(guard.username)));
+      return socialJson(
+        ownProfile(
+          await db.ensureUserProfile(guard.username),
+          await db.getProfileShowcase(guard.username),
+        ),
+      );
     const body = await socialBody(request);
     if (
       body.nickname === undefined &&
       body.favoritesPublic === undefined &&
       body.libraryVisibility === undefined &&
-      body.avatarSeed === undefined
+      body.avatarSeed === undefined &&
+      body.bio === undefined &&
+      body.showcaseKeys === undefined &&
+      body.watchTimePublic === undefined
     )
       throw new ReviewValidationError('请提供要修改的资料');
-    const patch: {
-      nickname?: string;
-      avatarSeed?: string | null;
-      libraryVisibility?: LibraryVisibility;
-    } = {};
+    const patch: Parameters<IStorage['updateUserProfile']>[1] = {};
+    if (body.bio !== undefined) patch.bio = validateBio(body.bio);
+    if (body.showcaseKeys !== undefined)
+      patch.showcaseKeys = validateShowcaseKeys(body.showcaseKeys);
+    if (body.watchTimePublic !== undefined)
+      patch.watchTimePublic = validateWatchTimePublic(body.watchTimePublic);
     if (body.nickname !== undefined)
       patch.nickname = validateNickname(body.nickname, {
         allowReserved: guard.role === 'owner',
@@ -115,7 +131,10 @@ export async function handleProfile(request: NextRequest) {
       patch.libraryVisibility = body.favoritesPublic ? 1 : 0;
     }
     return socialJson(
-      ownProfile(await db.updateUserProfile(guard.username, patch)),
+      ownProfile(
+        await db.updateUserProfile(guard.username, patch),
+        await db.getProfileShowcase(guard.username),
+      ),
     );
   } catch (error) {
     return socialFailure(error);

@@ -18,8 +18,11 @@ import type { PublicUserRef } from '@/lib/types';
 import { ListVisibilityBadge } from './ListVisibilityBadge';
 
 // 卡片与骨架共用几何类，改动时两侧同步
-export const LIST_GRID_CLASS =
-  'grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-5 sm:gap-y-8 lg:grid-cols-3 2xl:grid-cols-4';
+const LIST_GRID_BASE_CLASS =
+  'grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-5 sm:gap-y-8';
+const LIST_GRID_CLASS = `${LIST_GRID_BASE_CLASS} lg:grid-cols-3 2xl:grid-cols-4`;
+// 桌面端左右分栏时按内容区宽度排列，不跟视口断点
+export const SIDEBAR_LIST_GRID_CLASS = `${LIST_GRID_BASE_CLASS} lg:grid-cols-[repeat(auto-fill,minmax(220px,1fr))]`;
 const LIST_COVER_CLASS = 'aspect-[16/9] rounded-xl';
 const LIST_TITLE_CLASS = 'mt-3 text-[15px] leading-6';
 const LIST_DESCRIPTION_CLASS = 'mt-0.5 text-[13px] leading-5';
@@ -186,15 +189,17 @@ export function ListCard({
 export function ListGrid({
   lists,
   showPrivacy = false,
+  gridClassName = LIST_GRID_CLASS,
 }: {
   lists: (ListSummary & { owner?: PublicUserRef })[];
   showPrivacy?: boolean;
+  gridClassName?: string;
 }) {
   const containerRef = useListLayoutMotion<HTMLDivElement>(
     lists.map((list) => list.id),
   );
   return (
-    <div ref={containerRef} className={`relative ${LIST_GRID_CLASS}`}>
+    <div ref={containerRef} className={`relative ${gridClassName}`}>
       {lists.map((list) => (
         <div key={list.id} data-list-motion-key={list.id}>
           <ListCard list={list} owner={list.owner} showPrivacy={showPrivacy} />
@@ -204,9 +209,15 @@ export function ListGrid({
   );
 }
 
-export function ListGridSkeleton({ count }: { count: number }) {
+export function ListGridSkeleton({
+  count,
+  gridClassName = LIST_GRID_CLASS,
+}: {
+  count: number;
+  gridClassName?: string;
+}) {
   return (
-    <div className={LIST_GRID_CLASS} role='status' aria-label='加载中'>
+    <div className={gridClassName} role='status' aria-label='加载中'>
       {Array.from({ length: count }, (_, index) => (
         <div key={index}>
           <div className={`skeleton ${LIST_COVER_CLASS}`} />

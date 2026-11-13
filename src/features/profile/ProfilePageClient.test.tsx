@@ -20,7 +20,12 @@ import {
 import { showToast } from '@/lib/toast';
 import type { UserProfileView } from '@/lib/types';
 import { DisplayableError } from '@/lib/user-facing-error';
+import { SHOWCASE_MAX_ITEMS } from '@/lib/user-profile';
 
+jest.mock('next/navigation', () => ({
+  ...jest.requireActual('next/navigation'),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 jest.mock('@/components/card-actions/useMediaCardMenu', () => ({
   useMediaCardMenu: () => ({}),
 }));
@@ -48,9 +53,8 @@ jest.mock('@/lib/profile.client', () => ({
   getUserFavorites: jest.fn(),
   getUserFollows: jest.fn(),
   setFollowing: jest.fn(),
-  socialRequest: jest.fn(() =>
-    Promise.resolve({ commonCount: 0, score: null, picks: [] }),
-  ),
+  updateProfile: jest.fn(),
+  PROFILE_UPDATED_EVENT: 'profile:updated',
 }));
 const profile: UserProfileView = {
   profileId: 'profileAlice',
@@ -65,9 +69,14 @@ const profile: UserProfileView = {
   listCount: 0,
   libraryVisibility: 0,
   recap: null,
+  bio: null,
+  showcase: [],
+  watchHours: null,
+  tasteMatch: null,
 };
 beforeEach(() => {
   jest.clearAllMocks();
+  window.history.replaceState(null, '', '/u/profileAlice');
   jest.mocked(getUserProfile).mockResolvedValue(profile);
   jest
     .mocked(getUserReviews)
@@ -128,6 +137,15 @@ it('粉丝列表可跳转主页，非公开收藏展示占位', async () => {
   fireEvent.click(screen.getByRole('button', { name: '关闭列表' }));
   fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
   expect(await screen.findByText('这位用户暂未公开收藏')).toBeInTheDocument();
+});
+it('关注列表首屏骨架条数跟随资料中的计数，不显示转圈', async () => {
+  jest.mocked(getUserFollows).mockReturnValueOnce(new Promise(() => {}));
+  render(<ProfilePageClient profileId='profileAlice' />);
+  fireEvent.click(await screen.findByRole('button', { name: '2 粉丝' }));
+  const dialog = await screen.findByRole('dialog', { name: '粉丝' });
+  const skeleton = within(dialog).getByRole('status', { name: '加载中' });
+  expect(skeleton.children).toHaveLength(2);
+  expect(within(dialog).getAllByRole('status')).toHaveLength(1);
 });
 it('公开收藏只读播放链接包含源标识且分页追加', async () => {
   jest
@@ -298,4 +316,60 @@ it('复制主页链接使用当前站点地址与资料标识，并按结果给�
       'error',
     ),
   );
+});
+
+it('他人主页展示简介、本命、观影时长与相合度，缺省时保留占位或隐藏', async () => {
+  jest.mocked(getUserProfile).mockResolvedValueOnce({
+    ...profile,
+    bio: '深夜只看老港片',
+    watchHours: 128,
+    showcase: [{ key: 'src+1', title: '重庆森林', year: '1994', cover: 'c1' }],
+    tasteMatch: { commonCount: 3, score: null, picks: [] },
+  });
+  const { unmount } = render(<ProfilePageClient profileId='profileAlice' />);
+  await screen.findByText('深夜只看老港片');
+  expect(screen.getByRole('link', { name: '播放重庆森林' })).toHaveAttribute(
+    'href',
+    '/play?title=%E9%87%8D%E5%BA%86%E6%A3%AE%E6%9E%97&year=1994',
+  );
+  expect(screen.getByText('观影小时')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '挑选本命作品' })).toBeNull();
+  expect(
+    screen.getByRole('button', { name: '共同评分 3 部' }),
+  ).toBeInTheDocument();
+  unmount();
+
+  render(<ProfilePageClient profileId='profileAlice' />);
+  await screen.findByRole('heading', { name: '爱丽丝' });
+  expect(screen.getByText('暂无简介')).toBeInTheDocument();
+  expect(screen.getByText('观影小时')).toBeInTheDocument();
+  expect(screen.getByText('未公开')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '本命' })).toHaveTextContent(
+    '暂无',
+  );
+  expect(screen.queryByText(/共同评分|口味相合|高分推荐/)).toBeNull();
+});
+
+it('本人主页空本命展示挑选入口', async () => {
+  jest
+    .mocked(getUserProfile)
+    .mockResolvedValueOnce({ ...profile, isSelf: true, watchHours: 3 });
+  render(<ProfilePageClient profileId='profileAlice' />);
+  await screen.findByRole('heading', { name: '本命' });
+  expect(screen.getAllByRole('button', { name: '挑选本命作品' })).toHaveLength(
+    SHOWCASE_MAX_ITEMS,
+  );
+  expect(screen.getByRole('button', { name: '添加简介' })).toBeInTheDocument();
+});
+it('标签写入地址栏，带标签参数进入时直接打开对应标签', async () => {
+  window.history.replaceState(null, '', '/u/profileAlice?tab=favorites');
+  render(<ProfilePageClient profileId='profileAlice' />);
+  expect(await screen.findByRole('tab', { name: '收藏' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  fireEvent.click(screen.getByRole('tab', { name: '评价' }));
+  expect(window.location.search).toBe('');
+  fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
+  expect(window.location.search).toBe('?tab=favorites');
 });

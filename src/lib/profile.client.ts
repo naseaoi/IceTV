@@ -3,6 +3,7 @@ import type {
   FavoriteWatchStatus,
   FollowListPage,
   LibraryVisibility,
+  ProfileShowcaseItem,
   PublicFavoritePage,
   PublicUserRef,
   PublicVideoReviewPage,
@@ -11,8 +12,12 @@ import type {
 import { DisplayableError, getHttpErrorMessage } from '@/lib/user-facing-error';
 
 export const PROFILE_REQUIRED_EVENT = 'auth:profile-required';
+export const PROFILE_UPDATED_EVENT = 'profile:updated';
 export type MyProfile = PublicUserRef & {
   libraryVisibility: LibraryVisibility;
+  bio: string | null;
+  showcase: ProfileShowcaseItem[];
+  watchTimePublic: boolean;
 };
 
 export async function socialRequest<T>(
@@ -50,15 +55,21 @@ export async function socialRequest<T>(
 export function getMyProfile() {
   return socialRequest<MyProfile>('/api/profile');
 }
-export function updateProfile(input: {
+export async function updateProfile(input: {
   nickname?: string;
+  avatarSeed?: string | null;
   libraryVisibility?: LibraryVisibility;
+  bio?: string;
+  showcaseKeys?: string[];
+  watchTimePublic?: boolean;
 }) {
-  return socialRequest<MyProfile>('/api/profile', {
+  const profile = await socialRequest<MyProfile>('/api/profile', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
+  window.dispatchEvent(new Event(PROFILE_UPDATED_EVENT));
+  return profile;
 }
 export function getUserProfile(profileId: string) {
   return socialRequest<UserProfileView>(

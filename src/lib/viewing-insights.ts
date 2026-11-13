@@ -1,7 +1,7 @@
 import type {
   FavoriteWatchStatus,
   PublicUserRef,
-  PublicVideoReview,
+  VideoReview,
 } from '@/lib/types';
 
 export interface FollowOpinions {
@@ -16,10 +16,15 @@ export interface FollowOpinions {
   }[];
 }
 
+export type TasteMatchPick = Pick<
+  VideoReview,
+  'title_norm' | 'title' | 'year' | 'cover' | 'rating'
+>;
+
 export interface TasteMatch {
   commonCount: number;
   score: number | null;
-  picks: PublicVideoReview[];
+  picks: TasteMatchPick[];
 }
 
 export function tasteMatchScore(

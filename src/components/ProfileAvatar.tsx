@@ -21,3 +21,23 @@ export default function ProfileAvatar({
     />
   );
 }
+
+// 与头像同色板、同种子的抽象纹理，用于主页横幅等大面积背景
+export function ProfileAvatarArt({
+  user,
+  className = '',
+}: {
+  user: Pick<PublicUserRef, 'profileId' | 'avatarSeed'>;
+  className?: string;
+}) {
+  return (
+    <Avatar
+      aria-hidden='true'
+      name={user.avatarSeed ?? user.profileId}
+      variant='marble'
+      colors={AVATAR_COLORS}
+      square
+      className={className}
+    />
+  );
+}

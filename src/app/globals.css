@@ -228,35 +228,71 @@ div[data-media-provider] video {
 }
 
 @layer components {
-  /* 票根：左右两侧各挖一个半圆缺口 */
+  /* 票根：左右两侧各挖一个半圆缺口；--stub-notch 定半径，--stub-notch-y 定纵向位置。
+     默认值写在 var() 里而不在类内声明，带响应式前缀的覆盖才不受规则顺序影响 */
   .ticket-stub {
-    --stub-notch: 2.5px;
     -webkit-mask:
       radial-gradient(
-          circle at 0 50%,
-          transparent var(--stub-notch),
-          #000 calc(var(--stub-notch) + 0.5px)
+          circle at 0 var(--stub-notch-y, 50%),
+          transparent var(--stub-notch, 2.5px),
+          #000 calc(var(--stub-notch, 2.5px) + 0.5px)
         )
         left / 51% 100% no-repeat,
       radial-gradient(
-          circle at 100% 50%,
-          transparent var(--stub-notch),
-          #000 calc(var(--stub-notch) + 0.5px)
+          circle at 100% var(--stub-notch-y, 50%),
+          transparent var(--stub-notch, 2.5px),
+          #000 calc(var(--stub-notch, 2.5px) + 0.5px)
         )
         right / 51% 100% no-repeat;
     mask:
       radial-gradient(
-          circle at 0 50%,
-          transparent var(--stub-notch),
-          #000 calc(var(--stub-notch) + 0.5px)
+          circle at 0 var(--stub-notch-y, 50%),
+          transparent var(--stub-notch, 2.5px),
+          #000 calc(var(--stub-notch, 2.5px) + 0.5px)
         )
         left / 51% 100% no-repeat,
       radial-gradient(
-          circle at 100% 50%,
-          transparent var(--stub-notch),
-          #000 calc(var(--stub-notch) + 0.5px)
+          circle at 100% var(--stub-notch-y, 50%),
+          transparent var(--stub-notch, 2.5px),
+          #000 calc(var(--stub-notch, 2.5px) + 0.5px)
         )
         right / 51% 100% no-repeat;
+  }
+
+  /* 票根撕线：currentColor 圆点等距铺满，两端不出现半个点 */
+  .ticket-perforation {
+    background: radial-gradient(circle, currentColor 1px, transparent 1.5px)
+      center / 7px 100% space no-repeat;
+  }
+
+  /* 刮刮卡涂层：细斜纹叠在银灰渐变上，表示未公开的数值 */
+  .scratch-foil {
+    background:
+      repeating-linear-gradient(
+        115deg,
+        rgb(255 255 255 / 0.22) 0 1px,
+        transparent 1px 4px
+      ),
+      linear-gradient(115deg, #c9cdd4, #eef0f3 45%, #bfc4cc 58%, #dde0e5);
+  }
+
+  .dark .scratch-foil {
+    background:
+      repeating-linear-gradient(
+        115deg,
+        rgb(255 255 255 / 0.06) 0 1px,
+        transparent 1px 4px
+      ),
+      linear-gradient(115deg, #3a3e46, #5c616b 45%, #363a42 58%, #4a4e57);
+  }
+
+  /* 按透明度描边，轮廓跟随票根缺口；内容须为不透明底色 */
+  .ticket-outline {
+    filter: drop-shadow(0 0 0.75px rgb(13 14 17 / 0.28));
+  }
+
+  .dark .ticket-outline {
+    filter: drop-shadow(0 0 0.75px rgb(255 255 255 / 0.3));
   }
 
   /* 放在 components 层，absolute 等定位工具类仍能覆盖 relative */

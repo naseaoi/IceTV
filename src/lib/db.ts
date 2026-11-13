@@ -244,6 +244,10 @@ class DbManager {
   ): ReturnType<IStorage['getFollowRecapMessageCount']> {
     return (await this.getStorage()).getFollowRecapMessageCount(...args);
   }
+  async getProfileShowcase(username: string) {
+    return (await this.getStorage()).getProfileShowcase(username);
+  }
+
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {

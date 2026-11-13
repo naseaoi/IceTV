@@ -35,6 +35,7 @@ import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
   assertFollowPagination,
+  assertProfileDetails,
   assertPublicReviewRoles,
   videoReview,
 } from './__fixtures__/video-review-contract';
@@ -76,6 +77,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     await (
       storage as unknown as { pool: { end: () => Promise<void> } }
     ).pool.end();
+  });
+
+  it('主页资料、本命收藏与时长公开契约', async () => {
+    await assertProfileDetails(storage);
   });
 
   it('单次 JOIN 保留多组顺序、无组用户及删号边界', async () => {
