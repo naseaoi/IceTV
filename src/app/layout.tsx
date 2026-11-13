@@ -1,7 +1,7 @@
 import './globals.css';
 
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import localFont from 'next/font/local';
 import { cookies } from 'next/headers';
 
 import { AuthProvider } from '@/components/AuthProvider';
@@ -28,9 +28,10 @@ import { getStorageType } from '@/lib/storage-type';
 import { buildThemeInitScript, DEFAULT_THEME } from '@/lib/theme-preference';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+// 不用 next/font/google：构建时联网下载，Google 偶发异常会让构建失败。年度报告的细字重也取自这里
+const inter = localFont({
+  src: './fonts/inter-latin-wght.woff2',
+  weight: '200 800',
   display: 'swap',
   fallback: [
     'system-ui',

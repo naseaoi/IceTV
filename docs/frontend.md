@@ -8,6 +8,7 @@
 - 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。吸顶导航与筛选栏同样用实底，底色与页面背景一致（`bg-gray-50` / `dark:bg-gray-950`），靠底部分隔线与内容区分；全站不用毛玻璃。叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 - 吸附在桌面顶栏下方的子栏（分区筛选栏、搜索结果栏）根元素加 `data-nav-subbar`，顶栏据此去掉自己的底线，两者连成一块吸顶区，只在子栏底部留一条分隔线。只在部分断点吸附的子栏，只给在顶栏可见断点上吸附的那个元素加。
 - 图标用 `lucide-react` 或 SVG，不用 emoji。
+- 西文字体只用根布局以 `next/font/local` 加载的 Inter（`src/app/fonts/`，可变字重 200–800），不用 `next/font/google`：它在构建时联网下载，Google 偶发返回异常地址会直接让构建失败。
 - 版本面板的四类改动（新增、改进、修复、后台）各用一种固定语义色（`VersionPanel.tsx` 的 `CHANGE_KINDS`），是全站中性配色的特例，其他界面不借用。
 - 提醒小圆点（版本更新等）用纯色实心点，不加描边。版本更新提醒只对站长显示，入口统一走 `useHasUpdate()`。
 - 悬浮在内容之上的圆形图标按钮（横排滚动箭头、回顶、列表定位）复用 `FLOATING_CONTROL_CLASS`（`src/components/floating-control.ts`），中性实底不用主色，尺寸与定位由调用方追加。

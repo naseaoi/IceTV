@@ -100,18 +100,6 @@
   }
 }
 
-/* 细字重由路由 layout 单独加载的 Inter 提供，中文回退到系统字体 */
-.recap-root .font-extralight,
-.recap-root .font-light {
-  font-family:
-    var(--font-recap-light),
-    system-ui,
-    -apple-system,
-    'PingFang SC',
-    'Microsoft YaHei',
-    sans-serif;
-}
-
 /* 背景：一团低饱和的色调晕染加两道细环，--tint 为 RGB 三元组 */
 .recap-backdrop {
   --tint-alpha: 0.16;
