@@ -51,7 +51,7 @@ import {
   buildVodProxyUrl,
   isVodM3u8Url,
 } from '@/features/play/lib/vodProxyUrl';
-import { withAbortableTimeout } from '@/lib/concurrency';
+import { waitForSharedLoad, withAbortableTimeout } from '@/lib/concurrency';
 import {
   generateStorageKey,
   getCachedPlayRecordsSnapshot,
@@ -60,7 +60,11 @@ import {
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
-import { hasMatchingPlayIntent } from '@/lib/play-intent';
+import {
+  consumeMatchingPlayIntent,
+  hasMatchingPlayIntent,
+  savePlayIntent,
+} from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
@@ -71,6 +75,12 @@ import {
   sortSourcesByPlaybackStats,
 } from '@/lib/source-playback-stats';
 import { PlayRecord, SearchResult } from '@/lib/types';
+import { parseStorageKey } from '@/lib/utils';
+import {
+  fetchSharedPlaybackDetail,
+  getSharedPlaybackDetail,
+  getSharedPlaybackSearch,
+} from '@/lib/video-prefetch';
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -564,6 +574,7 @@ function mergeSourceResult(
 // ---------------------------------------------------------------------------
 
 interface UsePlayInitParams {
+  onSourceUnavailable?: (message: string) => void;
   currentSource: string;
   currentId: string;
   currentSourceRef: MutableRefObject<string>;
@@ -614,6 +625,7 @@ interface QuickSearchResponse {
 }
 
 export function usePlayInit({
+  onSourceUnavailable,
   currentSource,
   currentId,
   currentSourceRef,
@@ -648,6 +660,7 @@ export function usePlayInit({
   setSourceRecommendation,
 }: UsePlayInitParams) {
   const initialParamsRef = useRef({
+    onSourceUnavailable,
     currentEpisodeIndex,
     currentId,
     currentIdRef,
@@ -688,6 +701,7 @@ export function usePlayInit({
     const handlePlayerExit = () => abortController.abort();
     window.addEventListener(PLAYER_EXIT_EVENT, handlePlayerExit);
     const {
+      onSourceUnavailable,
       currentEpisodeIndex,
       currentId,
       currentIdRef,
@@ -726,14 +740,10 @@ export function usePlayInit({
       source: string,
       id: string,
     ): Promise<SearchResult> => {
-      const detailResponse = await fetch(
-        `/api/detail?source=${source}&id=${id}`,
-        IS_DEVELOPMENT ? { signal, cache: 'no-store' } : { signal },
+      const detailData = await waitForSharedLoad(
+        () => fetchSharedPlaybackDetail(source, id),
+        signal,
       );
-      if (!detailResponse.ok) {
-        throw new Error('获取视频详情失败');
-      }
-      const detailData = (await detailResponse.json()) as SearchResult;
       setCachedDetail(source, id, detailData);
       saveDetailSnapshot(source, id, detailData);
       return detailData;
@@ -799,6 +809,8 @@ export function usePlayInit({
           revalidateDetailSnapshot(source, id, snapshot);
           return snapshot;
         }
+        const shared = getSharedPlaybackDetail(source, id);
+        if (shared) return await waitForSharedLoad(() => shared, signal);
         return await fetchDetailData(source, id);
       } catch (err) {
         if (signal.aborted) return null;
@@ -809,16 +821,30 @@ export function usePlayInit({
       }
     };
 
+    let sourceSearchFailed = false;
     const fetchSourcesData = async (query: string): Promise<SearchResult[]> => {
       try {
-        const response = await fetch(
-          `/api/search?q=${encodeURIComponent(query.trim())}`,
-          { signal },
+        const data = await waitForSharedLoad(
+          () =>
+            getSharedPlaybackSearch(query) ??
+            (async () => {
+              const response = await fetch(
+                `/api/search?q=${encodeURIComponent(query.trim())}`,
+                { signal },
+              );
+              if (!response.ok) throw new Error('播放源搜索失败');
+              return response.json();
+            })(),
+          signal,
         );
-        if (!response.ok) {
-          throw new Error('搜索失败');
+        if (
+          data.totalSources > 0 &&
+          data.failedSources?.length >= data.totalSources &&
+          !data.results?.length
+        ) {
+          throw new Error('播放源搜索失败');
         }
-        const data = await response.json();
+        sourceSearchFailed = false;
 
         const results = filterSourcesForPlayback(data.results, {
           title: videoTitleRef.current,
@@ -842,9 +868,10 @@ export function usePlayInit({
             );
         });
         return results;
-      } catch (err) {
+      } catch {
         if (signal.aborted) return [];
-        setSourceSearchError(err instanceof Error ? err.message : '搜索失败');
+        sourceSearchFailed = true;
+        setSourceSearchError('播放源搜索失败');
         return [];
       } finally {
         if (!signal.aborted) setSourceSearchLoading(false);
@@ -853,6 +880,7 @@ export function usePlayInit({
 
     const fetchQuickPlayableData = async (
       query: string,
+      quickSignal = signal,
     ): Promise<QuickSearchResponse | null> => {
       const params = new URLSearchParams({ q: query.trim() });
       if (videoYearRef.current) {
@@ -864,7 +892,7 @@ export function usePlayInit({
 
       try {
         const response = await fetch(`/api/search/quick?${params.toString()}`, {
-          signal,
+          signal: quickSignal,
         });
         if (!response.ok) return null;
         return (await response.json()) as QuickSearchResponse;
@@ -1015,19 +1043,73 @@ export function usePlayInit({
           : '正在搜索播放源...',
       );
 
-      if (
-        currentSource &&
-        currentId &&
-        !needPreferRef.current &&
-        !hasMatchingPlayIntent({ source: currentSource, id: currentId })
-      ) {
-        requestStartupRecords([{ source: currentSource, id: currentId }]);
+      let preferRequested = needPreferRef.current;
+      let requestedSource = currentSource;
+      let requestedId = currentId;
+      const quickQuery = searchTitle || videoTitle;
+      const quickController = new AbortController();
+      signal.addEventListener('abort', () => quickController.abort(), {
+        once: true,
+      });
+      const cachedGroup = loadAggregateGroup();
+      const titleEntry = !currentSource && !currentId;
+      const quickPromise =
+        titleEntry && !cachedGroup && optimizationEnabled && quickQuery
+          ? fetchQuickPlayableData(quickQuery, quickController.signal)
+          : Promise.resolve(null);
+      if (titleEntry && quickQuery) {
+        const records = await withAbortableTimeout(
+          async (historySignal) => {
+            const params = new URLSearchParams({
+              title: videoTitle || quickQuery,
+              year: videoYearRef.current,
+            });
+            const response = await fetch(`/api/playrecords?${params}`, {
+              signal: historySignal,
+            });
+            if (!response.ok) return {};
+            return (await response.json()) as Record<string, PlayRecord>;
+          },
+          HISTORY_RESTORE_WAIT_TIMEOUT_MS,
+          'History lookup timeout',
+          signal,
+        ).catch(() => ({}) as Record<string, PlayRecord>);
+        if (signal.aborted) return;
+        const entry = Object.entries(records)[0];
+        const target = entry && parseStorageKey(entry[0]);
+        if (target) {
+          preferRequested = false;
+          requestedSource = target.source;
+          requestedId = target.id;
+          startupPlayRecords = records;
+          startupPlayRecordsRequest = Promise.resolve(records);
+          quickController.abort();
+          savePlayIntent({
+            source: target.source,
+            id: target.id,
+            episodeIndex: entry[1].index - 1,
+            resumeTime: entry[1].play_time,
+            groupLabel: entry[1].group_label,
+            groupIndex: entry[1].group_index,
+            groupTotal: entry[1].group_total,
+          });
+        }
       }
 
-      const cachedGroup = loadAggregateGroup();
+      if (
+        requestedSource &&
+        requestedId &&
+        !preferRequested &&
+        !hasMatchingPlayIntent({ source: requestedSource, id: requestedId })
+      ) {
+        requestStartupRecords([{ source: requestedSource, id: requestedId }]);
+      }
 
-      if (currentSource && currentId && !needPreferRef.current) {
-        const fastDetail = await fetchSourceDetail(currentSource, currentId);
+      if (requestedSource && requestedId && !preferRequested) {
+        const fastDetail = await fetchSourceDetail(
+          requestedSource,
+          requestedId,
+        );
         if (signal.aborted) return;
         if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
           setAvailableSources(mergeSourceBundle([], fastDetail));
@@ -1039,11 +1121,13 @@ export function usePlayInit({
 
       // quick 竞速在服务端已优先直连源，这里不等待选源上下文
       const selectionContextPromise = getSourceSelectionContext();
-      const quickQuery = searchTitle || videoTitle;
-      if (!cachedGroup && !currentSource && !currentId && optimizationEnabled) {
-        const quickData = quickQuery
-          ? await fetchQuickPlayableData(quickQuery)
-          : null;
+      if (
+        !cachedGroup &&
+        !requestedSource &&
+        !requestedId &&
+        optimizationEnabled
+      ) {
+        const quickData = await quickPromise;
         if (signal.aborted) return;
 
         const quickDetail = quickData?.detail;
@@ -1084,15 +1168,15 @@ export function usePlayInit({
         sourcesInfo = await fetchSourcesData(searchTitle || videoTitle);
       }
       if (signal.aborted) return;
-      if (currentSource && currentId) {
+      if (requestedSource && requestedId) {
         const detailedSource = await fetchSourceDetail(
-          currentSource,
-          currentId,
+          requestedSource,
+          requestedId,
         );
         if (detailedSource) {
           const matchedSource = sourcesInfo.find(
             (source) =>
-              source.source === currentSource && source.id === currentId,
+              source.source === requestedSource && source.id === requestedId,
           );
           const mergedCurrentSource = mergeSourceResult(
             detailedSource,
@@ -1105,28 +1189,38 @@ export function usePlayInit({
       if (signal.aborted) return;
       if (sourcesInfo.length === 0) {
         clearAggregateGroup();
-        setError('未找到匹配结果');
+        setError(sourceSearchFailed ? '播放源搜索失败' : '未找到匹配结果');
         setLoading(false);
         return;
       }
 
-      if (
+      let detailData: SearchResult;
+      const target =
+        requestedSource && requestedId && !preferRequested
+          ? sourcesInfo.find(
+              (source) =>
+                source.source === requestedSource && source.id === requestedId,
+            )
+          : undefined;
+      const replacingUnavailableSource = !!(
+        requestedSource &&
+        requestedId &&
+        !preferRequested &&
+        !target
+      );
+      if (replacingUnavailableSource) {
+        // 原源记录决定接续的集，原源无记录时按选中候选自己的记录恢复
+        requestStartupRecords([
+          { source: requestedSource, id: requestedId },
+          ...sourcesInfo,
+        ]);
+      } else if (
         !startupPlayRecordsRequest &&
-        (!currentSource || !currentId || needPreferRef.current)
+        (!requestedSource || !requestedId || preferRequested)
       ) {
         requestStartupRecords(sourcesInfo);
       }
-      let detailData: SearchResult;
-      if (currentSource && currentId && !needPreferRef.current) {
-        const target = sourcesInfo.find(
-          (source) =>
-            source.source === currentSource && source.id === currentId,
-        );
-        if (!target) {
-          setError('未找到匹配结果');
-          setLoading(false);
-          return;
-        }
+      if (target) {
         detailData = target;
       } else if (sourcesInfo.length === 1) {
         detailData = sourcesInfo[0];
@@ -1178,6 +1272,40 @@ export function usePlayInit({
       }
 
       if (signal.aborted) return;
+      if (replacingUnavailableSource) {
+        const intent = consumeMatchingPlayIntent({
+          source: requestedSource,
+          id: requestedId,
+          episodeCount: Number.MAX_SAFE_INTEGER,
+        });
+        if (!intent && startupPlayRecordsRequest) {
+          await withAbortableTimeout(
+            () => startupPlayRecordsRequest!,
+            HISTORY_RESTORE_WAIT_TIMEOUT_MS,
+            'History lookup timeout',
+            signal,
+          ).catch(() => undefined);
+        }
+        if (signal.aborted) return;
+        const record =
+          startupPlayRecords?.[
+            generateStorageKey(requestedSource, requestedId)
+          ];
+        if (intent || record) {
+          const episodeIndex = resolveTargetEpisodeIndex(
+            detailData.episodes.length,
+            intent?.episodeIndex ?? (record ? record.index - 1 : 0),
+          );
+          savePlayIntent({
+            source: detailData.source,
+            id: detailData.id,
+            episodeIndex,
+            resumeTime: 0,
+          });
+          setCurrentEpisodeIndex(episodeIndex);
+        }
+        onSourceUnavailable?.('原播放源已不可用，已切换到其他源');
+      }
       await finalizePlaybackDetail(detailData);
     };
 

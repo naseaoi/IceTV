@@ -27,6 +27,7 @@ import { useOpenListPicker } from '@/components/list-picker-context';
 import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
+import { usePlaybackIntentPrefetch } from '@/hooks/usePlaybackIntentPrefetch';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   deleteFavorite,
@@ -99,6 +100,11 @@ export default function ContinueCard({
   onSelect,
 }: ContinueCardProps) {
   const router = useRouter();
+  const prefetchProps = usePlaybackIntentPrefetch({
+    source,
+    id,
+    disabled: selectable,
+  });
   const interactionId = useId();
   const openWatchRecord = useOpenWatchRecord();
   const openListPicker = useOpenListPicker();
@@ -302,6 +308,7 @@ export default function ContinueCard({
     <div
       role={selectable ? 'button' : 'link'}
       data-continue-card
+      {...prefetchProps}
       tabIndex={0}
       aria-label={selectable ? `选择 ${title}` : `继续播放 ${title}`}
       aria-pressed={selectable ? selected : undefined}

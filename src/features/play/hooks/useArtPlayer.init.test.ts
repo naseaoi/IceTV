@@ -103,6 +103,10 @@ class MockArtplayer {
     MockArtplayer.instances.push(this);
   }
 
+  off = jest.fn((event: string) => {
+    this.listeners.delete(event);
+  });
+
   on(event: string, listener: Listener) {
     this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]);
   }
@@ -735,4 +739,58 @@ describe('initializeArtPlayer 拉流控制', () => {
       expect(video.play).toHaveBeenCalledTimes(1);
     });
   });
+});
+
+it('移除内建 video:error 重连后保留项目统计监听', async () => {
+  const params = createParams();
+  params.handlePlaybackStatsEvent = jest.fn();
+  const { player } = await setupPlayer(params);
+  expect(player.off).toHaveBeenCalledWith('video:error');
+  player.emit('video:error', new Error('media'));
+  expect(params.handlePlaybackStatsEvent).toHaveBeenCalledWith('error');
+});
+
+it('起播后的显式 seek 可归零稳定进度，程序性续播 seek 保持保护', async () => {
+  const { resolveSavedPlaybackTime } = jest.requireActual(
+    '@/features/play/lib/playProgressRestore',
+  );
+  const { applyResumeTime } = jest.requireActual(
+    '@/features/play/lib/resumePlayback',
+  );
+  const { player, params, video } = await setupPlayer();
+  makeFirstFrameReady(video);
+  player.duration = 1500;
+  player.currentTime = 120;
+  player.emit('video:playing');
+  params.stableCurrentTimeRef.current = 120;
+  player.currentTime = 0;
+  player.emit('video:seeking');
+  player.emit('video:seeked');
+  expect(params.stableCurrentTimeRef.current).toBe(0);
+  expect(resolveSavedPlaybackTime(0, params.stableCurrentTimeRef)).toBe(2);
+  applyResumeTime(player, 300);
+  player.emit('video:seeking');
+  player.emit('video:seeked');
+  expect(params.stableCurrentTimeRef.current).toBe(300);
+  runManagedVideoCleanup(video);
+});
+
+it('禁用内建重连后 video:error 仍驱动原生媒体错误处理', async () => {
+  jest.mocked(resolveSourcePlaybackRoute).mockResolvedValue({
+    useServerProxy: false,
+    directManifest: false,
+    allowAutoFallback: false,
+  });
+  const params = createParams();
+  params.videoUrl = 'https://cdn.example/movie.mp4';
+  params.onPlaybackRecoveryExhausted = jest.fn();
+  const { player, video } = await setupPlayer(params);
+  Object.defineProperty(video, 'error', { value: { code: 3 } });
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  player.emit('video:error', new Error('decode'));
+  expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+    'native-media-error',
+  );
+  runManagedVideoCleanup(video);
+  log.mockRestore();
 });

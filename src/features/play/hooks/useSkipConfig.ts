@@ -16,6 +16,7 @@ import {
   deleteSkipConfig,
   getSkipConfig,
   saveSkipConfig,
+  subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { showToast } from '@/lib/toast';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
@@ -35,6 +36,13 @@ type SaveState = {
   revision: number;
   queue: Promise<void>;
 };
+type PendingMigration = {
+  source: string;
+  id: string;
+  config: SkipConfigState;
+  revision: number;
+  resolve: (canDeletePrevious: boolean) => void;
+};
 const EMPTY_CONFIG: SkipConfigState = {
   enable: false,
   intro_time: 0,
@@ -51,6 +59,27 @@ export function useSkipConfig({
   setSkipConfig,
 }: UseSkipConfigOptions) {
   const states = useRef(new Map<string, SaveState>());
+  const pendingMigration = useRef<PendingMigration | null>(null);
+
+  const registerSkipConfigMigration = useCallback(
+    (source: string, id: string, config: SkipConfigState): Promise<boolean> => {
+      pendingMigration.current?.resolve(false);
+      pendingMigration.current = null;
+      // 本地读到的空配置可能来自过期缓存，不据此删除服务端的旧源配置
+      if (!config.enable && !config.intro_time && !config.outro_time)
+        return Promise.resolve(false);
+      return new Promise((resolve) => {
+        pendingMigration.current = {
+          source,
+          id,
+          config: { ...config },
+          revision: states.current.get(`${source}+${id}`)?.revision ?? 0,
+          resolve,
+        };
+      });
+    },
+    [],
+  );
 
   const applyConfig = useCallback(
     (config: SkipConfigState) => {
@@ -83,11 +112,13 @@ export function useSkipConfig({
     [artPlayerRef, setSkipConfig, skipConfigRef],
   );
 
-  const handleSkipConfigChange = useCallback(
-    (newConfig: SkipConfigState): Promise<void> => {
-      const source = currentSourceRef.current;
-      const id = currentIdRef.current;
-      if (!source || !id) return Promise.resolve();
+  const enqueueConfig = useCallback(
+    (
+      source: string,
+      id: string,
+      newConfig: SkipConfigState,
+      migration = false,
+    ): Promise<boolean> => {
       const key = `${source}+${id}`;
       let state = states.current.get(key);
       if (!state) {
@@ -102,7 +133,14 @@ export function useSkipConfig({
       const revision = ++saveState.revision;
       const config = { ...newConfig };
       applyConfig(config);
-      saveState.queue = saveState.queue.then(async () => {
+      const saved = saveState.queue.then(async () => {
+        if (
+          migration &&
+          (saveState.revision !== revision ||
+            currentSourceRef.current !== source ||
+            currentIdRef.current !== id)
+        )
+          return false;
         try {
           if (!config.enable && !config.intro_time && !config.outro_time) {
             await deleteSkipConfig(source, id);
@@ -110,6 +148,7 @@ export function useSkipConfig({
             await saveSkipConfig(source, id, config);
           }
           saveState.confirmed = config;
+          return true;
         } catch (error) {
           if (
             saveState.revision === revision &&
@@ -118,16 +157,27 @@ export function useSkipConfig({
           ) {
             applyConfig(saveState.confirmed);
           }
-          if (!isAbortError(error))
+          if (!migration && !isAbortError(error))
             showToast(
               getErrorMessage(error, '跳过片头片尾设置未能保存，请重试'),
               'error',
             );
+          return false;
         }
       });
-      return saveState.queue;
+      saveState.queue = saved.then(() => undefined);
+      return saved;
     },
     [applyConfig, currentSourceRef, currentIdRef, skipConfigRef],
+  );
+
+  const handleSkipConfigChange = useCallback(
+    async (config: SkipConfigState): Promise<void> => {
+      const source = currentSourceRef.current;
+      const id = currentIdRef.current;
+      if (source && id) await enqueueConfig(source, id, config);
+    },
+    [currentSourceRef, currentIdRef, enqueueConfig],
   );
 
   useEffect(() => {
@@ -136,10 +186,23 @@ export function useSkipConfig({
     const key = `${currentSource}+${currentId}`;
     const existing = states.current.get(key);
     const revision = existing?.revision ?? 0;
+    const migration = pendingMigration.current;
+    pendingMigration.current = null;
+    const matchesMigration =
+      migration?.source === currentSource && migration.id === currentId;
+    if (migration && !matchesMigration) migration.resolve(false);
     void getSkipConfig(currentSource, currentId)
       .then((config) => {
-        if (!active || (states.current.get(key)?.revision ?? 0) !== revision)
+        if (
+          !active ||
+          currentSourceRef.current !== currentSource ||
+          currentIdRef.current !== currentId ||
+          (states.current.get(key)?.revision ?? 0) !== revision ||
+          (matchesMigration && migration.revision !== revision)
+        ) {
+          if (matchesMigration) migration.resolve(false);
           return;
+        }
         const confirmed = config ?? EMPTY_CONFIG;
         if (!existing)
           states.current.set(key, {
@@ -147,19 +210,62 @@ export function useSkipConfig({
             revision: 0,
             queue: Promise.resolve(),
           });
-        applyConfig(existing?.confirmed ?? confirmed);
+        if (
+          matchesMigration &&
+          !config &&
+          !existing?.revision &&
+          migration.revision === revision
+        ) {
+          // 与用户设置共用队列，迁移完成只确认持久化，不回写较新的界面状态。
+          void enqueueConfig(
+            currentSource,
+            currentId,
+            migration.config,
+            true,
+          ).then(migration.resolve);
+        } else {
+          applyConfig(existing?.confirmed ?? confirmed);
+          if (matchesMigration) migration.resolve(!!config);
+        }
       })
       .catch((error) => {
+        if (matchesMigration) migration.resolve(false);
         if (active && !isAbortError(error))
           showToast(
             getErrorMessage(error, '读取跳过片头片尾设置失败'),
             'error',
           );
       });
+    // 读取先返回本地缓存，后台核对到服务端的新值（如其他设备修改）时再同步；本页已有修改或迁移时以本页为准
+    const unsubscribe = subscribeToDataUpdates<Record<string, SkipConfigState>>(
+      'skipConfigsUpdated',
+      (configs) => {
+        const state = states.current.get(key);
+        if (!active || !state || state.revision !== revision) return;
+        const next = configs[key] ?? EMPTY_CONFIG;
+        if (
+          next.enable === state.confirmed.enable &&
+          next.intro_time === state.confirmed.intro_time &&
+          next.outro_time === state.confirmed.outro_time
+        )
+          return;
+        state.confirmed = { ...next };
+        applyConfig(state.confirmed);
+      },
+    );
     return () => {
       active = false;
+      unsubscribe();
+      if (matchesMigration) migration.resolve(false);
     };
-  }, [currentSource, currentId, applyConfig]);
+  }, [
+    currentSource,
+    currentId,
+    currentSourceRef,
+    currentIdRef,
+    applyConfig,
+    enqueueConfig,
+  ]);
 
-  return { handleSkipConfigChange };
+  return { handleSkipConfigChange, registerSkipConfigMigration };
 }

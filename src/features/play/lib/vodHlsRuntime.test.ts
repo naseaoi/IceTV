@@ -213,7 +213,10 @@ function setupRuntime() {
   };
   return {
     options,
-    load: createVodM3u8Loader(options),
+    load: (video: HTMLVideoElement, url: string) => {
+      options.artPlayerRef.current ??= { video, isDestroy: false } as any;
+      return createVodM3u8Loader(options)(video, url);
+    },
     setError,
     setIsVideoLoading,
     setRealtimeLoadSpeed,
@@ -324,6 +327,7 @@ describe('vodHlsRuntime 运行时释放', () => {
     options.playbackIntentRef = { current: createVodPlaybackIntent() };
     const now = jest.spyOn(performance, 'now').mockReturnValue(0);
     const video = createVideo();
+    options.artPlayerRef.current = { video, isDestroy: false } as any;
     createVodM3u8Loader(options)(video, EPISODE_1);
     video.dispatchEvent(new Event('playing'));
     now.mockReturnValue(300_000);
@@ -354,7 +358,10 @@ describe('vodHlsRuntime 运行时释放', () => {
   it('成功播放后换源开启恢复预算，保留原意图尝试集合', () => {
     const { options } = setupRuntime();
     options.playbackIntentRef = { current: createVodPlaybackIntent() };
-    const load = createVodM3u8Loader(options);
+    const load = (video: HTMLVideoElement, url: string) => {
+      options.artPlayerRef.current ??= { video, isDestroy: false } as any;
+      createVodM3u8Loader(options)(video, url);
+    };
     const now = jest.spyOn(performance, 'now').mockReturnValue(0);
     const video = createVideo();
     load(video, EPISODE_1);
@@ -371,6 +378,7 @@ describe('vodHlsRuntime 运行时释放', () => {
     const { options, onPlaybackRecoveryExhausted } = setupRuntime();
     options.playbackIntentRef = { current: createVodPlaybackIntent() };
     const video = createVideo();
+    options.artPlayerRef.current = { video, isDestroy: false } as any;
     createVodM3u8Loader(options)(video, EPISODE_1);
     const hls = getFakeHls(video);
     hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
@@ -947,7 +955,10 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     it('同意图重建运行时不重置线路尝试', () => {
       const { options } = setupRuntime();
       options.playbackIntentRef = { current: createVodPlaybackIntent() };
-      const load = createVodM3u8Loader(options);
+      const load = (video: HTMLVideoElement, url: string) => {
+        options.artPlayerRef.current ??= { video, isDestroy: false } as any;
+        createVodM3u8Loader(options)(video, url);
+      };
       const video = createVideo();
       load(video, EPISODE_1);
       getFakeHls(video).emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
@@ -1153,5 +1164,62 @@ describe('vodHlsRuntime 缓冲配额', () => {
 
     expect(getFakeHls(video)).toBe(hls);
     expect(hls.config.maxMaxBufferLength).toBe(originalMaxMax);
+  });
+});
+
+describe('点播迟到 loader 与离线恢复', () => {
+  afterEach(() => {
+    createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.restoreAllMocks();
+  });
+
+  it('销毁实例或非当前 video 的 loader 不释放当前运行时也不建 HLS', () => {
+    const { load, options } = setupRuntime();
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    const count = FakeHls.created;
+    const art = options.artPlayerRef.current!;
+    Object.defineProperty(art, 'isDestroy', {
+      configurable: true,
+      value: true,
+    });
+    load(video, EPISODE_2);
+    expect(getVodRuntimeSourceUrl(video)).toBe(EPISODE_1);
+    Object.defineProperty(art, 'isDestroy', { value: false });
+    load(createVideo(), EPISODE_2);
+    expect(FakeHls.created).toBe(count);
+    expect(getFakeHls(video)).toBe(hls);
+  });
+
+  it('离线 fatal 联网后只补拉停止的当前运行时，暂停和清理后不补拉', () => {
+    const online = jest
+      .spyOn(navigator, 'onLine', 'get')
+      .mockReturnValue(false);
+    const { load } = setupRuntime();
+    const video = createVideo();
+    let paused = false;
+    Object.defineProperty(video, 'paused', { get: () => paused });
+    video.currentTime = 50;
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    hls.loadingEnabled = false;
+    hls.emit(FakeHls.Events.ERROR, fatalFragError(5));
+    online.mockReturnValue(true);
+    paused = true;
+    window.dispatchEvent(new Event('online'));
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    paused = false;
+    window.dispatchEvent(new Event('online'));
+    expect(hls.startLoad).toHaveBeenCalledTimes(1);
+    expect(hls.startLoad).toHaveBeenCalledWith(50);
+    window.dispatchEvent(new Event('online'));
+    expect(hls.startLoad).toHaveBeenCalledTimes(1);
+    online.mockReturnValue(false);
+    hls.emit(FakeHls.Events.ERROR, fatalFragError(6));
+    runManagedVideoCleanup(video);
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    expect(hls.startLoad).toHaveBeenCalledTimes(1);
   });
 });

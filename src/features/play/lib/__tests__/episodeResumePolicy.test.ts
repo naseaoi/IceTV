@@ -88,7 +88,7 @@ describe('episodeResumePolicy', () => {
     });
   });
 
-  it('旧 anchor 集数落后于当前 latest 时被 latest 矫正', () => {
+  it('不同源的绝对索引不改写原锚点', () => {
     const sourceA = createSearchResult({
       source: 'source-a',
       episodes_titles: ['01', '02'],
@@ -106,11 +106,11 @@ describe('episodeResumePolicy', () => {
       }),
     ).toEqual({
       detail: sourceA,
-      episodeIndex: 13,
+      episodeIndex: 0,
     });
   });
 
-  it('旧 anchor.detail 为 null 时用 activeDetail 兜底', () => {
+  it('锚点详情和索引保持为完整整体', () => {
     const sourceA = createSearchResult({ source: 'source-a' });
     const staleAnchor = {
       detail: null,
@@ -124,7 +124,7 @@ describe('episodeResumePolicy', () => {
         activeEpisodeIndex: 5,
       }),
     ).toEqual({
-      detail: sourceA,
+      detail: null,
       episodeIndex: 10,
     });
   });
@@ -167,4 +167,39 @@ describe('episodeResumePolicy', () => {
       resumeMode: 'forced',
     });
   });
+});
+
+it('A 第 1 集经带两条特别篇的 B 再换 C 仍映射到第 1 集', () => {
+  const { resolveEpisodeTargetIndex } = jest.requireActual(
+    '@/features/play/lib/episodeMapping',
+  );
+  const a = createSearchResult({
+    episodes: ['a1', 'a2', 'a3'],
+    episodes_titles: ['第1集', '第2集', '第3集'],
+  });
+  const b = createSearchResult({
+    source: 'b',
+    episodes: ['sp1', 'sp2', 'b1', 'b2', 'b3'],
+    episodes_titles: ['特别篇1', '特别篇2', '第1集', '第2集', '第3集'],
+  });
+  const c = { ...a, source: 'c' };
+  const first = resolveSourceSwitchEpisodeAnchor({
+    currentAnchor: null,
+    activeDetail: a,
+    activeEpisodeIndex: 0,
+  });
+  const mappedB = resolveEpisodeTargetIndex(
+    first.detail,
+    first.episodeIndex,
+    b,
+  );
+  expect(mappedB.index).toBe(2);
+  const next = resolveSourceSwitchEpisodeAnchor({
+    currentAnchor: first,
+    activeDetail: b,
+    activeEpisodeIndex: mappedB.index,
+  });
+  expect(
+    resolveEpisodeTargetIndex(next.detail, next.episodeIndex, c).index,
+  ).toBe(0);
 });

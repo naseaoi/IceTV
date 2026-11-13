@@ -153,7 +153,10 @@ jest.mock('@/features/play/hooks/usePlayProgress', () => ({
 }));
 
 jest.mock('@/features/play/hooks/useSkipConfig', () => ({
-  useSkipConfig: () => ({ handleSkipConfigChange: jest.fn() }),
+  useSkipConfig: () => ({
+    handleSkipConfigChange: jest.fn(),
+    registerSkipConfigMigration: jest.fn().mockResolvedValue(true),
+  }),
 }));
 
 jest.mock('@/features/play/hooks/useSourcePlaybackStatsRecorder', () => ({

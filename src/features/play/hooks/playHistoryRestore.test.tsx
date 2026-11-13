@@ -13,6 +13,7 @@ import { cacheManager } from '@/lib/db.client.cache';
 import { savePlayIntent } from '@/lib/play-intent';
 import { getPlayRecordResumeGroup } from '@/lib/play-records';
 import type { EpisodeGroup, PlayRecord, SearchResult } from '@/lib/types';
+import { clearPlaybackWarmups } from '@/lib/video-prefetch';
 
 jest.mock('@/features/play/lib/vodProbe', () => ({
   probeVodEpisodeUrl: jest.fn(),
@@ -194,6 +195,7 @@ function usePlayPageHarness() {
 const originalFetch = global.fetch;
 
 beforeEach(() => {
+  clearPlaybackWarmups();
   localStorage.clear();
   sessionStorage.clear();
   signIn();

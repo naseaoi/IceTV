@@ -805,3 +805,135 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     expect(gate.listeners.size).toBe(0);
   });
 });
+
+describe('播放记录持久化边界', () => {
+  const detail = {
+    id: 'b',
+    source: 'b',
+    source_name: 'B',
+    title: 'test',
+    episodes: ['1'],
+    episodes_titles: [],
+    poster: '',
+    year: '2024',
+  };
+  const save = savePlayRecord as jest.MockedFunction<typeof savePlayRecord>;
+  function setup() {
+    const player = { current: { currentTime: 120, duration: 1500 } };
+    const stable = { current: 120 };
+    const blocked = { current: false };
+    const onSaved = jest.fn();
+    const state: {
+      current: import('@/features/play/hooks/usePlayProgress').PlayProgressSaveState;
+    } = {
+      current: {
+        inFlight: false,
+        pending: null,
+        lastSavedFingerprint: null,
+        onSaved,
+      },
+    };
+    const run = (immediate = false) =>
+      saveCurrentPlayProgress(
+        player as any,
+        { current: 'b' },
+        { current: 'b' },
+        { current: 'test' },
+        { current: detail },
+        { current: 0 },
+        stable,
+        blocked,
+        state,
+        { current: 0 },
+        '',
+        immediate,
+      );
+    return { player, stable, blocked, onSaved, state, run };
+  }
+  beforeEach(() => {
+    save.mockReset();
+    sessionStorage.clear();
+  });
+
+  it('自动播放被拒的零进度和保存失败都不触发旧源清理', async () => {
+    const ctx = setup();
+    ctx.player.current.currentTime = 0;
+    ctx.stable.current = 0;
+    await ctx.run();
+    expect(save).not.toHaveBeenCalled();
+    expect(ctx.onSaved).not.toHaveBeenCalled();
+    ctx.player.current.currentTime = 120;
+    save.mockRejectedValueOnce(new Error('offline'));
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await ctx.run();
+    expect(ctx.onSaved).not.toHaveBeenCalled();
+    save.mockResolvedValueOnce();
+    await ctx.run();
+    expect(ctx.onSaved).toHaveBeenCalledWith('b', 'b');
+    log.mockRestore();
+  });
+
+  it('普通保存未完成时退出快照立即发送，重复退出事件按指纹去重', async () => {
+    const ctx = setup();
+    let finishFirst!: () => void;
+    let finishExit!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishExit = resolve;
+        }),
+    );
+    const first = ctx.run();
+    ctx.player.current.currentTime = 180;
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
+    const exit = ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1][2].play_time).toBe(180);
+    await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(ctx.state.current.pending).toBeNull();
+    finishExit();
+    await exit;
+    finishFirst();
+    await first;
+    await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it('用户显式拖回片头以最小有效续播点覆盖旧进度和 checkpoint', async () => {
+    const { recordExplicitPlaybackSeek, clearExplicitPlaybackSeek } =
+      jest.requireActual('@/features/play/lib/playProgressRestore');
+    const ctx = setup();
+    ctx.player.current.currentTime = 0;
+    recordExplicitPlaybackSeek(ctx.stable, 0);
+    await ctx.run(true);
+    expect(save.mock.calls[0][2].play_time).toBe(2);
+    savePlaybackCheckpoint(
+      { current: 'b' },
+      { current: 'b' },
+      { current: 0 },
+      { current: 'test' },
+      ctx.player as any,
+      ctx.stable,
+      ctx.blocked,
+    );
+    expect(
+      JSON.parse(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)!).currentTime,
+    ).toBe(2);
+    clearExplicitPlaybackSeek(ctx.stable);
+    ctx.state.current.lastSavedFingerprint = null;
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
+    ctx.blocked.current = true;
+    recordExplicitPlaybackSeek(ctx.stable, 0);
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+});

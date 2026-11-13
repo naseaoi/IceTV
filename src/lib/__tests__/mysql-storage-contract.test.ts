@@ -7,6 +7,7 @@ import {
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
@@ -2309,6 +2310,31 @@ function createFakePool() {
     }
 
     if (
+      normalized.startsWith(
+        'SELECT record_key, JSON_UNQUOTE(JSON_EXTRACT(record_json,',
+      )
+    ) {
+      const [username, limit, offset] = params as [string, number, number];
+      const rows = getJsonRows(
+        currentState.playRecords,
+        username,
+        'record_key',
+        'record_json',
+      )
+        .map((row) => ({
+          record_key: row.record_key,
+          ...JSON.parse(row.record_json),
+        }))
+        .sort(
+          (a, b) =>
+            b.save_time - a.save_time ||
+            b.record_key.localeCompare(a.record_key),
+        )
+        .slice(offset, offset + limit);
+      return [rows, []];
+    }
+
+    if (
       normalized ===
       'SELECT record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1'
     ) {
@@ -3516,6 +3542,12 @@ describe('mysql storage contract', () => {
 
   it('筛选分页与追更计数及客户端判定保持一致', async () => {
     await assertUpdatedPlayRecordPage(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+
+  it('按标题读取本人最近进度', async () => {
+    await assertPlayRecordTitleLookup(
       new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
     );
   });

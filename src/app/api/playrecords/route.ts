@@ -24,6 +24,19 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const { searchParams } = new URL(request.url);
+    if (searchParams.has('title')) {
+      const title = (searchParams.get('title') || '').trim();
+      const year = (searchParams.get('year') || '').trim();
+      if (!title || title.length > 300 || year.length > 16) {
+        return NextResponse.json({ error: '无效的作品信息' }, { status: 400 });
+      }
+      const records = await db.getLatestPlayRecordByTitle(
+        guardResult.username,
+        title,
+        year,
+      );
+      return NextResponse.json(records, { headers: NO_STORE_HEADERS });
+    }
     if (searchParams.has('keys')) {
       const keys = searchParams.getAll('keys');
       if (

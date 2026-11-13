@@ -5,6 +5,9 @@ import { PlaybackPosterCard } from '@/features/playback-stats/components/Playbac
 import { deleteFavorite, saveFavorite } from '@/lib/db.client';
 import { showToast } from '@/lib/toast';
 
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ prefetch: jest.fn() }),
+}));
 const mockShowActions = jest.fn();
 const mockShowConfirm = jest.fn();
 let mockFavorited = false;

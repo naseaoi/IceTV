@@ -305,3 +305,29 @@ it('目录或直播收藏不提供追更', async () => {
   await openMenu();
   expect(screen.queryByRole('menuitem', { name: /追更/ })).toBeNull();
 });
+
+describe('单搜索结果交接详情', () => {
+  it.each([false, true])('懒解析=%s 时仅普通源写起播快照', async (lazy) => {
+    const { readDetailSnapshot } =
+      await import('@/features/play/lib/detailSnapshot');
+    localStorage.clear();
+    const detail = result('single-source', 'single-id');
+    if (lazy) detail.episodes = ['icetv-lazy://giri/playGV1-1-1/'];
+    render(
+      <CardInteractionProvider>
+        <VideoCard
+          from='search'
+          source={detail.source}
+          id={detail.id}
+          title={detail.title}
+          year={detail.year}
+          aggregateGroup={[detail]}
+        />
+      </CardInteractionProvider>,
+    );
+    fireEvent.click(screen.getByText('三体'));
+    expect(readDetailSnapshot(detail.source, detail.id)).toEqual(
+      lazy ? null : detail,
+    );
+  });
+});

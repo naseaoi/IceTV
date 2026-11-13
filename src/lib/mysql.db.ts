@@ -1026,6 +1026,33 @@ export class MySqlStorage implements IStorage {
     return parseJsonValue<PlayRecord>(rows[0]?.record_json);
   }
 
+  async getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>> {
+    await this.ensureInitialized();
+    const { findLatestPlayRecordKeyByTitle } =
+      await import('@/lib/play-record-title');
+    const username = normalizeUsername(userName);
+    const key = await findLatestPlayRecordKeyByTitle(
+      title,
+      year,
+      async (offset, limit) => {
+        const [rows] = await this.pool.query<JsonRow[]>(
+          `SELECT record_key,
+        JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.title')) AS title,
+        JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.year')) AS year FROM play_records WHERE username = ?
+        ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS DECIMAL(20, 3)) DESC,
+        record_key DESC LIMIT ? OFFSET ?`,
+          [username, limit, offset],
+        );
+        return rows as unknown as import('@/lib/play-record-title').PlayRecordTitleRow[];
+      },
+    );
+    return key ? this.getPlayRecordsByKeys(username, [key]) : {};
+  }
+
   async getPlayRecordsByKeys(
     userName: string,
     keys: string[],

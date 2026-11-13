@@ -43,6 +43,7 @@ import {
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
 import { cancelNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
+import { getVodStartupNow } from '@/features/play/lib/playerLoading';
 import {
   holdBackgroundSourceProbes,
   releaseBackgroundSourceProbes,
@@ -67,8 +68,6 @@ import { destroyArtPlayer } from '@/lib/player-utils';
 import { preloadProxyModes } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult } from '@/lib/types';
-
-const DIRECT_STARTUP_LOADING_DELAY_MS = 140;
 
 function readInitialAggregateGroupLength() {
   if (typeof window === 'undefined') return 0;
@@ -217,38 +216,16 @@ function AuthenticatedPlayPageClient({
   const [isDirectStartup] = useState(
     () => searchParams.get('directStart') === 'true',
   );
-  const shouldHideStartupLoading = isSingleAggregateStartup || isDirectStartup;
-  const canDelayStartupLoading =
-    (!!currentSource && !!currentId && !needPreferRef.current) ||
-    shouldHideStartupLoading;
-  const [showStartupLoading, setShowStartupLoading] = useState(false);
+  // 已知播放源的入口从第一帧起就渲染播放器外壳，由播放器内的加载态承接，避免整页加载与播放器之间切换
+  const [startupInPlayerShell] = useState(
+    () =>
+      isSingleAggregateStartup ||
+      isDirectStartup ||
+      (!!currentSource && !!currentId && !needPreferRef.current),
+  );
   const dismissSourceRecommendation = useCallback(() => {
     setSourceRecommendation(null);
   }, [setSourceRecommendation]);
-
-  useEffect(() => {
-    if (!loading) {
-      setShowStartupLoading(false);
-      return;
-    }
-
-    if (shouldHideStartupLoading) {
-      setShowStartupLoading(false);
-      return;
-    }
-
-    if (!canDelayStartupLoading) {
-      setShowStartupLoading(true);
-      return;
-    }
-
-    setShowStartupLoading(false);
-    const timer = window.setTimeout(() => {
-      setShowStartupLoading(true);
-    }, DIRECT_STARTUP_LOADING_DELAY_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [loading, canDelayStartupLoading, shouldHideStartupLoading]);
 
   const cleanupPlayer = useCallback(() => {
     const player = artPlayerRef.current;
@@ -269,15 +246,17 @@ function AuthenticatedPlayPageClient({
     }
   }, [artPlayerRef]);
 
-  const { handleSkipConfigChange } = useSkipConfig({
-    currentSource,
-    currentId,
-    currentSourceRef,
-    currentIdRef,
-    skipConfigRef,
-    artPlayerRef,
-    setSkipConfig,
-  });
+  const { handleSkipConfigChange, registerSkipConfigMigration } = useSkipConfig(
+    {
+      currentSource,
+      currentId,
+      currentSourceRef,
+      currentIdRef,
+      skipConfigRef,
+      artPlayerRef,
+      setSkipConfig,
+    },
+  );
 
   useEffect(() => {
     if (!isVideoLoading && videoLoadingStage !== 'initing') {
@@ -290,7 +269,13 @@ function AuthenticatedPlayPageClient({
     'source' | 'id'
   > | null>(null);
 
+  const sourceUnavailableNoticeRef = useRef<string | null>(null);
+  const handleSourceUnavailable = useCallback((message: string) => {
+    sourceUnavailableNoticeRef.current = message;
+  }, []);
+
   usePlayInit({
+    onSourceUnavailable: handleSourceUnavailable,
     currentSource,
     currentId,
     currentSourceRef,
@@ -429,6 +414,18 @@ function AuthenticatedPlayPageClient({
   }, [artPlayerRef, currentIdRef, currentSourceRef, videoDoubanId]);
   const closeCompletion = useCallback(() => setCompletionTarget(null), []);
 
+  const [openSourcesRequest, setOpenSourcesRequest] = useState(0);
+  const openSourcesPanel = useCallback(() => {
+    const player = artPlayerRef.current;
+    if (player) {
+      // 换源面板在播放器外，全屏时看不到
+      player.fullscreen = false;
+      player.fullscreenWeb = false;
+    }
+    setIsEpisodeSelectorCollapsed(false);
+    setOpenSourcesRequest((value) => value + 1);
+  }, [artPlayerRef, setIsEpisodeSelectorCollapsed]);
+
   const {
     authRecoveryVisible,
     authRecoveryReasonMessage,
@@ -518,8 +515,17 @@ function AuthenticatedPlayPageClient({
     setRealtimeLoadSpeed,
     setSourceSearchError,
     cleanupPlayer,
+    registerSkipConfigMigration,
     onPlaybackStartFailed: handlePlaybackStartFailed,
   });
+
+  useEffect(() => {
+    const saveState = playProgressSaveStateRef.current;
+    saveState.onSaved = finalizePendingSourceSwitchCleanup;
+    return () => {
+      saveState.onSaved = undefined;
+    };
+  }, [finalizePendingSourceSwitchCleanup, playProgressSaveStateRef]);
 
   const resetAutoSourceSwitch = useCallback(() => {
     holdBackgroundSourceProbes();
@@ -611,7 +617,7 @@ function AuthenticatedPlayPageClient({
     const intent = playbackIntentRef?.current;
     if (intent) {
       const attempt = getVodSourceAttempt(intent, source, detail?.id || '');
-      attempt.startedAt ??= performance.now();
+      attempt.startedAt ??= getVodStartupNow();
     }
     const sourceChangeRequestId = sourceChangeRequestIdRef.current;
     const isStale = () =>
@@ -817,10 +823,12 @@ function AuthenticatedPlayPageClient({
       sourceSwitchEpisodeAnchorRef.current = null;
       clearTargetEpisodeProgressRef.current = false;
       showPendingPlaybackNotice();
-
-      void finalizePendingSourceSwitchCleanup(activeSource, activeId);
+      const unavailableNotice = sourceUnavailableNoticeRef.current;
+      sourceUnavailableNoticeRef.current = null;
+      if (unavailableNotice && artPlayerRef.current) {
+        artPlayerRef.current.notice.show = unavailableNotice;
+      }
     }, [
-      finalizePendingSourceSwitchCleanup,
       recordPlaybackStarted,
       playbackIntentRef,
       showPendingPlaybackNotice,
@@ -903,6 +911,8 @@ function AuthenticatedPlayPageClient({
         onDismissAuthRecovery={dismissAuthRecovery}
         onEpisodeChange={handleEpisodeChangeRequest}
         onRetryPlayback={handleRetryPlayback}
+        onOpenSources={openSourcesPanel}
+        openSourcesRequest={openSourcesRequest}
         onSourceChange={handleSourceChange}
         currentSource={currentSource}
         currentId={currentId}
@@ -936,11 +946,9 @@ function AuthenticatedPlayPageClient({
   );
 
   if (loading) {
-    if (shouldHideStartupLoading) {
+    if (startupInPlayerShell) {
       return renderMainContent(null);
     }
-
-    if (!showStartupLoading) return null;
 
     return (
       <PlayLoadingView

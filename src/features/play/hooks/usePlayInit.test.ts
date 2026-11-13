@@ -23,6 +23,7 @@ import {
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
 import type { PlayRecord, SearchResult } from '@/lib/types';
+import { clearPlaybackWarmups } from '@/lib/video-prefetch';
 
 jest.mock('@/features/play/lib/sourceSelectionContext', () => ({
   getSourceSelectionContext: jest.fn(),
@@ -137,6 +138,8 @@ function installFetch(
 ) {
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), window.location.origin);
+    if (url.pathname === '/api/playrecords' && url.searchParams.has('title'))
+      return Promise.resolve({ ok: true, json: async () => ({}) });
     const target = url.searchParams.get('url') || '';
     const apiResponse = apiResponses[url.pathname];
     if (apiResponse) {
@@ -193,7 +196,9 @@ function apiRequests(pathname: string): string[] {
   return (global.fetch as jest.Mock).mock.calls
     .map(([input]) => String(input))
     .filter(
-      (url) => new URL(url, window.location.origin).pathname === pathname,
+      (url) =>
+        new URL(url, window.location.origin).pathname === pathname &&
+        !new URL(url, window.location.origin).searchParams.has('title'),
     );
 }
 
@@ -286,6 +291,7 @@ beforeEach(() => {
     healthTiers: {},
   });
   jest.useFakeTimers();
+  clearPlaybackWarmups();
   localStorage.clear();
   sessionStorage.clear();
   window.history.replaceState({}, '', `/play?title=${TITLE}`);
@@ -1124,5 +1130,159 @@ describe('usePlayInit 直达入口读取播放记录', () => {
     expect(apiRequests('/api/playrecords')).toHaveLength(0);
     expect(params.historyRestoreGateRef.current.playRecords).toBeNull();
     expect(sessionStorage.getItem(PLAY_INTENT_KEY)).not.toBeNull();
+  });
+});
+
+describe('入口恢复与失效源回退', () => {
+  function reply(value: unknown, ok = true) {
+    return Promise.resolve({ ok, json: async () => value });
+  }
+
+  it.each([1, 8])(
+    '原源失效保留可用集号 %i，清除跨源时间并同步地址',
+    async (index) => {
+      const candidate = createSeries('fallback', 3);
+      savePlayIntent({
+        source: 'removed',
+        id: 'old',
+        episodeIndex: index,
+        resumeTime: 110,
+      });
+      global.fetch = jest.fn((input) =>
+        String(input).startsWith('/api/detail')
+          ? reply(null, false)
+          : reply({ results: [candidate] }),
+      ) as unknown as typeof fetch;
+      const notice = jest.fn();
+      const params = setupHook(null, {
+        currentSource: 'removed',
+        currentId: 'old',
+        needPreferRef: { current: false },
+        optimizationEnabled: false,
+        onSourceUnavailable: notice,
+      });
+      await waitFor(() =>
+        expect(params.setDetail).toHaveBeenCalledWith(candidate),
+      );
+      expect(
+        JSON.parse(sessionStorage.getItem(PLAY_INTENT_KEY)!),
+      ).toMatchObject({
+        source: candidate.source,
+        episodeIndex: index < 3 ? index : 0,
+        resumeTime: 0,
+      });
+      expect(notice).toHaveBeenCalledTimes(1);
+      expect(window.location.search).toContain('source=fallback');
+      expect(params.setError).not.toHaveBeenCalled();
+    },
+  );
+
+  it('原源无记录时不写跨源意图，按候选自己的播放记录恢复', async () => {
+    signIn();
+    const candidate = createSeries('fallback', 3);
+    const candidateRecords = {
+      'fallback+fallback-id': { index: 2, play_time: 151 },
+    };
+    global.fetch = jest.fn((input) => {
+      const url = String(input);
+      if (url.startsWith('/api/detail')) return reply(null, false);
+      if (url.startsWith('/api/playrecords')) return reply(candidateRecords);
+      return reply({ results: [candidate] });
+    }) as unknown as typeof fetch;
+    const notice = jest.fn();
+    const params = setupHook(null, {
+      currentSource: 'removed',
+      currentId: 'old',
+      needPreferRef: { current: false },
+      optimizationEnabled: false,
+      onSourceUnavailable: notice,
+    });
+    await waitFor(() =>
+      expect(params.setDetail).toHaveBeenCalledWith(candidate),
+    );
+    expect(sessionStorage.getItem(PLAY_INTENT_KEY)).toBeNull();
+    expect(notice).toHaveBeenCalledTimes(1);
+    await expect(
+      params.historyRestoreGateRef.current.playRecords,
+    ).resolves.toMatchObject(candidateRecords);
+  });
+
+  it.each([
+    [
+      { results: [], totalSources: 2, failedSources: ['a', 'b'] },
+      true,
+      '播放源搜索失败',
+    ],
+    [{ results: [] }, false, '播放源搜索失败'],
+    [
+      { results: [], totalSources: 2, failedSources: [] },
+      true,
+      '未找到匹配结果',
+    ],
+  ])('区分失败与空结果 %#', async (body, ok, message) => {
+    global.fetch = jest.fn((input) =>
+      String(input).startsWith('/api/playrecords')
+        ? reply({})
+        : reply(body, ok as boolean),
+    ) as unknown as typeof fetch;
+    const params = setupHook(null, { optimizationEnabled: false });
+    await waitFor(() => expect(params.setError).toHaveBeenCalledWith(message));
+  });
+
+  it('标题历史命中优先于已返回的 quick，按历史源交接集数和时间', async () => {
+    const history = createSeries('history', 3);
+    const quick = createSource('quick');
+    let finishHistory!: (value: unknown) => void;
+    const historyReply = new Promise((resolve) => {
+      finishHistory = resolve;
+    });
+    global.fetch = jest.fn((input) => {
+      const url = String(input);
+      if (url.startsWith('/api/playrecords?title='))
+        return historyReply.then((body) => ({
+          ok: true,
+          json: async () => body,
+        }));
+      if (url.startsWith('/api/search/quick')) return reply({ detail: quick });
+      if (url.startsWith('/api/detail')) return reply(history);
+      return reply({ results: [history, quick] });
+    }) as unknown as typeof fetch;
+    const params = setupHook(null);
+    expect(apiRequests('/api/search/quick')).toHaveLength(1);
+    await act(async () => finishHistory(createPlayRecords(history, 1)));
+    await waitFor(() => expect(params.setDetail).toHaveBeenCalledWith(history));
+    expect(params.setDetail).not.toHaveBeenCalledWith(quick);
+    expect(JSON.parse(sessionStorage.getItem(PLAY_INTENT_KEY)!)).toMatchObject({
+      source: 'history',
+      episodeIndex: 1,
+      resumeTime: 600,
+    });
+  });
+
+  it('标题历史超时后使用并发 quick，迟到历史不覆盖起播', async () => {
+    const quick = createSource('quick-timeout');
+    let finishHistory!: (value: unknown) => void;
+    global.fetch = jest.fn((input) => {
+      const url = String(input);
+      if (url.startsWith('/api/playrecords?title='))
+        return new Promise((resolve) => {
+          finishHistory = resolve;
+        });
+      if (url.startsWith('/api/search/quick')) return reply({ detail: quick });
+      if (url.startsWith('/api/detail')) return reply(quick);
+      return reply({ results: [quick] });
+    }) as unknown as typeof fetch;
+    const params = setupHook(null);
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+    await waitFor(() => expect(params.setDetail).toHaveBeenCalledWith(quick));
+    await act(async () =>
+      finishHistory({
+        ok: true,
+        json: async () => createPlayRecords(createSeries('late', 3), 1),
+      }),
+    );
+    expect(params.setDetail).toHaveBeenCalledTimes(1);
   });
 });

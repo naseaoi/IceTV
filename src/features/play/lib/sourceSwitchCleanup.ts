@@ -1,27 +1,21 @@
-import type { SkipConfig } from '@/lib/types';
-
 export interface SourceSwitchCleanupTask {
   previousSource: string;
   previousId: string;
   nextSource: string;
   nextId: string;
-  previousSkipConfig: SkipConfig;
+  skipConfigCleanupReady: Promise<boolean>;
   keepPreviousPlayRecord?: boolean;
 }
 
 interface SourceSwitchCleanupDeps {
   deletePlayRecord: (source: string, id: string) => Promise<void>;
   deleteSkipConfig: (source: string, id: string) => Promise<void>;
-  saveSkipConfig: (
-    source: string,
-    id: string,
-    config: SkipConfig,
-  ) => Promise<void>;
+  isCurrentSource: () => boolean;
 }
 
 /**
- * 只有新源真正成为当前播放源后，才允许清理旧记录，
- * 避免在加载失败或中途返回时把首页的继续观看记录提前删掉。
+ * 新源进度成功保存后，才允许清理旧记录，
+ * 避免自动播放被拒绝或保存失败时丢失继续观看记录。
  */
 export function shouldFinalizeSourceSwitchCleanup(
   task: SourceSwitchCleanupTask | null,
@@ -36,7 +30,7 @@ export function shouldFinalizeSourceSwitchCleanup(
 }
 
 /**
- * 新源开始播放后，再补做旧记录删除和跳过配置迁移。
+ * 新源记录落库后清理旧记录，跳过配置另外等待迁移结果。
  */
 export async function finalizeSourceSwitchCleanup(
   task: SourceSwitchCleanupTask,
@@ -51,13 +45,9 @@ export async function finalizeSourceSwitchCleanup(
   }
 
   try {
+    if (!(await task.skipConfigCleanupReady) || !deps.isCurrentSource()) return;
     await deps.deleteSkipConfig(task.previousSource, task.previousId);
-    await deps.saveSkipConfig(
-      task.nextSource,
-      task.nextId,
-      task.previousSkipConfig,
-    );
   } catch (err) {
-    console.error('迁移跳过片头片尾配置失败:', err);
+    console.error('清除旧源跳过片头片尾配置失败:', err);
   }
 }

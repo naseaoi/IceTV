@@ -92,6 +92,20 @@ export function hasUsableDuration(duration?: number): boolean {
   return Number.isFinite(duration) && (duration ?? 0) > 0;
 }
 
+const programmaticResumeTargets = new WeakMap<ResumePlayerLike, number>();
+
+export function isProgrammaticResumeSeek(
+  player: ResumePlayerLike,
+  completed: boolean,
+): boolean {
+  const target = programmaticResumeTargets.get(player);
+  if (target === undefined) return false;
+  if (completed || Math.abs(player.currentTime - target) > 1.5) {
+    programmaticResumeTargets.delete(player);
+  }
+  return Math.abs(player.currentTime - target) <= 1.5;
+}
+
 export function applyResumeTime(
   player: ResumePlayerLike | null | undefined,
   targetTime: number,
@@ -117,6 +131,7 @@ export function applyResumeTime(
     return true;
   }
 
+  programmaticResumeTargets.set(player, safeTarget);
   player.currentTime = safeTarget;
 
   // 回读确认落点，避免播放器静默改写后上层误判恢复成功。

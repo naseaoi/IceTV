@@ -29,6 +29,7 @@ import {
 import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
 import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { useLongPress } from '@/hooks/useLongPress';
+import { usePlaybackIntentPrefetch } from '@/hooks/usePlaybackIntentPrefetch';
 import {
   deleteFavorite,
   generateStorageKey,
@@ -99,6 +100,12 @@ export function PlaybackPosterCard({
     onPrefetch?.();
     if (hasTarget) void ensureFavoritesLoaded();
   }, [ensureFavoritesLoaded, hasTarget, onPrefetch, selectable]);
+  const prefetchProps = usePlaybackIntentPrefetch({
+    source,
+    id: videoId,
+    disabled: selectable,
+    onPrefetch: handlePrefetch,
+  });
 
   const toggleFavorite = useCallback(
     async (current: boolean, notify = false) => {
@@ -246,8 +253,7 @@ export function PlaybackPosterCard({
       aria-pressed={selectable ? selected : undefined}
       className={`${POSTER_CARD_INTERACTION_CLASS} outline-none`}
       onClick={onPlay}
-      onMouseEnter={handlePrefetch}
-      onFocus={handlePrefetch}
+      {...prefetchProps}
       onKeyDown={(event) => {
         if (
           event.target === event.currentTarget &&

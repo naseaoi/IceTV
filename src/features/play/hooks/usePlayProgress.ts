@@ -10,7 +10,7 @@ import {
   isPlayRecordCompatibleWithDetail,
   readMatchingPlaybackCheckpoint,
   resolvePlaybackRestoreCandidate,
-  resolveProtectedPlaybackTime,
+  resolveSavedPlaybackTime,
   savePlaybackCheckpoint,
   shouldApplyHistoryRestore,
 } from '@/features/play/lib/playProgressRestore';
@@ -59,6 +59,9 @@ export interface PlayProgressSaveState {
   inFlight: boolean;
   pending: PendingPlayProgressSave | null;
   lastSavedFingerprint: string | null;
+  activeFingerprints?: Set<string>;
+  latestSaveToken?: object;
+  onSaved?: (source: string, id: string) => void | Promise<void>;
 }
 
 function buildPlayProgressFingerprint(
@@ -71,6 +74,25 @@ function buildPlayProgressFingerprint(
   );
 }
 
+async function persistPlayProgressSave(
+  state: PlayProgressSaveState,
+  payload: PendingPlayProgressSave,
+): Promise<void> {
+  const active = (state.activeFingerprints ??= new Set());
+  active.add(payload.fingerprint);
+  const token = {};
+  state.latestSaveToken = token;
+  try {
+    await savePlayRecord(payload.source, payload.id, payload.record);
+    if (state.latestSaveToken === token) {
+      state.lastSavedFingerprint = payload.fingerprint;
+    }
+    await state.onSaved?.(payload.source, payload.id);
+  } finally {
+    active.delete(payload.fingerprint);
+  }
+}
+
 async function flushPlayProgressSave(
   saveStateRef: MutableRefObject<PlayProgressSaveState>,
   lastSaveTimeRef: MutableRefObject<number>,
@@ -80,8 +102,7 @@ async function flushPlayProgressSave(
   lastSaveTimeRef.current = Date.now();
 
   try {
-    await savePlayRecord(payload.source, payload.id, payload.record);
-    saveStateRef.current.lastSavedFingerprint = payload.fingerprint;
+    await persistPlayProgressSave(saveStateRef.current, payload);
   } finally {
     saveStateRef.current.inFlight = false;
 
@@ -109,6 +130,7 @@ export async function saveCurrentPlayProgress(
   saveStateRef: MutableRefObject<PlayProgressSaveState>,
   lastSaveTimeRef: MutableRefObject<number>,
   searchTitle: string,
+  immediate = false,
 ) {
   if (
     !artPlayerRef.current ||
@@ -126,9 +148,9 @@ export async function saveCurrentPlayProgress(
   }
 
   const player = artPlayerRef.current;
-  const currentTime = resolveProtectedPlaybackTime(
+  const currentTime = resolveSavedPlaybackTime(
     player.currentTime || 0,
-    stableCurrentTimeRef.current,
+    stableCurrentTimeRef,
   );
   const duration = player.duration || 0;
 
@@ -178,23 +200,27 @@ export async function saveCurrentPlayProgress(
     return;
   }
 
+  const payload = {
+    source: currentSourceRef.current,
+    id: currentIdRef.current,
+    record,
+    fingerprint,
+  };
   try {
+    if (immediate) {
+      // savePlayRecord 使用 keepalive；退出时直接发出，不等待普通保存队列。
+      saveStateRef.current.pending = null;
+      if (saveStateRef.current.activeFingerprints?.has(fingerprint)) return;
+      lastSaveTimeRef.current = Date.now();
+      await persistPlayProgressSave(saveStateRef.current, payload);
+      return;
+    }
     if (saveStateRef.current.inFlight) {
-      saveStateRef.current.pending = {
-        source: currentSourceRef.current,
-        id: currentIdRef.current,
-        record,
-        fingerprint,
-      };
+      saveStateRef.current.pending = payload;
       return;
     }
 
-    await flushPlayProgressSave(saveStateRef, lastSaveTimeRef, {
-      source: currentSourceRef.current,
-      id: currentIdRef.current,
-      record,
-      fingerprint,
-    });
+    await flushPlayProgressSave(saveStateRef, lastSaveTimeRef, payload);
   } catch (err) {
     console.error('保存播放进度失败:', err);
   }
@@ -333,7 +359,7 @@ export function usePlayProgress({
   }, [searchTitle]);
 
   const doSave = useCallback(
-    () =>
+    (immediate = false) =>
       saveCurrentPlayProgress(
         artPlayerRef,
         currentSourceRef,
@@ -346,6 +372,7 @@ export function usePlayProgress({
         saveStateRef,
         lastSaveTimeRef,
         searchTitleRef.current,
+        immediate,
       ),
     [
       artPlayerRef,
@@ -386,7 +413,7 @@ export function usePlayProgress({
 
   const persistPlaybackState = useCallback(() => {
     doCheckpoint();
-    void doSave();
+    void doSave(true);
   }, [doCheckpoint, doSave]);
 
   const requestWakeLock = useCallback(async () => {

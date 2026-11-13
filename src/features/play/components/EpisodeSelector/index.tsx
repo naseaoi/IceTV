@@ -240,6 +240,8 @@ interface EpisodeSelectorProps {
   onAddSources?: (newSources: SearchResult[]) => void;
   onDanmakuReload?: DanmakuReloadHandler;
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
+  /** 递增时打开换源面板（播放失败提示里的「选择其他源」） */
+  openSourcesRequest?: number;
 }
 
 type MobileSheetKey = 'episodes' | 'sources' | 'danmaku' | 'reviews';
@@ -273,6 +275,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   onAddSources,
   onDanmakuReload,
   onDanmakuHeatmapChange,
+  openSourcesRequest = 0,
 }) => {
   const runtimeConfig = useRuntimeConfig();
   const danmakuEnabled = runtimeConfig.ENABLE_DANMAKU;
@@ -326,6 +329,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     url.searchParams.delete('tab');
     window.history.replaceState(null, '', url);
   }, [reviewsRequest]);
+  useEffect(() => {
+    if (!openSourcesRequest) return;
+    setDesktopTab('sources');
+    if (window.matchMedia(MOBILE_QUERY).matches) setMobileSheet('sources');
+  }, [openSourcesRequest]);
   const [reviewEditRequested, setReviewEditRequested] = useState(false);
 
   const reviews = useVideoReviews({

@@ -112,6 +112,8 @@ describe('PlayMainContent', () => {
     onDismissAuthRecovery: jest.fn(),
     onEpisodeChange: jest.fn(),
     onRetryPlayback: jest.fn(),
+    onOpenSources: jest.fn(),
+    openSourcesRequest: 0,
     onSourceChange: jest.fn(),
     currentSource: 'source-a',
     currentId: 'source-a-id',
@@ -303,6 +305,23 @@ describe('PlayMainContent', () => {
     fireEvent.click(screen.getByRole('button', { name: '继续尝试' }));
 
     expect(onRetryPlayback).toHaveBeenCalledTimes(1);
+  });
+
+  it('播放器失败层可直接打开换源面板', () => {
+    const onOpenSources = jest.fn();
+
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        videoLoadingAttempt={1}
+        onOpenSources={onOpenSources}
+        playbackError='当前源加载失败'
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '选择其他源' }));
+
+    expect(onOpenSources).toHaveBeenCalledTimes(1);
   });
 
   it('超时回调已接手（切线路或自动换源）时保持加载层', () => {

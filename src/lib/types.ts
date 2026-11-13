@@ -544,6 +544,11 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   deleteUserDanmakuBatch(ids: string[]): Promise<number>;
   readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
+  getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>>;
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
   getPlayRecordsByKeys(
     userName: string,

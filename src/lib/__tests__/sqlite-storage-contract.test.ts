@@ -9,6 +9,7 @@ import {
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
@@ -30,6 +31,10 @@ import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+it('按标题读取本人最近进度并匹配归一化标题和年份', async () => {
+  await assertPlayRecordTitleLookup(new LocalSqliteStorage(':memory:'));
+});
 
 it('批量读取隔离用户并省略缺失键', async () => {
   await assertBatchReadPlayRecords(new LocalSqliteStorage(':memory:'));

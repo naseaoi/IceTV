@@ -35,7 +35,12 @@ import {
   shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
 import {
+  clearExplicitPlaybackSeek,
+  recordExplicitPlaybackSeek,
+} from '@/features/play/lib/playProgressRestore';
+import {
   applyResumeTime,
+  isProgrammaticResumeSeek,
   isWithinAutoResumeWindow,
   resolvePendingResumeTime,
   resolveResumeTimeTarget,
@@ -284,6 +289,7 @@ export async function initializeArtPlayer(
         allowAutoResume: allowAutoResumeRef.current,
       });
       resetPlayerLoadingSessionState(loadingSessionRef.current);
+      clearExplicitPlaybackSeek(stableCurrentTimeRef);
       // 复用播放器时 Artplayer 会在 loadedmetadata 把进度归零，这里保留未落地的
       // 恢复点，交给 timeupdate/progress 重试逻辑再次 seek。
       if (carriedResumeTarget !== null) {
@@ -325,6 +331,7 @@ export async function initializeArtPlayer(
       cleanupPlayer();
     }
     resetPlayerLoadingSessionState(loadingSessionRef.current);
+    clearExplicitPlaybackSeek(stableCurrentTimeRef);
 
     const adBlockingHlsLoader = createHlsLoaderClass(
       Hls.DefaultConfig.loader as unknown as new (config: unknown) => {
@@ -414,6 +421,8 @@ export async function initializeArtPlayer(
     if (!player) {
       return;
     }
+    // 点播恢复统一由受管运行时处理，移除 Artplayer 延迟重设旧 URL 的内建重连。
+    player.off('video:error');
     // 内置倍速设置在 ratechange 时按当前倍速查选项，快捷键 0.1 步进的倍速不在列表里会查到 null 并直接 check 崩溃
     const setting = player.setting as
       | { check?: (target: unknown) => void }
@@ -1076,7 +1085,7 @@ export async function initializeArtPlayer(
       }
     });
 
-    player.on('error', (error: Error) => {
+    const handlePlayerError = (error: Error) => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('error');
       console.error('播放器错误:', error);
       const activeVideo = player.video as HTMLVideoElement | undefined;
@@ -1105,7 +1114,10 @@ export async function initializeArtPlayer(
       )
         return;
       onPlaybackRecoveryExhausted?.('native-network-error');
-    });
+    };
+    player.on('error', handlePlayerError);
+    // 内建重连原本会转发 video:error；移除后由项目直接接管原生媒体错误。
+    player.on('video:error', handlePlayerError);
 
     player.on('video:timeupdate', () => {
       const now = Date.now();
@@ -1115,20 +1127,37 @@ export async function initializeArtPlayer(
     });
 
     // 媒体键、画中画等直接暂停元素时不一定经过 Artplayer 的 pause 事件
-    for (const event of ['pause', 'waiting', 'stalled', 'error'] as const) {
+    for (const event of ['pause', 'waiting', 'stalled'] as const) {
       player.on(`video:${event}`, () => {
         if (!isStalePlayerSession()) handlePlaybackStatsEvent?.(event);
       });
     }
 
+    const updateSeekProgress = (completed: boolean) => {
+      if (isStalePlayerSession()) return;
+      const programmatic = isProgrammaticResumeSeek(player, completed);
+      if (
+        !programmatic &&
+        loadingSessionRef.current.playbackStartNotified &&
+        loadingSessionRef.current.pendingInitialResumeTarget === null &&
+        !clearTargetEpisodeProgressRef.current
+      ) {
+        recordExplicitPlaybackSeek(
+          stableCurrentTimeRef,
+          player.currentTime || 0,
+        );
+      } else {
+        updateStableCurrentTime(player.currentTime || 0);
+      }
+    };
     player.on('video:seeking', () => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeking');
-      updateStableCurrentTime(player.currentTime || 0);
+      updateSeekProgress(false);
     });
 
     player.on('video:seeked', () => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeked');
-      updateStableCurrentTime(player.currentTime || 0);
+      updateSeekProgress(true);
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         completePendingResumeIfReady();
       }

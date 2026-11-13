@@ -1,3 +1,38 @@
+// 准备阶段、媒体加载与页面判定共用前台时钟，后台挂起不消耗 W/T。
+const VOD_FOREGROUND_GRACE_MS = 1000;
+let clockListening = false;
+let hiddenAt: number | null = null;
+let excludedMs = 0;
+let graceStartedAt: number | null = null;
+
+export function getVodStartupNow(): number {
+  if (!clockListening && typeof document !== 'undefined') {
+    clockListening = true;
+    hiddenAt = document.hidden ? performance.now() : null;
+    document.addEventListener('visibilitychange', () => {
+      const now = performance.now();
+      if (document.hidden) {
+        if (hiddenAt !== null) return;
+        if (graceStartedAt !== null) {
+          excludedMs += Math.min(now - graceStartedAt, VOD_FOREGROUND_GRACE_MS);
+          graceStartedAt = null;
+        }
+        hiddenAt = now;
+      } else if (hiddenAt !== null) {
+        excludedMs += now - hiddenAt;
+        hiddenAt = null;
+        graceStartedAt = now;
+      }
+    });
+  }
+  const now = hiddenAt ?? performance.now();
+  const graceMs =
+    graceStartedAt === null
+      ? 0
+      : Math.min(now - graceStartedAt, VOD_FOREGROUND_GRACE_MS);
+  return now - excludedMs - graceMs;
+}
+
 export interface VodStartupProgress {
   sourceKey: string;
   startedAt: number;
@@ -12,7 +47,7 @@ export function beginVodStartupProgress(
   sourceKey: string,
   sampleProgress?: () => void,
 ): VodStartupProgress {
-  const now = performance.now();
+  const now = getVodStartupNow();
   const progress = {
     sourceKey,
     startedAt: now,

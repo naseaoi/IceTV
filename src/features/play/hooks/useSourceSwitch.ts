@@ -32,6 +32,7 @@ import {
   resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
+import { getVodStartupNow } from '@/features/play/lib/playerLoading';
 import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
@@ -50,11 +51,7 @@ import {
   reportVodPlaybackOutcome,
 } from '@/features/play/lib/vodPlaybackIntent';
 import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
-import {
-  deletePlayRecord,
-  deleteSkipConfig,
-  saveSkipConfig,
-} from '@/lib/db.client';
+import { deletePlayRecord, deleteSkipConfig } from '@/lib/db.client';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { readAutoSwitchSource } from '@/lib/local-preferences';
@@ -156,6 +153,11 @@ interface UseSourceSwitchOptions {
   setRealtimeLoadSpeed: Dispatch<SetStateAction<string>>;
   setSourceSearchError: Dispatch<SetStateAction<string | null>>;
 
+  registerSkipConfigMigration: (
+    source: string,
+    id: string,
+    config: SkipConfigState,
+  ) => Promise<boolean>;
   cleanupPlayer: () => void;
   // 自动换源的三个触发点都会调用，调用方负责只在本次加载尚未起播时计入失败
   onPlaybackStartFailed?: () => void;
@@ -199,6 +201,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     setRealtimeLoadSpeed,
     setSourceSearchError,
     cleanupPlayer,
+    registerSkipConfigMigration,
     onPlaybackStartFailed,
   } = options;
 
@@ -318,7 +321,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
       const intent = playbackIntentRef.current;
       const attempt = getVodSourceAttempt(intent, newSource, newId);
-      attempt.startedAt = performance.now();
+      attempt.startedAt = getVodStartupNow();
       cancelEpisodeResolve?.();
       const currentRequestId = ++sourceChangeRequestIdRef.current;
       const isCurrentRequest = () =>
@@ -609,7 +612,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             previousId,
             nextSource: newDetail.source,
             nextId: newDetail.id,
-            previousSkipConfig,
+            skipConfigCleanupReady: registerSkipConfigMigration(
+              newDetail.source,
+              newDetail.id,
+              previousSkipConfig,
+            ),
             keepPreviousPlayRecord: clearTargetEpisodeProgress,
           };
         }
@@ -726,6 +733,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       setRealtimeLoadSpeed,
       setSourceSearchError,
       cleanupPlayer,
+      registerSkipConfigMigration,
       resetAutoSourceSwitch,
       stopActiveHlsLoading,
       restartCurrentPlayback,
@@ -893,19 +901,32 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   const finalizePendingSourceSwitchCleanup = useCallback(
     async (activeSource: string, activeId: string) => {
       const task = pendingSourceSwitchCleanupRef.current;
-      if (!shouldFinalizeSourceSwitchCleanup(task, activeSource, activeId)) {
+      if (
+        activeSource !== currentSourceRef.current ||
+        activeId !== currentIdRef.current ||
+        !shouldFinalizeSourceSwitchCleanup(task, activeSource, activeId)
+      ) {
         return;
       }
 
       pendingSourceSwitchCleanupRef.current = null;
 
+      const requestId = sourceChangeRequestIdRef.current;
       await finalizeSourceSwitchCleanup(task, {
         deletePlayRecord,
         deleteSkipConfig,
-        saveSkipConfig,
+        isCurrentSource: () =>
+          requestId === sourceChangeRequestIdRef.current &&
+          activeSource === currentSourceRef.current &&
+          activeId === currentIdRef.current,
       });
     },
-    [pendingSourceSwitchCleanupRef],
+    [
+      pendingSourceSwitchCleanupRef,
+      currentSourceRef,
+      currentIdRef,
+      sourceChangeRequestIdRef,
+    ],
   );
 
   return {

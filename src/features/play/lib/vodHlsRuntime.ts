@@ -17,6 +17,7 @@ import {
   type PlayerLoadingSessionState,
   beginVodStartupProgress,
   clearVodStartupProgress,
+  getVodStartupNow,
   registerStartupStateDescriber,
 } from '@/features/play/lib/playerLoading';
 import {
@@ -165,11 +166,11 @@ export function registerVodNativeRuntime(
       : 0;
     if (end > bufferedEnd) {
       bufferedEnd = end;
-      progress.lastProgressAt = performance.now();
+      progress.lastProgressAt = getVodStartupNow();
     }
   };
   const onLoadedMetadata = () => {
-    progress.lastProgressAt = performance.now();
+    progress.lastProgressAt = getVodStartupNow();
   };
   const onPlaying = () => {
     if (attempt) attempt.startedAt = null;
@@ -218,7 +219,19 @@ export function createVodM3u8Loader({
   onPlaybackRecoveryExhausted,
   onCurrentSourceVideoInfo,
 }: CreateVodM3u8LoaderOptions) {
-  return function loadVodM3u8(video: HTMLVideoElement, url: string) {
+  return function loadVodM3u8(
+    video: HTMLVideoElement,
+    url: string,
+    art = artPlayerRef.current,
+  ) {
+    if (
+      !art ||
+      art.isDestroy ||
+      art !== artPlayerRef.current ||
+      art.video !== video
+    ) {
+      return;
+    }
     if (!Hls) {
       console.error('HLS.js 未加载');
       return;
@@ -340,7 +353,7 @@ export function createVodM3u8Loader({
           const loaded = stats.loaded ?? 0;
           if (loaded > (observedBytes.get(stats) ?? 0)) {
             observedBytes.set(stats, loaded);
-            progress.lastProgressAt = performance.now();
+            progress.lastProgressAt = getVodStartupNow();
           }
         }
       });
@@ -350,7 +363,7 @@ export function createVodM3u8Loader({
     };
     let startupProgress: ReturnType<typeof beginMediaLoad> | null = null;
     const markStartupProgress = () => {
-      if (startupProgress) startupProgress.lastProgressAt = performance.now();
+      if (startupProgress) startupProgress.lastProgressAt = getVodStartupNow();
     };
 
     const playbackRoute =
@@ -674,6 +687,27 @@ export function createVodM3u8Loader({
       );
     };
 
+    let offlineFatalPending = false;
+    const onOnline = () => {
+      if (
+        !offlineFatalPending ||
+        navigator.onLine === false ||
+        videoRuntimeCleaned ||
+        managedVideo.hls !== hls ||
+        artPlayerRef.current !== art ||
+        art.isDestroy ||
+        art.video !== video ||
+        getVodRuntimeSourceUrl(video) !== url ||
+        (playbackIntentRef && playbackIntentRef.current !== intent) ||
+        video.paused ||
+        video.ended ||
+        hls.loadingEnabled
+      )
+        return;
+      offlineFatalPending = false;
+      hls.startLoad(video.currentTime || 0);
+    };
+
     const cleanupVideoRuntime = () => {
       if (videoRuntimeCleaned) return;
       videoRuntimeCleaned = true;
@@ -687,6 +721,7 @@ export function createVodM3u8Loader({
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
       }
+      window.removeEventListener('online', onOnline);
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('stalled', onStalled);
       video.removeEventListener('playing', onPlaying);
@@ -695,6 +730,7 @@ export function createVodM3u8Loader({
     };
 
     assignManagedVideoCleanup(video, cleanupVideoRuntime);
+    window.addEventListener('online', onOnline);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('stalled', onStalled);
     video.addEventListener('playing', onPlaying);
@@ -722,7 +758,12 @@ export function createVodM3u8Loader({
       // bufferFullError 非致命，hls.js 已自行降低上限并安排重下失败分片；这里只把上限压到当前前向缓冲以内，不计失败也不拉流
       bufferBudgetController.handleError(data);
 
-      if (navigator.onLine === false || /abort/i.test(errorDetails)) return;
+      if (navigator.onLine === false) {
+        offlineFatalPending ||=
+          data.fatal === true && data.type === Hls.ErrorTypes.NETWORK_ERROR;
+        return;
+      }
+      if (/abort/i.test(errorDetails)) return;
       const isRouteNetworkError = isVodRouteNetworkError(data);
       const isFragNetworkError =
         isRouteNetworkError && /frag|segment/i.test(errorDetails);

@@ -8,6 +8,7 @@ import { PlayPageClient } from '@/features/play/PlayPageClient';
 import { generateStorageKey } from '@/lib/db.client';
 import { savePlayIntent } from '@/lib/play-intent';
 import type { PlayRecord, SearchResult } from '@/lib/types';
+import { clearPlaybackWarmups } from '@/lib/video-prefetch';
 
 type ArtPlayerParams = Parameters<typeof useArtPlayer>[0];
 
@@ -99,7 +100,10 @@ jest.mock('@/features/play/hooks/usePlayFavorite', () => ({
 }));
 
 jest.mock('@/features/play/hooks/useSkipConfig', () => ({
-  useSkipConfig: () => ({ handleSkipConfigChange: jest.fn() }),
+  useSkipConfig: () => ({
+    handleSkipConfigChange: jest.fn(),
+    registerSkipConfigMigration: jest.fn().mockResolvedValue(true),
+  }),
 }));
 
 jest.mock('@/features/play/hooks/useSourcePlaybackStatsRecorder', () => ({
@@ -235,7 +239,12 @@ function installFetch(routes: Record<string, ApiRoute>) {
     ...routes,
   };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
-    const { pathname } = new URL(String(input), window.location.origin);
+    const { pathname, searchParams } = new URL(
+      String(input),
+      window.location.origin,
+    );
+    if (pathname === '/api/playrecords' && searchParams.has('title'))
+      return (allRoutes['/api/playrecords?title'] || reply({}))();
     const route = allRoutes[pathname];
     return route
       ? route()
@@ -246,7 +255,8 @@ function installFetch(routes: Record<string, ApiRoute>) {
 function requestCount(pathname: string): number {
   return (global.fetch as jest.Mock).mock.calls.filter(
     ([input]) =>
-      new URL(String(input), window.location.origin).pathname === pathname,
+      new URL(String(input), window.location.origin).pathname === pathname &&
+      !new URL(String(input), window.location.origin).searchParams.has('title'),
   ).length;
 }
 
@@ -295,6 +305,8 @@ describe('PlayPageClient 起播等历史恢复', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    clearPlaybackWarmups();
+    clearPlaybackWarmups();
     localStorage.clear();
     sessionStorage.clear();
     mockPlayerFrames.length = 0;
@@ -309,6 +321,23 @@ describe('PlayPageClient 起播等历史恢复', () => {
     global.fetch = originalFetch;
     document.cookie = 'auth_meta=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     window.dispatchEvent(new Event('auth:session-lost'));
+  });
+
+  it('标题入口按本人其他源最近记录起播，保留集与时间', async () => {
+    installFetch({
+      '/api/playrecords?title': reply(createPlayRecords(resumed)),
+      '/api/search/quick': reply({ detail: other }),
+      '/api/detail': reply(resumed),
+      '/api/search': reply({ results: [resumed, other] }),
+    });
+    openPlayPage({});
+    await flushStartup();
+    expect(startupFrame()).toMatchObject({
+      videoUrl: resumed.episodes[RESUME_EPISODE_INDEX],
+      episodeIndex: RESUME_EPISODE_INDEX,
+      resumeTime: RECORD_PLAY_TIME,
+    });
+    expect(playerUrls()).not.toContain(other.episodes[0]);
   });
 
   it('测速选完源后播放记录才到时，等历史恢复定下续播的集和时间再起播', async () => {

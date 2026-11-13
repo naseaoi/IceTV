@@ -6,6 +6,7 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 
 installWebPolyfills();
 
+const mockGetLatestPlayRecordByTitle = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetPlayRecordsByKeys = jest.fn();
 const mockGetPlayRecord = jest.fn();
@@ -24,6 +25,8 @@ jest.mock('@/lib/api-auth', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getLatestPlayRecordByTitle: (...args: unknown[]) =>
+      mockGetLatestPlayRecordByTitle(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getPlayRecordsByKeys: (...args: unknown[]) =>
       mockGetPlayRecordsByKeys(...args),
@@ -91,6 +94,29 @@ const records = {
 };
 
 describe('playrecords route', () => {
+  it('标题查询使用当前登录用户并禁止缓存', async () => {
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({
+      'source+new': records['source+new'],
+    });
+    const response = await GET(
+      createRequest('http://localhost/api/playrecords?title=新记录&year=2024'),
+    );
+    expect(mockGetLatestPlayRecordByTitle).toHaveBeenCalledWith(
+      'demo',
+      '新记录',
+      '2024',
+    );
+    expect(await response.json()).toEqual({
+      'source+new': records['source+new'],
+    });
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+  });
+  it('拒绝空标题', async () => {
+    const response = await GET(
+      createRequest('http://localhost/api/playrecords?title='),
+    );
+    expect(response.status).toBe(400);
+  });
   it.each(['ongoing', 'ended'])(
     '保存合法作品状态 %s 并保留手动追更',
     async (series_status) => {

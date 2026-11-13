@@ -1,4 +1,9 @@
-import { AlertTriangle, LockKeyhole, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  LockKeyhole,
+  RefreshCw,
+} from 'lucide-react';
 import { RefObject, useEffect, useRef, useState } from 'react';
 
 import { PlayerPageLayout } from '@/components/PlayerPageLayout';
@@ -16,6 +21,7 @@ import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import {
   type VodStartupProgress,
   describeVodStartupState,
+  getVodStartupNow,
   getVodStartupProgress,
 } from '@/features/play/lib/playerLoading';
 import type { VodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
@@ -44,6 +50,8 @@ interface PlayMainContentProps {
   onDismissAuthRecovery: () => void;
   onEpisodeChange: (episodeNumber: number) => void;
   onRetryPlayback: () => void;
+  onOpenSources: () => void;
+  openSourcesRequest: number;
   onSourceChange: (newSource: string, newId: string, newTitle: string) => void;
   currentSource: string;
   currentId: string;
@@ -105,6 +113,19 @@ function RetryPlaybackButton({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function OpenSourcesButton({ onOpenSources }: { onOpenSources: () => void }) {
+  return (
+    <button
+      type='button'
+      onClick={onOpenSources}
+      className={PLAYER_OVERLAY_SECONDARY_BUTTON_CLASS}
+    >
+      <ArrowLeftRight className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
+      <span>选择其他源</span>
+    </button>
+  );
+}
+
 function PlayLoadingOverlay({
   visible,
   loadingTimedOut,
@@ -113,6 +134,7 @@ function PlayLoadingOverlay({
   timeoutSeconds,
   totalLimit,
   onRetry,
+  onOpenSources,
 }: {
   visible: boolean;
   loadingTimedOut: boolean;
@@ -121,6 +143,7 @@ function PlayLoadingOverlay({
   timeoutSeconds: number;
   totalLimit: boolean;
   onRetry: () => void;
+  onOpenSources: () => void;
 }) {
   const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
 
@@ -134,6 +157,7 @@ function PlayLoadingOverlay({
         message={buildLoadingTimeoutMessage(timeoutSeconds, totalLimit)}
       >
         <RetryPlaybackButton onRetry={onRetry} />
+        <OpenSourcesButton onOpenSources={onOpenSources} />
       </PlayerStateOverlay>
     );
   }
@@ -159,18 +183,20 @@ function PlayLoadingOverlay({
 function PlaybackErrorOverlay({
   message,
   onRetry,
+  onOpenSources,
 }: {
   message: string;
   onRetry: () => void;
+  onOpenSources: () => void;
 }) {
   return (
     <PlayerStateOverlay
       zClassName='z-[510]'
       icon={<AlertTriangle />}
       title={message}
-      message='请从右侧面板手动切换其他源站。'
     >
       <RetryPlaybackButton onRetry={onRetry} />
+      <OpenSourcesButton onOpenSources={onOpenSources} />
     </PlayerStateOverlay>
   );
 }
@@ -229,6 +255,8 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onDismissAuthRecovery,
     onEpisodeChange,
     onRetryPlayback,
+    onOpenSources,
+    openSourcesRequest,
     onSourceChange,
     currentSource,
     currentId,
@@ -291,7 +319,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     setLoadingTimedOut(false);
     setTotalLimitReached(false);
     // 无运行时的准备阶段用一个无进展窗口兜底；已登记的源尝试同时受总预算约束。
-    const effectStartedAt = performance.now();
+    const effectStartedAt = getVodStartupNow();
     const fallbackProgress = {
       sourceKey: '',
       startedAt: effectStartedAt,
@@ -300,7 +328,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     let expiredProgress: ReturnType<typeof getVodStartupProgress> = null;
     const intent = playbackIntentRef?.current;
     const timer = setInterval(() => {
-      if (intent !== playbackIntentRef?.current) return;
+      if (intent !== playbackIntentRef?.current || document.hidden) return;
       const video = artRef.current?.querySelector('video');
       const runtimeProgress = video ? getVodStartupProgress(video) : null;
       const attempt = playbackIntentRef?.current.activeSource;
@@ -324,7 +352,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
         (attempt?.allowAutoFallback && !attempt.routeSwitched
           ? attemptTimeouts.idleMs
           : 0);
-      const now = performance.now();
+      const now = getVodStartupNow();
       const totalLimit = now - startedAt >= totalBudget;
       if (!totalLimit && now - progress.lastProgressAt < attemptTimeouts.idleMs)
         return;
@@ -398,11 +426,13 @@ export function PlayMainContent(props: PlayMainContentProps) {
             }
             totalLimit={totalLimitReached}
             onRetry={onRetryPlayback}
+            onOpenSources={onOpenSources}
           />
           {playbackError && (
             <PlaybackErrorOverlay
               message={playbackError}
               onRetry={onRetryPlayback}
+              onOpenSources={onOpenSources}
             />
           )}
           {authRecoveryVisible && (
@@ -459,6 +489,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
           onAddSources={onAddSources}
           onDanmakuReload={onDanmakuReload}
           onDanmakuHeatmapChange={onDanmakuHeatmapChange}
+          openSourcesRequest={openSourcesRequest}
         />
       }
     />

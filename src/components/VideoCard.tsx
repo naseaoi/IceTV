@@ -38,6 +38,7 @@ import {
   warmupDanmakuForNavigation,
   warmupDanmakuSearchForNavigation,
 } from '@/features/play/lib/danmaku/navigation-warmup';
+import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { useLongPress } from '@/hooks/useLongPress';
 import { buildExternalSubjectUrl } from '@/hooks/usePosterPlay';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
@@ -52,6 +53,7 @@ import {
   setFavoriteTracking,
   setPlayRecordTracking,
 } from '@/lib/db.client';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -463,6 +465,16 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         }`;
       }
       if (actualSource && actualId) {
+        const detail = aggregateGroup?.find(
+          (item) => item.source === actualSource && item.id === actualId,
+        );
+        if (
+          from === 'search' &&
+          detail?.episodes.length &&
+          !detail.episodes.some(isLazyEpisodeUrl)
+        ) {
+          saveDetailSnapshot(actualSource, actualId, detail);
+        }
         return `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
           actualTitle,
         )}${actualYear ? `&year=${actualYear}` : ''}${
@@ -487,6 +499,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualQuery,
       actualSearchType,
       saveAggregateGroup,
+      aggregateGroup,
+      from,
     ]);
 
     const warmupDanmaku = useCallback(() => {

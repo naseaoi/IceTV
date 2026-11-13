@@ -499,6 +499,18 @@ class DbManager {
     return storage.getPlayRecord(userName, key);
   }
 
+  async getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>> {
+    return (await this.getStorage()).getLatestPlayRecordByTitle(
+      userName,
+      title,
+      year,
+    );
+  }
+
   async getPlayRecordsByKeys(
     userName: string,
     keys: string[],

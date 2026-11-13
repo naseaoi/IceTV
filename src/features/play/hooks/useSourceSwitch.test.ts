@@ -9,6 +9,7 @@ import type {
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
 import { reportVodPlaybackOutcome } from '@/features/play/lib/vodPlaybackIntent';
+import { deletePlayRecord, deleteSkipConfig } from '@/lib/db.client';
 import {
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   readDanmakuEpisodeId,
@@ -203,6 +204,7 @@ function setupHook({
     setRealtimeLoadSpeed: jest.fn(),
     setSourceSearchError: jest.fn(),
     cleanupPlayer: jest.fn(),
+    registerSkipConfigMigration: jest.fn().mockResolvedValue(true),
     onPlaybackStartFailed: jest.fn(),
   };
 
@@ -245,6 +247,69 @@ function hangNextDetailFetch(): () => AbortSignal | undefined {
 }
 
 describe('useSourceSwitch 自动换源', () => {
+  it('仅提交新源时登记迁移，进度保存后等待迁移再清理旧配置', async () => {
+    const sources = createWaitingSources(['a', 'b']);
+    const { result, options } = setupHook({ availableSources: sources });
+    const config = { enable: true, intro_time: 15, outro_time: -20 };
+    options.skipConfigRef.current = config;
+    let resolve!: (saved: boolean) => void;
+    jest.mocked(options.registerSkipConfigMigration).mockReturnValueOnce(
+      new Promise<boolean>((done) => {
+        resolve = done;
+      }),
+    );
+    jest.mocked(deletePlayRecord).mockClear();
+    jest.mocked(deleteSkipConfig).mockClear();
+    const release = holdNextDetailFetch();
+    const switching = result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(options.registerSkipConfigMigration).not.toHaveBeenCalled();
+    release();
+    await switching;
+    expect(options.registerSkipConfigMigration).toHaveBeenCalledWith(
+      'b',
+      'b-id',
+      config,
+    );
+    expect(deletePlayRecord).not.toHaveBeenCalled();
+    await result.current.finalizePendingSourceSwitchCleanup('a', 'a-id');
+    expect(deletePlayRecord).not.toHaveBeenCalled();
+    const cleanup = result.current.finalizePendingSourceSwitchCleanup(
+      'b',
+      'b-id',
+    );
+    await Promise.resolve();
+    expect(deletePlayRecord).toHaveBeenCalledWith('a', 'a-id');
+    expect(deleteSkipConfig).not.toHaveBeenCalled();
+    resolve(true);
+    await cleanup;
+    expect(deleteSkipConfig).toHaveBeenCalledWith('a', 'a-id');
+  });
+
+  it('等待详情期间取消换源时不登记迁移', async () => {
+    const { result, options } = setupHook({
+      availableSources: createWaitingSources(['a', 'b']),
+    });
+    const release = holdNextDetailFetch();
+    const switching = result.current.handleSourceChange('b', 'b-id', '测试剧');
+    result.current.resetAutoSourceSwitch();
+    release();
+    await switching;
+    expect(options.registerSkipConfigMigration).not.toHaveBeenCalled();
+    expect(options.pendingSourceSwitchCleanupRef.current).toBeNull();
+  });
+
+  it('候选缺目标集而回退旧源时不登记迁移', async () => {
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createLazySource('b', ['第1集']),
+      ],
+    });
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(options.registerSkipConfigMigration).not.toHaveBeenCalled();
+    expect(options.currentSourceRef.current).toBe('a');
+    expect(options.pendingSourceSwitchCleanupRef.current).toBeNull();
+  });
   const originalFetch = global.fetch;
 
   beforeEach(() => {

@@ -1975,6 +1975,33 @@ export class LocalSqliteStorage implements IStorage {
     return parseJsonValue<PlayRecord>(row?.record_json);
   }
 
+  async getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>> {
+    const { findLatestPlayRecordKeyByTitle } =
+      await import('@/lib/play-record-title');
+    const username = normalizeUsername(userName);
+    const key = await findLatestPlayRecordKeyByTitle(
+      title,
+      year,
+      async (offset, limit) =>
+        this.db
+          .prepare(
+            `SELECT record_key, json_extract(record_json, '$.title') AS title,
+        json_extract(record_json, '$.year') AS year FROM play_records WHERE username = ?
+        ORDER BY CAST(json_extract(record_json, '$.save_time') AS REAL) DESC, record_key DESC LIMIT ? OFFSET ?`,
+          )
+          .all(
+            username,
+            limit,
+            offset,
+          ) as import('@/lib/play-record-title').PlayRecordTitleRow[],
+    );
+    return key ? this.getPlayRecordsByKeys(username, [key]) : {};
+  }
+
   async getPlayRecordsByKeys(
     userName: string,
     keys: string[],

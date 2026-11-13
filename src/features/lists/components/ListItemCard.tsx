@@ -22,6 +22,7 @@ import {
 import { listItemPlayUrl } from '@/features/lists/lib/list-links';
 import type { ListItem } from '@/features/lists/types';
 import { useLongPress } from '@/hooks/useLongPress';
+import { usePlaybackIntentPrefetch } from '@/hooks/usePlaybackIntentPrefetch';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import {
   deleteFavorite,
@@ -124,6 +125,14 @@ function InteractiveListItemCard({
   const id = item.sourceId ?? '';
   const hasTarget = Boolean(source && id);
   const catalog = isCatalogFavoriteSource(source);
+  const prefetchProps = usePlaybackIntentPrefetch({
+    source: catalog ? undefined : source,
+    id: catalog ? undefined : id,
+    title: item.searchTitle || item.title,
+    onPrefetch: () => {
+      if (hasTarget && !catalog) void ensureFavoritesLoaded();
+    },
+  });
   const year = itemYear(item);
 
   useEffect(
@@ -242,9 +251,8 @@ function InteractiveListItemCard({
       href={href}
       className='group block'
       style={noSelectStyle}
-      onMouseEnter={() => {
-        if (hasTarget && !catalog) void ensureFavoritesLoaded();
-      }}
+      prefetch={false}
+      {...prefetchProps}
       onContextMenu={(event) => {
         event.preventDefault();
         void openActions({

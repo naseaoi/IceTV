@@ -9,6 +9,7 @@ import {
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
@@ -103,6 +104,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       'access-reader',
     ]);
     expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('按标题读取本人最近进度', async () => {
+    await assertPlayRecordTitleLookup(storage);
   });
 
   it('批量读取隔离用户并省略缺失键', async () => {
