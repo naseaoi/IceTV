@@ -147,6 +147,34 @@ const _writePlayRecords = createOptimisticWriter<Record<string, PlayRecord>>({
   emptyCacheFactory: () => ({}),
 });
 
+const PLAY_RECORD_SAVE_DRAIN_TIMEOUT_MS = 5000;
+const inFlightPlayRecordSaves = new Map<Promise<void>, string>();
+
+function trackPlayRecordSave(key: string, request: Promise<void>) {
+  inFlightPlayRecordSaves.set(request, key);
+  const release = () => inFlightPlayRecordSaves.delete(request);
+  request.then(release, release);
+  return request;
+}
+
+// 服务端删除会清掉进度水位，删除后才到达的旧保存会重建记录；
+// 先等本标签页同键的保存（含重试）结束再删，超时照常删除。
+async function waitForPlayRecordSaves(keys: string[] | 'all') {
+  const keySet = keys === 'all' ? null : new Set(keys);
+  const pending = [...inFlightPlayRecordSaves]
+    .filter(([, key]) => !keySet || keySet.has(key))
+    .map(([request]) => request);
+  if (pending.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.allSettled(pending),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, PLAY_RECORD_SAVE_DRAIN_TIMEOUT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
 const _writeFavorites = createOptimisticWriter<Record<string, Favorite>>({
   getCached: () => cacheManager.getCachedFavorites(),
   setCached: (data) => cacheManager.cacheFavorites(data),
@@ -287,18 +315,21 @@ export async function savePlayRecord(
       return cached;
     },
     syncToServer: () =>
-      retryClientRequest(
-        () =>
-          fetchWithAuth('/api/playrecords', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, record: normalizedRecord }),
-            keepalive: true,
-          }).then(() => {}),
-        {
-          retries: 2,
-          delayMs: 600,
-        },
+      trackPlayRecordSave(
+        key,
+        retryClientRequest(
+          () =>
+            fetchWithAuth('/api/playrecords', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key, record: normalizedRecord }),
+              keepalive: true,
+            }).then(() => {}),
+          {
+            retries: 2,
+            delayMs: 600,
+          },
+        ),
       ),
     onServerError: async (err) => {
       await handleDatabaseOperationFailure('playRecords', err);
@@ -317,10 +348,12 @@ export async function deletePlayRecord(
       delete cached[key];
       return cached;
     },
-    syncToServer: () =>
-      fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
+    syncToServer: async () => {
+      await waitForPlayRecordSaves([key]);
+      await fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
         method: 'DELETE',
-      }).then(() => {}),
+      });
+    },
     onServerError: async (err) => {
       await handleDatabaseOperationFailure(
         'playRecords',
@@ -351,12 +384,14 @@ export async function deletePlayRecords(keys: string[]): Promise<void> {
         for (const key of batch) delete cached[key];
         return cached;
       },
-      syncToServer: () =>
-        fetchWithAuth('/api/playrecords', {
+      syncToServer: async () => {
+        await waitForPlayRecordSaves(batch);
+        await fetchWithAuth('/api/playrecords', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ keys: batch }),
-        }).then(() => {}),
+        });
+      },
       onServerError: (err) =>
         handleDatabaseOperationFailure(
           'playRecords',
@@ -446,8 +481,10 @@ export async function clearAllPlayRecords(): Promise<void> {
   await _writePlayRecords({
     affectedKeys: 'all',
     mutateCached: () => ({}),
-    syncToServer: () =>
-      fetchWithAuth('/api/playrecords', { method: 'DELETE' }).then(() => {}),
+    syncToServer: async () => {
+      await waitForPlayRecordSaves('all');
+      await fetchWithAuth('/api/playrecords', { method: 'DELETE' });
+    },
     onServerError: (err) =>
       handleDatabaseOperationFailure(
         'playRecords',
