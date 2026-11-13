@@ -11,6 +11,7 @@ import CoverImage from '@/components/CoverImage';
 import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import RatingStars from '@/components/RatingStars';
+import { FollowedOpinionsButton } from '@/features/play/components/EpisodeSelector/FollowedOpinions';
 import {
   INFO_COVER_CLASS,
   INFO_RATING_LINE_CLASS,
@@ -155,9 +156,27 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           <h3 className='line-clamp-2 text-lg font-bold leading-snug text-gray-900 dark:text-gray-50'>
             {videoTitle || '影片标题'}
           </h3>
-          {metaItems.length > 0 && (
-            <p className='truncate text-[13px] text-gray-600 dark:text-gray-300'>
-              {metaItems.join(' · ')}
+          {(metaItems.length > 0 || doubanId > 0) && (
+            <p className='flex min-w-0 items-center text-[13px] text-gray-600 dark:text-gray-300'>
+              <span className='truncate'>{metaItems.join(' · ')}</span>
+              {doubanId > 0 && (
+                <>
+                  {metaItems.length > 0 && (
+                    <span aria-hidden='true' className='mx-1 shrink-0'>
+                      ·
+                    </span>
+                  )}
+                  <a
+                    href={`https://movie.douban.com/subject/${doubanId}`}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='inline-flex shrink-0 items-center gap-0.5 transition-colors hover:text-gray-900 dark:hover:text-white'
+                  >
+                    豆瓣
+                    <ExternalLink aria-hidden='true' className='h-3 w-3' />
+                  </a>
+                </>
+              )}
             </p>
           )}
           {genres.length > 0 && (
@@ -199,40 +218,38 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           </div>
         </div>
 
-        <div className='-ml-0.5 flex flex-wrap items-center gap-1.5'>
+        <div className='-ml-0.5 flex min-w-0 flex-wrap items-center gap-1.5'>
           {onOpenReview && (
             <button
               type='button'
               aria-label={myReview ? '编辑我的评价' : '评分'}
-              className='inline-flex h-7 items-center gap-1.5 rounded-full bg-gray-900/[0.05] px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-900/[0.09] dark:bg-white/[0.07] dark:text-gray-200 dark:hover:bg-white/[0.12] [&_svg]:text-amber-500'
+              className='inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-gray-900/[0.05] px-2.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-900/[0.09] dark:bg-white/[0.07] dark:text-gray-200 dark:hover:bg-white/[0.12]'
               onClick={onOpenReview}
             >
+              <Star
+                aria-hidden='true'
+                className={`h-3.5 w-3.5 text-amber-500 ${
+                  myReview?.rating ? 'fill-current' : ''
+                }`.trim()}
+              />
               {myReview?.rating ? (
                 <>
-                  <RatingStars value={myReview.rating} size='sm' decorative />
-                  <span className='font-semibold tabular-nums'>
+                  我的
+                  <span className='font-semibold tabular-nums text-amber-600 dark:text-amber-400'>
                     {formatRating(myReview.rating)}
                   </span>
                 </>
+              ) : myReview ? (
+                '已评价'
               ) : (
-                <>
-                  <Star className='h-3.5 w-3.5' />
-                  {myReview ? '已评价' : '评分'}
-                </>
+                '评分'
               )}
             </button>
           )}
-          {doubanId > 0 && (
-            <a
-              href={`https://movie.douban.com/subject/${doubanId}`}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-xs text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white'
-            >
-              豆瓣
-              <ExternalLink className='h-3 w-3' />
-            </a>
-          )}
+          <FollowedOpinionsButton
+            title={videoTitle}
+            year={detail?.year || videoYear}
+          />
         </div>
       </div>
     </div>

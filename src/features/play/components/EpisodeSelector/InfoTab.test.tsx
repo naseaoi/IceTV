@@ -13,6 +13,13 @@ jest.mock('@/components/FavoriteHeartButton', () => ({
   FavoriteHeartButton: () => null,
 }));
 
+jest.mock(
+  '@/features/play/components/EpisodeSelector/FollowedOpinions',
+  () => ({
+    FollowedOpinionsButton: () => null,
+  }),
+);
+
 describe('InfoTab', () => {
   it('点播详情使用统一封面组件', () => {
     render(

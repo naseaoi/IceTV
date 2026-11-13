@@ -7,6 +7,7 @@ import {
   Film,
   Flag,
   Inbox,
+  Mail,
   Megaphone,
   Play,
   RefreshCw,
@@ -37,6 +38,12 @@ import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingBadge from '@/components/RatingBadge';
 import Spinner from '@/components/Spinner';
 import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
+import { CapsuleLetter } from '@/features/time-capsule/components/CapsuleLetter';
+import {
+  CAPSULES_UPDATED_EVENT,
+  formatDeliveryDate,
+} from '@/features/time-capsule/lib/capsules-client';
+import type { TimeCapsuleUserMessage } from '@/features/time-capsule/types';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { usePresence } from '@/hooks/usePresence';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
@@ -62,7 +69,16 @@ type PanelView =
   | { kind: 'list' }
   | { kind: 'settings' }
   | { kind: 'announcements' }
-  | { kind: 'review'; message: ReviewMessage };
+  | { kind: 'review'; message: ReviewMessage }
+  | { kind: 'capsule'; message: TimeCapsuleUserMessage };
+
+function isSystemMessage(message: UserMessage) {
+  return (
+    message.type === 'announcement' ||
+    message.type === 'annual-report' ||
+    message.type === 'time-capsule'
+  );
+}
 
 const MESSAGE_PRIMARY_CLASS =
   'truncate text-sm font-semibold text-gray-900 dark:text-gray-100';
@@ -133,6 +149,28 @@ function MessageBody({ message }: { message: UserMessage }) {
       </>
     );
   }
+
+  if (message.type === 'time-capsule')
+    return (
+      <>
+        <div
+          className={`${MESSAGE_LEAD_CLASS} flex items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300`}
+        >
+          <Mail className='h-[18px] w-[18px]' />
+        </div>
+        <div className='min-w-0 flex-1 pt-0.5'>
+          <p className='break-words text-sm leading-5 text-gray-800 dark:text-gray-100'>
+            {formatDeliveryDate(message.writtenAt)}的你寄来一封信
+          </p>
+          <p className={`mt-0.5 ${MESSAGE_BODY_CLASS} truncate`}>
+            关于《{message.title}》
+          </p>
+          <p className={MESSAGE_META_CLASS}>
+            {formatRelativeTime(message.createdAt)}
+          </p>
+        </div>
+      </>
+    );
 
   if (message.type === 'announcement' || message.type === 'annual-report')
     return (
@@ -258,12 +296,14 @@ function MessageRow({
   onRead,
   onNavigate,
   onOpenReview,
+  onOpenCapsule,
 }: {
   message: UserMessage;
   working: boolean;
   onRead: (message: UserMessage) => Promise<void>;
   onNavigate: () => void;
   onOpenReview: (message: ReviewMessage) => void;
+  onOpenCapsule: (message: TimeCapsuleUserMessage) => void;
 }) {
   const bodyClass = 'flex min-w-0 flex-1 gap-3 text-left';
   const clickable =
@@ -275,7 +315,7 @@ function MessageRow({
     <div
       data-list-motion-key={String(message.id)}
       className={`-mx-2 mb-1 flex items-start gap-2 rounded-xl px-2 py-3 sm:-mx-3 sm:px-3 ${
-        message.type === 'announcement' || message.type === 'annual-report'
+        isSystemMessage(message)
           ? 'bg-brand-50 dark:bg-brand-950/30'
           : clickable
             ? 'transition-colors hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'
@@ -286,6 +326,14 @@ function MessageRow({
         <button
           type='button'
           onClick={() => onOpenReview(message)}
+          className={bodyClass}
+        >
+          <MessageBody message={message} />
+        </button>
+      ) : message.type === 'time-capsule' ? (
+        <button
+          type='button'
+          onClick={() => onOpenCapsule(message)}
           className={bodyClass}
         >
           <MessageBody message={message} />
@@ -383,6 +431,7 @@ function MessageList({
   onLoadMore,
   onNavigate,
   onOpenReview,
+  onOpenCapsule,
 }: {
   items: UserMessage[];
   hasMore: boolean;
@@ -392,16 +441,11 @@ function MessageList({
   onLoadMore: () => Promise<void>;
   onNavigate: () => void;
   onOpenReview: (message: ReviewMessage) => void;
+  onOpenCapsule: (message: TimeCapsuleUserMessage) => void;
 }) {
   const readingAll = workingIds.has('all');
-  const announcements = items.filter(
-    (message) =>
-      message.type === 'announcement' || message.type === 'annual-report',
-  );
-  const feed = items.filter(
-    (message) =>
-      message.type !== 'announcement' && message.type !== 'annual-report',
-  );
+  const announcements = items.filter(isSystemMessage);
+  const feed = items.filter((message) => !isSystemMessage(message));
   const motionKeys = [
     ...(announcements.length > 0 ? [ANNOUNCEMENT_TITLE_KEY] : []),
     ...announcements.map((message) => message.id),
@@ -420,6 +464,7 @@ function MessageList({
       onRead={onRead}
       onNavigate={onNavigate}
       onOpenReview={onOpenReview}
+      onOpenCapsule={onOpenCapsule}
     />
   );
 
@@ -427,7 +472,7 @@ function MessageList({
     <div ref={containerRef} className='relative flex min-h-full flex-col'>
       {announcements.length > 0 && (
         <SectionTitle motionKey={ANNOUNCEMENT_TITLE_KEY}>
-          {announcements.some((message) => message.type === 'annual-report')
+          {announcements.some((message) => message.type !== 'announcement')
             ? '系统消息'
             : '公告'}
         </SectionTitle>
@@ -516,6 +561,14 @@ export default function MessagePanel({
     void onRead(message);
   }
 
+  function openCapsule(message: TimeCapsuleUserMessage) {
+    showView({ kind: 'capsule', message });
+    // 已读即拆信，通知「我的」页的观后信列表同步
+    void onRead(message).then(() =>
+      window.dispatchEvent(new Event(CAPSULES_UPDATED_EVENT)),
+    );
+  }
+
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -571,7 +624,9 @@ export default function MessagePanel({
                   ? '公告'
                   : view.kind === 'review'
                     ? '评价详情'
-                    : '我的消息'}
+                    : view.kind === 'capsule'
+                      ? '来自过去的信'
+                      : '我的消息'}
             </h2>
             {view.kind === 'list' && page.total > 0 && (
               <span className='inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1.5 text-xs font-medium tabular-nums text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
@@ -642,6 +697,8 @@ export default function MessagePanel({
               message={view.message}
               onNavigate={onClose}
             />
+          ) : view.kind === 'capsule' ? (
+            <CapsuleLetter letter={view.message} onNavigate={onClose} />
           ) : loading && page.items.length === 0 ? (
             <div className='flex min-h-full items-center justify-center text-gray-400'>
               <Spinner className='h-6 w-6' />
@@ -677,6 +734,7 @@ export default function MessagePanel({
               onLoadMore={onLoadMore}
               onNavigate={onClose}
               onOpenReview={openReview}
+              onOpenCapsule={openCapsule}
             />
           )}
         </div>

@@ -155,23 +155,19 @@ export interface LibraryCountsRow {
   library_total: number;
 }
 
-export function libraryStatements(
+export function libraryExpressions(
   dialect: 'sqlite' | 'mysql',
-  username: string,
-  query: FavoriteLibraryQuery,
+  publicScope = false,
 ) {
-  const cursor = validateLibraryQuery(query, username);
-  const pageSize = query.limit ?? FAVORITE_RENDER_CHUNK;
   const numericJson = (column: string, field: string) =>
     dialect === 'sqlite'
       ? `CAST(json_extract(${column}, '$.${field}') AS REAL)`
       : `CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(${column}, '$.${field}')), 'null') AS DOUBLE)`;
   // 存在精确年份评价即选它，包括只有正文、rating 为 null 的记录。
   const rating = `CASE WHEN exact_review.username IS NOT NULL THEN ${numericJson('exact_review.review_json', 'rating')} ELSE ${numericJson('fallback_review.review_json', 'rating')} END`;
-  const visibleRating =
-    query.profileScope === 'public'
-      ? `CASE WHEN exact_review.username IS NOT NULL THEN CASE WHEN exact_review.is_public = 1 THEN ${numericJson('exact_review.review_json', 'rating')} ELSE NULL END ELSE CASE WHEN fallback_review.is_public = 1 THEN ${numericJson('fallback_review.review_json', 'rating')} ELSE NULL END END`
-      : rating;
+  const visibleRating = publicScope
+    ? `CASE WHEN exact_review.username IS NOT NULL THEN CASE WHEN exact_review.is_public = 1 THEN ${numericJson('exact_review.review_json', 'rating')} ELSE NULL END ELSE CASE WHEN fallback_review.is_public = 1 THEN ${numericJson('fallback_review.review_json', 'rating')} ELSE NULL END END`
+    : rating;
   const played = numericJson('p.record_json', 'save_time');
   const recordNumber = (field: string) => numericJson('p.record_json', field);
   const groupValid = `(${recordNumber('group_index')} >= 1 AND ${recordNumber('group_total')} >= 1)`;
@@ -182,6 +178,44 @@ export function libraryStatements(
   const status = `CASE WHEN f.watch_status IS NOT NULL THEN f.watch_status WHEN ${rating} IS NOT NULL OR ${finished} THEN 'completed' WHEN p.record_key IS NOT NULL THEN 'watching' ELSE 'planned' END`;
   const reviewTime = `CASE WHEN exact_review.username IS NOT NULL THEN ${numericJson('exact_review.review_json', 'updated_at')} ELSE ${numericJson('fallback_review.review_json', 'updated_at')} END`;
   const watched = `CASE WHEN (${status}) = 'completed' THEN COALESCE(f.watched_at, ${played}, ${reviewTime}) ELSE NULL END`;
+  const from = `FROM favorites f
+    LEFT JOIN play_records p ON p.username = f.username AND p.record_key = f.favorite_key
+    LEFT JOIN video_reviews exact_review ON exact_review.username = f.username AND exact_review.title_norm = f.title_norm AND exact_review.year = f.year_norm
+    LEFT JOIN video_reviews fallback_review ON fallback_review.username = f.username AND fallback_review.title_norm = f.title_norm AND fallback_review.year = ''`;
+  return { rating, visibleRating, played, status, watched, from };
+}
+
+// 作品匹配沿用按作品查询的空年份通配与最早收藏优先规则。
+export function workStatusSelection(
+  dialect: 'sqlite' | 'mysql',
+  usernameSql: string,
+  titleSql: string,
+  yearSql: string,
+  publicScope = false,
+  projection: 'status' | 'recent' = 'status',
+) {
+  const { status, watched, played, from } = libraryExpressions(dialect);
+  const value =
+    projection === 'status'
+      ? status
+      : `${dialect === 'sqlite' ? 'MAX' : 'GREATEST'}(f.saved_at, COALESCE(${watched}, 0), COALESCE(${played}, 0))`;
+  return `SELECT ${value} ${from}
+    WHERE f.username = ${usernameSql} AND f.library_valid = 1
+      AND f.title_norm = ${titleSql}
+      AND (f.year_norm = ${yearSql} OR f.year_norm = '' OR ${yearSql} = '')
+      ${publicScope ? `AND ${profileFavoriteOriginSql(dialect, 'f.favorite_json')}` : ''}
+    ORDER BY f.saved_at ASC, f.favorite_key ASC LIMIT 1`;
+}
+
+export function libraryStatements(
+  dialect: 'sqlite' | 'mysql',
+  username: string,
+  query: FavoriteLibraryQuery,
+) {
+  const cursor = validateLibraryQuery(query, username);
+  const pageSize = query.limit ?? FAVORITE_RENDER_CHUNK;
+  const { rating, visibleRating, played, status, watched, from } =
+    libraryExpressions(dialect, query.profileScope === 'public');
   const sort = {
     saved: 'f.saved_at',
     played,
@@ -198,10 +232,6 @@ export function libraryStatements(
     dialect === 'mysql'
       ? 'BINARY f.favorite_key'
       : 'f.favorite_key COLLATE BINARY';
-  const from = `FROM favorites f
-    LEFT JOIN play_records p ON p.username = f.username AND p.record_key = f.favorite_key
-    LEFT JOIN video_reviews exact_review ON exact_review.username = f.username AND exact_review.title_norm = f.title_norm AND exact_review.year = f.year_norm
-    LEFT JOIN video_reviews fallback_review ON fallback_review.username = f.username AND fallback_review.title_norm = f.title_norm AND fallback_review.year = ''`;
   const reviewed =
     '(exact_review.username IS NOT NULL OR fallback_review.username IS NOT NULL)';
   const normalizedQuery = normalizeWorkTitle(query.query);

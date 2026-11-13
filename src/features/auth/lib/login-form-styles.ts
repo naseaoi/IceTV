@@ -1,6 +1,6 @@
 // 与 MODAL_INPUT_CLASS 同风格；移动端保持 16px 字号，避免 iOS 聚焦时放大页面
 const INPUT_BASE_CLASS =
-  'block h-11 w-full rounded-lg border-0 bg-gray-900/[0.04] px-3.5 text-base text-gray-900 ring-1 ring-inset transition-colors placeholder:text-gray-400 focus:bg-white focus:ring-2 dark:bg-white/[0.06] dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:bg-gray-950 sm:text-sm';
+  'block h-11 w-full rounded-lg border-0 bg-gray-900/[0.04] px-3.5 text-base text-gray-900 ring-1 ring-inset transition-colors placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-inset dark:bg-white/[0.06] dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:bg-gray-950 sm:text-sm';
 
 const INPUT_VALID_RING_CLASS =
   'ring-gray-900/[0.08] focus:ring-brand-500 dark:ring-white/[0.08]';

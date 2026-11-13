@@ -1,4 +1,4 @@
-import type { PublicUserRef } from '@/lib/types';
+import type { FavoriteWatchStatus, PublicUserRef } from '@/lib/types';
 
 // members 仅登录用户可见；everyone 含游客，可凭链接查看
 export type ListVisibility = 'private' | 'members' | 'everyone';
@@ -36,6 +36,7 @@ export interface ListLikeState {
 }
 
 export interface ListItem {
+  viewerStatus?: FavoriteWatchStatus | null;
   id: string;
   title: string;
   year: string;
@@ -55,7 +56,14 @@ export interface ListItemInput {
   searchTitle?: string;
 }
 
+export interface ListViewerProgress {
+  completed: number;
+  total: number;
+  nextItemId: string | null;
+}
+
 export interface ListDetail {
+  viewerProgress?: ListViewerProgress;
   list: ListSummary;
   owner: PublicUserRef;
   isOwner: boolean;

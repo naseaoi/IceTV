@@ -15,7 +15,10 @@ import { useOpenListPicker } from '@/components/list-picker-context';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import SkeletonText from '@/components/SkeletonText';
 import { noSelectStyle } from '@/components/video-card/constants';
-import { useOpenWatchRecord } from '@/components/watch-record-context';
+import {
+  useOpenWatchRecord,
+  WATCH_STATUS_OPTIONS,
+} from '@/components/watch-record-context';
 import { listItemPlayUrl } from '@/features/lists/lib/list-links';
 import type { ListItem } from '@/features/lists/types';
 import { useLongPress } from '@/hooks/useLongPress';
@@ -39,7 +42,15 @@ function itemYear(item: ListItem) {
   return item.year && item.year !== 'unknown' ? item.year : '';
 }
 
+const STATUS_LABELS = new Map(
+  WATCH_STATUS_OPTIONS.map((option) => [option.value, option.label]),
+);
+
 function CardBody({ item }: { item: ListItem }) {
+  const status = item.viewerStatus
+    ? STATUS_LABELS.get(item.viewerStatus)
+    : undefined;
+  const meta = [itemYear(item), status].filter(Boolean).join(' · ');
   return (
     <>
       <h3
@@ -48,7 +59,7 @@ function CardBody({ item }: { item: ListItem }) {
         {item.title}
       </h3>
       <p className={`${META_CLASS} truncate text-gray-500 dark:text-gray-400`}>
-        {itemYear(item) || ' '}
+        {meta || ' '}
       </p>
     </>
   );

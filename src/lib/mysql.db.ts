@@ -62,6 +62,10 @@ import {
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
 import {
+  ViewingHappinessPlans,
+  viewingHappinessSchema,
+} from '@/features/time-capsule/storage';
+import {
   type AnnouncementRow,
   ANNOUNCEMENT_INSERT_SQL,
   ANNOUNCEMENT_LIST_SQL,
@@ -455,6 +459,7 @@ export class MySqlStorage implements IStorage {
       OAUTH_SCHEMA + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
       ...userNoticeSchema('mysql'),
       ...socialSchema('mysql'),
+      ...viewingHappinessSchema('mysql'),
       ...listSchema('mysql'),
       ...userDanmakuSchema('mysql'),
       ...userAccessSchema('mysql'),
@@ -1630,6 +1635,62 @@ export class MySqlStorage implements IStorage {
     }
     return step.value;
   }
+  async countCapsules(
+    ...args: Parameters<IStorage['countCapsules']>
+  ): ReturnType<IStorage['countCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').countCapsules(...args),
+    );
+  }
+  async getCompletion(
+    ...args: Parameters<IStorage['getCompletion']>
+  ): ReturnType<IStorage['getCompletion']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').getCompletion(...args),
+    );
+  }
+  async createCapsule(
+    ...args: Parameters<IStorage['createCapsule']>
+  ): ReturnType<IStorage['createCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').createCapsule(...args),
+    );
+  }
+  async getCapsules(
+    ...args: Parameters<IStorage['getCapsules']>
+  ): ReturnType<IStorage['getCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').getCapsules(...args),
+    );
+  }
+  async deleteCapsule(
+    ...args: Parameters<IStorage['deleteCapsule']>
+  ): ReturnType<IStorage['deleteCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').deleteCapsule(...args),
+    );
+  }
+  async openCapsule(
+    ...args: Parameters<IStorage['openCapsule']>
+  ): ReturnType<IStorage['openCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').openCapsule(...args),
+    );
+  }
+  async getCapsuleMessages(
+    ...args: Parameters<IStorage['getCapsuleMessages']>
+  ): ReturnType<IStorage['getCapsuleMessages']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').getCapsuleMessages(...args),
+    );
+  }
+  async readAllCapsules(
+    ...args: Parameters<IStorage['readAllCapsules']>
+  ): ReturnType<IStorage['readAllCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').readAllCapsules(...args),
+    );
+  }
   async getTrackingCalendarItems(
     userName: string,
   ): ReturnType<IStorage['getTrackingCalendarItems']> {
@@ -2159,6 +2220,30 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     return this.socialFor().getMyVideoReviewRatings(...args);
   }
+  async getWorkWatchStatuses(
+    ...args: Parameters<IStorage['getWorkWatchStatuses']>
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getWorkWatchStatuses(...args),
+    );
+  }
+
+  async getFollowOpinions(
+    ...args: Parameters<IStorage['getFollowOpinions']>
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getFollowOpinions(...args),
+    );
+  }
+
+  async getTasteMatch(
+    ...args: Parameters<IStorage['getTasteMatch']>
+  ): ReturnType<IStorage['getTasteMatch']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getTasteMatch(...args),
+    );
+  }
+
   async getWorkVideoReviewPage(
     ...args: Parameters<IStorage['getWorkVideoReviewPage']>
   ): ReturnType<IStorage['getWorkVideoReviewPage']> {
@@ -2578,6 +2663,13 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM playback_sessions WHERE username = ?',
+        [username],
+      );
+      await connection.execute('DELETE FROM time_capsules WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute(
+        'DELETE FROM work_completions WHERE username = ?',
         [username],
       );
       await connection.execute(

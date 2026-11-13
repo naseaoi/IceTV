@@ -36,6 +36,7 @@ beforeEach(async () => {
   storage = new LocalSqliteStorage(':memory:');
   jest.mocked(getClientIp).mockReturnValue('203.0.113.1');
   for (const method of [
+    'getWorkWatchStatuses',
     'setListLike',
     'recordListView',
     'getPlazaLists',
@@ -104,6 +105,7 @@ it('游客只能读取所有人可见的片单，且不能写入', async () => {
     isOwner: false,
     list: { visibility: 'everyone' },
   });
+  expect(detail).not.toHaveProperty('viewerProgress');
   expect(detail.owner).not.toHaveProperty('username');
   expect(
     (
@@ -127,6 +129,11 @@ it('本人读取公开资料字段，他人私密和不存在统一 404', async 
   const own = await handleLists(req(), 'detail', context(list.id));
   const detail = await own.json();
   expect(detail.owner).toMatchObject({ nickname: null, avatarSeed: null });
+  expect(detail.viewerProgress).toEqual({
+    completed: 0,
+    total: 0,
+    nextItemId: null,
+  });
   expect(detail.owner).not.toHaveProperty('username');
   expect(detail).not.toHaveProperty('username');
   guard.mockResolvedValue({ username: 'bobby' } as Awaited<
@@ -476,4 +483,60 @@ it('片单点赞要求登录和昵称，详情返回本人点赞态且游客恒�
   const own = await handleLists(req('', 'PUT'), 'like', context(list.id));
   expect(own.status).toBe(400);
   expect((await own.json()).error).toBe('不能给自己点赞');
+});
+
+it('登录访客的片单进度优先继续在看，游客省略私人状态', async () => {
+  const list = await storage.createList('alice', {
+    name: '进度',
+    visibility: 'everyone',
+  });
+  const ids: string[] = [];
+  for (const title of ['想看', '在看', '看过']) {
+    const result = await storage.addListItem('alice', list.id, {
+      title,
+      year: '2026',
+      cover: '',
+      source: '',
+      id: null,
+    });
+    ids.push(result.item.id);
+  }
+  await storage.setFavorite('bobby', 'source+1', {
+    title: '在看',
+    year: '2026',
+    cover: '',
+    source_name: '源',
+    total_episodes: 1,
+    save_time: 1,
+    watch_status: 'watching',
+  });
+  await storage.setFavorite('bobby', 'source+2', {
+    title: '看过',
+    year: '2026',
+    cover: '',
+    source_name: '源',
+    total_episodes: 1,
+    save_time: 1,
+    watch_status: 'completed',
+  });
+  guard.mockResolvedValue({ username: 'bobby' } as Awaited<
+    ReturnType<typeof requireActiveUser>
+  >);
+  let detail = await (
+    await handleLists(req(), 'detail', context(list.id))
+  ).json();
+  expect(detail.viewerProgress).toEqual({
+    completed: 1,
+    total: 3,
+    nextItemId: ids[1],
+  });
+  expect(
+    detail.items.map((item: { viewerStatus: unknown }) => item.viewerStatus),
+  ).toEqual([null, 'watching', 'completed']);
+  optionalUser.mockResolvedValue(null);
+  detail = await (await handleLists(req(), 'detail', context(list.id))).json();
+  expect(detail).not.toHaveProperty('viewerProgress');
+  expect(detail.items.every((item: object) => !('viewerStatus' in item))).toBe(
+    true,
+  );
 });

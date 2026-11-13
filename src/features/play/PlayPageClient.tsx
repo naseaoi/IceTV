@@ -10,6 +10,10 @@ import {
 } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import {
+  type CompletionTarget,
+  CompletionCard,
+} from '@/features/play/components/CompletionCard';
 import { PlayMainContent } from '@/features/play/components/PlayMainContent';
 import {
   PlayErrorView,
@@ -404,6 +408,27 @@ function AuthenticatedPlayPageClient({
     setFavorited,
   });
 
+  const [completionTarget, setCompletionTarget] =
+    useState<CompletionTarget | null>(null);
+  // 同一次打开播放页内，同一个源只尝试弹一次；跨会话由服务端记录
+  const completionCheckedRef = useRef(new Set<string>());
+  const handleLastEpisodeEnded = useCallback(() => {
+    const source = currentSourceRef.current;
+    const id = currentIdRef.current;
+    if (!source || !id) return;
+    const key = `${source}+${id}`;
+    if (completionCheckedRef.current.has(key)) return;
+    completionCheckedRef.current.add(key);
+    const player = artPlayerRef.current;
+    if (player) {
+      // 卡片挂在 body 上，全屏时会被播放器盖住
+      player.fullscreen = false;
+      player.fullscreenWeb = false;
+    }
+    setCompletionTarget({ source, id, doubanId: videoDoubanId });
+  }, [artPlayerRef, currentIdRef, currentSourceRef, videoDoubanId]);
+  const closeCompletion = useCallback(() => setCompletionTarget(null), []);
+
   const {
     authRecoveryVisible,
     authRecoveryReasonMessage,
@@ -760,6 +785,7 @@ function AuthenticatedPlayPageClient({
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),
     onPlaybackRecoveryExhausted: handlePlaybackRecoveryExhausted,
+    onLastEpisodeEnded: handleLastEpisodeEnded,
     onPlaybackStarted: useCallback(() => {
       const activeSource = currentSourceRef.current;
       const activeId = currentIdRef.current;
@@ -857,48 +883,56 @@ function AuthenticatedPlayPageClient({
   ]);
 
   const renderMainContent = (playbackError: string | null) => (
-    <PlayMainContent
-      videoTitle={videoTitle}
-      totalEpisodes={totalEpisodes}
-      detail={detail}
-      detailLoading={loading && !detail}
-      currentEpisodeIndex={currentEpisodeIndex}
-      isEpisodeSelectorCollapsed={isEpisodeSelectorCollapsed}
-      setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}
-      artRef={artRef}
-      isVideoLoading={isVideoLoading}
-      videoLoadingStage={videoLoadingStage}
-      videoLoadingAttempt={videoLoadingAttempt}
-      realtimeLoadSpeed={realtimeLoadSpeed}
-      authRecoveryVisible={authRecoveryVisible}
-      authRecoveryReasonMessage={authRecoveryReasonMessage}
-      onReloginAndRecover={handleReloginAndRecover}
-      onDismissAuthRecovery={dismissAuthRecovery}
-      onEpisodeChange={handleEpisodeChangeRequest}
-      onRetryPlayback={handleRetryPlayback}
-      onSourceChange={handleSourceChange}
-      currentSource={currentSource}
-      currentId={currentId}
-      searchTitle={searchTitle}
-      availableSources={availableSources}
-      sourceSearchLoading={sourceSearchLoading}
-      sourceSearchError={sourceSearchError}
-      precomputedVideoInfo={precomputedVideoInfo}
-      sourceRecommendation={sourceRecommendation}
-      onDismissSourceRecommendation={dismissSourceRecommendation}
-      videoYear={videoYear}
-      favorited={favorited}
-      onToggleFavorite={handleToggleFavorite}
-      videoCover={videoCover}
-      videoDoubanId={videoDoubanId}
-      onSourceDetailFetched={handleSourceDetailFetched}
-      onAddSources={handleAddSources}
-      onDanmakuReload={handleDanmakuReload}
-      onDanmakuHeatmapChange={handleDanmakuHeatmapChange}
-      onLoadingTimeout={handleLoadingTimeout}
-      playbackIntentRef={playbackIntentRef}
-      playbackError={playbackError}
-    />
+    <>
+      <PlayMainContent
+        videoTitle={videoTitle}
+        totalEpisodes={totalEpisodes}
+        detail={detail}
+        detailLoading={loading && !detail}
+        currentEpisodeIndex={currentEpisodeIndex}
+        isEpisodeSelectorCollapsed={isEpisodeSelectorCollapsed}
+        setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}
+        artRef={artRef}
+        isVideoLoading={isVideoLoading}
+        videoLoadingStage={videoLoadingStage}
+        videoLoadingAttempt={videoLoadingAttempt}
+        realtimeLoadSpeed={realtimeLoadSpeed}
+        authRecoveryVisible={authRecoveryVisible}
+        authRecoveryReasonMessage={authRecoveryReasonMessage}
+        onReloginAndRecover={handleReloginAndRecover}
+        onDismissAuthRecovery={dismissAuthRecovery}
+        onEpisodeChange={handleEpisodeChangeRequest}
+        onRetryPlayback={handleRetryPlayback}
+        onSourceChange={handleSourceChange}
+        currentSource={currentSource}
+        currentId={currentId}
+        searchTitle={searchTitle}
+        availableSources={availableSources}
+        sourceSearchLoading={sourceSearchLoading}
+        sourceSearchError={sourceSearchError}
+        precomputedVideoInfo={precomputedVideoInfo}
+        sourceRecommendation={sourceRecommendation}
+        onDismissSourceRecommendation={dismissSourceRecommendation}
+        videoYear={videoYear}
+        favorited={favorited}
+        onToggleFavorite={handleToggleFavorite}
+        videoCover={videoCover}
+        videoDoubanId={videoDoubanId}
+        onSourceDetailFetched={handleSourceDetailFetched}
+        onAddSources={handleAddSources}
+        onDanmakuReload={handleDanmakuReload}
+        onDanmakuHeatmapChange={handleDanmakuHeatmapChange}
+        onLoadingTimeout={handleLoadingTimeout}
+        playbackIntentRef={playbackIntentRef}
+        playbackError={playbackError}
+      />
+      <CompletionCard
+        target={completionTarget}
+        favorited={favorited}
+        onAddFavorite={handleToggleFavorite}
+        onClose={closeCompletion}
+      />
+    </>
   );
 
   if (loading) {

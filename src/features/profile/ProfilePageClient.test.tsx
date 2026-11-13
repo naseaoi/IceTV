@@ -45,6 +45,9 @@ jest.mock('@/lib/profile.client', () => ({
   getUserFavorites: jest.fn(),
   getUserFollows: jest.fn(),
   setFollowing: jest.fn(),
+  socialRequest: jest.fn(() =>
+    Promise.resolve({ commonCount: 0, score: null, picks: [] }),
+  ),
 }));
 const profile: UserProfileView = {
   profileId: 'profileAlice',

@@ -143,6 +143,7 @@ export async function initializeArtPlayer(
     playbackIntentRef,
     onPlaybackRecoveryExhausted,
     onCurrentSourceVideoInfo,
+    onLastEpisodeEnded,
   } = params;
   const {
     loadingSessionRef,
@@ -569,6 +570,17 @@ export async function initializeArtPlayer(
       return true;
     };
 
+    const notifyIfLastEpisodeEnded = () => {
+      const episodeCount = detailRef.current?.episodes?.length ?? 0;
+      if (
+        episodeCount > 0 &&
+        currentEpisodeIndexRef.current === episodeCount - 1 &&
+        !isStalePlayerSession()
+      ) {
+        onLastEpisodeEnded?.();
+      }
+    };
+
     const updateStableCurrentTime = (time: number) => {
       stableCurrentTimeRef.current = resolveNextStablePlaybackTime(
         time,
@@ -944,7 +956,7 @@ export async function initializeArtPlayer(
         console.warn('忽略异常提前触发的播放结束事件');
         return;
       }
-      tryAutoAdvanceEpisode();
+      if (!tryAutoAdvanceEpisode()) notifyIfLastEpisodeEnded();
     });
 
     if (player.playing) {
@@ -1058,6 +1070,7 @@ export async function initializeArtPlayer(
       ) {
         if (!tryAutoAdvanceEpisode()) {
           player.pause();
+          notifyIfLastEpisodeEnded();
         }
         player.notice.show = `已跳过片尾 (${formatTime(skipConfigRef.current.outro_time)})`;
       }

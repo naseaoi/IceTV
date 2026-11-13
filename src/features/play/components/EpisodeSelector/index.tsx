@@ -78,7 +78,7 @@ function InfoTabLoading({
       }`.trim()}
     >
       <div
-        className={`skeleton flex-shrink-0 self-start rounded-lg ${INFO_COVER_CLASS}`}
+        className={`skeleton flex-shrink-0 rounded-lg ${INFO_COVER_CLASS}`}
       />
       <div className='flex min-w-0 flex-1 flex-col justify-between gap-2'>
         <div className='space-y-1.5'>

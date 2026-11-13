@@ -67,9 +67,34 @@ async function detailResponse(
       console.error('片单浏览计数失败', error);
     }
   }
+  const statuses =
+    viewer !== null
+      ? await db.getWorkWatchStatuses(viewer, detail.items)
+      : null;
+  const items = detail.items.map((item, index) =>
+    statuses ? { ...item, viewerStatus: statuses[index] } : item,
+  );
+  const nextIndex = statuses
+    ? statuses.findIndex((status) => status === 'watching')
+    : -1;
   return json({
     list: detail.list,
-    items: detail.items,
+    items,
+    ...(statuses
+      ? {
+          viewerProgress: {
+            completed: statuses.filter((status) => status === 'completed')
+              .length,
+            total: detail.items.length,
+            nextItemId:
+              detail.items[
+                nextIndex >= 0
+                  ? nextIndex
+                  : statuses.findIndex((status) => status !== 'completed')
+              ]?.id ?? null,
+          },
+        }
+      : {}),
     liked: detail.liked,
     isOwner: detail.username === viewer,
     owner: {

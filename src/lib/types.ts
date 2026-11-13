@@ -1,3 +1,4 @@
+import type { ViewingHappinessStore } from '@/features/time-capsule/storage';
 import {
   type ConfigStateUpdate,
   type ConfigSubscription,
@@ -155,6 +156,7 @@ export type PublicFavoritePage =
 
 export interface PublicVideoReview {
   author: PublicUserRef;
+  authorFollowed?: boolean;
   title_norm: string;
   title: string;
   year: string;
@@ -505,7 +507,7 @@ export interface SiteAnnouncement {
 import type { ListStore } from '@/features/lists/lib/list-storage';
 
 // 存储接口
-export interface IStorage extends ListStore {
+export interface IStorage extends ListStore, ViewingHappinessStore {
   getTrackingCalendarItems(
     username: string,
   ): Promise<
@@ -664,6 +666,19 @@ export interface IStorage extends ListStore {
   ): Promise<MyVideoReviewPage>;
   getMyVideoReviewCount(userName: string): Promise<number>;
   getMyVideoReviewRatings(userName: string): Promise<VideoReviewRating[]>;
+  getFollowOpinions(
+    viewer: string,
+    titleNorm: string,
+    year: string,
+  ): Promise<import('@/lib/viewing-insights').FollowOpinions>;
+  getTasteMatch(
+    viewer: string,
+    username: string,
+  ): Promise<import('@/lib/viewing-insights').TasteMatch>;
+  getWorkWatchStatuses(
+    viewer: string,
+    works: { title: string; year: string }[],
+  ): Promise<(FavoriteWatchStatus | null)[]>;
   getWorkVideoReviewPage(
     titleNorm: string,
     year: string,

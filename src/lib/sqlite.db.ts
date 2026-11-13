@@ -56,6 +56,10 @@ import {
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
 import {
+  ViewingHappinessPlans,
+  viewingHappinessSchema,
+} from '@/features/time-capsule/storage';
+import {
   type AnnouncementRow,
   ANNOUNCEMENT_INSERT_SQL,
   ANNOUNCEMENT_LIST_SQL,
@@ -620,6 +624,8 @@ export class LocalSqliteStorage implements IStorage {
         );
     }
     for (const statement of userNoticeSchema('sqlite')) this.db.exec(statement);
+    for (const statement of viewingHappinessSchema('sqlite'))
+      this.db.exec(statement);
     for (const statement of listSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 片单浏览量', () => {
       this.db
@@ -1607,6 +1613,17 @@ export class LocalSqliteStorage implements IStorage {
 
     const migrate = this.db.transaction(() => {
       for (const { legacy, canonical } of plan) {
+        this.db
+          .prepare('UPDATE time_capsules SET username = ? WHERE username = ?')
+          .run(canonical, legacy);
+        this.db
+          .prepare(
+            'INSERT INTO work_completions (username, title_norm, year, celebrated_at) SELECT ?, title_norm, year, celebrated_at FROM work_completions WHERE username = ? ON CONFLICT(username, title_norm, year) DO UPDATE SET celebrated_at = MIN(work_completions.celebrated_at, excluded.celebrated_at)',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM work_completions WHERE username = ?')
+          .run(legacy);
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
         const likedLists = this.db
@@ -1809,6 +1826,8 @@ export class LocalSqliteStorage implements IStorage {
       'playback_watch_buckets',
       'user_message_state',
       'user_annual_recaps',
+      'time_capsules',
+      'work_completions',
       'user_danmaku_settings',
     ];
     const usernames = new Set<string>();
@@ -2409,6 +2428,62 @@ export class LocalSqliteStorage implements IStorage {
       })
       .immediate();
   }
+  async countCapsules(
+    ...args: Parameters<IStorage['countCapsules']>
+  ): ReturnType<IStorage['countCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').countCapsules(...args),
+    );
+  }
+  async getCompletion(
+    ...args: Parameters<IStorage['getCompletion']>
+  ): ReturnType<IStorage['getCompletion']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').getCompletion(...args),
+    );
+  }
+  async createCapsule(
+    ...args: Parameters<IStorage['createCapsule']>
+  ): ReturnType<IStorage['createCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').createCapsule(...args),
+    );
+  }
+  async getCapsules(
+    ...args: Parameters<IStorage['getCapsules']>
+  ): ReturnType<IStorage['getCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').getCapsules(...args),
+    );
+  }
+  async deleteCapsule(
+    ...args: Parameters<IStorage['deleteCapsule']>
+  ): ReturnType<IStorage['deleteCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').deleteCapsule(...args),
+    );
+  }
+  async openCapsule(
+    ...args: Parameters<IStorage['openCapsule']>
+  ): ReturnType<IStorage['openCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').openCapsule(...args),
+    );
+  }
+  async getCapsuleMessages(
+    ...args: Parameters<IStorage['getCapsuleMessages']>
+  ): ReturnType<IStorage['getCapsuleMessages']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').getCapsuleMessages(...args),
+    );
+  }
+  async readAllCapsules(
+    ...args: Parameters<IStorage['readAllCapsules']>
+  ): ReturnType<IStorage['readAllCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('sqlite').readAllCapsules(...args),
+    );
+  }
   async getTrackingCalendarItems(
     userName: string,
   ): ReturnType<IStorage['getTrackingCalendarItems']> {
@@ -2848,6 +2923,24 @@ export class LocalSqliteStorage implements IStorage {
   ): ReturnType<IStorage['getMyVideoReviewRatings']> {
     return this.social.getMyVideoReviewRatings(...args);
   }
+  async getWorkWatchStatuses(
+    ...args: Parameters<IStorage['getWorkWatchStatuses']>
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    return this.social.getWorkWatchStatuses(...args);
+  }
+
+  async getFollowOpinions(
+    ...args: Parameters<IStorage['getFollowOpinions']>
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    return this.social.getFollowOpinions(...args);
+  }
+
+  async getTasteMatch(
+    ...args: Parameters<IStorage['getTasteMatch']>
+  ): ReturnType<IStorage['getTasteMatch']> {
+    return this.social.getTasteMatch(...args);
+  }
+
   async getWorkVideoReviewPage(
     ...args: Parameters<IStorage['getWorkVideoReviewPage']>
   ): ReturnType<IStorage['getWorkVideoReviewPage']> {
@@ -3244,6 +3337,12 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.db
         .prepare('DELETE FROM user_notice_events WHERE recipient_username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM time_capsules WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM work_completions WHERE username = ?')
         .run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
       this.db

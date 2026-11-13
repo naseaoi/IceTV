@@ -17,6 +17,8 @@ export function buildToastText(summary: UserMessageSummary): string {
       return `你的 ${message.year} 年度观影报告已生成`;
     case 'announcement':
       return '有一条新公告';
+    case 'time-capsule':
+      return `一封关于《${message.title}》的信送达了`;
     case 'follow-review':
       return `${nickname}评价了《${message.title}》`;
     case 'review-reply':

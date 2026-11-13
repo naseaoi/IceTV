@@ -8,6 +8,7 @@ import {
   Link2,
   ListVideo,
   Pencil,
+  Play,
   Trash2,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -33,7 +34,7 @@ import PageLayout from '@/components/PageLayout';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import SkeletonText from '@/components/SkeletonText';
-import { listUrl } from '@/features/lists/lib/list-links';
+import { listItemPlayUrl, listUrl } from '@/features/lists/lib/list-links';
 import {
   deleteList,
   fetchList,
@@ -42,7 +43,12 @@ import {
   reorderListItems,
   updateList,
 } from '@/features/lists/lib/lists-client';
-import type { ListDetail, ListItem, ListSummary } from '@/features/lists/types';
+import type {
+  ListDetail,
+  ListItem,
+  ListSummary,
+  ListViewerProgress,
+} from '@/features/lists/types';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -54,6 +60,7 @@ import {
   getErrorMessage,
   isAbortError,
 } from '@/lib/user-facing-error';
+import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
 
 import { ListCover, ListStats } from './ListCard';
 import { type ListFormValues, ListFormDialog } from './ListFormDialog';
@@ -125,6 +132,18 @@ export function ListDetailPageClient({
       });
     return () => controller.abort();
   }, [listId, reloadKey, authenticated]);
+
+  // 观看状态由收藏与评价推导，卡片菜单里改动后静默刷新进度
+  useEffect(() => {
+    if (!authenticated) return;
+    const refresh = () => setReloadKey((value) => value + 1);
+    window.addEventListener('favoritesUpdated', refresh);
+    window.addEventListener(VIDEO_REVIEWS_UPDATED_EVENT, refresh);
+    return () => {
+      window.removeEventListener('favoritesUpdated', refresh);
+      window.removeEventListener(VIDEO_REVIEWS_UPDATED_EVENT, refresh);
+    };
+  }, [authenticated]);
 
   const detail = state.status === 'ready' ? state.detail : null;
   // 从列表页进入时已有摘要，加载期间先渲染标题并按条目数铺骨架
@@ -390,10 +409,116 @@ function ListActions({
 }) {
   const { list, isOwner } = detail;
   const showLike = list.visibility !== 'private' && !isOwner;
+  const progress = editing ? null : detail.viewerProgress;
+  const showProgress = Boolean(progress && progress.total > 0);
   return (
     // 首个按钮是图标按钮时左移内边距，让图标与上方文字左对齐
-    <div className={`flex items-center gap-1 ${showLike ? '' : '-ml-2.5'}`}>
+    <div
+      className={`flex min-w-0 items-center gap-1 ${showLike || showProgress ? '' : '-ml-2.5'}`}
+    >
+      {progress && showProgress && (
+        <ViewerProgress progress={progress} items={detail.items} />
+      )}
       {showLike && like}
+      <ListActionButtons
+        detail={detail}
+        editing={editing}
+        onCopyLink={onCopyLink}
+        onEditInfo={onEditInfo}
+        onEditItems={onEditItems}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+const PROGRESS_RING_RADIUS = 7;
+const PROGRESS_RING_LENGTH = 2 * Math.PI * PROGRESS_RING_RADIUS;
+
+function ViewerProgress({
+  progress,
+  items,
+}: {
+  progress: ListViewerProgress;
+  items: ListItem[];
+}) {
+  const { completed, total, nextItemId } = progress;
+  const next = nextItemId
+    ? items.find((item) => item.id === nextItemId)
+    : undefined;
+  const ratio = Math.min(1, completed / total);
+  const label = !next
+    ? null
+    : next.viewerStatus === 'watching'
+      ? '继续看'
+      : completed === 0
+        ? '开始看'
+        : '看下一部';
+  return (
+    <div className='mr-2 flex min-w-0 items-center gap-3'>
+      {next && label && (
+        <Link
+          href={listItemPlayUrl(next)}
+          title={`《${next.title}》`}
+          className={`${LIBRARY_PILL_BUTTON_CLASS} shrink-0 gap-1.5 pl-3.5`}
+        >
+          <Play aria-hidden='true' className='h-4 w-4 fill-current' />
+          {label}
+        </Link>
+      )}
+      <span
+        className='inline-flex shrink-0 items-center gap-1.5 text-sm tabular-nums text-gray-500 dark:text-gray-400'
+        aria-label={`已看 ${completed} 部，共 ${total} 部`}
+      >
+        <svg
+          aria-hidden='true'
+          viewBox='0 0 18 18'
+          className='h-[18px] w-[18px] -rotate-90'
+        >
+          <circle
+            cx='9'
+            cy='9'
+            r={PROGRESS_RING_RADIUS}
+            fill='none'
+            strokeWidth='2.5'
+            className='stroke-gray-200 dark:stroke-gray-700'
+          />
+          <circle
+            cx='9'
+            cy='9'
+            r={PROGRESS_RING_RADIUS}
+            fill='none'
+            strokeWidth='2.5'
+            strokeLinecap='round'
+            strokeDasharray={PROGRESS_RING_LENGTH}
+            strokeDashoffset={PROGRESS_RING_LENGTH * (1 - ratio)}
+            className={`stroke-brand-500 transition-[stroke-dashoffset] duration-500 ${ratio === 0 ? 'opacity-0' : ''}`}
+          />
+        </svg>
+        {next ? `已看 ${completed}/${total}` : '已全部看过'}
+      </span>
+    </div>
+  );
+}
+
+function ListActionButtons({
+  detail,
+  editing,
+  onCopyLink,
+  onEditInfo,
+  onEditItems,
+  onDelete,
+}: {
+  detail: ListDetail;
+  editing: boolean;
+  onCopyLink: () => void;
+  onEditInfo: () => void;
+  onEditItems: () => void;
+  onDelete: () => void;
+}) {
+  const { list, isOwner } = detail;
+  return (
+    <>
       {(list.visibility !== 'private' || isOwner) && (
         <button
           type='button'
@@ -426,7 +551,7 @@ function ListActions({
           ]}
         />
       )}
-    </div>
+    </>
   );
 }
 

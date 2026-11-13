@@ -2,6 +2,9 @@
 
 import type { SiteAnnouncement } from '@/lib/types';
 
+const mockGetCapsuleMessages = jest.fn();
+const mockOpenCapsule = jest.fn();
+const mockReadAllCapsules = jest.fn();
 const mockGetFavoriteUpdateMessagePage = jest.fn();
 const mockGetFavorite = jest.fn();
 const mockReadFavoriteUpdate = jest.fn();
@@ -28,6 +31,9 @@ const mockSavePlayRecordsByKey = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getCapsuleMessages: (...args: unknown[]) => mockGetCapsuleMessages(...args),
+    openCapsule: (...args: unknown[]) => mockOpenCapsule(...args),
+    readAllCapsules: (...args: unknown[]) => mockReadAllCapsules(...args),
     getFavoriteUpdateMessagePage: (...args: unknown[]) =>
       mockGetFavoriteUpdateMessagePage(...args),
     getFavorite: (...args: unknown[]) => mockGetFavorite(...args),
@@ -121,6 +127,62 @@ function usePersistedUserMessageState(): void {
 }
 
 describe('messages server', () => {
+  it('观后信必收、参与未读与revision，消息已读及全部已读连接信件状态', async () => {
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: [
+        'tracking-update',
+        'follow-review',
+        'review-reply',
+        'new-follower',
+        'review-like',
+      ],
+    });
+    const empty = await getUserMessageSummary('reader');
+    const capsule = {
+      id: 'letter',
+      title: '作品',
+      year: '2026',
+      cover: '',
+      source: '',
+      videoId: '',
+      content: '正文',
+      ratingThen: 8,
+      ratingNow: 9,
+      createdAt: 100,
+      deliverAt: 200,
+      openedAt: null,
+    };
+    const message = {
+      ...capsule,
+      id: 'time-capsule:letter',
+      capsuleId: 'letter',
+      writtenAt: 100,
+      createdAt: 200,
+      type: 'time-capsule',
+    };
+    mockGetCapsuleMessages.mockResolvedValue({ items: [message], total: 1 });
+    const summary = await getUserMessageSummary('reader');
+    expect(summary.unreadCount).toBe(empty.unreadCount + 1);
+    expect(summary.revision).not.toBe(empty.revision);
+    expect(summary.latestUnread).toMatchObject({
+      type: 'time-capsule',
+      title: '作品',
+    });
+    expect((await getUserMessagePage('reader', 20)).items).toContainEqual(
+      message,
+    );
+    mockOpenCapsule.mockResolvedValue({ ...capsule, openedAt: 300 });
+    expect(await readUserMessage('reader', message.id)).toMatchObject({
+      message: { capsuleId: 'letter', openedAt: 300 },
+    });
+    await readAllUserMessages('reader');
+    expect(mockReadAllCapsules).toHaveBeenCalledWith(
+      'reader',
+      expect.any(Number),
+    );
+  });
+
   it('merges recap notifications into follow counts, revision and the shared read state', async () => {
     mockGetPublishedAnnouncements.mockResolvedValue([]);
     mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
@@ -189,6 +251,9 @@ describe('messages server', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetCapsuleMessages.mockResolvedValue({ items: [], total: 0 });
+    mockOpenCapsule.mockResolvedValue(null);
+    mockReadAllCapsules.mockResolvedValue(undefined);
     mockGetFavoriteUpdateMessagePage.mockResolvedValue({ items: [], total: 0 });
     mockGetFavorite.mockResolvedValue(null);
     mockReadFavoriteUpdate.mockResolvedValue(undefined);
@@ -915,6 +980,9 @@ describe('messages server', () => {
 describe('annual report messages', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetCapsuleMessages.mockResolvedValue({ items: [], total: 0 });
+    mockOpenCapsule.mockResolvedValue(null);
+    mockReadAllCapsules.mockResolvedValue(undefined);
     mockGetFavoriteUpdateMessagePage.mockResolvedValue({ items: [], total: 0 });
     mockGetFavorite.mockResolvedValue(null);
     mockReadFavoriteUpdate.mockResolvedValue(undefined);

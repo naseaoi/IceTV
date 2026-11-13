@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash } from 'crypto';
 
 import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
+import { capsuleMessage } from '@/features/time-capsule/storage';
 import {
   buildAnnouncementMessageId,
   parseAnnouncementMessageId,
@@ -192,6 +193,7 @@ async function getVisibleMessageSources(
     likeCount,
     notices,
     noticeCount,
+    capsules,
   ] = await Promise.all([
     muted.has('tracking-update')
       ? { items: {}, total: 0, nextCursor: null }
@@ -247,8 +249,10 @@ async function getVisibleMessageSources(
       state.userNoticeReadIds ?? [],
       now,
     ),
+    db.getCapsuleMessages(userName, limit, before, now),
   ]);
   return {
+    capsules,
     tracking,
     favorites,
     followed: [...followed, ...recaps],
@@ -293,6 +297,7 @@ export async function getUserMessagePage(
     ...sources.followers,
     ...sources.likes,
     ...sources.notices,
+    ...sources.capsules.items,
   ];
   const remaining = merged.filter(
     (message) =>
@@ -319,6 +324,7 @@ export async function getUserMessagePage(
       sources.followerCount +
       sources.likeCount +
       sources.noticeCount +
+      sources.capsules.total +
       announcements.length +
       (annualReport ? 1 : 0),
     nextCursor: hasMore
@@ -355,6 +361,7 @@ export async function getUserMessageSummary(
     sources.followerCount +
     sources.likeCount +
     sources.noticeCount +
+    sources.capsules.total +
     announcements.length +
     (annualReport ? 1 : 0);
   const latest = [
@@ -363,6 +370,7 @@ export async function getUserMessageSummary(
     ...sources.followers,
     ...sources.likes,
     ...sources.notices,
+    ...sources.capsules.items,
   ];
   const latestUnread = [
     ...latest,
@@ -390,6 +398,7 @@ export async function getUserMessageSummary(
         sources.followerCount,
         sources.likeCount,
         sources.noticeCount,
+        sources.capsules.total,
         ...announcements.map((message) => message.id),
         annualReport?.id ?? '',
         latestTracking?.id ?? '',
@@ -410,6 +419,13 @@ export async function readUserMessage(
   messageId: string,
   timeZone = 'UTC',
 ): Promise<ReadUserMessageResult | null> {
+  if (messageId.startsWith('time-capsule:')) {
+    const capsule = await db.openCapsule(
+      userName,
+      messageId.slice('time-capsule:'.length),
+    );
+    return capsule ? { message: capsuleMessage(capsule) } : null;
+  }
   if (messageId.startsWith('annual-report:')) {
     // 重复已读仍可成功；资格重新按当前用户与开放期检查。
     const message = await getAnnualReportMessage(userName, {}, timeZone);
@@ -583,6 +599,7 @@ export async function readAllUserMessages(
   userName: string,
   timeZone = 'UTC',
 ): Promise<ReadAllUserMessagesResult> {
+  const readAt = Date.now();
   const state = await db.getUserMessageState(userName);
   const annualReport = await getAnnualReportMessage(userName, state, timeZone);
   await db.updateUserMessageState(userName, {
@@ -595,6 +612,7 @@ export async function readAllUserMessages(
     reviewLikeReadAt: Date.now(),
   });
 
+  await db.readAllCapsules(userName, readAt);
   const updatedRecords: Record<string, PlayRecord> = {};
   while (!state.mutedKinds?.includes('tracking-update')) {
     const page = await db.getUnreadTrackingPlayRecordPage(

@@ -216,6 +216,11 @@ export default function PublicReviewContent({
                     我
                   </span>
                 )}
+                {review.authorFollowed && !isMine && (
+                  <span className='shrink-0 text-xs text-gray-400 dark:text-gray-500'>
+                    已关注
+                  </span>
+                )}
               </div>
               <div className='flex h-4 items-center gap-2'>{meta}</div>
             </div>

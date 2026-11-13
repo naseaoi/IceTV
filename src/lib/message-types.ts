@@ -99,6 +99,7 @@ export interface ReviewLikeUserMessage {
   createdAt: number;
 }
 export type UserMessage =
+  | import('@/features/time-capsule/types').TimeCapsuleUserMessage
   | UserNoticeMessage
   | AnnualReportUserMessage
   | AnnouncementUserMessage

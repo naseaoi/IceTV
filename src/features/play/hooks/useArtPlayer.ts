@@ -100,6 +100,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         onDanmakuEnable: () => paramsRef.current.onDanmakuEnable?.(),
         onDanmakuEnabledChange: (enabled) =>
           paramsRef.current.onDanmakuEnabledChange?.(enabled),
+        onLastEpisodeEnded: () => paramsRef.current.onLastEpisodeEnded?.(),
       },
       {
         loadingSessionRef,

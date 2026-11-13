@@ -1,6 +1,6 @@
 'use client';
 
-import { RotateCcw, X } from 'lucide-react';
+import { Mail, RotateCcw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -21,6 +21,10 @@ import {
   ContentCounter,
   ReviewOptionsMenu,
 } from '@/features/reviews/components/ReviewEditor';
+import {
+  type CapsuleTarget,
+  CapsuleComposerModal,
+} from '@/features/time-capsule/components/CapsuleComposer';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import {
   batchFavorites,
@@ -260,6 +264,9 @@ function WatchRecordForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [capsuleTarget, setCapsuleTarget] = useState<CapsuleTarget | null>(
+    null,
+  );
 
   const trimmed = content.trim();
   const effectiveStatus = choice === 'auto' ? entry?.watchStatus : choice;
@@ -423,7 +430,7 @@ function WatchRecordForm({
                     setWatchedDate(event.target.value);
                     setChoice('completed');
                   }}
-                  className='h-7 rounded-md border-0 bg-gray-900/[0.04] px-2 py-0 text-xs tabular-nums text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] focus:ring-2 focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:[color-scheme:dark]'
+                  className='h-7 rounded-md border-0 bg-gray-900/[0.04] px-2 py-0 text-xs tabular-nums text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] focus:ring-2 focus:ring-inset focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:[color-scheme:dark]'
                 />
               </label>
             )}
@@ -506,7 +513,7 @@ function WatchRecordForm({
                   if (canSave) void save().catch(() => {});
                 }
               }}
-              className={`block w-full resize-none border-0 bg-gray-900/[0.04] px-3.5 pb-6 pt-3 text-sm leading-relaxed text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:placeholder:text-gray-500 dark:focus:bg-gray-900 ${CONTENT_FIELD_CLASS}`}
+              className={`block w-full resize-none border-0 bg-gray-900/[0.04] px-3.5 pb-6 pt-3 text-sm leading-relaxed text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:placeholder:text-gray-500 dark:focus:bg-gray-900 ${CONTENT_FIELD_CLASS}`}
             />
             <span className='pointer-events-none absolute bottom-2 right-3'>
               <ContentCounter length={trimmed.length} />
@@ -520,17 +527,38 @@ function WatchRecordForm({
           <p role='alert' className='min-w-0 truncate text-sm text-rose-500'>
             {error}
           </p>
-        ) : entry ? (
-          <button
-            type='button'
-            disabled={saving}
-            onClick={() => setConfirmRemove(true)}
-            className='-ml-3 inline-flex h-9 items-center rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-rose-500/10 hover:text-rose-500 disabled:opacity-50 dark:text-gray-400'
-          >
-            移出收藏
-          </button>
         ) : (
-          <span />
+          <div className='-ml-3 flex min-w-0 items-center'>
+            {entry && (
+              <button
+                type='button'
+                disabled={saving}
+                onClick={() => setConfirmRemove(true)}
+                className='inline-flex h-9 shrink-0 items-center rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-rose-500/10 hover:text-rose-500 disabled:opacity-50 dark:text-gray-400'
+              >
+                移出收藏
+              </button>
+            )}
+            {effectiveStatus === 'completed' && (
+              <button
+                type='button'
+                disabled={saving}
+                onClick={() =>
+                  setCapsuleTarget({
+                    title: target.title,
+                    year,
+                    cover: target.cover,
+                    source: target.source,
+                    videoId: target.id,
+                  })
+                }
+                className='inline-flex h-9 min-w-0 items-center gap-1.5 rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white'
+              >
+                <Mail aria-hidden='true' className='h-3.5 w-3.5 shrink-0' />
+                <span className='truncate'>写给未来的自己</span>
+              </button>
+            )}
+          </div>
         )}
         <button
           type='button'
@@ -543,6 +571,10 @@ function WatchRecordForm({
         </button>
       </PanelFooter>
 
+      <CapsuleComposerModal
+        target={capsuleTarget}
+        onClose={() => setCapsuleTarget(null)}
+      />
       <ConfirmModal
         isOpen={confirmRemove}
         title='移出收藏？'

@@ -30,6 +30,7 @@ import {
   profileButtonClass as buttonClass,
 } from '@/features/profile/FollowList';
 import { useProfilePage } from '@/features/profile/hooks/useProfilePage';
+import { TasteMatchChip } from '@/features/profile/TasteMatch';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
   getUserFavorites,
@@ -481,6 +482,12 @@ export default function ProfilePageClient({
                           href={`/u/${encodeURIComponent(profileId)}/recap/${profile.recap.year}`}
                           year={profile.recap.year}
                           className='-my-1'
+                        />
+                      )}
+                      {!profile.isSelf && (
+                        <TasteMatchChip
+                          profileId={profileId}
+                          nickname={profile.nickname ?? 'TA'}
                         />
                       )}
                     </div>

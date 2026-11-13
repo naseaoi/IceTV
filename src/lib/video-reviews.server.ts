@@ -148,7 +148,6 @@ export async function handleWorkReviews(request: NextRequest) {
     if (isGuardFailure(guard)) return guard.response;
     const { title_norm, year } = queryIdentity(request);
     const cursor = request.nextUrl.searchParams.get('cursor') || undefined;
-    decodeReviewCursor(cursor);
     return json(
       await db.getWorkVideoReviewPage(title_norm, year, guard.username, cursor),
     );

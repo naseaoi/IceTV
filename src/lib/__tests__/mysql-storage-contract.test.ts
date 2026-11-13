@@ -386,6 +386,18 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    for (const table of ['time_capsules', 'work_completions']) {
+      if (normalized === `DELETE FROM ${table} WHERE username = ?`) {
+        const rows = currentState.social[table] ?? [];
+        currentState.social[table] = rows.filter(
+          (row) => row.username !== params[0],
+        );
+        return [
+          { affectedRows: rows.length - currentState.social[table].length },
+          [],
+        ];
+      }
+    }
     if (normalized.startsWith('INSERT IGNORE INTO user_notice_events')) {
       const rows = (currentState.social.user_notice_events ??= []);
       if (
@@ -2129,28 +2141,38 @@ function createFakePool() {
         const profileId = (username: string) =>
           currentState.social.user_profiles.find((p) => p.username === username)
             ?.profile_id ?? '';
+        const followed = (username: string) =>
+          Number(
+            currentState.social.user_follows.some(
+              (follow) =>
+                follow.follower === params[0] && follow.followee === username,
+            ),
+          );
         rows = rows.filter(
           (row) =>
             row.review.is_public &&
-            row.review.title_norm === params[0] &&
-            (!params[1] ||
-              row.review.year === params[1] ||
+            row.review.title_norm === params[1] &&
+            (!params[2] ||
+              row.review.year === params[2] ||
               row.review.year === ''),
         );
         rows.sort(
           (a, b) =>
+            followed(b.username) - followed(a.username) ||
             b.review.updated_at - a.review.updated_at ||
             compareText(profileId(b.username), profileId(a.username)) ||
             compareText(b.review.year, a.review.year),
         );
-        if (params.length > 3)
+        if (params.length > 4)
           rows = rows.filter(
             (row) =>
-              row.review.updated_at < Number(params[3]) ||
-              (row.review.updated_at === Number(params[3]) &&
-                (profileId(row.username) < String(params[5]) ||
-                  (profileId(row.username) === params[5] &&
-                    row.review.year < String(params[7])))),
+              followed(row.username) < Number(params[4]) ||
+              (followed(row.username) === Number(params[4]) &&
+                (row.review.updated_at < Number(params[6]) ||
+                  (row.review.updated_at === Number(params[6]) &&
+                    (profileId(row.username) < String(params[8]) ||
+                      (profileId(row.username) === params[8] &&
+                        row.review.year < String(params[10])))))),
           );
         return [
           rows.slice(0, 21).map((row) => ({

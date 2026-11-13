@@ -1,6 +1,9 @@
-import { randomInt } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 
-import { profileFavoriteOriginSql } from '@/features/favorites/lib/library-storage';
+import {
+  profileFavoriteOriginSql,
+  workStatusSelection,
+} from '@/features/favorites/lib/library-storage';
 import {
   annualRecapSchema,
   AnnualRecapStorage,
@@ -15,6 +18,7 @@ import type { FollowReviewUserMessage } from '@/lib/message-types';
 import { publicUserRole } from '@/lib/public-user-role.server';
 import { replySchema, ReviewReplyStorage } from '@/lib/review-reply-storage';
 import { SocialNotificationStorage } from '@/lib/social-notification-storage';
+import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type { IStorage } from '@/lib/types';
 import type {
   AdminReviewReportPage,
@@ -40,7 +44,7 @@ import { normalizeUsername } from '@/lib/username';
 import {
   type MyReviewQuery,
   type VideoReviewRow,
-  decodeReviewCursor,
+  decodeWorkReviewCursor,
   MY_REVIEWS_PAGE_SIZE,
   publicReview,
   reviewSql,
@@ -48,6 +52,7 @@ import {
   validateMyReviewQuery,
   WORK_REVIEWS_PAGE_SIZE,
 } from '@/lib/video-reviews';
+import { tasteMatchScore } from '@/lib/viewing-insights';
 
 export class NicknameTakenError extends Error {
   constructor() {
@@ -423,6 +428,13 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       usernames,
     );
     const roles = new Map(access.map((user) => [user.username, user.role]));
+    const follows = viewer
+      ? await this.sql.rows<{ followee: string }>(
+          `SELECT followee FROM user_follows WHERE follower = ? AND followee IN (${usernames.map(() => '?').join(',')})`,
+          [normalizeUsername(viewer), ...usernames],
+        )
+      : [];
+    const followedAuthors = new Set(follows.map((row) => row.followee));
     return Promise.all(
       rows.map(async (row) => {
         const review = JSON.parse(row.review_json) as VideoReview;
@@ -446,6 +458,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
             row.username,
             roles.get(normalizeUsername(row.username)),
           ),
+          author_followed: followedAuthors.has(normalizeUsername(row.username)),
           reply_count: Number(replies.count),
           profile_id: profile.profile_id,
           nickname: profile.nickname,
@@ -570,24 +583,172 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     };
   }
 
+  async getWorkWatchStatuses(
+    viewer: string,
+    works: { title: string; year: string }[],
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    if (!works.length) return [];
+    const result: Awaited<ReturnType<IStorage['getWorkWatchStatuses']>> = [];
+    // 避免 SQLite 参数数量限制；每批仅执行一次作品匹配查询。
+    for (let offset = 0; offset < works.length; offset += 200) {
+      const batch = works.slice(offset, offset + 200);
+      const rows = await this.sql.rows<{ status: (typeof result)[number] }>(
+        `SELECT (${workStatusSelection(this.sql.dialect, '?', 'w.title_norm', 'w.year')}) AS status
+         FROM (${batch.map((_, index) => `SELECT ${index} AS position, ? AS title_norm, ? AS year`).join(' UNION ALL ')}) w ORDER BY w.position`,
+        [
+          normalizeUsername(viewer),
+          ...batch.flatMap((work) => [
+            normalizeWorkTitle(work.title),
+            normalizeWorkYear(work.year),
+          ]),
+        ],
+      );
+      result.push(...rows.map((row) => row.status));
+    }
+    return result;
+  }
+
+  async getFollowOpinions(
+    viewer: string,
+    titleNorm: string,
+    year: string,
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    type OpinionRow = UserProfile & {
+      status: import('@/lib/types').FavoriteWatchStatus | null;
+      review_json: string | null;
+      recent: number;
+    };
+    const rows = await this.sql.rows<OpinionRow>(
+      `SELECT profile.*, CASE WHEN profile.favorites_public >= 2 THEN (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true)}) ELSE NULL END AS status,
+       (SELECT CASE WHEN r.is_public = 1 THEN r.review_json ELSE NULL END FROM video_reviews r WHERE r.username = profile.username AND r.title_norm = ? AND (? = '' OR r.year IN (?, '')) ORDER BY CASE WHEN r.year = ? THEN 0 ELSE 1 END, r.updated_at DESC, r.year DESC LIMIT 1) AS review_json,
+       (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true, 'recent')}) AS recent
+       FROM user_follows follow JOIN user_profiles profile ON profile.username = follow.followee WHERE follow.follower = ?`,
+      [
+        titleNorm,
+        year,
+        year,
+        titleNorm,
+        year,
+        year,
+        year,
+        titleNorm,
+        year,
+        year,
+        normalizeUsername(viewer),
+      ],
+    );
+    const order = { completed: 0, watching: 1, planned: 2 };
+    const items = rows
+      .map((row) => {
+        const review = row.review_json
+          ? (JSON.parse(row.review_json) as VideoReview)
+          : null;
+        return {
+          author: {
+            profileId: row.profile_id,
+            nickname: row.nickname,
+            avatarSeed: row.avatar_seed,
+          },
+          status: row.status,
+          rating: review?.rating ?? null,
+          hasPublicReview: review !== null,
+          recent: Math.max(
+            row.status ? Number(row.recent ?? 0) : 0,
+            review?.updated_at ?? 0,
+          ),
+        };
+      })
+      .filter((item) => item.status !== null || item.hasPublicReview)
+      .sort(
+        (a, b) =>
+          (a.status ? order[a.status] : 3) - (b.status ? order[b.status] : 3) ||
+          b.recent - a.recent ||
+          b.author.profileId.localeCompare(a.author.profileId),
+      )
+      .map(({ recent: _recent, ...item }) => item);
+    const rated = items.filter((item) => item.rating !== null);
+    return {
+      items,
+      watchedCount: items.filter((item) => item.status === 'completed').length,
+      ratedCount: rated.length,
+      averageRating: rated.length
+        ? rated.reduce((sum, item) => sum + item.rating!, 0) / rated.length
+        : null,
+    };
+  }
+
+  async getTasteMatch(
+    viewer: string,
+    username: string,
+  ): ReturnType<IStorage['getTasteMatch']> {
+    viewer = normalizeUsername(viewer);
+    username = normalizeUsername(username);
+    const rating = (alias: string) =>
+      reviewSql(this.sql.dialect).rating.replaceAll(
+        'review_json',
+        `${alias}.review_json`,
+      );
+    // 每条对方评价只匹配本人一条：精确年份优先，其次未知年份，再按更新时间。
+    const ownYear = `COALESCE((SELECT exact.year FROM video_reviews exact WHERE exact.username = own.username AND exact.title_norm = peer.title_norm AND exact.year = peer.year), (SELECT mine.year FROM video_reviews mine WHERE mine.username = own.username AND mine.title_norm = peer.title_norm AND (mine.year = '' OR peer.year = '') ORDER BY mine.updated_at DESC, mine.year DESC LIMIT 1))`;
+    const [common] = await this.sql.rows<{
+      count: number;
+      difference: number | null;
+    }>(
+      `SELECT COUNT(*) AS count, SUM(ABS(${rating('peer')} - ${rating('own')})) AS difference
+       FROM video_reviews peer JOIN video_reviews own ON own.username = ? AND own.title_norm = peer.title_norm AND own.year = (${ownYear})
+       WHERE peer.username = ? AND peer.is_public = 1 AND ${rating('peer')} IS NOT NULL AND ${rating('own')} IS NOT NULL`,
+      [viewer, username],
+    );
+    const rows = await this.sql.rows<VideoReviewRow>(
+      `SELECT peer.username, peer.review_json FROM video_reviews peer
+       WHERE peer.username = ? AND peer.is_public = 1 AND ${rating('peer')} >= 8
+       AND NOT EXISTS (SELECT 1 FROM video_reviews mine WHERE mine.username = ? AND mine.title_norm = peer.title_norm AND (mine.year = peer.year OR mine.year = '' OR peer.year = ''))
+       AND COALESCE((${workStatusSelection(this.sql.dialect, '?', 'peer.title_norm', 'peer.year')}), 'planned') NOT IN ('watching', 'completed')
+       ORDER BY ${rating('peer')} DESC, peer.updated_at DESC, peer.title_norm DESC, peer.year DESC LIMIT 12`,
+      [username, viewer, viewer],
+    );
+    return {
+      commonCount: Number(common.count),
+      score: tasteMatchScore(
+        Number(common.count),
+        Number(common.difference ?? 0),
+      ),
+      picks: (await this.enrichReviews(rows, viewer)).map(publicReview),
+    };
+  }
+
   async getWorkVideoReviewPage(
     titleNorm: string,
     year: string,
     viewer: string,
     cursor?: string,
   ): Promise<WorkReviewSummary> {
-    const after = decodeReviewCursor(cursor);
+    viewer = normalizeUsername(viewer);
+    const binding = createHash('sha256').update(viewer).digest('hex');
+    const after = decodeWorkReviewCursor(cursor, binding, titleNorm, year);
     const queries = reviewSql(this.sql.dialect);
     const params = [titleNorm, year, year];
-    // 公开游标使用 profileId，登录名只在存储边界内用于关联。
+    const followed = 'CASE WHEN follow.followee IS NULL THEN 0 ELSE 1 END';
     const rows = await this.sql.rows<VideoReviewRow>(
       `SELECT r.username, r.review_json, p.profile_id FROM video_reviews r JOIN user_profiles p ON p.username = r.username
+       LEFT JOIN user_follows follow ON follow.followee = r.username AND follow.follower = ?
        WHERE r.title_norm = ? AND r.is_public = 1 AND (? = '' OR r.year IN (?, ''))
-       ${after ? 'AND (r.updated_at < ? OR (r.updated_at = ? AND (p.profile_id < ? OR (p.profile_id = ? AND r.year < ?))))' : ''}
-       ORDER BY r.updated_at DESC, p.profile_id DESC, r.year DESC LIMIT ${WORK_REVIEWS_PAGE_SIZE + 1}`,
+       ${after ? `AND (${followed} < ? OR (${followed} = ? AND (r.updated_at < ? OR (r.updated_at = ? AND (p.profile_id < ? OR (p.profile_id = ? AND r.year < ?))))))` : ''}
+       ORDER BY ${followed} DESC, r.updated_at DESC, p.profile_id DESC, r.year DESC LIMIT ${WORK_REVIEWS_PAGE_SIZE + 1}`,
       [
+        viewer,
         ...params,
-        ...(after ? [after[0], after[0], after[1], after[1], after[3]] : []),
+        ...(after
+          ? [
+              after.followed,
+              after.followed,
+              after.time,
+              after.time,
+              after.profileId,
+              after.profileId,
+              after.year,
+            ]
+          : []),
       ],
     );
     const [summary] = await this.sql.rows<{
@@ -619,9 +780,13 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       nextCursor:
         rows.length > WORK_REVIEWS_PAGE_SIZE && last
           ? socialCursor([
+              'work-v2',
+              binding,
+              titleNorm,
+              year,
+              Number(last.authorFollowed),
               last.updated_at,
               last.author.profileId,
-              last.title_norm,
               last.year,
             ])
           : null,

@@ -59,7 +59,7 @@
 其余界面规范见 [前端界面](docs/frontend.md)。原生 `<select>`、`max-*` 变体、`animate-pulse` / `animate-spin`、`backdrop-blur` 由 ESLint（`eslint.config.mjs`）报错拦截。
 
 - `tailwind.config.ts` 含 raw 断点（`split`），Tailwind 因此**不生成 `max-sm:` / `max-md:` 等 `max-*` 变体**，写了也静默无效。窄屏样式写成基础类加 `sm:` / `md:` 覆盖，窄屏横屏用 `phone-landscape:`。
-- `@tailwindcss/forms` 按控件类型给原生 input / select / textarea 加边框、内边距和背景（select 另有背景箭头）。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则浅色模式出现灰框或文字被裁切。下拉统一用 `src/components/Select.tsx`，不写原生 `<select>`。
+- `@tailwindcss/forms` 按控件类型给原生 input / select / textarea 加边框、内边距和背景（select 另有背景箭头）。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则浅色模式出现灰框或文字被裁切。用 `ring-inset` 做描边的控件聚焦时同时写 `focus:ring-inset`，插件的聚焦样式优先级更高，会把内描边改回外描边，在滚动容器边缘被裁掉。下拉统一用 `src/components/Select.tsx`，不写原生 `<select>`。
 - 页面滚动可能发生在 `window`、`documentElement` 或 `body` 上，监听或回顶统一用 `src/hooks/usePageScroll.ts`，只监听其中一处会静默失效。需要捕获任意容器滚动的虚拟列表、无限加载可在 `document` 上用捕获监听。换页滚动位置由根布局的 `PageScrollRestorer` 接管（新页面回顶、前进后退恢复），不要在页面里另写换页回顶。
 - 加载反馈与骨架有统一入口，骨架与真实组件共用布局常量，不手写 `animate-pulse` / `animate-spin` 或像素高度，见 [前端界面](docs/frontend.md#加载反馈与骨架)。
 - 本站数据的列表骨架条数跟随真实条数（快照、计数 cookie 或服务端同次渲染的轻量计数），已知为 0 时渲染空状态骨架；固定默认条数仅限搜索结果、分类等外部数据源列表。新增或改造列表页时同次接入计数来源，见 [前端界面](docs/frontend.md#加载反馈与骨架)。

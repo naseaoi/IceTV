@@ -58,6 +58,47 @@ function generateStorageKey(source: string, id: string): string {
 
 // 导出便捷方法
 class DbManager {
+  async countCapsules(
+    ...args: Parameters<IStorage['countCapsules']>
+  ): ReturnType<IStorage['countCapsules']> {
+    return (await this.getStorage()).countCapsules(...args);
+  }
+  async getCompletion(
+    ...args: Parameters<IStorage['getCompletion']>
+  ): ReturnType<IStorage['getCompletion']> {
+    return (await this.getStorage()).getCompletion(...args);
+  }
+  async createCapsule(
+    ...args: Parameters<IStorage['createCapsule']>
+  ): ReturnType<IStorage['createCapsule']> {
+    return (await this.getStorage()).createCapsule(...args);
+  }
+  async getCapsules(
+    ...args: Parameters<IStorage['getCapsules']>
+  ): ReturnType<IStorage['getCapsules']> {
+    return (await this.getStorage()).getCapsules(...args);
+  }
+  async deleteCapsule(
+    ...args: Parameters<IStorage['deleteCapsule']>
+  ): ReturnType<IStorage['deleteCapsule']> {
+    return (await this.getStorage()).deleteCapsule(...args);
+  }
+  async openCapsule(
+    ...args: Parameters<IStorage['openCapsule']>
+  ): ReturnType<IStorage['openCapsule']> {
+    return (await this.getStorage()).openCapsule(...args);
+  }
+  async getCapsuleMessages(
+    ...args: Parameters<IStorage['getCapsuleMessages']>
+  ): ReturnType<IStorage['getCapsuleMessages']> {
+    return (await this.getStorage()).getCapsuleMessages(...args);
+  }
+  async readAllCapsules(
+    ...args: Parameters<IStorage['readAllCapsules']>
+  ): ReturnType<IStorage['readAllCapsules']> {
+    return (await this.getStorage()).readAllCapsules(...args);
+  }
+
   async getTrackingCalendarItems(
     ...args: Parameters<IStorage['getTrackingCalendarItems']>
   ): ReturnType<IStorage['getTrackingCalendarItems']> {
@@ -401,6 +442,24 @@ class DbManager {
   ): ReturnType<IStorage['getMyVideoReviewRatings']> {
     return (await this.getStorage()).getMyVideoReviewRatings(...args);
   }
+  async getWorkWatchStatuses(
+    ...args: Parameters<IStorage['getWorkWatchStatuses']>
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    return (await this.getStorage()).getWorkWatchStatuses(...args);
+  }
+
+  async getFollowOpinions(
+    ...args: Parameters<IStorage['getFollowOpinions']>
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    return (await this.getStorage()).getFollowOpinions(...args);
+  }
+
+  async getTasteMatch(
+    ...args: Parameters<IStorage['getTasteMatch']>
+  ): ReturnType<IStorage['getTasteMatch']> {
+    return (await this.getStorage()).getTasteMatch(...args);
+  }
+
   async getWorkVideoReviewPage(
     ...args: Parameters<IStorage['getWorkVideoReviewPage']>
   ): ReturnType<IStorage['getWorkVideoReviewPage']> {
