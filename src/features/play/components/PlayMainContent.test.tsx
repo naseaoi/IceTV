@@ -246,6 +246,8 @@ describe('PlayMainContent', () => {
     const nextDismissSourceRecommendation = jest.fn();
     const sourceRecommendation = {
       source: 'source-b',
+      id: 'source-b-id',
+      title: '测试影片',
       sourceName: '源站B',
       quality: '1080P',
       loadSpeed: '1.2MB/s',
@@ -286,6 +288,36 @@ describe('PlayMainContent', () => {
 
     expect(onDismissSourceRecommendation).not.toHaveBeenCalled();
     expect(nextDismissSourceRecommendation).toHaveBeenCalledTimes(1);
+  });
+
+  it('优源提示可一键切换到推荐源', () => {
+    const onSourceChange = jest.fn();
+    const onDismissSourceRecommendation = jest.fn();
+
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        onSourceChange={onSourceChange}
+        sourceRecommendation={{
+          source: 'source-b',
+          id: 'source-b-id',
+          title: '测试影片',
+          sourceName: '源站B',
+          quality: '1080P',
+          loadSpeed: '1.2MB/s',
+        }}
+        onDismissSourceRecommendation={onDismissSourceRecommendation}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '切换' }));
+
+    expect(onSourceChange).toHaveBeenCalledWith(
+      'source-b',
+      'source-b-id',
+      '测试影片',
+    );
+    expect(onDismissSourceRecommendation).toHaveBeenCalledTimes(1);
   });
 
   it('在播放器失败层支持继续尝试', () => {

@@ -16,6 +16,7 @@ export const AUTO_SWITCH_SOURCE_STORAGE_KEY = 'autoSwitchSource';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
+export const PLAYBACK_RATE_STORAGE_KEY = 'playbackRate';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const NOTIFIED_RELEASE_VERSION_STORAGE_KEY = 'notifiedReleaseVersion';
@@ -165,6 +166,29 @@ export function readAutoPlayNextEnabled(): boolean {
 
 export function writeAutoPlayNextEnabled(value: boolean) {
   return writeStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY, value);
+}
+
+const MIN_PLAYBACK_RATE = 0.25;
+const MAX_PLAYBACK_RATE = 4;
+
+export function readPlaybackRate(): number {
+  const rate = Number(readStorage(PLAYBACK_RATE_STORAGE_KEY));
+  return Number.isFinite(rate) &&
+    rate >= MIN_PLAYBACK_RATE &&
+    rate <= MAX_PLAYBACK_RATE
+    ? rate
+    : 1;
+}
+
+export function writePlaybackRate(rate: number) {
+  if (
+    !Number.isFinite(rate) ||
+    rate < MIN_PLAYBACK_RATE ||
+    rate > MAX_PLAYBACK_RATE
+  ) {
+    return false;
+  }
+  return writeStorage(PLAYBACK_RATE_STORAGE_KEY, String(rate));
 }
 
 export function readSeenAnnouncement(): string | undefined {

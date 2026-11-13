@@ -306,6 +306,63 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+describe('首次搜索截止时间', () => {
+  it.each(['headers', 'body'])(
+    'quick %s 悬挂后中止并回退完整搜索',
+    async (phase) => {
+      const source = createSource('search-fallback');
+      let quickSignal: AbortSignal | undefined;
+      global.fetch = jest.fn((input, init) => {
+        const url = new URL(String(input), window.location.origin);
+        if (url.pathname === '/api/search/quick') {
+          quickSignal = init?.signal as AbortSignal;
+          const hanging = new Promise(() => undefined);
+          return phase === 'headers'
+            ? hanging
+            : Promise.resolve({ ok: true, json: () => hanging });
+        }
+        if (url.pathname === '/api/search')
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ results: [source] }),
+          });
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }) as unknown as typeof fetch;
+      const params = setupHook(null);
+      await act(async () => {
+        for (let i = 0; i < 30; i += 1) await Promise.resolve();
+        jest.advanceTimersByTime(30_000);
+      });
+      expect(quickSignal?.aborted).toBe(true);
+      expect(apiRequests('/api/search')).toHaveLength(1);
+      expect(params.setDetail).toHaveBeenCalledWith(source);
+    },
+  );
+
+  it('完整搜索正文悬挂后中止并结束加载', async () => {
+    let searchSignal: AbortSignal | undefined;
+    global.fetch = jest.fn((input, init) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname === '/api/search') {
+        searchSignal = init?.signal as AbortSignal;
+        return Promise.resolve({
+          ok: true,
+          json: () => new Promise(() => undefined),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    }) as unknown as typeof fetch;
+    const params = setupHook(null, { optimizationEnabled: false });
+    await act(async () => {
+      for (let i = 0; i < 30; i += 1) await Promise.resolve();
+      jest.advanceTimersByTime(30_001);
+    });
+    expect(searchSignal?.aborted).toBe(true);
+    expect(params.setError).toHaveBeenCalledWith('播放源搜索失败');
+    expect(params.setLoading).toHaveBeenLastCalledWith(false);
+  });
+});
+
 describe('usePlayInit 线路偏好', () => {
   const relay = createSource('relay');
   const direct = createSource('direct');
@@ -682,6 +739,9 @@ describe('usePlayInit 常用源直接起播', () => {
 
     await waitFor(() =>
       expect(params.setSourceRecommendation).toHaveBeenCalledWith({
+        source: other.source,
+        id: other.id,
+        title: other.title,
         sourceName: 'B',
         quality: PASSING_PROBE.quality,
         loadSpeed: PASSING_PROBE.loadSpeed,

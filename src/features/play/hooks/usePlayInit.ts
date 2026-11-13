@@ -88,6 +88,7 @@ const SOURCE_PROBE_FOREGROUND_LIMIT = SOURCE_PROBE_CONCURRENCY;
 const TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS = 3_000;
 // 起播等历史恢复的上限：播放记录接口正常远在此内返回；超时按当前集起播，记录迟到时照旧由历史恢复换集
 const HISTORY_RESTORE_WAIT_TIMEOUT_MS = 1_000;
+const STARTUP_SEARCH_TIMEOUT_MS = 30_000;
 const detailCache = new Map<
   string,
   { data: SearchResult; expiresAt: number }
@@ -290,6 +291,9 @@ async function preferBestSource(
 
     recommendedKey = bestKey;
     setSourceRecommendation({
+      source: best.source.source,
+      id: best.source.id,
+      title: best.source.title,
       sourceName: best.source.source_name || best.source.source || '更优源',
       quality: best.testResult.quality,
       loadSpeed: best.testResult.loadSpeed,
@@ -824,17 +828,23 @@ export function usePlayInit({
     let sourceSearchFailed = false;
     const fetchSourcesData = async (query: string): Promise<SearchResult[]> => {
       try {
-        const data = await waitForSharedLoad(
-          () =>
-            getSharedPlaybackSearch(query) ??
-            (async () => {
-              const response = await fetch(
-                `/api/search?q=${encodeURIComponent(query.trim())}`,
-                { signal },
-              );
-              if (!response.ok) throw new Error('播放源搜索失败');
-              return response.json();
-            })(),
+        const data = await withAbortableTimeout(
+          (searchSignal) =>
+            waitForSharedLoad(
+              () =>
+                getSharedPlaybackSearch(query) ??
+                (async () => {
+                  const response = await fetch(
+                    `/api/search?q=${encodeURIComponent(query.trim())}`,
+                    { signal: searchSignal },
+                  );
+                  if (!response.ok) throw new Error('播放源搜索失败');
+                  return response.json();
+                })(),
+              searchSignal,
+            ),
+          STARTUP_SEARCH_TIMEOUT_MS,
+          '播放源搜索失败',
           signal,
         );
         if (
@@ -891,11 +901,20 @@ export function usePlayInit({
       }
 
       try {
-        const response = await fetch(`/api/search/quick?${params.toString()}`, {
-          signal: quickSignal,
-        });
-        if (!response.ok) return null;
-        return (await response.json()) as QuickSearchResponse;
+        return await withAbortableTimeout(
+          (searchSignal) =>
+            waitForSharedLoad(async () => {
+              const response = await fetch(
+                `/api/search/quick?${params.toString()}`,
+                { signal: searchSignal },
+              );
+              if (!response.ok) return null;
+              return (await response.json()) as QuickSearchResponse;
+            }, searchSignal),
+          STARTUP_SEARCH_TIMEOUT_MS,
+          '播放源搜索失败',
+          quickSignal,
+        );
       } catch {
         return null;
       }

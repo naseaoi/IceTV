@@ -1,5 +1,11 @@
 ﻿import type Artplayer from 'artplayer';
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
+import {
+  Dispatch,
+  MutableRefObject,
+  SetStateAction,
+  useEffect,
+  useMemo,
+} from 'react';
 import { useCallback, useRef } from 'react';
 
 import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
@@ -20,6 +26,7 @@ import {
 } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import { applyResumeTime } from '@/features/play/lib/resumePlayback';
+import { createScreenWakeLockController } from '@/features/play/lib/screenWakeLock';
 import {
   generateStorageKey,
   PlayRecord,
@@ -479,49 +486,12 @@ export function usePlayProgress({
     void doSave(true);
   }, [doCheckpoint, doSave]);
 
-  const requestWakeLock = useCallback(async () => {
-    try {
-      if (
-        typeof document !== 'undefined' &&
-        document.visibilityState !== 'visible'
-      ) {
-        console.debug('Wake Lock 页面不可见，跳过请求');
-        return;
-      }
-      if ('wakeLock' in navigator) {
-        wakeLockRef.current = await (
-          navigator as unknown as {
-            wakeLock: { request: (type: string) => Promise<WakeLockSentinel> };
-          }
-        ).wakeLock.request('screen');
-      }
-    } catch (err) {
-      const wakeLockMessage =
-        err instanceof Error ? err.message.toLowerCase() : '';
-      if (
-        err instanceof DOMException &&
-        err.name === 'NotAllowedError' &&
-        (wakeLockMessage.includes('not visible') ||
-          (typeof document !== 'undefined' &&
-            document.visibilityState !== 'visible'))
-      ) {
-        console.debug('Wake Lock 页面不可见，浏览器拒绝请求:', err);
-        return;
-      }
-      console.warn('Wake Lock 请求失败:', err);
-    }
-  }, [wakeLockRef]);
-
-  const releaseWakeLock = useCallback(async () => {
-    try {
-      if (wakeLockRef.current) {
-        await wakeLockRef.current.release();
-        wakeLockRef.current = null;
-      }
-    } catch (err) {
-      console.warn('Wake Lock 释放失败:', err);
-    }
-  }, [wakeLockRef]);
+  const wakeLockController = useMemo(
+    () => createScreenWakeLockController(wakeLockRef),
+    [wakeLockRef],
+  );
+  const requestWakeLock = wakeLockController.request;
+  const releaseWakeLock = wakeLockController.release;
 
   const clearSaveInterval = useCallback(() => {
     if (saveIntervalRef.current) {

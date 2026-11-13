@@ -76,6 +76,7 @@ interface PlayerMobileControlsOptions {
 export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
   __icetvHlsCleanup?: (() => void) | null;
+  __icetvOnRuntimeReleased?: () => void;
   __icetvClientAdFilter?: boolean;
   __icetvFragmentHttpCacheRecovery?: boolean;
   /** HLS 事件处理器引用，复用时先移除旧的再绑定新的 */
@@ -103,20 +104,22 @@ export async function getPlayerModules(): Promise<PlayerModules> {
     return playerModulesPromise;
   }
 
-  playerModulesPromise = Promise.all([
-    import('artplayer'),
-    import('hls.js'),
-  ]).then(([{ default: Artplayer }, { default: Hls }]) => ({
-    Artplayer,
-    Hls,
-  }));
+  playerModulesPromise = Promise.all([import('artplayer'), import('hls.js')])
+    .then(([{ default: Artplayer }, { default: Hls }]) => ({
+      Artplayer,
+      Hls,
+    }))
+    .catch((error) => {
+      playerModulesPromise = null;
+      throw error;
+    });
 
   return playerModulesPromise;
 }
 
 /** 预热播放器模块：页面加载时调用，提前触发动态导入 */
 export function preloadPlayerModules(): void {
-  getPlayerModules();
+  void getPlayerModules().catch(() => undefined);
 }
 
 /** 预取 m3u8 代理地址（与模块加载并行），填充服务端缓存 */
@@ -143,6 +146,7 @@ export function runManagedVideoCleanup(video?: HTMLVideoElement | null): void {
   markManagedVideoExpectedAbort(managedVideo);
   const cleanup = managedVideo.__icetvHlsCleanup;
   managedVideo.__icetvHlsCleanup = null;
+  managedVideo.__icetvOnRuntimeReleased?.();
   cleanup?.();
 }
 

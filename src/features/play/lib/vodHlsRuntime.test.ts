@@ -225,6 +225,90 @@ function setupRuntime() {
 }
 
 describe('vodHlsRuntime 运行时释放', () => {
+  it('backs off resource limits without route failure, freezes budgets and stops after three retries', async () => {
+    jest.useFakeTimers();
+    mockIsServerProxy.mockReturnValue(true);
+    const runtime = setupRuntime();
+    const video = createVideo();
+    await runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    const busy = {
+      ...FATAL_MANIFEST_ERROR,
+      response: { code: 503 },
+      networkDetails: {
+        getResponseHeader: (name: string) =>
+          name === 'x-icetv-resource-limited' ? '1' : '5',
+      },
+    };
+    for (let i = 0; i < 3; i++) {
+      const progress = getVodStartupProgress(video)!;
+      const before = progress.startedAt;
+      const loads = hls.loadSource.mock.calls.length;
+      hls.emit(FakeHls.Events.ERROR, busy);
+      jest.advanceTimersByTime(4999);
+      expect(hls.loadSource).toHaveBeenCalledTimes(loads);
+      expect(getVodStartupProgress(video)!.startedAt - before).toBeCloseTo(
+        4999,
+      );
+      jest.advanceTimersByTime(1);
+      expect(hls.loadSource).toHaveBeenCalledTimes(loads + 1);
+    }
+    hls.emit(FakeHls.Events.ERROR, busy);
+    expect(runtime.setError).toHaveBeenCalledWith('服务器繁忙，请稍后重试');
+    expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+    expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+  });
+
+  it('cancels pending resource retries when runtime is released', async () => {
+    jest.useFakeTimers();
+    const runtime = setupRuntime();
+    const video = createVideo();
+    await runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    hls.emit(FakeHls.Events.ERROR, {
+      ...FATAL_MANIFEST_ERROR,
+      response: { code: 429 },
+      networkDetails: {
+        getResponseHeader: (name: string) =>
+          name === 'x-icetv-resource-limited' ? '1' : '20',
+      },
+    });
+    const loads = hls.loadSource.mock.calls.length;
+    runManagedVideoCleanup(video);
+    jest.advanceTimersByTime(30_000);
+    expect(hls.loadSource).toHaveBeenCalledTimes(loads);
+    expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+  });
+
+  it('backs off mid-play resource limits and ignores stall triggers until the retry', async () => {
+    jest.useFakeTimers();
+    const runtime = setupRuntime();
+    const video = createVideo();
+    await runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    hls.levels = [{}];
+    video.dispatchEvent(new Event('playing'));
+    hls.emit(FakeHls.Events.ERROR, {
+      ...NON_FATAL_FRAG_ERROR,
+      response: { code: 503 },
+      networkDetails: {
+        getResponseHeader: (name: string) =>
+          name === 'x-icetv-resource-limited' ? '1' : '10',
+      },
+    });
+    video.dispatchEvent(new Event('waiting'));
+    video.dispatchEvent(new Event('playing'));
+    jest.advanceTimersByTime(9999);
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(hls.startLoad).toHaveBeenCalledTimes(1);
+    expect(runtime.setRealtimeLoadSpeed).toHaveBeenCalledWith(
+      '服务器繁忙，稍后自动重试',
+    );
+    expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+    expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     FakeHls.created = 0;
     mockIsServerProxy.mockReset().mockReturnValue(false);
@@ -238,6 +322,7 @@ describe('vodHlsRuntime 运行时释放', () => {
 
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -657,6 +742,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
 
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.useRealTimers();
     jest.restoreAllMocks();
     jest.useRealTimers();
     global.fetch = originalFetch;
@@ -989,6 +1075,7 @@ describe('vodHlsRuntime 卡顿恢复', () => {
 
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.useRealTimers();
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -1088,6 +1175,7 @@ describe('vodHlsRuntime 缓冲配额', () => {
 
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -1170,6 +1258,7 @@ describe('vodHlsRuntime 缓冲配额', () => {
 describe('点播迟到 loader 与离线恢复', () => {
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 

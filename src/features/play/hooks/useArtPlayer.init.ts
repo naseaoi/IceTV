@@ -23,6 +23,7 @@ import {
   waitForDanmakuPlayerSwitch,
 } from '@/features/play/lib/danmaku/load-notice';
 import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
+import { resolveActivePlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { prewarmLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
 import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import {
@@ -63,6 +64,7 @@ import {
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { writePlaybackRate } from '@/lib/local-preferences';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -72,6 +74,7 @@ import {
   isPlayerFastForwarding,
   prefetchM3U8,
   restorePlayerPlaybackRate,
+  runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import {
   configureArtplayerStatics,
@@ -521,6 +524,15 @@ export async function initializeArtPlayer(
       });
       reportNativeRouteStat(false);
 
+      const resumeTarget = resolveActivePlayTime({
+        targetEpisodePending: clearTargetEpisodeProgressRef.current,
+        playerCurrentTime: player.currentTime || 0,
+        pendingResumeTime: resumeTimeRef.current,
+        stableCurrentTime: stableCurrentTimeRef.current,
+      });
+      resumeTimeRef.current = resumeTarget;
+      resumeModeRef.current = 'forced';
+      loadingSessionRef.current.pendingInitialResumeTarget = resumeTarget;
       nativeUseServerProxy = nextServer;
       nativeAttempt.routeSwitched = true;
       nativeAttempt.triedRoutes.add(nextServer ? 'server' : 'browser');
@@ -530,6 +542,10 @@ export async function initializeArtPlayer(
 
       try {
         waitForDanmakuPlayerSwitch(player, player.switchUrl(fallbackUrl));
+        player.once('video:loadedmetadata', () => {
+          if (isStalePlayerSession()) return;
+          applyResumeTime(player, resumeTarget);
+        });
         const activeVideo = player.video as HTMLVideoElement | undefined;
         if (activeVideo) {
           const managedVideo = getManagedVideo(activeVideo);
@@ -562,6 +578,7 @@ export async function initializeArtPlayer(
     };
 
     const tryAutoAdvanceEpisode = () => {
+      if (isStalePlayerSession()) return false;
       const currentDetail = detailRef.current;
       const episodeIndex = currentEpisodeIndexRef.current;
       if (
@@ -954,6 +971,7 @@ export async function initializeArtPlayer(
     });
 
     player.on('video:ended', () => {
+      if (isStalePlayerSession()) return;
       void releaseWakeLock();
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('ended');
       setIsPlaying(false);
@@ -983,6 +1001,7 @@ export async function initializeArtPlayer(
         return;
       }
       lastPlaybackRateRef.current = player.playbackRate as number;
+      writePlaybackRate(lastPlaybackRateRef.current);
     });
 
     player.on('video:canplay', () => {
@@ -996,7 +1015,7 @@ export async function initializeArtPlayer(
           Math.abs(
             (player.playbackRate as number) - lastPlaybackRateRef.current,
           ) > 0.01 &&
-          isWebkit
+          !isPlayerFastForwarding(player)
         ) {
           player.playbackRate = lastPlaybackRateRef.current as
             | 0.5
@@ -1019,7 +1038,8 @@ export async function initializeArtPlayer(
     player.on('video:progress', finishInitialLoadingIfMediaReady);
 
     player.on('video:timeupdate', () => {
-      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('timeupdate');
+      if (isStalePlayerSession()) return;
+      handlePlaybackStatsEvent?.('timeupdate');
       updateStableCurrentTime(player.currentTime || 0);
 
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
@@ -1087,6 +1107,15 @@ export async function initializeArtPlayer(
       }
     });
 
+    let nativeOfflineErrorPending = false;
+    const failNativePlayback = (reason: string) => {
+      if (onPlaybackRecoveryExhausted?.(reason)) return;
+      runManagedVideoCleanup(player.video as HTMLVideoElement);
+      player.pause();
+      setIsVideoLoading(false);
+      setRealtimeLoadSpeed('');
+      setError('当前源加载失败');
+    };
     const handlePlayerError = (error: Error) => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('error');
       console.error('播放器错误:', error);
@@ -1096,27 +1125,43 @@ export async function initializeArtPlayer(
         return;
       }
       if (isStalePlayerSession()) return;
-      if (player.currentTime > 0) {
+      if (mediaKind !== 'native' || activeVideo?.error?.code === 1) return;
+      if (navigator.onLine === false) {
+        nativeOfflineErrorPending = true;
         return;
       }
-      if (
-        mediaKind !== 'native' ||
-        navigator.onLine === false ||
-        activeVideo?.error?.code === 1
-      )
-        return;
+      nativeOfflineErrorPending = false;
       if (activeVideo?.error?.code !== 2) {
-        onPlaybackRecoveryExhausted?.('native-media-error');
+        failNativePlayback('native-media-error');
         return;
       }
       reportNativeRouteStat(false);
       if (
         mediaKind === 'native' &&
-        switchNativeToServerProxy(error.message || 'network-error')
+        switchNativeToServerProxy(error?.message || 'network-error')
       )
         return;
-      onPlaybackRecoveryExhausted?.('native-network-error');
+      failNativePlayback('native-network-error');
     };
+    const onNativeOnline = () => {
+      if (
+        nativeOfflineErrorPending &&
+        navigator.onLine !== false &&
+        !isStalePlayerSession()
+      ) {
+        handlePlayerError(new Error('network-restored'));
+      }
+    };
+    if (mediaKind === 'native')
+      window.addEventListener('online', onNativeOnline);
+    const onRuntimeReleased = () => {
+      autoAdvanceArmedRef.current = false;
+      nativeOfflineErrorPending = false;
+      window.removeEventListener('online', onNativeOnline);
+    };
+    getManagedVideo(player.video as HTMLVideoElement).__icetvOnRuntimeReleased =
+      onRuntimeReleased;
+    player.on('destroy', onRuntimeReleased);
     player.on('error', handlePlayerError);
     // 内建重连原本会转发 video:error；移除后由项目直接接管原生媒体错误。
     player.on('video:error', handlePlayerError);

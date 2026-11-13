@@ -26,6 +26,7 @@ import { useDanmakuWarmup } from '@/features/play/hooks/useDanmakuWarmup';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
+import { usePlayMediaSession } from '@/features/play/hooks/usePlayMediaSession';
 import { usePlayPageState } from '@/features/play/hooks/usePlayPageState';
 import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
@@ -556,6 +557,21 @@ function AuthenticatedPlayPageClient({
     if (currentEpisodeIndexRef.current !== previousIndex)
       resetAutoSourceSwitch();
   }, [handleNextEpisode, resetAutoSourceSwitch, currentEpisodeIndexRef]);
+
+  usePlayMediaSession({
+    artPlayerRef,
+    videoTitle,
+    episodeLabel:
+      totalEpisodes > 1
+        ? detail?.episodes_titles?.[currentEpisodeIndex] ||
+          `第 ${currentEpisodeIndex + 1} 集`
+        : null,
+    videoCover: videoCover || detail?.poster || '',
+    hasPreviousEpisode: currentEpisodeIndex > 0,
+    hasNextEpisode: currentEpisodeIndex < totalEpisodes - 1,
+    onPreviousEpisode: handlePreviousEpisodeRequest,
+    onNextEpisode: handleNextEpisodeRequest,
+  });
 
   usePlayerKeyboard({
     artPlayerRef,

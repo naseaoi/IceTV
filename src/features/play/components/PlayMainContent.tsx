@@ -450,15 +450,28 @@ export function PlayMainContent(props: PlayMainContentProps) {
               <div className='mt-0.5 text-white/75'>
                 {sourceRecommendation.quality} ·{' '}
                 {sourceRecommendation.loadSpeed}
-                ，可在换源中手动选择
               </div>
-              <button
-                type='button'
-                className='mt-1 text-brand-300 hover:text-brand-200'
-                onClick={() => onDismissSourceRecommendationRef.current?.()}
-              >
-                知道了
-              </button>
+              <div className='mt-1.5 flex items-center gap-3'>
+                <button
+                  type='button'
+                  className='inline-flex items-center gap-1 font-medium text-brand-300 hover:text-brand-200'
+                  onClick={() => {
+                    const { source, id, title } = sourceRecommendation;
+                    onDismissSourceRecommendationRef.current?.();
+                    onSourceChange(source, id, title);
+                  }}
+                >
+                  <ArrowLeftRight className='h-3.5 w-3.5' />
+                  切换
+                </button>
+                <button
+                  type='button'
+                  className='text-white/60 hover:text-white/85'
+                  onClick={() => onDismissSourceRecommendationRef.current?.()}
+                >
+                  忽略
+                </button>
+              </div>
             </div>
           )}
         </>

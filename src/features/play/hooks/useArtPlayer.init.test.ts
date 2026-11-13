@@ -308,6 +308,104 @@ describe('initializeArtPlayer 拉流控制', () => {
     jest.useRealTimers();
   });
 
+  it.each([2, 3])(
+    '原生播放中错误 %s 交给换源，未接手时展示失败',
+    async (code) => {
+      const params = createParams();
+      params.videoUrl = 'https://cdn.example/movie.mp4';
+      params.onPlaybackRecoveryExhausted = jest.fn(() => false);
+      const { player, video } = await setupPlayer(params);
+      player.emit('video:playing');
+      player.currentTime = 120;
+      Object.defineProperty(video, 'error', { value: { code } });
+      player.emit('video:error', new Error('failed'));
+      expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+        code === 2 ? 'native-network-error' : 'native-media-error',
+      );
+      expect(params.setError).toHaveBeenCalledWith('当前源加载失败');
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    },
+  );
+
+  it.each([false, true])(
+    '原生线路回落保留目标集进度，pending=%s',
+    async (pending) => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: true,
+      });
+      const params = createParams();
+      params.videoUrl = 'https://cdn.example/movie.mp4';
+      params.onPlaybackRecoveryExhausted = jest.fn(() => true);
+      const { player, video } = await setupPlayer(params);
+      player.emit('video:playing');
+      player.currentTime = 120;
+      params.clearTargetEpisodeProgressRef.current = pending;
+      params.resumeTimeRef.current = pending ? 45 : null;
+      player.switchUrl.mockImplementation(() => {
+        player.currentTime = 0;
+        return Promise.resolve();
+      });
+      video.play = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(video, 'error', { value: { code: 2 } });
+      player.emit('video:error', new Error('network'));
+      expect(player.switchUrl).toHaveBeenCalledTimes(1);
+      expect(params.resumeTimeRef.current).toBe(pending ? 45 : 120);
+      player.duration = 1000;
+      player.emit('video:loadedmetadata');
+      expect(player.currentTime).toBe(pending ? 45 : 120);
+      player.emit('video:error', new Error('network'));
+      expect(player.switchUrl).toHaveBeenCalledTimes(1);
+      expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+        'native-network-error',
+      );
+      expect(params.setError).not.toHaveBeenCalledWith('当前源加载失败');
+    },
+  );
+
+  it('原生离线错误等联网处理，运行时释放后移除联网监听', async () => {
+    const online = jest
+      .spyOn(navigator, 'onLine', 'get')
+      .mockReturnValue(false);
+    const params = createParams();
+    params.videoUrl = 'https://cdn.example/movie.mp4';
+    params.onPlaybackRecoveryExhausted = jest.fn(() => true);
+    const { player, video } = await setupPlayer(params);
+    player.currentTime = 120;
+    Object.defineProperty(video, 'error', { value: { code: 2 } });
+    player.emit('video:error', new Error('offline'));
+    expect(params.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+    online.mockReturnValue(false);
+    player.emit('video:error', new Error('offline'));
+    runManagedVideoCleanup(video);
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['video:timeupdate', 'video:ended'])(
+    '释放旧集后 %s 不触发下一集或片尾操作',
+    async (event) => {
+      const params = createParams();
+      params.autoPlayNextEnabledRef.current = true;
+      const { player, video } = await setupPlayer(params);
+      player.emit('video:playing');
+      player.duration = 100;
+      player.currentTime = 99.8;
+      runManagedVideoCleanup(video);
+      player.emit(event);
+      expect(params.handleNextEpisode).not.toHaveBeenCalled();
+      // 即使重新登记运行时，已释放会话也必须等下一次真实起播再获连播资格。
+      player.option.customType.m3u8(video, player.option.url);
+      player.emit('video:ended');
+      expect(params.handleNextEpisode).not.toHaveBeenCalled();
+    },
+  );
+
   it('统计事件独立于跳片头设置，并屏蔽已释放运行时的迟到采样', async () => {
     const params = createParams();
     params.handlePlaybackStatsEvent = jest.fn();
