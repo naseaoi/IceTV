@@ -4,6 +4,7 @@ import { CalendarDays, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
 import {
@@ -56,15 +57,29 @@ function CalendarEntry({
   item: TrackingCalendarItem | PlacedCalendarItem;
 }) {
   const inferred = 'inferred' in item && item.inferred;
+  const href = buildContinuePlayUrl({
+    source: item.source,
+    id: item.id,
+    title: item.title,
+    year: item.year,
+    query: item.searchTitle,
+  });
+  const menuProps = useMediaCardMenu({
+    target: {
+      source: item.source,
+      id: item.id,
+      title: item.title,
+      year: item.year,
+      cover: item.cover,
+      searchTitle: item.searchTitle,
+      totalEpisodes: item.totalEpisodes ?? undefined,
+    },
+    href,
+  });
   return (
     <Link
-      href={buildContinuePlayUrl({
-        source: item.source,
-        id: item.id,
-        title: item.title,
-        year: item.year,
-        query: item.searchTitle,
-      })}
+      href={href}
+      {...menuProps}
       title={inferred ? '按最近一次更新推测' : undefined}
       className={`${ENTRY_CLASS} group transition-colors hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.06]`}
     >

@@ -21,6 +21,9 @@ import { showToast } from '@/lib/toast';
 import type { UserProfileView } from '@/lib/types';
 import { DisplayableError } from '@/lib/user-facing-error';
 
+jest.mock('@/components/card-actions/useMediaCardMenu', () => ({
+  useMediaCardMenu: () => ({}),
+}));
 jest.mock('@/components/PageLayout', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,

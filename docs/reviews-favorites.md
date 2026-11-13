@@ -67,3 +67,4 @@
 
 - 标记评分面板由根布局的 `WatchRecordProvider` 挂载，卡片菜单经 `useOpenWatchRecord()` 打开（`src/components/watch-record-context.ts`）；「加入片单」弹窗同样由根布局的 `ListPickerProvider` 挂载，经 `useOpenListPicker()`（`src/components/list-picker-context.ts`）打开。两者未登录时返回 null 隐藏入口。新入口复用它，评价编辑复用 `src/features/reviews/`。
 - 卡片右键 / 长按菜单统一经 `buildCardActions()`（`src/components/card-actions/actions.tsx`）组装，顺序固定为播放 → 收藏 → 加入片单 → 标记评分 → 标为已读 / 追更 → 外部详情 → 删除记录；卡片只决定提供哪些项，不要在卡片里手排数组。
+- 跳转播放页的封面链接（他人主页收藏、我的评价、追更日历、片单条目等）经 `useMediaCardMenu()`（`src/components/card-actions/useMediaCardMenu.ts`）挂同一套菜单，返回值整体展开到 `<Link>` 上。新增作品封面入口同样接入；目录作品不给收藏项，收藏交给标记评分面板。

@@ -2,34 +2,14 @@
 
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useId } from 'react';
 
-import {
-  type CardActionAnchor,
-  buildCardActions,
-} from '@/components/card-actions/actions';
-import { useCardInteractionManager } from '@/components/CardInteractionProvider';
+import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import CoverImage from '@/components/CoverImage';
-import { useOpenListPicker } from '@/components/list-picker-context';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import SkeletonText from '@/components/SkeletonText';
-import { noSelectStyle } from '@/components/video-card/constants';
-import {
-  useOpenWatchRecord,
-  WATCH_STATUS_OPTIONS,
-} from '@/components/watch-record-context';
+import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
 import { listItemPlayUrl } from '@/features/lists/lib/list-links';
 import type { ListItem } from '@/features/lists/types';
-import { useLongPress } from '@/hooks/useLongPress';
-import { usePlaybackIntentPrefetch } from '@/hooks/usePlaybackIntentPrefetch';
-import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
-import {
-  deleteFavorite,
-  generateStorageKey,
-  saveFavorite,
-} from '@/lib/db.client';
-import { showToast } from '@/lib/toast';
 
 // 卡片与骨架共用几何类，改动时两侧同步
 const COVER_CLASS = 'aspect-[2/3] rounded-xl';
@@ -76,11 +56,6 @@ function Cover({ item }: { item: ListItem }) {
   );
 }
 
-const CATALOG_SOURCE_NAMES: Record<string, string> = {
-  douban: '豆瓣',
-  bangumi: 'Bangumi',
-};
-
 // 点击直达播放；登录后右键或长按展开与其他海报卡片一致的操作菜单
 export function ListItemCard({
   item,
@@ -109,162 +84,22 @@ function InteractiveListItemCard({
   item: ListItem;
   onRemove?: () => Promise<void>;
 }) {
-  const router = useRouter();
-  const interactionId = useId();
-  const openListPicker = useOpenListPicker();
-  const openWatchRecord = useOpenWatchRecord();
-  const {
-    showActionSheet,
-    hideActionSheet,
-    showConfirm,
-    ensureFavoritesLoaded,
-    getFavoriteStatus,
-  } = useCardInteractionManager();
   const href = listItemPlayUrl(item);
-  const source = item.source;
-  const id = item.sourceId ?? '';
-  const hasTarget = Boolean(source && id);
-  const catalog = isCatalogFavoriteSource(source);
-  const prefetchProps = usePlaybackIntentPrefetch({
-    source: catalog ? undefined : source,
-    id: catalog ? undefined : id,
-    title: item.searchTitle || item.title,
-    onPrefetch: () => {
-      if (hasTarget && !catalog) void ensureFavoritesLoaded();
+  const menuProps = useMediaCardMenu({
+    target: {
+      source: item.source,
+      id: item.sourceId ?? '',
+      title: item.title,
+      year: item.year,
+      cover: item.cover,
+      searchTitle: item.searchTitle,
     },
-  });
-  const year = itemYear(item);
-
-  useEffect(
-    () => () => hideActionSheet(interactionId),
-    [hideActionSheet, interactionId],
-  );
-
-  const toggleFavorite = useCallback(
-    async (favorited: boolean) => {
-      if (!favorited) {
-        await saveFavorite(source, id, {
-          title: item.title,
-          source_name: '',
-          year,
-          cover: item.cover,
-          total_episodes: 1,
-          save_time: Date.now(),
-          search_title: item.searchTitle,
-        });
-        showToast('已加入收藏', 'success');
-        return;
-      }
-      showConfirm(interactionId, {
-        objectKey: generateStorageKey(source, id),
-        operation: 'favorite',
-        title: '确认取消收藏？',
-        message: `确认取消收藏「${item.title}」吗？`,
-        danger: true,
-        cancelText: '再想想',
-        confirmText: '取消收藏',
-        onConfirm: async () => {
-          await deleteFavorite(source, id);
-          showToast('已取消收藏', 'success');
-        },
-      });
-    },
-    [id, interactionId, item, showConfirm, source, year],
-  );
-
-  const openActions = useCallback(
-    async (anchorRect: CardActionAnchor | null) => {
-      // 目录作品收藏后会换绑到可播放源，收藏入口交给标记评分面板
-      const canFavorite = hasTarget && !catalog;
-      if (canFavorite) await ensureFavoritesLoaded();
-      const favorited = canFavorite
-        ? getFavoriteStatus(generateStorageKey(source, id))
-        : false;
-      showActionSheet(interactionId, {
-        objectKey: hasTarget ? generateStorageKey(source, id) : item.id,
-        title: item.title,
-        poster: item.cover,
-        actions: buildCardActions({
-          play: { onClick: () => router.push(href) },
-          favorite: canFavorite
-            ? { favorited, onToggle: () => toggleFavorite(favorited) }
-            : undefined,
-          addToList:
-            openListPicker && hasTarget
-              ? () =>
-                  openListPicker({
-                    source,
-                    id,
-                    title: item.title,
-                    year,
-                    cover: item.cover,
-                    searchTitle: item.searchTitle || undefined,
-                  })
-              : null,
-          watchRecord:
-            openWatchRecord && hasTarget
-              ? () =>
-                  openWatchRecord({
-                    source,
-                    id,
-                    title: item.title,
-                    year,
-                    cover: item.cover,
-                    sourceName: CATALOG_SOURCE_NAMES[source] ?? '',
-                    searchTitle: item.searchTitle || undefined,
-                    doubanId: source === 'douban' ? Number(id) : undefined,
-                  })
-              : null,
-          removeFromList: onRemove,
-        }),
-        anchorRect,
-      });
-    },
-    [
-      catalog,
-      ensureFavoritesLoaded,
-      getFavoriteStatus,
-      hasTarget,
-      href,
-      id,
-      interactionId,
-      item,
-      onRemove,
-      openListPicker,
-      openWatchRecord,
-      router,
-      showActionSheet,
-      source,
-      toggleFavorite,
-      year,
-    ],
-  );
-
-  // 触屏手势会拦下原生点击，短按由这里补上跳转
-  const longPressProps = useLongPress({
-    onLongPress: () => void openActions(null),
-    onClick: () => router.push(href),
+    href,
+    onRemoveFromList: onRemove,
   });
 
   return (
-    <Link
-      href={href}
-      className='group block'
-      style={noSelectStyle}
-      prefetch={false}
-      {...prefetchProps}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        void openActions({
-          top: event.clientY,
-          left: event.clientX,
-          width: 0,
-          height: 0,
-        });
-      }}
-      onDragStart={(event) => event.preventDefault()}
-      {...longPressProps}
-    >
+    <Link href={href} className='group block' prefetch={false} {...menuProps}>
       <Cover item={item} />
       <CardBody item={item} />
     </Link>

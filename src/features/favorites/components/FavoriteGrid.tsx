@@ -3,6 +3,7 @@
 import { Check } from 'lucide-react';
 import Link from 'next/link';
 
+import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import CoverImage from '@/components/CoverImage';
 import {
   POSTER_BADGE_NEUTRAL_CLASS,
@@ -203,8 +204,22 @@ function ReadOnlyFavoriteCard({ item }: { item: FavoriteItem }) {
   const status = WATCH_STATUS_OPTIONS.find(
     (option) => option.value === item.watchStatus,
   );
+  const href = readOnlyPlayUrl(item);
+  const menuProps = useMediaCardMenu({
+    target: {
+      source: item.source,
+      id: item.id,
+      title: item.title,
+      year: item.year,
+      cover: item.poster,
+      searchTitle: item.search_title,
+      sourceName: item.source_name,
+      totalEpisodes: item.episodes,
+    },
+    href,
+  });
   return (
-    <Link href={readOnlyPlayUrl(item)} className='group block'>
+    <Link href={href} className='group block' {...menuProps}>
       <div
         className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 ${READ_ONLY_COVER_CLASS}`}
       >
