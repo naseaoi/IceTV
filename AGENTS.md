@@ -106,4 +106,4 @@
 
 `docs/` 的索引与维护规则见 [docs/README.md](docs/README.md)。改动使文档中的约束失效时同次更新对应文档。
 
-用户或部署者可感知的改动，同次提交写入 `CHANGELOG.md` 顶部的 `## [Unreleased]`，写法见 [发布](docs/release.md#发布说明)。
+用户或部署者可感知的改动，同次提交更新 `CHANGELOG.md` 顶部的 `## [Unreleased]`：重要改动单列，细节改动并入已有的概括条目或省略，取舍见 [发布](docs/release.md#条目取舍)。
