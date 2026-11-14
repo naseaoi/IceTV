@@ -125,7 +125,8 @@
       "unrs-resolver"
     ],
     "patchedDependencies": {
-      "artplayer-plugin-danmuku@5.3.0": "patches/artplayer-plugin-danmuku@5.3.0.patch"
+      "artplayer-plugin-danmuku@5.3.0": "patches/artplayer-plugin-danmuku@5.3.0.patch",
+      "next@16.2.10": "patches/next@16.2.10.patch"
     }
   },
   "packageManager": "pnpm@10.14.0"
