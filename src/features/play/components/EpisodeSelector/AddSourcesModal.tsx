@@ -112,6 +112,21 @@ const AddSourcesContent: React.FC<Omit<AddSourcesModalProps, 'isOpen'>> = ({
     [candidates, existingKeys, currentEpisodeCount],
   );
 
+  const selectableKeys = useMemo(
+    () =>
+      availableCandidates
+        .filter((item) => !item.isExisting)
+        .map((item) => item.key),
+    [availableCandidates],
+  );
+  const allSelected =
+    selectableKeys.length > 0 &&
+    selectableKeys.every((key) => selectedKeys.has(key));
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedKeys(allSelected ? new Set() : new Set(selectableKeys));
+  }, [allSelected, selectableKeys]);
+
   const handleConfirm = useCallback(() => {
     const selected = availableCandidates
       .filter((item) => selectedKeys.has(item.key))
@@ -125,27 +140,38 @@ const AddSourcesContent: React.FC<Omit<AddSourcesModalProps, 'isOpen'>> = ({
         <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
           选择要添加的源站
         </h2>
-        <button
-          type='button'
-          onClick={onCancel}
-          className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200'
-          aria-label='关闭'
-        >
-          <svg
-            xmlns='http://www.w3.org/2000/svg'
-            width='20'
-            height='20'
-            viewBox='0 0 24 24'
-            fill='none'
-            stroke='currentColor'
-            strokeWidth='2'
-            strokeLinecap='round'
-            strokeLinejoin='round'
+        <div className='flex items-center gap-4'>
+          {selectableKeys.length > 0 && (
+            <button
+              type='button'
+              onClick={toggleSelectAll}
+              className='text-sm font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300'
+            >
+              {allSelected ? '取消全选' : '全选'}
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={onCancel}
+            className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200'
+            aria-label='关闭'
           >
-            <line x1='18' y1='6' x2='6' y2='18' />
-            <line x1='6' y1='6' x2='18' y2='18' />
-          </svg>
-        </button>
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              width='20'
+              height='20'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <line x1='18' y1='6' x2='6' y2='18' />
+              <line x1='6' y1='6' x2='18' y2='18' />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {currentEpisodeCount && currentEpisodeCount > 0 && (
