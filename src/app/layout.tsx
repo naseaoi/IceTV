@@ -24,6 +24,7 @@ import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
+import { DEFAULT_APPLE_TOUCH_ICON } from '@/lib/site-icon';
 import { getStorageType } from '@/lib/storage-type';
 import { buildThemeInitScript, DEFAULT_THEME } from '@/lib/theme-preference';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
@@ -128,7 +129,7 @@ export default async function RootLayout({
         />
         <link
           rel='apple-touch-icon'
-          href={initialSiteIcon || '/icons/icon-192x192.png'}
+          href={initialSiteIcon || DEFAULT_APPLE_TOUCH_ICON}
         />
         <link rel='icon' href={initialSiteIcon || '/favicon.ico'} />
         <script
