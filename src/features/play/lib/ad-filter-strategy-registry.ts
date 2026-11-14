@@ -1,13 +1,13 @@
 export type AdFilterSignal =
-  | 'extinf-pattern'
-  | 'local-duration-shift'
-  | 'host-anomaly'
-  | 'periodic-duration-profile'
-  | 'short-edge-blocks';
+  | 'known-ad-templates'
+  | 'frame-grid-clips'
+  | 'host-anomaly';
 
 export interface SourceAdFilterStrategy {
   id: string;
   signals: readonly AdFilterSignal[];
+  /** 已确认广告素材的整块 EXTINF 序列；同一素材跨集、跨作品、跨 CDN 字节一致，只有文件名随机 */
+  adTemplates: readonly (readonly number[])[];
   timeline: 'preserve' | 'continuous-periodic';
 }
 
@@ -16,12 +16,12 @@ const SOURCE_AD_FILTER_STRATEGIES: Readonly<
 > = {
   rycj: {
     id: 'rycj-periodic-blocks',
-    signals: [
-      'extinf-pattern',
-      'local-duration-shift',
-      'host-anomaly',
-      'periodic-duration-profile',
-      'short-edge-blocks',
+    signals: ['known-ad-templates', 'frame-grid-clips', 'host-anomaly'],
+    adTemplates: [
+      [4, 5.48, 2.68],
+      [4, 4, 4, 4, 3.88],
+      [4, 4, 4, 4, 3],
+      [4, 4, 4, 4, 4, 1],
     ],
     timeline: 'continuous-periodic',
   },

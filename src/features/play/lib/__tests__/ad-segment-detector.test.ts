@@ -70,17 +70,13 @@ describe('filterM3U8AdsForSource', () => {
 
   // -------------- 信号 A: EXTINF 整数规律 --------------
 
-  /** 构造正片段：每个段内 6 个零散浮点 EXTINF */
+  const FRAME_23976 = 1001 / 24000;
+
+  /** 构造正片段：每个段内 6 个 23.976fps 整帧时长 */
   function buildNormalSegment(seed: number): string[] {
-    // 精度到微秒的零散浮点，模拟 rycj 源
-    const durs = [
-      4.170833 + seed * 0.01,
-      3.628622 - seed * 0.007,
-      5.130122 + seed * 0.003,
-      2.002 + seed * 0.005,
-      4.504 + seed * 0.002,
-      3.378 + seed * 0.004,
-    ];
+    const durs = [100, 87, 123, 48, 108, 81].map(
+      (frames, i) => (frames + ((seed + i) % 7)) * FRAME_23976,
+    );
     const lines: string[] = ['#EXT-X-DISCONTINUITY'];
     durs.forEach((d, i) => {
       lines.push(`#EXTINF:${d.toFixed(6)},`);
@@ -224,7 +220,7 @@ describe('filterM3U8AdsForSource', () => {
     expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(50);
   });
 
-  test('主流 5 秒切片中的单个 4 秒区间被识别并剔除', async () => {
+  test('25fps 正片中的整秒块不按时长判为广告', async () => {
     const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:5'];
     for (let segment = 0; segment < 10; segment++) {
       lines.push('#EXT-X-DISCONTINUITY');
@@ -245,9 +241,8 @@ describe('filterM3U8AdsForSource', () => {
       'rycj',
     );
 
-    expect(result).not.toMatch(/duration_ad_\d+\.ts/);
-    expect(result).toMatch(/normal_3_4\.ts/);
-    expect(result).toMatch(/normal_5_0\.ts/);
+    expect(result.match(/duration_ad_\d+\.ts/g)).toHaveLength(5);
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
 
   test('规律切片中的单个短尾片不被删除', async () => {
@@ -274,30 +269,34 @@ describe('filterM3U8AdsForSource', () => {
     expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
 
-  test('规律切片的短尾广告块被删除', async () => {
-    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:5'];
-    for (let segment = 0; segment < 9; segment += 1) {
+  test('24fps 正片的整秒块保留，带出非整帧时长的网格块删除', () => {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:9'];
+    for (let segment = 0; segment < 10; segment += 1) {
       lines.push('#EXT-X-DISCONTINUITY');
-      for (let fragment = 0; fragment < 6; fragment += 1) {
-        lines.push('#EXTINF:5.000000,');
+      const durations =
+        segment === 6 ? [9, 9, 9, 9, 9] : [9, 8.833333, 7.958333, 9, 3.916667];
+      durations.forEach((duration, fragment) => {
+        lines.push(`#EXTINF:${duration.toFixed(6)},`);
         lines.push(`main_${segment}_${fragment}.ts`);
-      }
+      });
     }
     lines.push('#EXT-X-DISCONTINUITY');
-    lines.push('#EXTINF:5.000000,', 'tail_ad_0.ts');
-    lines.push('#EXTINF:2.333333,', 'tail_ad_1.ts');
+    [4, 5.2, 2.6].forEach((duration, fragment) => {
+      lines.push(
+        `#EXTINF:${duration.toFixed(6)},`,
+        `unknown_ad_${fragment}.ts`,
+      );
+    });
     lines.push('#EXT-X-ENDLIST');
 
-    const result = await filterM3U8AdsForSource(
+    const result = filterM3U8AdsForSource(
       lines.join('\n'),
       'https://cdn.example.com/x/index.m3u8',
       'rycj',
     );
 
-    expect(result).not.toContain('tail_ad_0.ts');
-    expect(result).not.toContain('tail_ad_1.ts');
-    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
-    expect(result.trim().endsWith('#EXT-X-ENDLIST')).toBe(true);
+    expect(result).not.toMatch(/unknown_ad_\d+\.ts/);
+    expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(50);
   });
 
   test('片尾单浮点短正片段不被删除', async () => {
@@ -357,9 +356,9 @@ describe('filterM3U8AdsForSource', () => {
     expect(result).toMatch(/tail_0\.ts[\s\S]*tail_2\.ts/);
   });
 
-  test('正片本身是 25fps 网格时不按网格删除片尾块', async () => {
+  test('正片本身是 25fps 网格时不按网格删除未知片尾块', async () => {
     const result = await filterM3U8AdsForSource(
-      buildPeriodicPlaylist([4.2, 3.84, 5.08, 4.36, 2.96], [4, 5.48, 2.68]),
+      buildPeriodicPlaylist([4.2, 3.84, 5.08, 4.36, 2.96], [4, 5.2, 2.6]),
       'https://cdn.example.com/x/index.m3u8',
       'rycj',
     );
@@ -367,12 +366,27 @@ describe('filterM3U8AdsForSource', () => {
     expect(result).toMatch(/tail_0\.ts[\s\S]*tail_2\.ts/);
   });
 
+  test.each([
+    [[4, 5.48, 2.68]],
+    [[4, 4, 4, 4, 3.88]],
+    [[4, 4, 4, 4, 3]],
+    [[4, 4, 4, 4, 4, 1]],
+  ])('25fps 正片中的已知广告模板 %j 被删除', (template) => {
+    const result = filterM3U8AdsForSource(
+      buildPeriodicPlaylist([4, 4, 4, 4, 4], template),
+      'https://cdn.example.com/x/index.m3u8',
+      'rycj',
+    );
+
+    expect(result).not.toMatch(/tail_\d+\.ts/);
+    expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(50);
+  });
+
   test('规律正片边界和广告删除边界全部连续化', async () => {
     const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:6'];
     for (let segment = 0; segment < 10; segment += 1) {
       lines.push('#EXT-X-DISCONTINUITY');
-      const durations =
-        segment === 4 ? [4, 5.48, 4, 3.24, 4, 0.28] : [5, 5, 5, 5, 5, 5];
+      const durations = segment === 4 ? [4, 4, 4, 4, 4, 1] : [5, 5, 5, 5, 5, 5];
       durations.forEach((duration, fragment) => {
         lines.push(`#EXTINF:${duration.toFixed(6)},`);
         lines.push(
