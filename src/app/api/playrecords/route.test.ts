@@ -24,6 +24,8 @@ const mockStore = {
     return record ? JSON.stringify(record) : null;
   },
   setPlayRecordIfUnchanged: (...args: unknown[]) => mockCas(...args),
+  getLatestPlayRecordByTitle: (...args: unknown[]) =>
+    mockGetLatestPlayRecordByTitle(...args),
 };
 const mockDeletePlayRecord = jest.fn();
 const mockDeletePlayRecords = jest.fn();
@@ -334,6 +336,7 @@ describe('playrecords route', () => {
     jest.clearAllMocks();
     mockGetAllPlayRecords.mockResolvedValue(records);
     mockGetPlayRecord.mockResolvedValue(null);
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({});
     mockGetPlayRecordPage.mockResolvedValue({
       items: {
         'source+new': records['source+new'],
@@ -539,27 +542,79 @@ describe('playrecords route', () => {
     expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
   });
 
-  it('保存播放进度时由服务端记录元数据检查时间', async () => {
-    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1234);
+  it('换源首次保存沿用同作品其他源的已知集数', async () => {
+    const oldSource: PlayRecord = {
+      ...records['source+new'],
+      index: 4,
+      total_episodes: 6,
+      update_baseline_episodes: 6,
+      tracking_enabled: true,
+    };
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({ 'old+1': oldSource });
+    const save = async (record: PlayRecord) => {
+      mockSavePlayRecord.mockClear();
+      await POST(createJsonRequest({ key: 'source+new', record }));
+      return mockSavePlayRecord.mock.calls[0][3] as PlayRecord;
+    };
+    const next = {
+      ...records['source+new'],
+      index: 4,
+      total_episodes: 7,
+      update_baseline_episodes: 7,
+    };
 
-    try {
-      const response = await POST(
-        createJsonRequest({
-          key: 'source+new',
-          record: records['source+new'],
-        }),
-      );
+    expect(await save(next)).toMatchObject({
+      update_baseline_episodes: 6,
+      tracking_enabled: true,
+      update_detected_at: expect.any(Number),
+    });
+    expect(
+      await save({ ...next, total_episodes: 5, update_baseline_episodes: 5 }),
+    ).toMatchObject({ update_baseline_episodes: 5 });
 
-      expect(response.status).toBe(200);
-      expect(mockSavePlayRecord).toHaveBeenCalledWith(
-        'demo',
-        'source',
-        'new',
-        expect.objectContaining({ metadata_checked_at: 1234 }),
-      );
-    } finally {
-      nowSpy.mockRestore();
-    }
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({
+      'old+1': { ...oldSource, year: '2020' },
+    });
+    expect(await save(next)).toMatchObject({ update_baseline_episodes: 7 });
+
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({
+      'old+1': {
+        ...oldSource,
+        group_index: 4,
+        group_total: 6,
+        group_label: '第一季',
+      },
+    });
+    expect(
+      await save({
+        ...next,
+        group_index: 4,
+        group_total: 7,
+        group_label: '第二季',
+      }),
+    ).toMatchObject({ update_baseline_group_total: 7 });
+  });
+
+  it('保存播放进度不推进元数据检查时间', async () => {
+    mockGetPlayRecord.mockResolvedValue({
+      ...records['source+new'],
+      metadata_checked_at: 1234,
+    });
+
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: { ...records['source+new'], metadata_checked_at: 9999 },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'demo',
+      'source',
+      'new',
+      expect.objectContaining({ metadata_checked_at: 1234 }),
+    );
   });
 
   it('把当前可用集数标记为已读', async () => {

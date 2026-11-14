@@ -6,6 +6,8 @@ const DEFAULT_STAGGER_MS = 15 * 1000;
 const DEFAULT_METADATA_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_LIVE_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_CONFIG_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const BUSY_RETRY_MS = 2 * 60 * 1000;
+const BUSY_MAX_RETRIES = 15;
 
 let scheduled = false;
 
@@ -17,10 +19,16 @@ function readPositiveInteger(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-async function runTask(task: CronTask): Promise<void> {
+async function runTask(task: CronTask, retryCount = 0): Promise<void> {
   try {
     const result = await startCronTask(task);
     console.log(`[dev-cron] ${task}: ${result.payload.message}`);
+    if (result.status === 202 && retryCount < BUSY_MAX_RETRIES) {
+      setTimeout(
+        () => void runTask(task, retryCount + 1),
+        BUSY_RETRY_MS,
+      ).unref();
+    }
   } catch (error) {
     console.error(`[dev-cron] ${task} 执行失败:`, error);
   }

@@ -52,6 +52,9 @@ const CRON_METADATA_INTERVAL_MS = readPositiveInteger(
   process.env.CRON_METADATA_INTERVAL_MS,
   6 * 60 * 60 * 1000,
 );
+// 任务互斥，撞上其他任务时接口返回 202 并跳过本轮，稍后补跑而不是等下一个周期
+const CRON_BUSY_RETRY_MS = 2 * 60 * 1000;
+const CRON_BUSY_MAX_RETRIES = 15;
 
 // 每 1 秒轮询一次，直到请求成功
 const REQUEST_HOSTNAME = '127.0.0.1';
@@ -106,7 +109,7 @@ function scheduleCronTasks() {
   });
 }
 
-function executeCronJob(task) {
+function executeCronJob(task, retryCount = 0) {
   const hostname = REQUEST_HOSTNAME;
   const port = process.env.PORT || 3000;
   const cronPath = task ? `/api/cron?task=${task}` : '/api/cron';
@@ -133,6 +136,17 @@ function executeCronJob(task) {
     });
 
     res.on('end', () => {
+      if (res.statusCode === 202 && retryCount < CRON_BUSY_MAX_RETRIES) {
+        console.warn(
+          `Cron ${task} busy, retrying in ${CRON_BUSY_RETRY_MS}ms:`,
+          data,
+        );
+        setTimeout(
+          () => executeCronJob(task, retryCount + 1),
+          CRON_BUSY_RETRY_MS,
+        );
+        return;
+      }
       if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
         console.log('Cron request accepted:', data);
       } else {

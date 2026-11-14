@@ -36,9 +36,24 @@ export function shouldRefreshMetadata(
   );
 }
 
-// 未看完且开启追更的记录优先，其次是已看完的，关闭追更的最后
+/**
+ * 判断陈旧所用的参考时刻。条目的检查时间写在处理时，晚于本轮开始时间；
+ * 若直接用开始时间比较，调度周期等于检查间隔时，上一轮处理过的条目在下一轮
+ * 差几秒不到期，实际要隔两个周期才刷新。参考时刻后移一个单轮时间预算，
+ * 上一轮预算内处理的条目在下一轮都会到期；不超过检查间隔的一半，避免短间隔时每轮全刷。
+ */
+export function getMetadataStaleReferenceTime(
+  startedAt: number,
+  ttlMs: number,
+  timeBudgetMs: number,
+): number {
+  return startedAt + Math.min(timeBudgetMs, Math.floor(ttlMs / 2));
+}
+
+// 开启追更的连载（含已追平、等新集的）优先；完结作品看完后降级，关闭追更的最后
 function getPlayRecordPriority(record: PlayRecord): number {
   if (!isTrackingEnabled(record)) return 2;
+  if (record.series_status !== 'ended') return 0;
   return hasPlayRecordUpdate(record) || isUnfinished(record) ? 0 : 1;
 }
 

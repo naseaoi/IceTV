@@ -448,8 +448,7 @@ describe('cron route', () => {
     mockGetAllUsers.mockResolvedValue(['user']);
     mockGetAllPlayRecords.mockResolvedValue({
       'source+a': createPlayRecord({
-        index: 1,
-        total_episodes: 1,
+        tracking_enabled: false,
         metadata_checked_at: 1,
       }),
       'source+z': createPlayRecord({

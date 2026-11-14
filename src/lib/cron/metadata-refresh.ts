@@ -3,6 +3,7 @@ import {
   buildFavoriteCandidate,
   buildPlayRecordCandidate,
   compareMetadataCandidates,
+  getMetadataStaleReferenceTime,
 } from '@/lib/cron/metadata-candidates';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
@@ -21,6 +22,7 @@ import type {
   PlayRecord,
   SearchResult,
 } from '@/lib/types';
+import { normalizeUsername } from '@/lib/username';
 import { parseStorageKey } from '@/lib/utils';
 
 const DEFAULT_METADATA_REFRESH_TTL_MS = 6 * 60 * 60 * 1000;
@@ -30,17 +32,18 @@ const DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS = 5 * 60 * 1000;
 const DEFAULT_METADATA_PAGE_SIZE = 100;
 const RECORD_TIME_BUDGET_RATIO = 0.7;
 
-type MetadataRefreshBudget = {
+export type MetadataRefreshBudget = {
   startedAt: number;
   maxItems: number;
   timeBudgetMs: number;
   processed: number;
 };
 
-type GetDetail = (
+export type GetDetail = (
   source: string,
   id: string,
   fallbackTitle: string,
+  retry?: boolean,
 ) => Promise<SearchResult | null>;
 
 type CandidateCollection<T> = {
@@ -135,9 +138,12 @@ async function collectPagedCandidates<T>(
 
 export async function refreshRecordAndFavorites(): Promise<void> {
   try {
-    const ownerUsername = getOwnerUsername();
+    const ownerUsername = normalizeUsername(getOwnerUsername());
     const users = await db.getAllUsers();
-    if (ownerUsername && !users.includes(ownerUsername)) {
+    if (
+      ownerUsername &&
+      !users.some((user) => normalizeUsername(user) === ownerUsername)
+    ) {
       users.push(ownerUsername);
     }
 
@@ -163,22 +169,39 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       DEFAULT_METADATA_PAGE_SIZE,
     );
     const startedAt = Date.now();
+    const staleReferenceTime = getMetadataStaleReferenceTime(
+      startedAt,
+      metadataRefreshTtlMs,
+      totalTimeBudgetMs,
+    );
     const detailCache = new Map<string, Promise<SearchResult | null>>();
+    const retriedDetailKeys = new Set<string>();
 
-    const getDetail: GetDetail = async (source, id, fallbackTitle) => {
+    const fetchDetail = (source: string, id: string, fallbackTitle: string) =>
+      fetchVideoDetail({
+        source,
+        id,
+        fallbackTitle: fallbackTitle.trim(),
+      }).catch((error) => {
+        console.error(`获取视频详情失败 (${source}+${id}):`, error);
+        return null;
+      });
+
+    // 同一作品在本轮只请求一次；失败的详情在重试阶段每个作品至多重新请求一次
+    const getDetail: GetDetail = async (source, id, fallbackTitle, retry) => {
       const key = `${source}+${id}`;
-      let promise = detailCache.get(key);
-      if (!promise) {
-        promise = fetchVideoDetail({
-          source,
-          id,
-          fallbackTitle: fallbackTitle.trim(),
-        }).catch((error) => {
-          console.error(`获取视频详情失败 (${source}+${id}):`, error);
-          return null;
-        });
+      const cached = detailCache.get(key);
+      if (!cached) {
+        const promise = fetchDetail(source, id, fallbackTitle);
         detailCache.set(key, promise);
+        return promise;
       }
+      if (!retry || (await cached) || retriedDetailKeys.has(key)) {
+        return detailCache.get(key) as Promise<SearchResult | null>;
+      }
+      retriedDetailKeys.add(key);
+      const promise = fetchDetail(source, id, fallbackTitle);
+      detailCache.set(key, promise);
       return promise;
     };
 
@@ -189,7 +212,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
         (user, cursorKey) =>
           db.getStalePlayRecordPage(
             user,
-            startedAt,
+            staleReferenceTime,
             metadataRefreshTtlMs,
             metadataPageSize,
             cursorKey,
@@ -199,7 +222,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
             user,
             key,
             record,
-            startedAt,
+            staleReferenceTime,
             metadataRefreshTtlMs,
             snapshot,
           ),
@@ -211,7 +234,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
         (user, cursorKey) =>
           db.getStaleFavoritePage(
             user,
-            startedAt,
+            staleReferenceTime,
             metadataRefreshTtlMs,
             metadataPageSize,
             cursorKey,
@@ -221,7 +244,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
             user,
             key,
             favorite,
-            startedAt,
+            staleReferenceTime,
             metadataRefreshTtlMs,
             snapshot,
           ),
@@ -239,10 +262,11 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       timeBudgetMs: Math.floor(totalTimeBudgetMs * RECORD_TIME_BUDGET_RATIO),
       processed: 0,
     };
-    await refreshPlayRecordCandidates(
+    await refreshMetadataCandidates(
       recordCandidates,
       recordBudget,
       getDetail,
+      PLAY_RECORD_TARGET,
     );
 
     const favoriteBudget: MetadataRefreshBudget = {
@@ -251,10 +275,11 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       timeBudgetMs: totalTimeBudgetMs,
       processed: 0,
     };
-    await refreshFavoriteCandidates(
+    await refreshMetadataCandidates(
       favoriteCandidates,
       favoriteBudget,
       getDetail,
+      FAVORITE_TARGET,
     );
 
     console.log(
@@ -265,85 +290,105 @@ export async function refreshRecordAndFavorites(): Promise<void> {
   }
 }
 
-async function refreshPlayRecordCandidates(
-  candidates: Array<MetadataCandidate<PlayRecord>>,
+export type MetadataTarget<T> = {
+  label: string;
+  getTitle: (item: T) => string;
+  build: (item: T, detail: SearchResult | null, checkedAt: number) => T;
+  saveIfUnchanged: (
+    user: string,
+    source: string,
+    id: string,
+    next: T,
+    snapshot: string,
+  ) => Promise<boolean>;
+};
+
+const PLAY_RECORD_TARGET: MetadataTarget<PlayRecord> = {
+  label: '播放记录',
+  getTitle: (record) => record.title,
+  build: (record, detail, checkedAt) =>
+    buildRefreshedPlayRecord(record, detail, checkedAt),
+  saveIfUnchanged: (user, source, id, next, snapshot) =>
+    db.savePlayRecordIfUnchanged(user, source, id, next, snapshot),
+};
+
+const FAVORITE_TARGET: MetadataTarget<Favorite> = {
+  label: '收藏',
+  getTitle: (favorite) => favorite.title,
+  build: (favorite, detail, checkedAt) =>
+    buildRefreshedFavorite(favorite, detail, checkedAt),
+  saveIfUnchanged: (user, source, id, next, snapshot) =>
+    db.saveFavoriteIfUnchanged(user, source, id, next, snapshot),
+};
+
+export async function refreshMetadataCandidates<T>(
+  candidates: Array<MetadataCandidate<T>>,
   budget: MetadataRefreshBudget,
   getDetail: GetDetail,
+  target: MetadataTarget<T>,
 ): Promise<void> {
-  for (const candidate of candidates) {
-    if (!canProcessMetadata(budget)) {
-      break;
-    }
-
-    const { user, key, item: record } = candidate;
+  const save = async (
+    candidate: MetadataCandidate<T>,
+    source: string,
+    id: string,
+    detail: SearchResult | null,
+    checkedAt: number,
+  ) => {
     try {
-      const parsed = parseStorageKey(key);
-      if (!parsed) {
-        console.warn(`跳过无效的播放记录键: ${key}`);
-        continue;
-      }
-
-      budget.processed += 1;
-      const checkedAt = Date.now();
-      const detail = await getDetail(parsed.source, parsed.id, record.title);
-      if (!detail) {
-        console.warn(`跳过无法获取详情的播放记录: ${key}`);
-      }
-
-      const nextRecord = buildRefreshedPlayRecord(record, detail, checkedAt);
-      const saved = await db.savePlayRecordIfUnchanged(
-        user,
-        parsed.source,
-        parsed.id,
-        nextRecord,
+      const saved = await target.saveIfUnchanged(
+        candidate.user,
+        source,
+        id,
+        target.build(candidate.item, detail, checkedAt),
         candidate.snapshot,
       );
       if (!saved) {
-        console.warn(`跳过并发变更的播放记录: ${key}`);
+        console.warn(`跳过并发变更的${target.label}: ${candidate.key}`);
       }
     } catch (error) {
-      console.error(`处理播放记录失败 (${key}):`, error);
+      console.error(`处理${target.label}失败 (${candidate.key}):`, error);
+    }
+  };
+
+  const failed: Array<{
+    candidate: MetadataCandidate<T>;
+    source: string;
+    id: string;
+    checkedAt: number;
+  }> = [];
+  for (const candidate of candidates) {
+    if (!canProcessMetadata(budget)) break;
+
+    const parsed = parseStorageKey(candidate.key);
+    if (!parsed) {
+      console.warn(`跳过无效的${target.label}键: ${candidate.key}`);
+      continue;
+    }
+
+    budget.processed += 1;
+    const checkedAt = Date.now();
+    const detail = await getDetail(
+      parsed.source,
+      parsed.id,
+      target.getTitle(candidate.item),
+    );
+    if (detail) {
+      await save(candidate, parsed.source, parsed.id, detail, checkedAt);
+    } else {
+      failed.push({ candidate, ...parsed, checkedAt });
     }
   }
-}
 
-async function refreshFavoriteCandidates(
-  candidates: Array<MetadataCandidate<Favorite>>,
-  budget: MetadataRefreshBudget,
-  getDetail: GetDetail,
-): Promise<void> {
-  for (const candidate of candidates) {
-    if (!canProcessMetadata(budget)) {
-      break;
+  // 获取失败的条目在本轮末尾重试一次，瞬时故障不必再等一个检查周期；
+  // 仍失败或预算用尽时只写入检查时间
+  for (const { candidate, source, id, checkedAt } of failed) {
+    const detail = hasTimeBudget(budget)
+      ? await getDetail(source, id, target.getTitle(candidate.item), true)
+      : null;
+    if (!detail) {
+      console.warn(`跳过无法获取详情的${target.label}: ${candidate.key}`);
     }
-
-    const { user, key, item: favorite } = candidate;
-    try {
-      const parsed = parseStorageKey(key);
-      if (!parsed) {
-        console.warn(`跳过无效的收藏键: ${key}`);
-        continue;
-      }
-
-      budget.processed += 1;
-      const checkedAt = Date.now();
-      const detail = await getDetail(parsed.source, parsed.id, favorite.title);
-      const nextFavorite = buildRefreshedFavorite(favorite, detail, checkedAt);
-      if (!detail) console.warn(`跳过无法获取详情的收藏: ${key}`);
-
-      const saved = await db.saveFavoriteIfUnchanged(
-        user,
-        parsed.source,
-        parsed.id,
-        nextFavorite,
-        candidate.snapshot,
-      );
-      if (!saved) {
-        console.warn(`跳过并发变更的收藏: ${key}`);
-      }
-    } catch (error) {
-      console.error(`处理收藏失败 (${key}):`, error);
-    }
+    await save(candidate, source, id, detail, detail ? Date.now() : checkedAt);
   }
 }
 
@@ -370,11 +415,12 @@ export function buildRefreshedFavorite(
   return next;
 }
 
+function hasTimeBudget(budget: MetadataRefreshBudget): boolean {
+  return Date.now() - budget.startedAt < budget.timeBudgetMs;
+}
+
 function canProcessMetadata(budget: MetadataRefreshBudget): boolean {
-  return (
-    budget.processed < budget.maxItems &&
-    Date.now() - budget.startedAt < budget.timeBudgetMs
-  );
+  return budget.processed < budget.maxItems && hasTimeBudget(budget);
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number) {

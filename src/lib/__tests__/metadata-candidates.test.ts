@@ -3,6 +3,7 @@ import {
   collectFavoriteCandidates,
   collectPlayRecordCandidates,
   ENDED_SERIES_METADATA_REFRESH_TTL_MS,
+  getMetadataStaleReferenceTime,
   shouldRefreshMetadata,
   sortMetadataCandidates,
 } from '@/lib/cron/metadata-candidates';
@@ -44,6 +45,37 @@ describe('shouldRefreshMetadata', () => {
     expect(shouldRefreshMetadata(NOW - TTL_MS, NOW, TTL_MS)).toBe(true);
     expect(shouldRefreshMetadata(NOW + 1000, NOW, TTL_MS)).toBe(true);
     expect(shouldRefreshMetadata(NOW - 1000, NOW, TTL_MS)).toBe(false);
+  });
+});
+
+describe('getMetadataStaleReferenceTime', () => {
+  const BUDGET_MS = 5 * 60 * 1000;
+
+  it('调度周期等于检查间隔时，上一轮预算内处理的条目在下一轮到期', () => {
+    const previousRun = NOW - TTL_MS;
+    const record = createRecord({
+      metadata_checked_at: previousRun + BUDGET_MS - 1,
+    });
+    const referenceTime = getMetadataStaleReferenceTime(NOW, TTL_MS, BUDGET_MS);
+
+    expect(
+      buildPlayRecordCandidate('user', 'source+1', record, NOW, TTL_MS),
+    ).toBeNull();
+    expect(
+      buildPlayRecordCandidate(
+        'user',
+        'source+1',
+        record,
+        referenceTime,
+        TTL_MS,
+      ),
+    ).not.toBeNull();
+  });
+
+  it('提前量不超过检查间隔的一半', () => {
+    expect(getMetadataStaleReferenceTime(NOW, 60_000, BUDGET_MS)).toBe(
+      NOW + 30_000,
+    );
   });
 });
 
@@ -133,14 +165,20 @@ describe('collectPlayRecordCandidates', () => {
     ]);
   });
 
-  it('未看完的记录优先于已看完和已关闭追更的记录', () => {
+  it('追更中的连载（含已追平）优先于看完的完结作品和关闭追更的记录', () => {
     const candidates = sortMetadataCandidates(
       collectPlayRecordCandidates(
         'user',
         {
-          'source+finished': createRecord({ index: 11, total_episodes: 11 }),
-          'source+disabled': createRecord({ tracking_enabled: false }),
-          'source+watching': createRecord({ index: 2, total_episodes: 11 }),
+          'source+a-ended-finished': createRecord({
+            index: 11,
+            total_episodes: 11,
+            series_status: 'ended',
+            tracking_enabled: true,
+          }),
+          'source+b-disabled': createRecord({ tracking_enabled: false }),
+          'source+c-caught-up': createRecord({ index: 11, total_episodes: 11 }),
+          'source+d-watching': createRecord({ index: 2, total_episodes: 11 }),
         },
         NOW,
         TTL_MS,
@@ -148,9 +186,10 @@ describe('collectPlayRecordCandidates', () => {
     );
 
     expect(candidates.map((candidate) => candidate.key)).toEqual([
-      'source+watching',
-      'source+finished',
-      'source+disabled',
+      'source+c-caught-up',
+      'source+d-watching',
+      'source+a-ended-finished',
+      'source+b-disabled',
     ]);
   });
 

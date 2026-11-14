@@ -151,16 +151,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const now = Date.now();
     const saved = await db.savePlayProgress(
       guardResult.username,
       parsed.source,
       parsed.id,
-      {
-        ...record,
-        save_time: record.save_time ?? now,
-        metadata_checked_at: now,
-      },
+      { ...record, save_time: record.save_time ?? Date.now() },
     );
     if (!saved) return NextResponse.json({ success: true, ignored: true });
 

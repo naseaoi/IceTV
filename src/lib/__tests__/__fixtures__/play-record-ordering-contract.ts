@@ -101,9 +101,11 @@ export async function assertPlayRecordOrdering(storage: IStorage) {
         save({ ...record, progress_sequence: 3, play_time: 300 }, target),
       ]);
       expect(reads).toBeGreaterThanOrEqual(3);
+      // 新记录沿用同作品其他记录的手动追更设置
       expect(await storage.getPlayRecord(user, target)).toMatchObject({
         progress_sequence: 4,
         play_time: 400,
+        tracking_enabled: false,
       });
     } finally {
       readSpy.mockRestore();

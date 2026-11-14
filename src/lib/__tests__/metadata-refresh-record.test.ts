@@ -1,6 +1,10 @@
+import type { MetadataCandidate } from '@/lib/cron/metadata-candidates';
 import {
+  type MetadataRefreshBudget,
+  type MetadataTarget,
   buildRefreshedFavorite,
   buildRefreshedPlayRecord,
+  refreshMetadataCandidates,
 } from '@/lib/cron/metadata-refresh';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { PlayRecord, SearchResult } from '@/lib/types';
@@ -338,5 +342,117 @@ describe('buildRefreshedPlayRecord', () => {
     expect(next.update_baseline_group_total).toBe(13);
     expect(next.update_detected_at).toBeUndefined();
     expect(hasPlayRecordUpdate(next)).toBe(false);
+  });
+});
+
+describe('refreshMetadataCandidates', () => {
+  function createCandidate(key: string): MetadataCandidate<PlayRecord> {
+    const item = createRecord({
+      group_index: undefined,
+      group_total: undefined,
+      group_label: undefined,
+      index: 6,
+      total_episodes: 6,
+    });
+    return {
+      user: 'user',
+      key,
+      item,
+      snapshot: JSON.stringify(item),
+      priority: 0,
+      checkedAt: 0,
+    };
+  }
+
+  function createBudget(
+    overrides: Partial<MetadataRefreshBudget> = {},
+  ): MetadataRefreshBudget {
+    return {
+      startedAt: Date.now(),
+      maxItems: 10,
+      timeBudgetMs: 60_000,
+      processed: 0,
+      ...overrides,
+    };
+  }
+
+  function createTarget() {
+    const saved: Array<{ id: string; next: PlayRecord }> = [];
+    const target: MetadataTarget<PlayRecord> = {
+      label: '播放记录',
+      getTitle: (record) => record.title,
+      build: buildRefreshedPlayRecord,
+      saveIfUnchanged: async (_user, _source, id, next) => {
+        saved.push({ id, next });
+        return true;
+      },
+    };
+    return { saved, target };
+  }
+
+  const sevenEpisodes = createDetail({
+    episodes: Array.from({ length: 7 }, (_, index) => `ep-${index}`),
+    episode_groups: undefined,
+  });
+
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('获取失败的条目在本轮末尾重试一次，成功后记录新集数', async () => {
+    const getDetail = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(sevenEpisodes);
+    const { saved, target } = createTarget();
+
+    await refreshMetadataCandidates(
+      [createCandidate('source+1')],
+      createBudget(),
+      getDetail,
+      target,
+    );
+
+    expect(getDetail).toHaveBeenNthCalledWith(
+      2,
+      'source',
+      '1',
+      '测试番剧',
+      true,
+    );
+    expect(saved).toHaveLength(1);
+    expect(saved[0].next).toMatchObject({
+      total_episodes: 7,
+      update_baseline_episodes: 6,
+    });
+    expect(hasPlayRecordUpdate(saved[0].next)).toBe(true);
+    expect(saved[0].next.update_detected_at).toEqual(expect.any(Number));
+  });
+
+  it('时间预算用尽时不重试，只写入检查时间', async () => {
+    const getDetail = jest.fn().mockResolvedValue(null);
+    const { saved, target } = createTarget();
+    const budget = createBudget();
+    getDetail.mockImplementationOnce(async () => {
+      budget.startedAt = Date.now() - budget.timeBudgetMs;
+      return null;
+    });
+
+    await refreshMetadataCandidates(
+      [createCandidate('source+1')],
+      budget,
+      getDetail,
+      target,
+    );
+
+    expect(getDetail).toHaveBeenCalledTimes(1);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].next).toMatchObject({ total_episodes: 6 });
+    expect(saved[0].next.metadata_checked_at).toEqual(expect.any(Number));
   });
 });
