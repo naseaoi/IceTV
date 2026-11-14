@@ -442,8 +442,9 @@ export function PlayMainContent(props: PlayMainContentProps) {
               onDismissAuthRecovery={onDismissAuthRecovery}
             />
           )}
+          {/* 起播慢时最需要换源，提示须浮在加载遮罩（z-500）之上才能点击 */}
           {sourceRecommendation && !playbackError && (
-            <div className='absolute right-3 top-3 z-20 max-w-[min(22rem,calc(100%-1.5rem))] animate-menu-in-down rounded-xl bg-black/80 px-3 py-2 text-xs text-white shadow-lg ring-1 ring-white/10 sm:right-4 sm:top-4'>
+            <div className='absolute right-3 top-3 z-[505] max-w-[min(22rem,calc(100%-1.5rem))] animate-menu-in-down rounded-xl bg-black/80 px-3 py-2 text-xs text-white shadow-lg ring-1 ring-white/10 sm:right-4 sm:top-4'>
               <div className='font-medium'>
                 发现更优源：{sourceRecommendation.sourceName}
               </div>
