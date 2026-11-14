@@ -8,6 +8,7 @@ export const LIST_COUNT_COOKIE_NAMES = [
   'review_count',
   'history_count',
   'list_count',
+  'plaza_count',
 ] as const;
 
 export type ListCountCookieName = (typeof LIST_COUNT_COOKIE_NAMES)[number];

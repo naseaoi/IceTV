@@ -17,17 +17,20 @@ jest.mock('@/features/lists/lib/lists-client', () => ({
   fetchPlazaLists: jest.fn(() => new Promise(() => undefined)),
 }));
 
-it('路由 loading 未知总数时只转圈，进入过广场后按服务端总数铺骨架', () => {
-  const { unmount } = render(<ListPlazaPageSkeleton />);
+it('路由 loading 未知总数时只转圈，已知总数时按条数铺骨架', () => {
+  const { unmount } = render(<ListPlazaPageSkeleton knownTotal={null} />);
   expect(screen.queryByRole('status', { name: '加载中' })).toBeNull();
   expect(document.querySelector('.ice-spinner')).not.toBeNull();
   unmount();
 
-  render(<ListPlazaPageClient initialTotal={2} />).unmount();
-
-  render(<ListPlazaPageSkeleton />);
+  render(<ListPlazaPageSkeleton knownTotal={2} />);
   expect(screen.getByRole('status', { name: '加载中' }).children).toHaveLength(
     2,
   );
   expect(document.querySelector('.ice-spinner')).toBeNull();
+});
+
+it('进入广场后把服务端总数写入计数 cookie，供下次冷启动的路由 loading 读取', () => {
+  render(<ListPlazaPageClient initialTotal={3} />);
+  expect(document.cookie).toContain('plaza_count=3');
 });

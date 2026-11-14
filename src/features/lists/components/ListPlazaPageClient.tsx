@@ -19,6 +19,7 @@ import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { fetchPlazaLists } from '@/features/lists/lib/lists-client';
 import { type PlazaSort, PLAZA_PAGE_SIZE } from '@/features/lists/types';
 import { usePagedQuery } from '@/hooks/usePagedQuery';
+import { writeListCountCookie } from '@/lib/list-count-cookies';
 
 import { ListGrid, ListGridSkeleton } from './ListCard';
 
@@ -26,9 +27,6 @@ const SORT_OPTIONS: { value: PlazaSort; label: string }[] = [
   { value: 'hot', label: '最热' },
   { value: 'new', label: '最新' },
 ];
-// 本标签页上次进入时服务端给出的总数，供路由 loading 按条数铺骨架
-let knownPlazaTotal: number | null = null;
-
 function PlazaContentSkeleton({
   total,
   authenticated,
@@ -85,17 +83,21 @@ function PlazaShell({
 }
 
 // 路由 loading：总数未知时不编造骨架条数，只转圈
-export function ListPlazaPageSkeleton() {
+export function ListPlazaPageSkeleton({
+  knownTotal,
+}: {
+  knownTotal: number | null;
+}) {
   const authenticated = useAuthSession().session.status === 'authenticated';
   return (
     <PlazaShell sort='hot' authenticated={authenticated}>
-      {knownPlazaTotal === null ? (
+      {knownTotal === null ? (
         <div className='flex justify-center py-12'>
           <Spinner className='h-6 w-6' />
         </div>
       ) : (
         <PlazaContentSkeleton
-          total={knownPlazaTotal}
+          total={knownTotal}
           authenticated={authenticated}
         />
       )}
@@ -112,7 +114,8 @@ export function ListPlazaPageClient({
   const authenticated = useAuthSession().session.status === 'authenticated';
   const [sort, setSort] = useState<PlazaSort>('hot');
   useEffect(() => {
-    if (initialTotal !== null) knownPlazaTotal = initialTotal;
+    if (initialTotal !== null)
+      writeListCountCookie('plaza_count', initialTotal);
   }, [initialTotal]);
   const fetchPage = useCallback(
     (cursor: string | undefined, signal: AbortSignal) =>
