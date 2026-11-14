@@ -2,7 +2,13 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
@@ -15,6 +21,7 @@ import PublicReviewContent, {
   PUBLIC_REVIEW_TIME_TEXT_CLASS,
 } from '@/components/PublicReviewContent';
 import SkeletonText from '@/components/SkeletonText';
+import Spinner from '@/components/Spinner';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
 import {
@@ -34,10 +41,12 @@ import {
 } from '@/features/profile/ProfileHero';
 import { useSlidingIndicator } from '@/hooks/useSlidingIndicator';
 import {
+  getKnownPublicReviewCount,
   getUserFavorites,
   getUserProfile,
   getUserReviews,
   PROFILE_UPDATED_EVENT,
+  rememberPublicReviewCount,
   setFollowing,
 } from '@/lib/profile.client';
 import type {
@@ -67,10 +76,6 @@ function parseProfileTab(value: string | null | undefined): ProfileTab {
     PROFILE_TABS.find(([tab]) => tab === value)?.[0] ?? DEFAULT_PROFILE_TAB
   );
 }
-const DEFAULT_REVIEW_SKELETON_COUNT = 3;
-// 资料返回前无从得知评价数，沿用本次会话里上次看到的数量
-const knownReviewCounts = new Map<string, number>();
-
 function skeletonCount(count: number) {
   return Math.min(count, LIST_SKELETON_LIMIT);
 }
@@ -290,7 +295,9 @@ const PROFILE_LAYOUT_CLASS =
   'lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-10';
 const PROFILE_MAIN_CLASS = 'min-w-0';
 
-function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
+// 评价数未知时不编造骨架条数，内容区只转圈
+function ProfileHeaderSkeleton({ profileId }: { profileId: string }) {
+  const reviewCount = getKnownPublicReviewCount(profileId);
   return (
     <div aria-label='加载中' role='status' className={PROFILE_LAYOUT_CLASS}>
       <ProfileHeroSkeleton />
@@ -302,9 +309,40 @@ function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
             </span>
           ))}
         </div>
-        <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
+        {reviewCount === null ? (
+          <div className='flex justify-center py-12'>
+            <Spinner className='h-6 w-6' />
+          </div>
+        ) : (
+          <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
+        )}
       </div>
     </div>
+  );
+}
+
+function ProfilePageFrame({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <PageLayout activePath='/me' mobileHeader={{ title, showBack: true }}>
+      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-10`}>
+        <div className='mx-auto max-w-4xl lg:max-w-6xl'>{children}</div>
+      </div>
+    </PageLayout>
+  );
+}
+
+// 路由 loading 与页面内资料加载共用，点击入口后立即切到个人主页外壳
+export function ProfilePageSkeleton({ profileId }: { profileId: string }) {
+  return (
+    <ProfilePageFrame title='个人主页'>
+      <ProfileHeaderSkeleton profileId={profileId} />
+    </ProfilePageFrame>
   );
 }
 
@@ -389,14 +427,13 @@ export default function ProfilePageClient({
   useEffect(() => {
     // 服务端已预取同一用户时首轮不再请求，version 变化后照常重新拉取
     if (version === 0 && initialProfile?.profileId === profileId) {
-      knownReviewCounts.set(profileId, initialProfile.publicReviewCount);
+      rememberPublicReviewCount(profileId, initialProfile.publicReviewCount);
       return;
     }
     let active = true;
     setError('');
     getUserProfile(profileId)
       .then((value) => {
-        knownReviewCounts.set(profileId, value.publicReviewCount);
         if (active) setProfile(value);
       })
       .catch((error) => {
@@ -449,99 +486,85 @@ export default function ProfilePageClient({
     }
   }
   return (
-    <PageLayout
-      activePath='/me'
-      mobileHeader={{ title: profile?.nickname ?? '个人主页', showBack: true }}
-    >
-      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-10`}>
-        <div className='mx-auto max-w-4xl lg:max-w-6xl'>
-          {error && (
-            <div
-              role='alert'
-              className='mb-4 flex items-center gap-3 text-sm text-red-500'
+    <ProfilePageFrame title={profile?.nickname ?? '个人主页'}>
+      {error && (
+        <div
+          role='alert'
+          className='mb-4 flex items-center gap-3 text-sm text-red-500'
+        >
+          {error}
+          {!profile && (
+            <button
+              type='button'
+              className={buttonClass}
+              onClick={() => setVersion((value) => value + 1)}
             >
-              {error}
-              {!profile && (
-                <button
-                  type='button'
-                  className={buttonClass}
-                  onClick={() => setVersion((value) => value + 1)}
-                >
-                  重试
-                </button>
-              )}
-            </div>
-          )}
-          {profile ? (
-            <div className={PROFILE_LAYOUT_CLASS}>
-              <ProfileHero
-                profile={profile}
-                profileId={profileId}
-                busy={busy}
-                onFollow={() => void follow()}
-                onEdit={() => setEditing(true)}
-                onShowReviews={() => setTab('reviews')}
-                onOpenList={setList}
-                onShowcaseChange={(showcase) =>
-                  setProfile((current) => current && { ...current, showcase })
-                }
-              />
-              <div className={PROFILE_MAIN_CLASS}>
-                <ProfileTabs tab={tab} onChange={setTab} />
-                {tab === 'lists' ? (
-                  <ProfileLists
-                    key={`${profileId}:${version}`}
-                    profileId={profileId}
-                    isSelf={profile.isSelf}
-                    skeletonCount={skeletonCount(profile.listCount)}
-                  />
-                ) : tab === 'reviews' ? (
-                  <ProfileReviews
-                    profileId={profileId}
-                    isSelf={profile.isSelf}
-                    reviewCount={profile.publicReviewCount}
-                  />
-                ) : (
-                  <ProfileFavorites
-                    key={`${profileId}:${version}`}
-                    profileId={profileId}
-                    initialVisibility={
-                      profile.isSelf ? 3 : profile.libraryVisibility
-                    }
-                    favoriteCount={profile.favoriteCount}
-                  />
-                )}
-              </div>
-              <FollowList
-                isOpen={Boolean(list)}
-                profileId={profileId}
-                type={list}
-                count={
-                  list === 'followers'
-                    ? profile.followerCount
-                    : profile.followingCount
-                }
-                onClose={() => setList(null)}
-              />
-              {editing && (
-                <ProfilePanel
-                  showSuccessToast={false}
-                  onClose={() => setEditing(false)}
-                />
-              )}
-            </div>
-          ) : (
-            !error && (
-              <ProfileHeaderSkeleton
-                reviewCount={
-                  knownReviewCounts.get(profileId) ??
-                  DEFAULT_REVIEW_SKELETON_COUNT
-                }
-              />
-            )
+              重试
+            </button>
           )}
         </div>
-      </div>
-    </PageLayout>
+      )}
+      {profile ? (
+        <div className={PROFILE_LAYOUT_CLASS}>
+          <ProfileHero
+            profile={profile}
+            profileId={profileId}
+            busy={busy}
+            onFollow={() => void follow()}
+            onEdit={() => setEditing(true)}
+            onShowReviews={() => setTab('reviews')}
+            onOpenList={setList}
+            onShowcaseChange={(showcase) =>
+              setProfile((current) => current && { ...current, showcase })
+            }
+          />
+          <div className={PROFILE_MAIN_CLASS}>
+            <ProfileTabs tab={tab} onChange={setTab} />
+            {tab === 'lists' ? (
+              <ProfileLists
+                key={`${profileId}:${version}`}
+                profileId={profileId}
+                isSelf={profile.isSelf}
+                skeletonCount={skeletonCount(profile.listCount)}
+              />
+            ) : tab === 'reviews' ? (
+              <ProfileReviews
+                profileId={profileId}
+                isSelf={profile.isSelf}
+                reviewCount={profile.publicReviewCount}
+              />
+            ) : (
+              <ProfileFavorites
+                key={`${profileId}:${version}`}
+                profileId={profileId}
+                initialVisibility={
+                  profile.isSelf ? 3 : profile.libraryVisibility
+                }
+                favoriteCount={profile.favoriteCount}
+              />
+            )}
+          </div>
+          <FollowList
+            isOpen={Boolean(list)}
+            profileId={profileId}
+            type={list}
+            count={
+              list === 'followers'
+                ? profile.followerCount
+                : profile.followingCount
+            }
+            onClose={() => setList(null)}
+          />
+          {editing && (
+            <ProfilePanel
+              showSuccessToast={false}
+              onClose={() => setEditing(false)}
+            />
+          )}
+        </div>
+      ) : (
+        !error && <ProfileHeaderSkeleton profileId={profileId} />
+      )}
+    </ProfilePageFrame>
   );
 }

@@ -8,9 +8,12 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import ProfilePageClient from '@/features/profile/ProfilePageClient';
+import ProfilePageClient, {
+  ProfilePageSkeleton,
+} from '@/features/profile/ProfilePageClient';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
+  getKnownPublicReviewCount,
   getUserFavorites,
   getUserFollows,
   getUserProfile,
@@ -48,6 +51,8 @@ jest.mock('@/lib/toast', () => ({
   showToast: jest.fn(),
 }));
 jest.mock('@/lib/profile.client', () => ({
+  getKnownPublicReviewCount: jest.fn(() => null),
+  rememberPublicReviewCount: jest.fn(),
   getUserProfile: jest.fn(),
   getUserReviews: jest.fn(),
   getUserFavorites: jest.fn(),
@@ -95,6 +100,18 @@ beforeEach(() => {
     ],
     nextCursor: null,
   });
+});
+it('资料加载骨架按已知公开评价数渲染，未知时只转圈', () => {
+  const { unmount } = render(<ProfilePageSkeleton profileId='profileAlice' />);
+  const unknown = screen.getByRole('status', { name: '加载中' });
+  expect(unknown.querySelector('.ice-spinner')).not.toBeNull();
+  expect(within(unknown).queryAllByRole('status')).toHaveLength(0);
+  unmount();
+  jest.mocked(getKnownPublicReviewCount).mockReturnValueOnce(2);
+  render(<ProfilePageSkeleton profileId='profileAlice' />);
+  const [known, reviews] = screen.getAllByRole('status', { name: '加载中' });
+  expect(known.querySelector('.ice-spinner')).toBeNull();
+  expect(reviews.children).toHaveLength(2);
 });
 it('关注失败回滚计数与按钮，并展示服务端错误', async () => {
   let reject!: (reason: Error) => void;

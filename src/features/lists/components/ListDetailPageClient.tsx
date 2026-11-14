@@ -83,6 +83,7 @@ const DESCRIPTION_CLASS = 'mt-2 text-sm leading-6';
 const META_CLASS = 'mt-3 text-sm leading-5';
 const ACTIONS_CLASS = 'mt-5 flex h-9 items-center gap-1';
 const BACK_BUTTON_CLASS = 'relative -ml-2 mb-3 hidden md:flex';
+const PAGE_BODY_CLASS = `${PAGE_CONTAINER_CLASS} pb-12 pt-4 sm:pt-8`;
 // 游客只能经分享链接直接进入，返回会落到受保护的「我的片单」，因此不提供返回
 const mobileHeader = (authenticated: boolean) => ({
   title: '片单',
@@ -268,7 +269,7 @@ export function ListDetailPageClient({
       mobileHeader={mobileHeader(authenticated)}
       transparentTopNav
     >
-      <div className={`${PAGE_CONTAINER_CLASS} pb-12 pt-4 sm:pt-8`}>
+      <div className={PAGE_BODY_CLASS}>
         {state.status === 'loading' && (
           <ListDetailSkeleton
             summary={summary}
@@ -731,6 +732,27 @@ function ListItems({
         </div>
       ))}
     </div>
+  );
+}
+
+// 路由 loading：服务端条目数返回前，按本标签页已知的摘要渲染标题与条目骨架
+export function ListDetailPageSkeleton({ listId }: { listId: string }) {
+  const authenticated = useAuthSession().session.status === 'authenticated';
+  const summary = peekListSummary(listId);
+  return (
+    <PageLayout
+      activePath='/me'
+      mobileHeader={mobileHeader(authenticated)}
+      transparentTopNav
+    >
+      <div className={PAGE_BODY_CLASS}>
+        <ListDetailSkeleton
+          summary={summary}
+          itemCount={summary?.itemCount ?? null}
+          showBack={authenticated}
+        />
+      </div>
+    </PageLayout>
   );
 }
 

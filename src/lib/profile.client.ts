@@ -71,10 +71,23 @@ export async function updateProfile(input: {
   window.dispatchEvent(new Event(PROFILE_UPDATED_EVENT));
   return profile;
 }
-export function getUserProfile(profileId: string) {
-  return socialRequest<UserProfileView>(
+// 本标签页内已知的公开评价数；个人主页资料返回前（含路由 loading）按它渲染评价骨架条数
+const knownPublicReviewCounts = new Map<string, number>();
+
+export function getKnownPublicReviewCount(profileId: string): number | null {
+  return knownPublicReviewCounts.get(profileId) ?? null;
+}
+
+export function rememberPublicReviewCount(profileId: string, count: number) {
+  knownPublicReviewCounts.set(profileId, count);
+}
+
+export async function getUserProfile(profileId: string) {
+  const view = await socialRequest<UserProfileView>(
     `/api/users/${encodeURIComponent(profileId)}`,
   );
+  rememberPublicReviewCount(profileId, view.publicReviewCount);
+  return view;
 }
 function userPageUrl(profileId: string, kind: string, cursor?: string | null) {
   return `/api/users/${encodeURIComponent(profileId)}/${kind}?${new URLSearchParams(cursor ? { cursor } : {})}`;
