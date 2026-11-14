@@ -25,12 +25,19 @@
   --foreground-rgb: 255, 255, 255;
 }
 
-html,
-body {
-  height: 100%;
+/*
+ * 页面滚动必须由文档承担：给 body 固定 100% 高度或 overflow-x: hidden 会让 body
+ * 成为一屏高的内部滚动容器，移动端浏览器的地址栏因此不收起，底部约一个地址栏
+ * 高度的内容永远滚不到。横向裁切用 clip，它不产生滚动容器。
+ */
+html {
   overflow-x: hidden;
   /* 阻止 iOS Safari 拉动回弹 */
   overscroll-behavior: none;
+}
+
+body {
+  overflow-x: clip;
 }
 
 body {
