@@ -173,8 +173,13 @@ export function libraryExpressions(
   const groupValid = `(${recordNumber('group_index')} >= 1 AND ${recordNumber('group_total')} >= 1)`;
   const episode = `CASE WHEN ${groupValid} THEN ${recordNumber('group_index')} ELSE ${recordNumber('index')} END`;
   const total = `CASE WHEN ${groupValid} THEN ${recordNumber('group_total')} ELSE ${recordNumber('total_episodes')} END`;
+  const seriesStatus =
+    dialect === 'sqlite'
+      ? `json_extract(p.record_json, '$.series_status')`
+      : `JSON_UNQUOTE(JSON_EXTRACT(p.record_json, '$.series_status'))`;
   // 点播写入的绝对集数与组内集数均为 1 基；组内刻度有效时优先采用。
-  const finished = `(${total} > 0 AND ${episode} >= ${total} AND ${recordNumber('total_time')} > 0 AND ${recordNumber('play_time')} >= ${recordNumber('total_time')} * 0.9)`;
+  // 连载中看完当前最新一集只算追平，不算看过。
+  const finished = `(COALESCE(${seriesStatus}, '') <> 'ongoing' AND ${total} > 0 AND ${episode} >= ${total} AND ${recordNumber('total_time')} > 0 AND ${recordNumber('play_time')} >= ${recordNumber('total_time')} * 0.9)`;
   const status = `CASE WHEN f.watch_status IS NOT NULL THEN f.watch_status WHEN ${rating} IS NOT NULL OR ${finished} THEN 'completed' WHEN p.record_key IS NOT NULL THEN 'watching' ELSE 'planned' END`;
   const reviewTime = `CASE WHEN exact_review.username IS NOT NULL THEN ${numericJson('exact_review.review_json', 'updated_at')} ELSE ${numericJson('fallback_review.review_json', 'updated_at')} END`;
   const watched = `CASE WHEN (${status}) = 'completed' THEN COALESCE(f.watched_at, ${played}, ${reviewTime}) ELSE NULL END`;

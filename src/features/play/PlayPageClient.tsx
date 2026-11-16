@@ -403,6 +403,8 @@ function AuthenticatedPlayPageClient({
     const source = currentSourceRef.current;
     const id = currentIdRef.current;
     if (!source || !id) return;
+    // 连载中看完最新一集只是追平，不算完结；与收藏库「看过」判定一致，状态未知时照常弹出
+    if (detailRef.current?.series_status === 'ongoing') return;
     const key = `${source}+${id}`;
     if (completionCheckedRef.current.has(key)) return;
     completionCheckedRef.current.add(key);
@@ -413,7 +415,7 @@ function AuthenticatedPlayPageClient({
       player.fullscreenWeb = false;
     }
     setCompletionTarget({ source, id, doubanId: videoDoubanId });
-  }, [artPlayerRef, currentIdRef, currentSourceRef, videoDoubanId]);
+  }, [artPlayerRef, currentIdRef, currentSourceRef, detailRef, videoDoubanId]);
   const closeCompletion = useCallback(() => setCompletionTarget(null), []);
 
   const [openSourcesRequest, setOpenSourcesRequest] = useState(0);

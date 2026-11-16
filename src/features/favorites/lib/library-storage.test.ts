@@ -461,15 +461,38 @@ for (const backend of ['sqlite', 'mysql'] as const) {
     });
 
     it('优先手动状态，按 1 基最后一集及组内进度推导完成', async () => {
-      const scenarios = [
+      const scenarios: Array<{
+        key: string;
+        status?: 'planned';
+        index: number;
+        groupIndex?: number;
+        groupTotal?: number;
+        progress: number;
+        seriesStatus?: 'ongoing' | 'ended';
+        expected: string;
+      }> = [
         {
           key: 'manual',
-          status: 'planned' as const,
+          status: 'planned',
           index: 10,
           progress: 100,
           expected: 'planned',
         },
         { key: 'last', index: 10, progress: 90, expected: 'completed' },
+        {
+          key: 'last-ended',
+          index: 10,
+          progress: 90,
+          seriesStatus: 'ended',
+          expected: 'completed',
+        },
+        {
+          key: 'last-ongoing',
+          index: 10,
+          progress: 100,
+          seriesStatus: 'ongoing',
+          expected: 'watching',
+        },
         { key: 'before', index: 9, progress: 100, expected: 'watching' },
         { key: 'partial', index: 10, progress: 89, expected: 'watching' },
         {
@@ -499,6 +522,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           index: item.index,
           group_index: item.groupIndex,
           group_total: item.groupTotal,
+          series_status: item.seriesStatus,
           play_time: item.progress,
           total_time: 100,
           save_time: 2000,
