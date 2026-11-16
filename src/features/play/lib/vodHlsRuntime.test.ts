@@ -1312,3 +1312,110 @@ describe('点播迟到 loader 与离线恢复', () => {
     expect(hls.startLoad).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('已起播会话的线路回落', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    mockIsServerProxy.mockReset().mockReturnValue(false);
+    mockShouldAutoFallbackToServer.mockReset().mockReturnValue(true);
+    mockReportSourceRouteStat.mockReset();
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  function loadStartedEpisode({ paused }: { paused: boolean }) {
+    const runtime = setupRuntime();
+    runtime.options.loadingSessionRef.current.playbackStartNotified = true;
+    const video = createVideo();
+    video.autoplay = true;
+    Object.defineProperty(video, 'currentTime', {
+      value: 600,
+      writable: true,
+    });
+    Object.defineProperty(video, 'paused', { value: paused, writable: true });
+    runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    hls.levels = [{}];
+    return { runtime, video, hls };
+  }
+
+  it('回落点只登记为会话落点，不留下会反复跳回的强制恢复点', () => {
+    const { runtime, video, hls } = loadStartedEpisode({ paused: false });
+
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+
+    expect(hls.loadSource).toHaveBeenCalledTimes(2);
+    expect(hls.config.startPosition).toBe(600);
+    expect(runtime.options.resumeTimeRef.current).toBeNull();
+    expect(runtime.options.resumeModeRef.current).toBeNull();
+    expect(
+      runtime.options.loadingSessionRef.current.pendingInitialResumeTarget,
+    ).toBe(600);
+    expect(runtime.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+    expect(video.autoplay).toBe(true);
+  });
+
+  it('用户暂停时后台切线路，不自动播放也不开加载等待，下次播放恢复 autoplay', () => {
+    const { runtime, video, hls } = loadStartedEpisode({ paused: true });
+
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+
+    expect(hls.loadSource).toHaveBeenCalledTimes(2);
+    expect(video.autoplay).toBe(false);
+    expect(runtime.setIsVideoLoading).not.toHaveBeenCalledWith(true);
+    expect(runtime.options.onSourceProxyFallbackStarted).not.toHaveBeenCalled();
+
+    video.dispatchEvent(new Event('play'));
+    expect(video.autoplay).toBe(true);
+  });
+
+  it('暂停中切线路后运行时释放也恢复 autoplay', () => {
+    const { video, hls } = loadStartedEpisode({ paused: true });
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(video.autoplay).toBe(false);
+
+    runManagedVideoCleanup(video);
+    expect(video.autoplay).toBe(true);
+  });
+
+  it('两路都已尝试时分片失败交给恢复流程，恢复耗尽才判源失败', () => {
+    const { runtime, hls } = loadStartedEpisode({ paused: false });
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(getManagedVideo(createdVideos[0]).__icetvUsingServerProxy).toBe(
+      true,
+    );
+
+    hls.emit(FakeHls.Events.ERROR, {
+      ...NON_FATAL_FRAG_ERROR,
+      frag: mainFragment(11),
+    });
+    hls.emit(FakeHls.Events.ERROR, {
+      ...NON_FATAL_FRAG_ERROR,
+      frag: mainFragment(11),
+    });
+    expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+    expect(runtime.setError).not.toHaveBeenCalled();
+
+    HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS.forEach((delayMs) => {
+      hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+      jest.advanceTimersByTime(delayMs);
+    });
+    expect(hls.startLoad).toHaveBeenCalledTimes(
+      HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS.length,
+    );
+    expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+
+    hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+    expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+      'networkError:fragLoadError',
+    );
+    expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
+  });
+});

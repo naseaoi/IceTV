@@ -137,6 +137,15 @@ export function getVodRuntimeSourceUrl(video: HTMLVideoElement): string | null {
   return vodRuntimeSourceUrls.get(video) ?? null;
 }
 
+// 资源限流退避期间由运行时按 Retry-After 补拉，播放器的 play 等入口不得提前 startLoad
+const vodRuntimeResourceWaits = new WeakSet<HTMLVideoElement>();
+
+export function isVodRuntimeWaitingForResource(
+  video: HTMLVideoElement,
+): boolean {
+  return vodRuntimeResourceWaits.has(video);
+}
+
 // 原生播放没有 hls 运行时，同样登记本次加载的地址并挂上释放入口，换源和逐集解析停旧集时随之释放
 export function registerVodNativeRuntime(
   video: HTMLVideoElement,
@@ -502,9 +511,29 @@ export function createVodM3u8Loader({
       if (resumeTime <= 1) {
         return;
       }
+      // resumeTimeRef 只在首次起播时清空；已起播后写入它会让此后每次 canplay / progress 都跳回回落点，只登记本会话落地一次的目标
+      if (loadingSessionRef.current.playbackStartNotified) {
+        loadingSessionRef.current.pendingInitialResumeTarget = resumeTime;
+        return;
+      }
       resumeTimeRef.current = resumeTime;
       resumeModeRef.current = 'forced';
       loadingSessionRef.current.pendingInitialResumeTarget = null;
+    };
+
+    // hls.js 换地址会重新挂载媒体，浏览器随之重置自动播放资格，autoplay 属性会让用户已暂停的视频自行播放
+    let autoplaySuppressed = false;
+    const restoreAutoplay = () => {
+      if (!autoplaySuppressed) return;
+      autoplaySuppressed = false;
+      video.autoplay = true;
+      video.removeEventListener('play', restoreAutoplay);
+    };
+    const suppressAutoplayUntilPlay = () => {
+      if (autoplaySuppressed || !video.autoplay) return;
+      autoplaySuppressed = true;
+      video.autoplay = false;
+      video.addEventListener('play', restoreAutoplay);
     };
 
     const hasUntriedRoute = () =>
@@ -540,9 +569,16 @@ export function createVodM3u8Loader({
         nextServer ? '直连失败，切换代理...' : '代理失败，切换直连...',
       );
       resetSpeedFallbackTimer();
+      const userPaused =
+        video.paused && loadingSessionRef.current.playbackStartNotified;
       preservePlaybackPositionBeforeReload();
-      setIsVideoLoading(true);
-      onSourceProxyFallbackStarted?.();
+      if (userPaused) {
+        // 暂停中不会触发 playing 收起加载层，不开页面加载等待，线路在后台切换
+        suppressAutoplayUntilPlay();
+      } else {
+        setIsVideoLoading(true);
+        onSourceProxyFallbackStarted?.();
+      }
       markManagedVideoExpectedAbort(video);
       hls.stopLoad?.();
       startupProgress = beginMediaLoad();
@@ -739,11 +775,13 @@ export function createVodM3u8Loader({
       videoRuntimeCleaned = true;
       managedVideo.__icetvSwitchToServerProxy = null;
       vodRuntimeSourceUrls.delete(video);
+      vodRuntimeResourceWaits.delete(video);
       clearVodStartupProgress(video);
       qualityController.dispose();
       segmentPrebufferController.dispose();
       recoveryController.dispose();
       clearStallConfirmation();
+      restoreAutoplay();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
       }
@@ -794,6 +832,7 @@ export function createVodM3u8Loader({
       if (resourceDelay !== null || resourceWaitAt !== null) {
         if (resourceWaitAt !== null) return;
         resourceWaitAt = getVodStartupNow();
+        vodRuntimeResourceWaits.add(video);
         setIsVideoLoading(true);
         setRealtimeLoadSpeed('服务器繁忙，稍后自动重试');
         clearStallConfirmation();
@@ -804,6 +843,7 @@ export function createVodM3u8Loader({
             startLoad: () => {
               accountResourceWait();
               resourceWaitAt = null;
+              vodRuntimeResourceWaits.delete(video);
               resumeLoading();
             },
             recoverMediaError: () => hls.recoverMediaError(),
@@ -841,7 +881,11 @@ export function createVodM3u8Loader({
             return;
           reportRouteStat(false);
           if (switchRoute(errorReason)) return;
-          if (allowAutoFallback) {
+          // 起播前两路失败直接判源失败；已起播时前向缓冲通常还能播，交给 hls.js 自身重试与致命错误恢复，耗尽再判失败
+          if (
+            allowAutoFallback &&
+            !loadingSessionRef.current.playbackStartNotified
+          ) {
             failCurrentSource(errorReason);
             return;
           }

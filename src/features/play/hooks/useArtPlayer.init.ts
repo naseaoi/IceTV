@@ -50,6 +50,7 @@ import {
 import {
   createVodM3u8Loader,
   getVodRuntimeSourceUrl,
+  isVodRuntimeWaitingForResource,
   pauseIfVodRuntimeReleased,
   registerVodNativeRuntime,
 } from '@/features/play/lib/vodHlsRuntime';
@@ -530,15 +531,22 @@ export async function initializeArtPlayer(
         pendingResumeTime: resumeTimeRef.current,
         stableCurrentTime: stableCurrentTimeRef.current,
       });
-      resumeTimeRef.current = resumeTarget;
-      resumeModeRef.current = 'forced';
+      const sessionStarted = loadingSessionRef.current.playbackStartNotified;
+      const userPaused = sessionStarted && player.video?.paused === true;
+      // resumeTimeRef 只在首次起播时清空，已起播后只登记本会话落地一次的目标，否则之后每次 canplay / progress 都会跳回
+      if (!sessionStarted) {
+        resumeTimeRef.current = resumeTarget;
+        resumeModeRef.current = 'forced';
+      }
       loadingSessionRef.current.pendingInitialResumeTarget = resumeTarget;
       nativeUseServerProxy = nextServer;
       nativeAttempt.routeSwitched = true;
       nativeAttempt.triedRoutes.add(nextServer ? 'server' : 'browser');
       setRealtimeLoadSpeed('直连失败，切换代理...');
-      setIsVideoLoading(true);
-      onSourceProxyFallbackStarted?.();
+      if (!userPaused) {
+        setIsVideoLoading(true);
+        onSourceProxyFallbackStarted?.();
+      }
 
       try {
         waitForDanmakuPlayerSwitch(player, player.switchUrl(fallbackUrl));
@@ -551,7 +559,11 @@ export async function initializeArtPlayer(
           const managedVideo = getManagedVideo(activeVideo);
           managedVideo.__icetvUsingServerProxy = nextServer;
           ensureVideoSource(activeVideo, fallbackUrl);
-          void activeVideo.play().catch(() => {});
+          if (userPaused) {
+            activeVideo.pause();
+          } else {
+            void activeVideo.play().catch(() => {});
+          }
         }
         return true;
       } catch (error) {
@@ -741,10 +753,11 @@ export async function initializeArtPlayer(
     };
 
     let initialPlaybackRequestInFlight = false;
-    // hls 仍在加载时再 startLoad 会中止在途分片并从头重下，只在加载被停掉时补拉
+    // hls 仍在加载时再 startLoad 会中止在途分片并从头重下，只在加载被停掉时补拉；资源限流退避由运行时按时补拉
     const resumeHlsLoadingIfStopped = (video: HTMLVideoElement) => {
       const hls = getManagedVideo(video).hls;
-      if (hls && !hls.loadingEnabled) hls.startLoad();
+      if (hls && !hls.loadingEnabled && !isVodRuntimeWaitingForResource(video))
+        hls.startLoad();
     };
     const requestInitialPlayback = (
       video: HTMLVideoElement | null | undefined,
@@ -899,6 +912,20 @@ export async function initializeArtPlayer(
       return trackedResumeTarget;
     };
 
+    // 已起播会话里线路恢复或资源等待期间用户暂停，不会再有 playing 收起加载层；落点已到且画面就绪即结束等待
+    const finishRecoveryIfPausedReady = () => {
+      if (isStalePlayerSession()) return;
+      const activeVideo = player.video as HTMLVideoElement | null;
+      if (
+        loadingSessionRef.current.playbackStartNotified &&
+        loadingSessionRef.current.pendingInitialResumeTarget === null &&
+        activeVideo?.paused &&
+        shouldDismissLoadingFromReadyFrame(activeVideo)
+      ) {
+        finishInitialLoading(true);
+      }
+    };
+
     const finishInitialLoadingIfMediaReady = () => {
       if (isStalePlayerSession()) {
         return;
@@ -913,19 +940,24 @@ export async function initializeArtPlayer(
       }
 
       const hasReadyFrame = shouldDismissLoadingFromReadyFrame(activeVideo);
+      // 起播后播放与暂停由用户决定，就绪事件不再代为播放
+      const mayRequestPlayback =
+        hasReadyFrame && !loadingSessionRef.current.playbackStartNotified;
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         if (!completePendingResumeIfReady()) {
           retryPendingResumePosition();
         }
-        if (!isPlayingReady && hasReadyFrame) {
+        if (!isPlayingReady && mayRequestPlayback) {
           requestInitialPlayback(activeVideo);
         }
+        finishRecoveryIfPausedReady();
         return;
       }
 
-      if (hasReadyFrame) {
+      if (mayRequestPlayback) {
         requestInitialPlayback(activeVideo);
       }
+      finishRecoveryIfPausedReady();
     };
 
     const unbindDanmakuSliderDrag = bindDanmakuSliderDrag(player);
@@ -964,6 +996,7 @@ export async function initializeArtPlayer(
     });
 
     player.on('pause', () => {
+      finishRecoveryIfPausedReady();
       void releaseWakeLock();
       saveCurrentPlayProgress();
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('pause');
