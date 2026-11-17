@@ -2,22 +2,19 @@
 
 import { useEffect } from 'react';
 
+// 只锁 html：它的 overflow 会传给视口。body 一旦也设成 hidden 就成了滚动容器，
+// 页面里的 sticky 元素（顶栏、子栏）改为相对 body 吸附，页面已滚动时被移出视口。
 export function useBodyScrollLock(active: boolean) {
   useEffect(() => {
     if (!active) {
       return;
     }
 
-    const body = document.body;
     const html = document.documentElement;
-    const originalBodyOverflow = body.style.overflow;
     const originalHtmlOverflow = html.style.overflow;
-
-    body.style.overflow = 'hidden';
     html.style.overflow = 'hidden';
 
     return () => {
-      body.style.overflow = originalBodyOverflow;
       html.style.overflow = originalHtmlOverflow;
     };
   }, [active]);

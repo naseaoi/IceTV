@@ -190,8 +190,8 @@ describe('MessagePanel', () => {
     );
 
     await waitFor(() => {
-      expect(document.body.style.overflow).toBe('hidden');
       expect(document.documentElement.style.overflow).toBe('hidden');
+      expect(document.body.style.overflow).toBe('');
     });
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
