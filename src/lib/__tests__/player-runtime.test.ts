@@ -7,6 +7,47 @@ import {
   restorePlayerPlaybackRate,
 } from '@/lib/player-runtime';
 
+describe('播放器模块加载重试', () => {
+  afterEach(() => {
+    jest.dontMock('artplayer');
+    jest.dontMock('hls.js');
+  });
+
+  it.each([false, true])(
+    '失败后重新导入且成功结果共享，preload=%s',
+    async (preload) => {
+      let attempts = 0;
+      const Artplayer = class {};
+      const Hls = class {};
+      jest.doMock('artplayer', () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('chunk unavailable');
+        return { __esModule: true, default: Artplayer };
+      });
+      jest.doMock('hls.js', () => ({ __esModule: true, default: Hls }));
+      jest.resetModules();
+      const runtime = await import('@/lib/player-runtime');
+      if (preload) {
+        runtime.preloadPlayerModules();
+        for (let i = 0; i < 20; i += 1) await Promise.resolve();
+      } else {
+        await expect(runtime.getPlayerModules()).rejects.toThrow(
+          'chunk unavailable',
+        );
+      }
+      await expect(runtime.getPlayerModules()).resolves.toEqual({
+        Artplayer,
+        Hls,
+      });
+      await expect(runtime.getPlayerModules()).resolves.toEqual({
+        Artplayer,
+        Hls,
+      });
+      expect(attempts).toBe(2);
+    },
+  );
+});
+
 describe('prefetchM3U8', () => {
   it('跳过直连清单，代理清单仍预热服务端缓存', () => {
     const originalFetch = global.fetch;

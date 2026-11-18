@@ -278,6 +278,7 @@ describe('LinuxDo 路由', () => {
       'Alice',
       ['members'],
       expect.objectContaining({ providerUserId: '123', autoCreated: true }),
+      undefined,
     );
     expect(mockDb.registerUser.mock.calls[0][1]).toHaveLength(43);
     expect(response.cookies.get('auth')).toBeDefined();
@@ -326,6 +327,7 @@ describe('LinuxDo 路由', () => {
       ),
     );
     expect(response.status).toBe(500);
+    expect(mockDb.registerUser.mock.calls[0][5]).toBe('TEST-CODE');
     expect(mockDb.releaseInviteCodeUse).toHaveBeenCalledTimes(1);
   });
   it('规范化后的双斜线绑定回跳仍保持同站', async () => {

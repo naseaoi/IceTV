@@ -45,6 +45,19 @@ const manifestTemplate = {
       sizes: '512x512',
       type: 'image/png',
     },
+    // 安卓启动器按 maskable 图标裁切，图形须在中心 80% 的安全区内
+    {
+      src: '/icons/icon-maskable-192x192.png',
+      sizes: '192x192',
+      type: 'image/png',
+      purpose: 'maskable',
+    },
+    {
+      src: '/icons/icon-maskable-512x512.png',
+      sizes: '512x512',
+      type: 'image/png',
+      purpose: 'maskable',
+    },
   ],
 };
 

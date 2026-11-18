@@ -25,3 +25,11 @@ export const VersionPanel = dynamic<{ isOpen: boolean; onClose: () => void }>(
   () => import('@/components/VersionPanel').then((mod) => mod.VersionPanel),
   { ssr: false },
 );
+
+export const WatchLevelPanel = dynamic<{ onClose: () => void }>(
+  () =>
+    import('@/features/watch-level/WatchLevelPanel').then(
+      (mod) => mod.WatchLevelPanel,
+    ),
+  { ssr: false },
+);

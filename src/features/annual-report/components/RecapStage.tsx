@@ -18,6 +18,11 @@ import {
 import { hasOpenModalShell } from '@/components/modals/ModalShell';
 import { RECAP_TEXT } from '@/features/annual-report/components/RecapPrimitives';
 import {
+  CompletionsSlide,
+  LettersSlide,
+  ListsSlide,
+} from '@/features/annual-report/components/slides/ActivitySlides';
+import {
   type SlideProps,
   EmptySlide,
   IntroSlide,
@@ -35,7 +40,6 @@ import {
   JourneySlide,
   RankingSlide,
   ReviewsSlide,
-  SourcesSlide,
   TopWorkSlide,
 } from '@/features/annual-report/components/slides/WorkSlides';
 import type {
@@ -58,8 +62,10 @@ const SLIDES: Record<SlideKey, ComponentType<SlideProps>> = {
   top: TopWorkSlide,
   ranking: RankingSlide,
   journey: JourneySlide,
-  sources: SourcesSlide,
+  completions: CompletionsSlide,
   reviews: ReviewsSlide,
+  lists: ListsSlide,
+  letters: LettersSlide,
   summary: SummarySlide,
   empty: EmptySlide,
 };
@@ -292,6 +298,7 @@ export function RecapStage({
         aria-roledescription='slide'
         aria-label={`第 ${index + 1} 页，共 ${slides.length} 页`}
         aria-hidden={className === 'recap-slide-exit' || undefined}
+        data-recap-last={index === slides.length - 1 || undefined}
         className={`absolute inset-0 ${className}`}
         style={{ '--dir': dir } as CSSProperties}
       >

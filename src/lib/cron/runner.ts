@@ -35,7 +35,7 @@ export async function startCronTask(task: CronTask): Promise<CronStartResult> {
     .catch((error) => console.error('Cron job background error:', error))
     .finally(() => finishCronTask(lease));
 
-  return createResult(200, task, true, 'Cron job executed successfully');
+  return createResult(200, task, true, 'Cron job started');
 }
 
 async function finishCronTask(lease: CronLease): Promise<void> {

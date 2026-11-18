@@ -69,3 +69,31 @@ describe('playerLoading', () => {
     expect(markPlayerLoadingSessionStarted(state)).toBe(false);
   });
 });
+
+it('准备阶段与媒体阶段共用扣除后台时间和有限前台宽限的时钟', () => {
+  const { getVodStartupNow, beginVodStartupProgress } = jest.requireActual(
+    '@/features/play/lib/playerLoading',
+  );
+  let now = 0;
+  let hidden = false;
+  jest.spyOn(performance, 'now').mockImplementation(() => now);
+  jest.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+  expect(getVodStartupNow()).toBe(0);
+  now = 500;
+  hidden = true;
+  document.dispatchEvent(new Event('visibilitychange'));
+  now = 100_500;
+  expect(getVodStartupNow()).toBe(500);
+  const progress = beginVodStartupProgress(
+    document.createElement('video'),
+    'a',
+  );
+  expect(progress.startedAt).toBe(500);
+  hidden = false;
+  document.dispatchEvent(new Event('visibilitychange'));
+  now += 500;
+  expect(getVodStartupNow()).toBe(500);
+  now += 1500;
+  expect(getVodStartupNow()).toBe(1500);
+  jest.restoreAllMocks();
+});

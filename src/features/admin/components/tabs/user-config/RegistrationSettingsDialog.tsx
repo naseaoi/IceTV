@@ -7,6 +7,7 @@ import {
   Eraser,
   Plus,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -92,6 +93,7 @@ interface RegistrationSettingsDialogProps {
   // 成功返回本次生成的邀请码，失败返回 null（错误由调用方提示）
   onCreateCodes: (draft: InviteCodeDraft) => Promise<string[] | null>;
   onDeleteCode: (code: string) => void;
+  onViewCodeUsers: (code: string) => void;
   onPurgeInactiveCodes: () => void;
   onClose: () => void;
 }
@@ -517,12 +519,14 @@ function InviteCodeRow({
   copied,
   onCopy,
   onDelete,
+  onViewUsers,
 }: {
   item: InviteCode;
   deleting: boolean;
   copied: boolean;
   onCopy: (code: string) => void;
   onDelete: (code: string) => void;
+  onViewUsers: (code: string) => void;
 }) {
   const expired = isInviteCodeExpired(item);
   const exhausted = isInviteCodeExhausted(item);
@@ -580,6 +584,19 @@ function InviteCodeRow({
         />
         {expired ? '已过期' : exhausted ? '已用尽' : '有效'}
       </span>
+      {(item.usedCount ?? 0) > 0 ? (
+        <button
+          type='button'
+          onClick={() => onViewUsers(item.code)}
+          aria-label={`查看使用邀请码 ${item.code} 的用户`}
+          title='查看使用者'
+          className='shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200'
+        >
+          <Users className='h-4 w-4' />
+        </button>
+      ) : (
+        <span aria-hidden='true' className='w-8 shrink-0' />
+      )}
       <button
         type='button'
         onClick={() => onDelete(item.code)}
@@ -618,6 +635,7 @@ function InviteCodeRowsSkeleton({ count }: { count: number }) {
             />
           </div>
           <div className='skeleton h-5 w-12 rounded-full' />
+          <span className='w-8 shrink-0' />
           <div className='skeleton h-8 w-8 rounded-lg' />
         </div>
       ))}
@@ -675,6 +693,7 @@ export function RegistrationSettingsDialog({
   onInviteFilterChange,
   onCreateCodes,
   onDeleteCode,
+  onViewCodeUsers,
   onPurgeInactiveCodes,
   onClose,
 }: RegistrationSettingsDialogProps) {
@@ -866,6 +885,7 @@ export function RegistrationSettingsDialog({
                     copied={copiedKey === item.code}
                     onCopy={(code) => void copy(code, code)}
                     onDelete={onDeleteCode}
+                    onViewUsers={onViewCodeUsers}
                   />
                 ))}
                 {nextCursor && (

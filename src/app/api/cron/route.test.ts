@@ -283,6 +283,11 @@ describe('cron route', () => {
     const secondResponse = await GET(createRequest());
 
     expect(firstResponse.status).toBe(200);
+    expect(await firstResponse.json()).toMatchObject({
+      success: true,
+      message: 'Cron job started',
+    });
+    expect(mockLeaseRelease).not.toHaveBeenCalled();
     expect(secondResponse.status).toBe(202);
 
     releaseFirstConfig({
@@ -443,8 +448,7 @@ describe('cron route', () => {
     mockGetAllUsers.mockResolvedValue(['user']);
     mockGetAllPlayRecords.mockResolvedValue({
       'source+a': createPlayRecord({
-        index: 1,
-        total_episodes: 1,
+        tracking_enabled: false,
         metadata_checked_at: 1,
       }),
       'source+z': createPlayRecord({

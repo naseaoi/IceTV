@@ -70,4 +70,47 @@ describe('ad-segment-detector rycj 源站样本回归', () => {
     );
     expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
+
+  test('25fps 正片只删已知广告模板，保留整秒切片的正片与片尾字幕', () => {
+    const m3u8 = fs.readFileSync(
+      fixturePath('rycj-episode-1-25fps.m3u8'),
+      'utf8',
+    );
+    const result = filterM3U8AdsForSource(
+      m3u8,
+      ORIGIN.replace('episode-8', 'episode-1'),
+      'rycj',
+    );
+
+    expect(m3u8.match(/(mid|tail)_ad_\d+\.ts/g)).toHaveLength(8);
+    expect(result).not.toMatch(/(mid|tail)_ad_\d+\.ts/);
+    expect(result.match(/content_\d+_\d+\.ts/g)).toHaveLength(
+      m3u8.match(/content_\d+_\d+\.ts/g)!.length,
+    );
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
+  });
+
+  test('块时长离散时删除中插与片尾网格广告，保留 23.976fps 整帧正片', () => {
+    const m3u8 = fs.readFileSync(
+      fixturePath('rycj-episode-11-irregular-blocks.m3u8'),
+      'utf8',
+    );
+    const result = filterM3U8AdsForSource(
+      m3u8,
+      ORIGIN.replace('episode-8', 'episode-11'),
+      'rycj',
+    );
+
+    expect(m3u8.match(/(mid|tail)_ad_\d+\.ts/g)).toHaveLength(8);
+    expect(result).not.toMatch(/(mid|tail)_ad_\d+\.ts/);
+    expect(result.match(/content_\d+_\d+\.ts/g)).toHaveLength(
+      m3u8.match(/content_\d+_\d+\.ts/g)!.length,
+    );
+    expect(result).toContain('#EXTINF:4.004000,\ncontent_22_0.ts');
+    expect(sumExtinfDurations(m3u8) - sumExtinfDurations(result)).toBeCloseTo(
+      32.04,
+      6,
+    );
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
+  });
 });

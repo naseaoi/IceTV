@@ -1,4 +1,4 @@
-import { ensureVideoSource } from '@/lib/player-utils';
+import { createHlsConfig, ensureVideoSource } from '@/lib/player-utils';
 
 function sourceUrls(video: HTMLVideoElement) {
   return Array.from(video.getElementsByTagName('source')).map((s) => s.src);
@@ -28,5 +28,11 @@ describe('ensureVideoSource', () => {
     ensureVideoSource(video, 'http://localhost/a.mp4');
 
     expect(sourceUrls(video)).toEqual(['http://localhost/a.mp4']);
+  });
+});
+
+describe('createHlsConfig', () => {
+  it('关闭插播控制器，避免挂载媒体时重复 startLoad 中止续播首片', () => {
+    expect(createHlsConfig().enableInterstitialPlayback).toBe(false);
   });
 });

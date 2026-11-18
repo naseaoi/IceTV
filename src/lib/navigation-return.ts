@@ -59,6 +59,7 @@ export function withReturnTo(target: string, returnTo: string): string {
 }
 
 export function getBackFallbackPath(pathname: string): string {
+  if (pathname.startsWith('/lists/')) return '/me/lists';
   if (
     pathname.startsWith('/me/') ||
     pathname.startsWith('/settings') ||

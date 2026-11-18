@@ -79,7 +79,7 @@ export async function assertPlaybackAnnualData(
       started_at: 0,
       ended_at: end + 1000,
     };
-    const historyId = await storage.saveWatchSessionReport(
+    const { historyId: historyId } = await storage.saveWatchSessionReport(
       user,
       modern,
       [

@@ -826,7 +826,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             <AdminSearchField
               value={userSearch}
               onChange={setUserSearch}
-              label='搜索用户名或昵称'
+              label='搜索用户名、昵称或邀请码'
               className='w-full sm:w-64'
             />
             <Select
@@ -1228,6 +1228,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onInviteFilterChange={setInviteFilter}
         onCreateCodes={handleCreateInviteCodes}
         onDeleteCode={handleDeleteInviteCode}
+        onViewCodeUsers={(code) => {
+          setUserSearch(code);
+          setUserFilter('all');
+          setUserGroupFilter('');
+          setShowRegistrationModal(false);
+        }}
         isPurgingCodes={isLoading('purgeInactiveInviteCodes')}
         onPurgeInactiveCodes={() => setShowPurgeInviteConfirm(true)}
         onClose={() => setShowRegistrationModal(false)}

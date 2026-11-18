@@ -37,6 +37,7 @@ describe('AuthProvider', () => {
       <AuthProvider
         initialSession={{
           status: 'authenticated',
+          level: 1,
           profileId: 'profileAlice',
           avatarSeed: null,
           nickname: '爱丽丝',
@@ -57,6 +58,7 @@ describe('AuthProvider', () => {
       <AuthProvider
         initialSession={{
           status: 'authenticated',
+          level: 1,
           profileId: 'profileAlice',
           avatarSeed: null,
           nickname: '爱丽丝',
@@ -78,6 +80,7 @@ describe('AuthProvider', () => {
   it('只在显式刷新时调用客户端会话接口', async () => {
     mockGetClientAuthSession.mockResolvedValue({
       status: 'authenticated',
+      level: 1,
       profileId: 'profileAlice',
       avatarSeed: null,
       nickname: '爱丽丝',
@@ -103,6 +106,7 @@ it('昵称缺失事件触发显式会话刷新', async () => {
   jest.clearAllMocks();
   mockGetClientAuthSession.mockResolvedValue({
     status: 'authenticated',
+    level: 1,
     username: 'alice',
     profileId: 'profileAlice',
     avatarSeed: null,
@@ -113,6 +117,7 @@ it('昵称缺失事件触发显式会话刷新', async () => {
     <AuthProvider
       initialSession={{
         status: 'authenticated',
+        level: 1,
         username: 'alice',
         profileId: 'profileAlice',
         avatarSeed: null,

@@ -1,0 +1,42 @@
+diff --git a/dist/client/components/layout-router.js b/dist/client/components/layout-router.js
+index 06b68cc92862992b485d8f3edf0a937e0af2847a..6160c0865babb49766a149d5e6b681373a5dac18 100644
+--- a/dist/client/components/layout-router.js
++++ b/dist/client/components/layout-router.js
+@@ -316,7 +316,15 @@ function ScrollAndMaybeFocusHandler({ children, cacheNode }) {
+     // We use `useDeferredValue` to handle switching between the prefetched and
+     // final values. The second argument is returned on initial render, then it
+     // re-renders with the first argument.
+-    const rsc = (0, _react.useDeferredValue)(cacheNode.rsc, resolvedPrefetchRsc);
++    let rsc = (0, _react.useDeferredValue)(cacheNode.rsc, resolvedPrefetchRsc);
++    // IceTV patch: a prefetch still pending at navigation time is a plain promise.
++    // When it resolves to null (dynamic segment without prefetched data), render the
++    // final data instead, so the segment suspends into loading.tsx rather than
++    // rendering nothing and blanking the whole page.
++    if (rsc !== null && typeof rsc === 'object' && typeof rsc.then === 'function' && !(0, _pprnavigations.isDeferredRsc)(rsc)) {
++        const unwrappedPrefetchRsc = (0, _react.use)(rsc);
++        rsc = unwrappedPrefetchRsc === null && cacheNode.rsc !== rsc ? cacheNode.rsc : unwrappedPrefetchRsc;
++    }
+     // `rsc` is either a React node or a promise for a React node, except we
+     // special case `null` to represent that this segment's data is missing. If
+     // it's a promise, we need to unwrap it so we can determine whether or not the
+diff --git a/dist/esm/client/components/layout-router.js b/dist/esm/client/components/layout-router.js
+index 25e44ba48e03b6ae3eb6de3ddacfdcc8f43f185d..786cb43b64323a515749d520a2a823f876422a64 100644
+--- a/dist/esm/client/components/layout-router.js
++++ b/dist/esm/client/components/layout-router.js
+@@ -289,7 +289,15 @@ function ScrollAndMaybeFocusHandler({ children, cacheNode }) {
+     // We use `useDeferredValue` to handle switching between the prefetched and
+     // final values. The second argument is returned on initial render, then it
+     // re-renders with the first argument.
+-    const rsc = useDeferredValue(cacheNode.rsc, resolvedPrefetchRsc);
++    let rsc = useDeferredValue(cacheNode.rsc, resolvedPrefetchRsc);
++    // IceTV patch: a prefetch still pending at navigation time is a plain promise.
++    // When it resolves to null (dynamic segment without prefetched data), render the
++    // final data instead, so the segment suspends into loading.tsx rather than
++    // rendering nothing and blanking the whole page.
++    if (rsc !== null && typeof rsc === 'object' && typeof rsc.then === 'function' && !isDeferredRsc(rsc)) {
++        const unwrappedPrefetchRsc = use(rsc);
++        rsc = unwrappedPrefetchRsc === null && cacheNode.rsc !== rsc ? cacheNode.rsc : unwrappedPrefetchRsc;
++    }
+     // `rsc` is either a React node or a promise for a React node, except we
+     // special case `null` to represent that this segment's data is missing. If
+     // it's a promise, we need to unwrap it so we can determine whether or not the

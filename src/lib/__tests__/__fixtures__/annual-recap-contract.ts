@@ -1,3 +1,4 @@
+import { emptyAnnualActivity } from '@/features/playback-stats/lib/annual-activity';
 import { aggregateAnnualReport } from '@/features/playback-stats/lib/annual-report';
 import { publicAnnualReport } from '@/features/playback-stats/lib/annual-share';
 import { followRecapSortKey } from '@/lib/annual-recap-identity';
@@ -16,6 +17,7 @@ export async function assertAnnualRecapStorage(storage: IStorage) {
     }),
     [],
     true,
+    emptyAnnualActivity(),
   );
   try {
     await storage.registerUser(user, 'password');
@@ -80,6 +82,7 @@ export async function assertAnnualRecapMessages(storage: IStorage) {
     }),
     [],
     false,
+    emptyAnnualActivity(),
   );
   try {
     await storage.registerUser(user, 'password');

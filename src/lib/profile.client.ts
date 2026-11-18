@@ -3,6 +3,7 @@ import type {
   FavoriteWatchStatus,
   FollowListPage,
   LibraryVisibility,
+  ProfileShowcaseItem,
   PublicFavoritePage,
   PublicUserRef,
   PublicVideoReviewPage,
@@ -11,8 +12,12 @@ import type {
 import { DisplayableError, getHttpErrorMessage } from '@/lib/user-facing-error';
 
 export const PROFILE_REQUIRED_EVENT = 'auth:profile-required';
+export const PROFILE_UPDATED_EVENT = 'profile:updated';
 export type MyProfile = PublicUserRef & {
   libraryVisibility: LibraryVisibility;
+  bio: string | null;
+  showcase: ProfileShowcaseItem[];
+  watchTimePublic: boolean;
 };
 
 export async function socialRequest<T>(
@@ -38,7 +43,10 @@ export async function socialRequest<T>(
       typeof data?.error === 'string'
         ? data.error
         : getHttpErrorMessage(response.status, '请求失败，请稍后重试'),
-      { status: response.status },
+      {
+        status: response.status,
+        code: typeof data?.code === 'string' ? data.code : undefined,
+      },
     );
   if (!data) throw new DisplayableError('服务器响应异常，请稍后重试');
   return data as T;
@@ -47,20 +55,39 @@ export async function socialRequest<T>(
 export function getMyProfile() {
   return socialRequest<MyProfile>('/api/profile');
 }
-export function updateProfile(input: {
+export async function updateProfile(input: {
   nickname?: string;
+  avatarSeed?: string | null;
   libraryVisibility?: LibraryVisibility;
+  bio?: string;
+  showcaseKeys?: string[];
+  watchTimePublic?: boolean;
 }) {
-  return socialRequest<MyProfile>('/api/profile', {
+  const profile = await socialRequest<MyProfile>('/api/profile', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
+  window.dispatchEvent(new Event(PROFILE_UPDATED_EVENT));
+  return profile;
 }
-export function getUserProfile(profileId: string) {
-  return socialRequest<UserProfileView>(
+// 本标签页内已知的公开评价数；个人主页资料返回前（含路由 loading）按它渲染评价骨架条数
+const knownPublicReviewCounts = new Map<string, number>();
+
+export function getKnownPublicReviewCount(profileId: string): number | null {
+  return knownPublicReviewCounts.get(profileId) ?? null;
+}
+
+export function rememberPublicReviewCount(profileId: string, count: number) {
+  knownPublicReviewCounts.set(profileId, count);
+}
+
+export async function getUserProfile(profileId: string) {
+  const view = await socialRequest<UserProfileView>(
     `/api/users/${encodeURIComponent(profileId)}`,
   );
+  rememberPublicReviewCount(profileId, view.publicReviewCount);
+  return view;
 }
 function userPageUrl(profileId: string, kind: string, cursor?: string | null) {
   return `/api/users/${encodeURIComponent(profileId)}/${kind}?${new URLSearchParams(cursor ? { cursor } : {})}`;

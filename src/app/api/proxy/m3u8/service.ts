@@ -1,3 +1,4 @@
+import { createSharedPlaybackTask } from '@/features/play/lib/sharedPlaybackTask';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getConfigForRead } from '@/lib/config';
@@ -33,6 +34,7 @@ export type M3U8LoadResult = M3U8CacheEntry & {
 };
 
 export type M3U8ProxyRequestContext = {
+  signal?: AbortSignal;
   identity?: string;
   proxyPoolStickyKey?: string;
   startedAt: number;
@@ -62,7 +64,13 @@ const m3u8Cache = createSharedServerCache<M3U8CacheEntry>({
 
 const MAX_M3U8_BYTES = 2 * 1024 * 1024;
 const m3u8RefreshInflight = new Map<string, Promise<void>>();
-const m3u8LoadInflight = new Map<string, Promise<M3U8LoadResult>>();
+const m3u8LoadInflight = new Map<
+  string,
+  {
+    task: ReturnType<typeof createSharedPlaybackTask<M3U8LoadResult>>;
+    done: Promise<unknown>;
+  }
+>();
 
 async function getProxyRequestTimeoutMs(
   source: string | null,
@@ -140,28 +148,45 @@ export function loadM3U8Data(
 ): Promise<M3U8LoadResult> {
   skipCache = skipCache || isLive || isSignedM3U8Url(url);
   const key = getM3U8LoadInflightKey(url, ua, source, isLive, skipCache);
+  if (context.signal?.aborted) {
+    return Promise.reject(
+      context.signal.reason ?? new DOMException('Aborted', 'AbortError'),
+    );
+  }
   const existing = m3u8LoadInflight.get(key);
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.task.signal.aborted)
+      return existing.task.consume(context.signal);
+    // 等被取消的缓存 loader 退出，防止新消费者接到共享缓存内部的旧在途结果。
+    return existing.done.then(() =>
+      loadM3U8Data(url, ua, source, isLive, skipCache, context),
+    );
+  }
 
-  const task = (
-    skipCache
-      ? fetchM3U8Data(url, ua, source, isLive, context)
+  let done!: Promise<unknown>;
+  const task = createSharedPlaybackTask<M3U8LoadResult>((signal) => {
+    const load = () =>
+      fetchM3U8Data(url, ua, source, isLive, { ...context, signal });
+    const pending = skipCache
+      ? load()
       : m3u8Cache
           .getOrLoad(getM3U8CacheKey(url, source), async () =>
-            toM3U8CacheEntry(
-              await fetchM3U8Data(url, ua, source, isLive, context),
-            ),
+            toM3U8CacheEntry(await load()),
           )
-          .then((entry) => ({
-            ...entry,
-            status: 200,
-            statusText: 'OK',
-          }))
-  ).finally(() => {
-    m3u8LoadInflight.delete(key);
+          .then((entry) => ({ ...entry, status: 200, statusText: 'OK' }));
+    done = pending
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => {
+        if (m3u8LoadInflight.get(key)?.task === task)
+          m3u8LoadInflight.delete(key);
+      });
+    return pending;
   });
-  m3u8LoadInflight.set(key, task);
-  return task;
+  m3u8LoadInflight.set(key, { task, done });
+  return task.consume(context.signal);
 }
 
 function getM3U8LoadInflightKey(
@@ -200,6 +225,7 @@ async function fetchM3U8Data(
             userAgent: ua,
             maxBytes: MAX_M3U8_BYTES,
             accept: 'application/vnd.apple.mpegurl,text/plain,*/*',
+            signal: context.signal,
           },
         );
         const content = response.body.toString('utf8');
@@ -228,7 +254,8 @@ async function fetchM3U8Data(
           statusText: response.statusText,
         };
       } catch (error) {
-        if (error instanceof ResourceLimitError) throw error;
+        if (error instanceof ResourceLimitError || context.signal?.aborted)
+          throw error;
         logProxyFailure(
           classifyProxyFailure(error, {
             route: 'm3u8',
@@ -261,6 +288,7 @@ async function fetchM3U8Data(
     useProxyPool: !isLive,
     skipInitialValidation: true,
     timeoutMs,
+    signal: context.signal,
   });
 
   if (!response.ok) {

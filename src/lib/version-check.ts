@@ -1,6 +1,10 @@
 'use client';
 
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import {
+  readSeenReleaseVersion,
+  writeSeenReleaseVersion,
+} from '@/lib/local-preferences';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export enum UpdateStatus {
@@ -30,8 +34,24 @@ export interface ReleaseCheckResult {
 let cachedCheckPromise: Promise<ReleaseCheckResult> | null = null;
 let cachedCheckResult: CachedCheckResult | null = null;
 
-export async function checkForUpdates(): Promise<UpdateStatus> {
-  return (await checkLatestRelease()).status;
+export const RELEASE_SEEN_EVENT = 'icetv:release-seen';
+
+// 站长在版本面板看过的版本不再挂红点，更新的版本发布后重新提醒
+export async function checkForUnseenUpdate(): Promise<boolean> {
+  const { status, latestVersion } = await checkLatestRelease();
+  return (
+    status === UpdateStatus.HAS_UPDATE &&
+    !!latestVersion &&
+    readSeenReleaseVersion() !== latestVersion
+  );
+}
+
+export async function markLatestReleaseSeen(): Promise<void> {
+  const { status, latestVersion } = await checkLatestRelease();
+  if (status !== UpdateStatus.HAS_UPDATE || !latestVersion) return;
+  if (readSeenReleaseVersion() === latestVersion) return;
+  writeSeenReleaseVersion(latestVersion);
+  window.dispatchEvent(new Event(RELEASE_SEEN_EVENT));
 }
 
 export async function checkLatestRelease(): Promise<ReleaseCheckResult> {

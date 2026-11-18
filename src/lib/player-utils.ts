@@ -209,6 +209,8 @@ export function createHlsConfig(overrides?: HlsConfigOverrides) {
     progressive: true,
     testBandwidth: true,
     abrEwmaDefaultEstimate: resolveInitialBandwidthEstimate(),
+    // 源站不使用插播；开启时挂载媒体会按 currentTime=0 判定偏离续播点而再次 startLoad，中止在途首片
+    enableInterstitialPlayback: false,
     ...overrides,
   };
 }
@@ -343,6 +345,7 @@ export type HlsFatalRecoveryController = {
     errorType: string,
     ErrorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string },
     failedFragment?: HlsFragmentRef,
+    minimumDelayMs?: number,
   ) => HlsFatalRecoveryResult;
   // 返回 true 表示这次加载算作网络已恢复，调用方的线路失败计数也按它清零
   handleFragmentLoaded: (fragment?: HlsFragmentRef) => boolean;
@@ -388,7 +391,7 @@ export function createHlsFatalRecoveryController(): HlsFatalRecoveryController {
   };
 
   return {
-    recover(target, errorType, ErrorTypes, fragment) {
+    recover(target, errorType, ErrorTypes, fragment, minimumDelayMs = 0) {
       // 释放后到达的迟到错误既不恢复，也不能让调用方当成失败处理
       if (disposed) return 'recovering';
 
@@ -399,7 +402,12 @@ export function createHlsFatalRecoveryController(): HlsFatalRecoveryController {
         if (networkAttempts >= HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS.length) {
           return 'exhausted';
         }
-        const delayMs = HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[networkAttempts];
+        const delayMs = Math.max(
+          HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[networkAttempts],
+          Number.isFinite(minimumDelayMs)
+            ? Math.min(300_000, minimumDelayMs)
+            : 0,
+        );
         networkAttempts += 1;
         playbackAnchor = null;
         networkRetryTimer = setTimeout(() => {

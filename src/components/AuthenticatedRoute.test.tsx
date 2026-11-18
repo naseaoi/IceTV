@@ -97,6 +97,7 @@ describe('AuthenticatedRoute', () => {
     mockUseAuthSession.mockReturnValue({
       session: {
         status: 'authenticated',
+        level: 1,
         profileId: 'profileAlice',
         avatarSeed: null,
         nickname: '爱丽丝',
@@ -121,6 +122,7 @@ describe('AuthenticatedRoute', () => {
     mockUseAuthSession.mockReturnValue({
       session: {
         status: 'authenticated',
+        level: 1,
         profileId: 'profileAlice',
         avatarSeed: null,
         nickname: '爱丽丝',
@@ -154,6 +156,7 @@ describe('AuthenticatedRoute', () => {
     mockUseAuthSession.mockReturnValue({
       session: {
         status: 'authenticated',
+        level: 1,
         profileId: 'profileAlice',
         avatarSeed: null,
         nickname: '爱丽丝',
@@ -216,6 +219,7 @@ it('昵称未设置时先展示资料门禁，业务内容保持未挂载', () =
   mockUseAuthSession.mockReturnValue({
     session: {
       status: 'authenticated',
+      level: 1,
       username: 'private-login',
       role: 'user',
       profileId: 'profileAlice',

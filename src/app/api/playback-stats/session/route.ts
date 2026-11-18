@@ -9,6 +9,7 @@ import type {
   PlaybackWatchBucket,
   WatchHistoryWrite,
 } from '@/lib/types';
+import type { WatchLevelUp } from '@/lib/watch-level-types';
 
 export const runtime = 'nodejs';
 
@@ -151,6 +152,7 @@ export async function POST(request: NextRequest) {
     }
 
     let historyId: string | null = null;
+    let levelUp: WatchLevelUp = null;
     if (body && Object.prototype.hasOwnProperty.call(body, 'buckets')) {
       const buckets = normalizeBuckets(
         body.buckets,
@@ -165,18 +167,18 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-      historyId = await db.saveWatchSessionReport(
+      ({ historyId, levelUp } = await db.saveWatchSessionReport(
         guardResult.username,
         session,
         buckets,
         history,
-      );
+      ));
     } else if (session.watch_seconds > 0) {
-      await db.savePlaybackSession(guardResult.username, session);
+      levelUp = await db.savePlaybackSession(guardResult.username, session);
     }
 
     return NextResponse.json(
-      { success: true, historyId },
+      { success: true, historyId, levelUp },
       { status: 200, headers: NO_STORE_HEADERS },
     );
   } catch (err) {

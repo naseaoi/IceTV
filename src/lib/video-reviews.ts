@@ -5,6 +5,7 @@ import type {
   PublicVideoReview,
   VideoReview,
 } from '@/lib/types';
+import { type WatchLevel, watchLevelForMs } from '@/lib/watch-level';
 
 // 前后端共用；存储列为 MEDIUMTEXT，放宽上限无需迁移
 export const REVIEW_CONTENT_MAX_LENGTH = 5000;
@@ -133,6 +134,43 @@ export function decodeReviewCursor(cursor?: string): ReviewCursor | null {
   }
 }
 
+export function decodeWorkReviewCursor(
+  cursor: string | undefined,
+  viewer: string,
+  title: string,
+  year: string,
+): { followed: number; time: number; profileId: string; year: string } | null {
+  if (!cursor) return null;
+  try {
+    if (cursor.length > 3000 || !/^[\w-]+$/.test(cursor)) throw new Error();
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (
+      !Array.isArray(value) ||
+      value.length !== 8 ||
+      value[0] !== 'work-v2' ||
+      value[1] !== viewer ||
+      value[2] !== title ||
+      value[3] !== year ||
+      ![0, 1].includes(value[4]) ||
+      !Number.isSafeInteger(value[5]) ||
+      value[5] < 0 ||
+      typeof value[6] !== 'string' ||
+      !/^[a-zA-Z0-9]{12}$/.test(value[6]) ||
+      typeof value[7] !== 'string' ||
+      value[7].length > 16
+    )
+      throw new Error();
+    return {
+      followed: value[4],
+      time: value[5],
+      profileId: value[6],
+      year: value[7],
+    };
+  } catch {
+    throw new ReviewValidationError('分页游标已失效，请重新加载');
+  }
+}
+
 export function reviewPageParams(cursor?: string, q = '') {
   const keyword = text(q, '搜索关键词', 200);
   const after = decodeReviewCursor(cursor);
@@ -154,6 +192,8 @@ export function reviewPageParams(cursor?: string, q = '') {
 }
 
 export type VideoReviewRow = {
+  level?: WatchLevel;
+  counted_ms?: number | null;
   username: string;
   review_json: string;
   profile_id?: string;
@@ -163,6 +203,7 @@ export type VideoReviewRow = {
   like_count?: number;
   reply_count?: number;
   liked_by_me?: boolean;
+  author_followed?: boolean;
 };
 
 export function publicReview(row: VideoReviewRow): PublicVideoReview {
@@ -172,8 +213,10 @@ export function publicReview(row: VideoReviewRow): PublicVideoReview {
       profileId: row.profile_id ?? '',
       nickname: row.nickname ?? null,
       avatarSeed: row.avatar_seed ?? null,
+      level: row.level ?? watchLevelForMs(Number(row.counted_ms ?? 0)),
       ...(row.role ? { role: row.role } : {}),
     },
+    authorFollowed: row.author_followed ?? false,
     title_norm: review.title_norm,
     spoiler: review.spoiler === true,
     likeCount: row.like_count ?? 0,

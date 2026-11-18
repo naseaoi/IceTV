@@ -4,11 +4,13 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
@@ -16,17 +18,24 @@ import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-n
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
+import {
+  assertWatchLevelContract,
+  watchLevelSession,
+} from '@/lib/__tests__/__fixtures__/watch-level-contract';
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
 import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { listsContract } from './__fixtures__/lists-contract';
 import { resetMysqlTestData } from './__fixtures__/mysql-test-data';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
+import { assertTrackingCalendar } from './__fixtures__/tracking-calendar-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
   assertFollowPagination,
+  assertProfileDetails,
   assertPublicReviewRoles,
   videoReview,
 } from './__fixtures__/video-review-contract';
@@ -70,6 +79,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     ).pool.end();
   });
 
+  it('主页资料、本命收藏与时长公开契约', async () => {
+    await assertProfileDetails(storage);
+  });
+
   it('单次 JOIN 保留多组顺序、无组用户及删号边界', async () => {
     await storage.registerUser('access-reader', 'password');
     await storage.updateUserAccess(['access-reader'], {
@@ -101,6 +114,104 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       'access-reader',
     ]);
     expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('观影等级增量、重发、跨级、保留期与删号契约', async () => {
+    await assertWatchLevelContract(storage);
+  });
+
+  it('并发多会话同桶封顶且只返回一次升级', async () => {
+    await storage.setPlaybackSession('level-concurrent', {
+      ...watchLevelSession,
+      id: 'level-base',
+      watch_seconds: 6300,
+    });
+    const results = await Promise.all(
+      [1, 2, 3].map((index) =>
+        storage.saveWatchSessionReport(
+          'level-concurrent',
+          { ...watchLevelSession, id: `level-parallel-${index}` },
+          [{ start: 900000, watch_ms: 900000 }],
+        ),
+      ),
+    );
+    expect(results.filter((result) => result.levelUp)).toHaveLength(1);
+    expect(await storage.getWatchLevel('level-concurrent')).toMatchObject({
+      level: 2,
+      countedMs: 7200000,
+    });
+  });
+
+  it('等级混合回填按时间还原足迹，标记幂等且失败回滚', async () => {
+    const impl = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      migrateWatchLevel(): Promise<void>;
+    };
+    const session = watchLevelSession;
+    await storage.setPlaybackSession('level-migrate', {
+      ...session,
+      id: 'level-old-a',
+      started_at: 0,
+      watch_seconds: 6300,
+    });
+    await storage.saveWatchSessionReport(
+      'level-migrate',
+      { ...session, id: 'level-bucket-a', title: '桶升级', ended_at: 1800001 },
+      [{ start: 900000, watch_ms: 800000 }],
+    );
+    await storage.saveWatchSessionReport(
+      'level-migrate',
+      { ...session, id: 'level-bucket-b' },
+      [{ start: 900000, watch_ms: 800000 }],
+    );
+    await storage.setPlaybackSession('level-migrate', {
+      ...session,
+      id: 'level-old-b',
+      title: '旧口径升级',
+      started_at: 2000000,
+      ended_at: 3000000,
+      watch_seconds: 64800,
+    });
+    await impl.pool.execute('DELETE FROM user_watch_totals');
+    await impl.pool.execute('DELETE FROM user_level_events');
+    await impl.pool.execute(
+      "DELETE FROM storage_migrations WHERE name = 'watch_level_v1'",
+    );
+    await impl.pool.query(
+      "CREATE TRIGGER fail_watch_level BEFORE INSERT ON user_level_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'interrupt'",
+    );
+    try {
+      await expect(impl.migrateWatchLevel()).rejects.toThrow('interrupt');
+      expect((await storage.getWatchLevel('level-migrate')).countedMs).toBe(0);
+    } finally {
+      await impl.pool.query('DROP TRIGGER fail_watch_level');
+    }
+    await impl.migrateWatchLevel();
+    const state = await storage.getWatchLevel('level-migrate');
+    expect(state.countedMs).toBe(72000000);
+    expect(state.events).toEqual([
+      expect.objectContaining({
+        level: 2,
+        title: '桶升级',
+        reachedAt: 1800000,
+      }),
+      expect.objectContaining({
+        level: 3,
+        title: '旧口径升级',
+        reachedAt: 3000000,
+      }),
+    ]);
+    await storage.deletePlaybackSessionsBefore(Number.MAX_SAFE_INTEGER);
+    await impl.migrateWatchLevel();
+    expect(await storage.getWatchLevel('level-migrate')).toEqual(state);
+  });
+
+  it('播放记录会话序号与并发 CAS 契约', async () => {
+    await assertPlayRecordOrdering(storage);
+  });
+
+  it('按标题读取本人最近进度', async () => {
+    await assertPlayRecordTitleLookup(storage);
   });
 
   it('批量读取隔离用户并省略缺失键', async () => {
@@ -350,7 +461,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         ),
       ),
     );
-    expect(new Set(ids).size).toBe(1);
+    expect(new Set(ids.map((result) => result.historyId)).size).toBe(1);
     expect(
       (
         await storage.getPlaybackPeriodSessions('concurrent-user', 0, 1000000)
@@ -1381,4 +1492,129 @@ describeLive('MySQL OAuth 身份契约（真实实例）', () => {
         storage as unknown as { pool: import('mysql2/promise').Pool }
       ).pool.end();
   });
+});
+
+describeLive('MySQL 片单契约（真实实例）', () => {
+  const stores: MySqlStorage[] = [];
+  listsContract(() => {
+    const storage = new MySqlStorage(liveUrl);
+    stores.push(storage);
+    return storage;
+  }, resetMysqlTestData);
+  afterAll(async () => {
+    for (const storage of stores)
+      await (
+        storage as unknown as { pool: import('mysql2/promise').Pool }
+      ).pool.end();
+  });
+});
+
+describeLive('MySQL 片单并发（真实实例）', () => {
+  let storage: MySqlStorage;
+  beforeAll(async () => {
+    storage = new MySqlStorage(liveUrl);
+    await resetMysqlTestData(storage);
+    await storage.ensureUserProfile('lists-owner');
+  });
+  afterAll(async () => {
+    await resetMysqlTestData(storage);
+    await (
+      storage as unknown as { pool: import('mysql2/promise').Pool }
+    ).pool.end();
+  });
+  it('并发创建守住上限，重复添加幂等，旧版本排序失败', async () => {
+    for (let i = 0; i < 49; i++)
+      await storage.createList('lists-owner', { name: '片单' });
+    const created = await Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        storage.createList('lists-owner', { name: '并发' }),
+      ),
+    );
+    expect(
+      created.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(await storage.countUserLists('lists-owner')).toBe(50);
+    const list = (await storage.getLists('lists-owner', 'lists-owner'))[0];
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        storage.addListItem('lists-owner', list.id, {
+          title: '作品',
+          year: '',
+          cover: '',
+          source: '',
+          id: null,
+        }),
+      ),
+    );
+    expect(new Set(results.map((result) => result.item.id)).size).toBe(1);
+    expect(new Set(results.map((result) => result.list.version)).size).toBe(1);
+    const sorted = await Promise.allSettled(
+      Array.from({ length: 2 }, () =>
+        storage.reorderListItems(
+          'lists-owner',
+          list.id,
+          [results[0].item.id],
+          results[0].list.version,
+        ),
+      ),
+    );
+    expect(
+      sorted.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(sorted.find((result) => result.status === 'rejected')).toMatchObject(
+      { reason: { code: 'LIST_VERSION_CONFLICT' } },
+    );
+  });
+  it('并发点赞幂等，删号重算计数，删片单清除点赞行', async () => {
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    await storage.ensureUserProfile('likes-owner');
+    const list = await storage.createList('likes-owner', {
+      name: '点赞并发',
+      visibility: 'everyone',
+    });
+    await storage.ensureUserProfile('lists-liker');
+    const before = (await storage.getList(list.id, 'lists-owner')).list;
+    const liked = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        storage.setListLike('lists-liker', list.id, true),
+      ),
+    );
+    expect(liked).toEqual(
+      Array.from({ length: 4 }, () => ({ liked: true, likeCount: 1 })),
+    );
+    expect((await storage.getList(list.id, 'lists-owner')).list).toEqual({
+      ...before,
+      likeCount: 1,
+    });
+    await storage.deleteUser('lists-liker');
+    expect((await storage.getList(list.id, 'lists-owner')).list.likeCount).toBe(
+      0,
+    );
+    await storage.ensureUserProfile('lists-liker');
+    await storage.setListLike('lists-liker', list.id, true);
+    await storage.deleteList('likes-owner', list.id);
+    const [rows] = await pool.query<import('mysql2/promise').RowDataPacket[]>(
+      'SELECT COUNT(*) AS total FROM list_likes WHERE list_id = ?',
+      [list.id],
+    );
+    expect(Number(rows[0].total)).toBe(0);
+  });
+});
+
+describeLive('MySQL 追剧周历契约（真实实例）', () => {
+  let storage: MySqlStorage;
+  beforeAll(async () => {
+    storage = new MySqlStorage(liveUrl);
+    await resetMysqlTestData(storage);
+  });
+  afterAll(async () => {
+    await resetMysqlTestData(storage);
+    await (
+      storage as unknown as { pool: import('mysql2/promise').Pool }
+    ).pool.end();
+  });
+  it('候选范围、隔离、去重、集刻度与上限', async () => {
+    await assertTrackingCalendar(storage);
+  }, 30_000);
 });

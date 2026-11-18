@@ -65,6 +65,12 @@ class MockHls {
   off(event: string, listener: Listener) {
     this.listeners.get(event)?.delete(listener);
   }
+
+  emit(event: string, data: unknown) {
+    [...(this.listeners.get(event) ?? [])].forEach((listener) =>
+      listener(event, data),
+    );
+  }
 }
 
 type MockArtplayerOption = {
@@ -102,6 +108,10 @@ class MockArtplayer {
     this.url = 'blob:http://localhost/mock-media-source';
     MockArtplayer.instances.push(this);
   }
+
+  off = jest.fn((event: string) => {
+    this.listeners.delete(event);
+  });
 
   on(event: string, listener: Listener) {
     this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]);
@@ -238,13 +248,14 @@ const createdVideos: HTMLVideoElement[] = [];
 
 // Artplayer 在设置地址后回调 customType，这里手动调用以拿到本次加载的 hls 实例
 async function setupPlayer(params = createParams()) {
-  await initializeArtPlayer(params, {
-    loadingSessionRef: {
-      current: {
-        pendingInitialResumeTarget: null,
-        playbackStartNotified: false,
-      },
+  const loadingSessionRef = {
+    current: {
+      pendingInitialResumeTarget: null as number | null,
+      playbackStartNotified: false,
     },
+  };
+  await initializeArtPlayer(params, {
+    loadingSessionRef,
     autoAdvanceArmedRef: { current: false },
     autoAdvancedRef: { current: false },
     playerMediaKindRef: { current: null },
@@ -262,7 +273,7 @@ async function setupPlayer(params = createParams()) {
     player.option.customType.m3u8(video, player.option.url);
   }
   const hls = getManagedVideo(video).hls as unknown as MockHls;
-  return { params, player, video, hls };
+  return { params, player, video, hls, loadingSessionRef };
 }
 
 // 首帧已就绪但尚未播放，满足起播条件
@@ -303,6 +314,136 @@ describe('initializeArtPlayer 拉流控制', () => {
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
+
+  it.each([2, 3])(
+    '原生播放中错误 %s 交给换源，未接手时展示失败',
+    async (code) => {
+      const params = createParams();
+      params.videoUrl = 'https://cdn.example/movie.mp4';
+      params.onPlaybackRecoveryExhausted = jest.fn(() => false);
+      const { player, video } = await setupPlayer(params);
+      player.emit('video:playing');
+      player.currentTime = 120;
+      Object.defineProperty(video, 'error', { value: { code } });
+      player.emit('video:error', new Error('failed'));
+      expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+        code === 2 ? 'native-network-error' : 'native-media-error',
+      );
+      expect(params.setError).toHaveBeenCalledWith('当前源加载失败');
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    },
+  );
+
+  it.each([false, true])(
+    '原生线路回落保留目标集进度，pending=%s',
+    async (pending) => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: true,
+      });
+      const params = createParams();
+      params.videoUrl = 'https://cdn.example/movie.mp4';
+      params.onPlaybackRecoveryExhausted = jest.fn(() => true);
+      const { player, video, loadingSessionRef } = await setupPlayer(params);
+      Object.defineProperty(video, 'paused', { value: false });
+      player.emit('video:playing');
+      player.currentTime = 120;
+      params.clearTargetEpisodeProgressRef.current = pending;
+      params.resumeTimeRef.current = pending ? 45 : null;
+      player.switchUrl.mockImplementation(() => {
+        player.currentTime = 0;
+        return Promise.resolve();
+      });
+      video.play = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(video, 'error', { value: { code: 2 } });
+      player.emit('video:error', new Error('network'));
+      expect(player.switchUrl).toHaveBeenCalledTimes(1);
+      // 已起播的会话只登记会话落点，不改写 resumeTimeRef
+      expect(params.resumeTimeRef.current).toBe(pending ? 45 : null);
+      expect(loadingSessionRef.current.pendingInitialResumeTarget).toBe(
+        pending ? 45 : 120,
+      );
+      expect(video.play).toHaveBeenCalled();
+      player.duration = 1000;
+      player.emit('video:loadedmetadata');
+      expect(player.currentTime).toBe(pending ? 45 : 120);
+      player.emit('video:error', new Error('network'));
+      expect(player.switchUrl).toHaveBeenCalledTimes(1);
+      expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+        'native-network-error',
+      );
+      expect(params.setError).not.toHaveBeenCalledWith('当前源加载失败');
+    },
+  );
+
+  it('原生暂停中回落保持暂停，不开页面加载等待', async () => {
+    jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+      useServerProxy: false,
+      directManifest: true,
+      allowAutoFallback: true,
+    });
+    const params = createParams();
+    params.videoUrl = 'https://cdn.example/movie.mp4';
+    params.onSourceProxyFallbackStarted = jest.fn();
+    const { player, video, loadingSessionRef } = await setupPlayer(params);
+    player.emit('video:playing');
+    player.currentTime = 120;
+    player.switchUrl.mockImplementation(() => Promise.resolve());
+    video.play = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(video, 'error', { value: { code: 2 } });
+    jest.mocked(params.setIsVideoLoading).mockClear();
+
+    player.emit('video:error', new Error('network'));
+
+    expect(player.switchUrl).toHaveBeenCalledTimes(1);
+    expect(video.play).not.toHaveBeenCalled();
+    expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(true);
+    expect(params.onSourceProxyFallbackStarted).not.toHaveBeenCalled();
+    expect(loadingSessionRef.current.pendingInitialResumeTarget).toBe(120);
+  });
+
+  it('原生离线错误等联网处理，运行时释放后移除联网监听', async () => {
+    const online = jest
+      .spyOn(navigator, 'onLine', 'get')
+      .mockReturnValue(false);
+    const params = createParams();
+    params.videoUrl = 'https://cdn.example/movie.mp4';
+    params.onPlaybackRecoveryExhausted = jest.fn(() => true);
+    const { player, video } = await setupPlayer(params);
+    player.currentTime = 120;
+    Object.defineProperty(video, 'error', { value: { code: 2 } });
+    player.emit('video:error', new Error('offline'));
+    expect(params.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+    online.mockReturnValue(false);
+    player.emit('video:error', new Error('offline'));
+    runManagedVideoCleanup(video);
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['video:timeupdate', 'video:ended'])(
+    '释放旧集后 %s 不触发下一集或片尾操作',
+    async (event) => {
+      const params = createParams();
+      params.autoPlayNextEnabledRef.current = true;
+      const { player, video } = await setupPlayer(params);
+      player.emit('video:playing');
+      player.duration = 100;
+      player.currentTime = 99.8;
+      runManagedVideoCleanup(video);
+      player.emit(event);
+      expect(params.handleNextEpisode).not.toHaveBeenCalled();
+      // 即使重新登记运行时，已释放会话也必须等下一次真实起播再获连播资格。
+      player.option.customType.m3u8(video, player.option.url);
+      player.emit('video:ended');
+      expect(params.handleNextEpisode).not.toHaveBeenCalled();
+    },
+  );
 
   it('统计事件独立于跳片头设置，并屏蔽已释放运行时的迟到采样', async () => {
     const params = createParams();
@@ -355,6 +496,7 @@ describe('initializeArtPlayer 拉流控制', () => {
         });
         video.play = jest.fn().mockResolvedValue(undefined);
       }
+      Object.defineProperty(video, 'paused', { value: false });
       video.dispatchEvent(new Event('playing'));
       player.emit('video:playing');
       expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
@@ -711,6 +853,82 @@ describe('initializeArtPlayer 拉流控制', () => {
     });
   });
 
+  describe('已起播会话的暂停', () => {
+    function trackPaused(video: HTMLVideoElement, initial: boolean) {
+      let paused = initial;
+      Object.defineProperty(video, 'paused', {
+        configurable: true,
+        get: () => paused,
+      });
+      return (next: boolean) => {
+        paused = next;
+      };
+    }
+
+    it('自动起播被拦截后，之后的就绪事件不再代为播放', async () => {
+      const { player, video } = await setupPlayer();
+      makeFirstFrameReady(video);
+      video.play = jest.fn(() =>
+        Promise.reject(new DOMException('blocked', 'NotAllowedError')),
+      );
+      player.emit('video:loadeddata');
+      await flushMicrotasks();
+
+      video.play = jest.fn(() => Promise.resolve());
+      player.emit('video:progress');
+      player.emit('video:canplay');
+
+      expect(video.play).not.toHaveBeenCalled();
+    });
+
+    it('播放中回落后用户暂停，画面就绪即收起加载层', async () => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: true,
+      });
+      const params = createParams();
+      params.playbackIntentRef = { current: createVodPlaybackIntent() };
+      const { player, video } = await setupPlayer(params);
+      const setPaused = trackPaused(video, false);
+      video.dispatchEvent(new Event('playing'));
+      player.emit('video:playing');
+      expect(
+        getManagedVideo(video).__icetvSwitchToServerProxy!(
+          'page-loading-timeout',
+        ),
+      ).toBe(true);
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+
+      setPaused(true);
+      player.emit('pause');
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+
+      makeFirstFrameReady(video);
+      player.emit('video:progress');
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    });
+
+    it('资源限流退避期间用户点播放不提前补拉', async () => {
+      const { player, hls } = await setupPlayer();
+      hls.emit(MockHls.Events.ERROR, {
+        type: MockHls.ErrorTypes.NETWORK_ERROR,
+        details: 'manifestLoadError',
+        fatal: true,
+        response: { code: 429 },
+        networkDetails: {
+          getResponseHeader: (name: string) =>
+            name === 'x-icetv-resource-limited' ? '1' : '20',
+        },
+      });
+      expect(hls.stopLoad).toHaveBeenCalled();
+
+      player.emit('play');
+
+      expect(hls.startLoad).not.toHaveBeenCalled();
+    });
+  });
+
   describe('起播', () => {
     it('hls 仍在加载时直接播放，不重新拉流', async () => {
       const { player, video, hls } = await setupPlayer();
@@ -735,4 +953,58 @@ describe('initializeArtPlayer 拉流控制', () => {
       expect(video.play).toHaveBeenCalledTimes(1);
     });
   });
+});
+
+it('移除内建 video:error 重连后保留项目统计监听', async () => {
+  const params = createParams();
+  params.handlePlaybackStatsEvent = jest.fn();
+  const { player } = await setupPlayer(params);
+  expect(player.off).toHaveBeenCalledWith('video:error');
+  player.emit('video:error', new Error('media'));
+  expect(params.handlePlaybackStatsEvent).toHaveBeenCalledWith('error');
+});
+
+it('起播后的显式 seek 可归零稳定进度，程序性续播 seek 保持保护', async () => {
+  const { resolveSavedPlaybackTime } = jest.requireActual(
+    '@/features/play/lib/playProgressRestore',
+  );
+  const { applyResumeTime } = jest.requireActual(
+    '@/features/play/lib/resumePlayback',
+  );
+  const { player, params, video } = await setupPlayer();
+  makeFirstFrameReady(video);
+  player.duration = 1500;
+  player.currentTime = 120;
+  player.emit('video:playing');
+  params.stableCurrentTimeRef.current = 120;
+  player.currentTime = 0;
+  player.emit('video:seeking');
+  player.emit('video:seeked');
+  expect(params.stableCurrentTimeRef.current).toBe(0);
+  expect(resolveSavedPlaybackTime(0, params.stableCurrentTimeRef)).toBe(2);
+  applyResumeTime(player, 300);
+  player.emit('video:seeking');
+  player.emit('video:seeked');
+  expect(params.stableCurrentTimeRef.current).toBe(300);
+  runManagedVideoCleanup(video);
+});
+
+it('禁用内建重连后 video:error 仍驱动原生媒体错误处理', async () => {
+  jest.mocked(resolveSourcePlaybackRoute).mockResolvedValue({
+    useServerProxy: false,
+    directManifest: false,
+    allowAutoFallback: false,
+  });
+  const params = createParams();
+  params.videoUrl = 'https://cdn.example/movie.mp4';
+  params.onPlaybackRecoveryExhausted = jest.fn();
+  const { player, video } = await setupPlayer(params);
+  Object.defineProperty(video, 'error', { value: { code: 3 } });
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  player.emit('video:error', new Error('decode'));
+  expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+    'native-media-error',
+  );
+  runManagedVideoCleanup(video);
+  log.mockRestore();
 });

@@ -118,6 +118,8 @@ describe('register route', () => {
       'strong-password',
       '测试昵称',
       undefined,
+      undefined,
+      undefined,
     );
   });
 
@@ -137,6 +139,8 @@ describe('register route', () => {
       'strong-password',
       '测试昵称',
       ['vip'],
+      undefined,
+      undefined,
     );
   });
 
@@ -216,7 +220,14 @@ describe('register route', () => {
 
     expect(response.status).toBe(200);
     expect(reserveInviteCode).toHaveBeenCalledWith('welcome-2026');
-    expect(db.registerUser).toHaveBeenCalled();
+    expect(db.registerUser).toHaveBeenCalledWith(
+      'demo-user',
+      'strong-password',
+      expect.anything(),
+      undefined,
+      undefined,
+      'WELCOME-2026',
+    );
     expect(releaseInviteCode).not.toHaveBeenCalled();
   });
 

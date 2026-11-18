@@ -1,21 +1,33 @@
 /** @jest-environment node */
+import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
+import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
+import { assertWatchLevelContract } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
-import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
 import { announcementContract } from './__fixtures__/announcement-contract';
+import { listsContract } from './__fixtures__/lists-contract';
+import {
+  type ListFakeState,
+  executeLists,
+  queryLists,
+} from './__fixtures__/lists-fake-sql';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
+import { assertTrackingCalendar } from './__fixtures__/tracking-calendar-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
 
@@ -52,7 +64,7 @@ type HealthPlayRow = {
   failureCount: number;
 };
 
-type FakeState = {
+type FakeState = ListFakeState & {
   announcements: Map<string, AnnouncementRow>;
   healthSearch: HealthSearchRow[];
   healthPlay: HealthPlayRow[];
@@ -74,6 +86,9 @@ type FakeState = {
   playbackSessions: Map<string, Record<string, unknown>>;
   watchHistory: Record<string, any>[];
   watchBuckets: Record<string, any>[];
+  watchTotals: Map<string, number>;
+  levelEvents: Record<string, any>[];
+  levelMigrated: boolean;
   historyMigrated: boolean;
   reviewPublishedMigrated: boolean;
   searchHistory: SearchHistoryRow[];
@@ -82,6 +97,7 @@ type FakeState = {
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
+  inviteCodeRedemptions: Map<string, string>;
   inviteCodes: Map<string, Record<string, any>>;
   danmakuEpisodes: Map<string, Map<string, number>>;
   danmakuEnabled: Map<string, boolean>;
@@ -95,6 +111,9 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    lists: state.lists.map((row) => ({ ...row })),
+    listItems: state.listItems.map((row) => ({ ...row })),
+    listLikes: state.listLikes.map((row) => ({ ...row })),
     announcements: new Map(
       [...state.announcements].map(([id, row]) => [id, { ...row }]),
     ),
@@ -126,6 +145,9 @@ function cloneState(state: FakeState): FakeState {
     ),
     watchHistory: state.watchHistory.map((row) => ({ ...row })),
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
+    watchTotals: new Map(state.watchTotals),
+    levelEvents: state.levelEvents.map((row) => ({ ...row })),
+    levelMigrated: state.levelMigrated,
     historyMigrated: state.historyMigrated,
     reviewPublishedMigrated: state.reviewPublishedMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
@@ -134,6 +156,7 @@ function cloneState(state: FakeState): FakeState {
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
     inviteCodeUsage: new Map(state.inviteCodeUsage),
+    inviteCodeRedemptions: new Map(state.inviteCodeRedemptions),
     inviteCodes: new Map(
       [...state.inviteCodes].map(([code, item]) => [code, { ...item }]),
     ),
@@ -149,6 +172,9 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    lists: [],
+    listItems: [],
+    listLikes: [],
     announcements: new Map(),
     healthSearch: [],
     healthPlay: [],
@@ -156,6 +182,7 @@ function createState(): FakeState {
     liveCounts: new Map(),
     social: {
       user_profiles: [],
+      user_profile_showcase: [],
       user_follows: [],
       video_review_likes: [],
       video_review_reports: [],
@@ -174,6 +201,9 @@ function createState(): FakeState {
     playbackSessions: new Map(),
     watchHistory: [],
     watchBuckets: [],
+    watchTotals: new Map(),
+    levelEvents: [],
+    levelMigrated: false,
     historyMigrated: false,
     reviewPublishedMigrated: false,
     searchHistory: [],
@@ -182,6 +212,7 @@ function createState(): FakeState {
     messageStates: new Map(),
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
+    inviteCodeRedemptions: new Map(),
     inviteCodes: new Map(),
     danmakuEpisodes: new Map(),
     danmakuEnabled: new Map(),
@@ -368,6 +399,18 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    for (const table of ['time_capsules', 'work_completions']) {
+      if (normalized === `DELETE FROM ${table} WHERE username = ?`) {
+        const rows = currentState.social[table] ?? [];
+        currentState.social[table] = rows.filter(
+          (row) => row.username !== params[0],
+        );
+        return [
+          { affectedRows: rows.length - currentState.social[table].length },
+          [],
+        ];
+      }
+    }
     if (normalized.startsWith('INSERT IGNORE INTO user_notice_events')) {
       const rows = (currentState.social.user_notice_events ??= []);
       if (
@@ -412,6 +455,50 @@ function createFakePool() {
       if (row) row.review = JSON.parse(String(params[0]));
       return [{ affectedRows: row ? 1 : 0 }, []];
     }
+    if (normalized.startsWith('INSERT INTO user_watch_totals')) {
+      if (!currentState.watchTotals.has(String(params[0])))
+        currentState.watchTotals.set(String(params[0]), 0);
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('UPDATE user_watch_totals SET counted_ms')) {
+      const user = String(params[2]);
+      currentState.watchTotals.set(
+        user,
+        (currentState.watchTotals.get(user) ?? 0) + Number(params[0]),
+      );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO user_level_events')) {
+      const columns = [
+        'username',
+        'level',
+        'reached_at',
+        'source',
+        'video_id',
+        'title',
+        'year',
+        'episode_index',
+      ];
+      if (
+        !currentState.levelEvents.some(
+          (row) => row.username === params[0] && row.level === params[1],
+        )
+      )
+        currentState.levelEvents.push(
+          Object.fromEntries(columns.map((column, i) => [column, params[i]])),
+        );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM user_watch_totals WHERE username = ?') {
+      currentState.watchTotals.delete(String(params[0]));
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM user_level_events WHERE username = ?') {
+      currentState.levelEvents = currentState.levelEvents.filter(
+        (row) => row.username !== params[0],
+      );
+      return [{ affectedRows: 1 }, []];
+    }
     if (normalized.startsWith('INSERT IGNORE INTO storage_migrations'))
       return [{ affectedRows: 0 }, []];
     if (normalized.startsWith('UPDATE video_reviews SET first_published_at')) {
@@ -422,6 +509,8 @@ function createFakePool() {
     if (normalized.startsWith('UPDATE storage_migrations')) {
       if (params[1] === 'review_first_published_v1')
         currentState.reviewPublishedMigrated = true;
+      else if (params[1] === 'watch_level_v1')
+        currentState.levelMigrated = true;
       else currentState.historyMigrated = true;
       return [{ affectedRows: 1 }, []];
     }
@@ -770,6 +859,8 @@ function createFakePool() {
       if (row) row.provider_username = params[0];
       return [{ affectedRows: row ? 1 : 0 }, []];
     }
+    const listResult = executeLists(normalized, params, currentState);
+    if (listResult !== undefined) return [{ affectedRows: listResult }, []];
     const socialResult = executeSocial(normalized, params, currentState);
     if (socialResult !== undefined) return [{ affectedRows: socialResult }, []];
     if (
@@ -1078,6 +1169,26 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'INSERT INTO invite_code_redemptions (username, code, redeemed_at) VALUES (?, ?, ?)'
+    ) {
+      const [username, code] = params as [string, string];
+      if (currentState.inviteCodeRedemptions.has(username))
+        throw Object.assign(new Error('Duplicate entry'), {
+          code: 'ER_DUP_ENTRY',
+        });
+      currentState.inviteCodeRedemptions.set(username, code);
+      return [[], []];
+    }
+
+    if (
+      normalized === 'DELETE FROM invite_code_redemptions WHERE username = ?'
+    ) {
+      currentState.inviteCodeRedemptions.delete(params[0] as string);
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM user_login_activity WHERE username = ?') {
       const [username] = params as [string];
       currentState.loginActivities.delete(username);
@@ -1119,6 +1230,35 @@ function createFakePool() {
 
     if (
       normalized ===
+      'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)'
+    ) {
+      const [username, key, value] = params as [string, string, string];
+      if (currentState.playRecords.get(username)?.has(key)) {
+        throw Object.assign(new Error('Duplicate record'), {
+          code: 'ER_DUP_ENTRY',
+        });
+      }
+      upsertJsonRecord(currentState.playRecords, username, key, value);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
+      'DELETE FROM play_records WHERE username = ? AND record_key = ?'
+    ) {
+      const [username, key] = params as [string, string];
+      return [
+        {
+          affectedRows: Number(
+            currentState.playRecords.get(username)?.delete(key) ?? false,
+          ),
+        },
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
       'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ? AND BINARY record_json = BINARY ?'
     ) {
       const [value, username, key, snapshot] = params as [
@@ -1143,6 +1283,42 @@ function createFakePool() {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.favorites, username, key, value);
       return [[], []];
+    }
+
+    if (
+      normalized.startsWith(
+        'UPDATE favorites AS f SET favorite_json = JSON_SET(',
+      )
+    ) {
+      const [value, username, key] = params as [
+        string | number,
+        string,
+        string,
+      ];
+      const favorites = currentState.favorites.get(username);
+      const json = favorites?.get(key);
+      if (!json) return [{ affectedRows: 0 }, []];
+      const favorite = JSON.parse(json) as Favorite;
+      if (
+        /^(douban|bangumi)\+/.test(key) ||
+        (favorite.origin ?? 'vod') !== 'vod'
+      )
+        return [{ affectedRows: 0 }, []];
+      if (normalized.includes("'$.tracking_enabled', CAST(? AS JSON)")) {
+        favorite.tracking_enabled = JSON.parse(String(value));
+      } else {
+        const message = buildFavoriteUpdateMessage(key, favorite);
+        if (
+          !message ||
+          currentState.playRecords.get(username)?.has(key) ||
+          message.fromEpisodes >= Number(value) ||
+          message.toEpisodes < Number(value)
+        )
+          return [{ affectedRows: 0 }, []];
+        favorite.update_baseline_episodes = Number(value);
+      }
+      favorites!.set(key, JSON.stringify(favorite));
+      return [{ affectedRows: 1 }, []];
     }
 
     if (normalized.startsWith('UPDATE favorites SET favorite_json = ?,')) {
@@ -1186,6 +1362,13 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'DELETE FROM favorites WHERE username = ? AND favorite_key = ?'
+    ) {
+      currentState.favorites.get(String(params[0]))?.delete(String(params[1]));
+      return [[], []];
+    }
     if (normalized === 'DELETE FROM favorites WHERE username = ?') {
       const [username] = params as [string];
       currentState.favorites.delete(username);
@@ -1288,7 +1471,10 @@ function createFakePool() {
         year,
         started_at: startedAt,
         ended_at: endedAt,
-        watch_seconds: watchSeconds,
+        watch_seconds: Math.max(
+          Number(existing?.watch_seconds ?? 0),
+          watchSeconds,
+        ),
         last_position: lastPosition,
         total_time: totalTime,
         created_at: createdAt,
@@ -1505,6 +1691,10 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")
+      return [[{ Field: 'like_count' }], []];
+    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'view_count'")
+      return [[{ Field: 'view_count' }], []];
     if (normalized === "SHOW COLUMNS FROM users LIKE 'password_set'")
       return [[{ Field: 'password_set' }], []];
     if (normalized.startsWith('SHOW COLUMNS FROM user_danmaku'))
@@ -1692,7 +1882,9 @@ function createFakePool() {
             completed_at: (
               params[0] === 'review_first_published_v1'
                 ? currentState.reviewPublishedMigrated
-                : currentState.historyMigrated
+                : params[0] === 'watch_level_v1'
+                  ? currentState.levelMigrated
+                  : currentState.historyMigrated
             )
               ? 1
               : 0,
@@ -1719,6 +1911,23 @@ function createFakePool() {
       const row = currentState.playbackSessions.get(String(params[0]));
       return [row ? [row] : [], []];
     }
+    if (normalized.startsWith('SELECT counted_ms FROM user_watch_totals')) {
+      const value = currentState.watchTotals.get(String(params[0]));
+      return [value === undefined ? [] : [{ counted_ms: value }], []];
+    }
+    if (normalized.startsWith('SELECT * FROM user_level_events'))
+      return [
+        currentState.levelEvents
+          .filter((row) => row.username === params[0])
+          .sort((a, b) => a.level - b.level),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT username, source, video_id, title, year, episode_index, CASE WHEN counted_ms',
+      )
+    )
+      return [[], []];
     if (normalized.startsWith('SELECT COALESCE(SUM(watch_ms)'))
       return [
         [
@@ -1726,7 +1935,10 @@ function createFakePool() {
             total: currentState.watchBuckets
               .filter(
                 (row) =>
-                  row.username === params[0] && row.session_id === params[1],
+                  row.username === params[0] &&
+                  (normalized.includes('bucket_start = ?')
+                    ? row.bucket_start === params[1]
+                    : row.session_id === params[1]),
               )
               .reduce((sum, row) => sum + Number(row.watch_ms), 0),
           },
@@ -1876,6 +2088,79 @@ function createFakePool() {
           : [],
         [],
       ];
+    if (
+      normalized.startsWith(
+        'SELECT entry_key, entry_json, origin, has_update FROM (',
+      )
+    ) {
+      const records =
+        currentState.playRecords.get(String(params[0])) ??
+        new Map<string, string>();
+      const favorites =
+        currentState.favorites.get(String(params[1])) ??
+        new Map<string, string>();
+      const rows: {
+        entry_key: string;
+        entry_json: string;
+        origin: string;
+        has_update: number;
+        activity: number;
+      }[] = [];
+      for (const [key, json] of records) {
+        const record = JSON.parse(json) as PlayRecord;
+        if (isTrackingEnabled(record) && record.series_status !== 'ended')
+          rows.push({
+            entry_key: key,
+            entry_json: json,
+            origin: 'record',
+            has_update: hasPlayRecordUpdate(record) ? 1 : 0,
+            activity: record.save_time,
+          });
+      }
+      for (const [key, json] of favorites) {
+        const favorite = JSON.parse(json) as Favorite;
+        if (
+          !records.has(key) &&
+          !/^(douban|bangumi)+/.test(key) &&
+          (favorite.origin ?? 'vod') === 'vod' &&
+          favorite.tracking_enabled !== false &&
+          favoriteProjection(key, json)[5]
+        )
+          rows.push({
+            entry_key: key,
+            entry_json: json,
+            origin: 'favorite',
+            has_update: buildFavoriteUpdateMessage(key, favorite) ? 1 : 0,
+            activity: favorite.save_time,
+          });
+      }
+      return [
+        rows
+          .sort(
+            (a, b) =>
+              b.activity - a.activity || b.entry_key.localeCompare(a.entry_key),
+          )
+          .slice(0, 200),
+        [],
+      ];
+    }
+    const listRows = queryLists(
+      normalized,
+      params,
+      currentState,
+      currentState.social.user_profiles,
+    );
+    if (listRows !== undefined) return [listRows, []];
+    if (
+      normalized ===
+      'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE'
+    )
+      return [
+        currentState.social.user_profiles.filter(
+          (row) => row.username === params[0],
+        ),
+        [],
+      ];
     const socialRows = querySocial(normalized, params, currentState);
     if (socialRows !== undefined) return [socialRows, []];
 
@@ -1976,28 +2261,38 @@ function createFakePool() {
         const profileId = (username: string) =>
           currentState.social.user_profiles.find((p) => p.username === username)
             ?.profile_id ?? '';
+        const followed = (username: string) =>
+          Number(
+            currentState.social.user_follows.some(
+              (follow) =>
+                follow.follower === params[0] && follow.followee === username,
+            ),
+          );
         rows = rows.filter(
           (row) =>
             row.review.is_public &&
-            row.review.title_norm === params[0] &&
-            (!params[1] ||
-              row.review.year === params[1] ||
+            row.review.title_norm === params[1] &&
+            (!params[2] ||
+              row.review.year === params[2] ||
               row.review.year === ''),
         );
         rows.sort(
           (a, b) =>
+            followed(b.username) - followed(a.username) ||
             b.review.updated_at - a.review.updated_at ||
             compareText(profileId(b.username), profileId(a.username)) ||
             compareText(b.review.year, a.review.year),
         );
-        if (params.length > 3)
+        if (params.length > 4)
           rows = rows.filter(
             (row) =>
-              row.review.updated_at < Number(params[3]) ||
-              (row.review.updated_at === Number(params[3]) &&
-                (profileId(row.username) < String(params[5]) ||
-                  (profileId(row.username) === params[5] &&
-                    row.review.year < String(params[7])))),
+              followed(row.username) < Number(params[4]) ||
+              (followed(row.username) === Number(params[4]) &&
+                (row.review.updated_at < Number(params[6]) ||
+                  (row.review.updated_at === Number(params[6]) &&
+                    (profileId(row.username) < String(params[8]) ||
+                      (profileId(row.username) === params[8] &&
+                        row.review.year < String(params[10])))))),
           );
         return [
           rows.slice(0, 21).map((row) => ({
@@ -2131,6 +2426,31 @@ function createFakePool() {
         })),
         [],
       ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT record_key, JSON_UNQUOTE(JSON_EXTRACT(record_json,',
+      )
+    ) {
+      const [username, limit, offset] = params as [string, number, number];
+      const rows = getJsonRows(
+        currentState.playRecords,
+        username,
+        'record_key',
+        'record_json',
+      )
+        .map((row) => ({
+          record_key: row.record_key,
+          ...JSON.parse(row.record_json),
+        }))
+        .sort(
+          (a, b) =>
+            b.save_time - a.save_time ||
+            b.record_key.localeCompare(a.record_key),
+        )
+        .slice(offset, offset + limit);
+      return [rows, []];
     }
 
     if (
@@ -2309,6 +2629,54 @@ function createFakePool() {
       const [username] = params as [string];
       return [
         [{ count: currentState.playRecords.get(username)?.size || 0 }],
+        [],
+      ];
+    }
+
+    if (
+      normalized.startsWith('SELECT f.favorite_json FROM favorites f WHERE')
+    ) {
+      const [username, key] = params as [string, string];
+      const json = currentState.favorites.get(username)?.get(key);
+      if (
+        !json ||
+        /^(douban|bangumi)\+/.test(key) ||
+        (JSON.parse(json).origin ?? 'vod') !== 'vod'
+      )
+        return [[], []];
+      return [[{ favorite_json: json }], []];
+    }
+    if (
+      normalized.includes(
+        'FROM favorites f WHERE f.username = ? AND f.library_valid = 1',
+      ) &&
+      normalized.includes("'$.update_baseline_episodes'")
+    ) {
+      const username = String(params[0]);
+      const rows = [...(currentState.favorites.get(username)?.entries() ?? [])]
+        .map(([favorite_key, favorite_json]) => ({
+          favorite_key,
+          favorite_json,
+          message: buildFavoriteUpdateMessage(
+            favorite_key,
+            JSON.parse(favorite_json),
+          ),
+        }))
+        .filter(
+          (row) =>
+            row.message &&
+            !currentState.playRecords.get(username)?.has(row.favorite_key),
+        );
+      if (normalized.startsWith('SELECT COUNT(*)'))
+        return [[{ count: rows.length }], []];
+      return [
+        rows
+          .sort(
+            (a, b) =>
+              b.message!.createdAt - a.message!.createdAt ||
+              b.favorite_key.localeCompare(a.favorite_key),
+          )
+          .slice(0, Number(params.at(-1))),
         [],
       ];
     }
@@ -3297,6 +3665,12 @@ describe('mysql storage contract', () => {
     );
   });
 
+  it('按标题读取本人最近进度', async () => {
+    await assertPlayRecordTitleLookup(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+
   it('批量读取一次查询并隔离用户与缺失键', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await assertBatchReadPlayRecords(storage);
@@ -3721,6 +4095,12 @@ describe('mysql storage contract', () => {
     ]);
   });
 
+  it('观影等级存储契约', async () => {
+    await assertWatchLevelContract(
+      new MySqlStorage('mysql://root:password@localhost:3306/icetv'),
+    );
+  });
+
   it('历史与桶统计双后端契约', async () => {
     await assertWatchHistoryContract(
       new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
@@ -3889,5 +4269,23 @@ describe('MySQL OAuth 身份契约（fake pool）', () => {
 describe('MySQL announcements (fake pool)', () => {
   announcementContract(
     () => new MySqlStorage('mysql://root:password@localhost:3306/icetv'),
+  );
+});
+
+describe('MySQL 片单契约（fake pool）', () => {
+  listsContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+  );
+});
+
+it('MySQL 追剧周历契约（fake pool）', async () => {
+  await assertTrackingCalendar(
+    new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+  );
+});
+
+it('播放记录会话序号与并发 CAS 契约', async () => {
+  await assertPlayRecordOrdering(
+    new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
   );
 });

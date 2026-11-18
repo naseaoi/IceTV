@@ -23,6 +23,9 @@ export function resourceLimitResponse(error: unknown): Response | null {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
       'Retry-After': String(Math.max(1, Math.ceil(error.retryAfterSeconds))),
+      'X-IceTV-Resource-Limited': '1',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Retry-After, X-IceTV-Resource-Limited',
     },
   });
 }

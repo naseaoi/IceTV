@@ -1,3 +1,5 @@
+import type { WatchLevel } from '@/lib/watch-level';
+
 export type AuthSessionRole = 'owner' | 'admin' | 'user';
 
 export type ClientAuthSession =
@@ -9,6 +11,7 @@ export type ClientAuthSession =
       // null 表示尚未设置，受保护页面会先要求设置
       nickname: string | null;
       avatarSeed: string | null;
+      level: WatchLevel;
     }
   | { status: 'guest' }
   | { status: 'error' };

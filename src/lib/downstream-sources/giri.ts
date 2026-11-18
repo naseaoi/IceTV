@@ -11,6 +11,7 @@ import {
   readTextLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
+import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -216,7 +217,10 @@ async function fetchGirigiriSuggestList(
       signal: abortState.signal,
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
     const data = await readJsonLimited<any>(
       response,
       UPSTREAM_METADATA_MAX_BYTES,
@@ -273,7 +277,8 @@ export async function searchFromGirigiri(
       .filter((item): item is SearchResult => Boolean(item));
   }
 
-  return [];
+  if (signal?.aborted) return [];
+  throw new SearchSourceUnavailableError(apiSite.name);
 }
 
 async function resolveGirigiriEpisodeVariants(

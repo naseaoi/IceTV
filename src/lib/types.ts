@@ -1,3 +1,4 @@
+import type { ViewingHappinessStore } from '@/features/time-capsule/storage';
 import {
   type ConfigStateUpdate,
   type ConfigSubscription,
@@ -6,6 +7,7 @@ import type {
   StoredUserDanmaku,
   UserDanmakuQuery,
 } from '@/lib/user-danmaku-storage';
+import type { WatchLevel } from '@/lib/watch-level';
 import { AdminConfig } from '@/types/admin';
 
 // 播放记录数据结构
@@ -22,6 +24,8 @@ export interface PlayRecord {
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
+  progress_session_id?: string;
+  progress_sequence?: number;
   metadata_checked_at?: number;
   update_baseline_episodes?: number;
   update_baseline_group_total?: number;
@@ -60,10 +64,17 @@ export interface Favorite {
   metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
+  tracking_enabled?: boolean; // 缺省开启，由服务端维护
   update_baseline_episodes?: number;
   update_detected_at?: number;
   watch_status?: FavoriteWatchStatus;
   watched_at?: number;
+  catalog_bind?: {
+    status: 'skipped' | 'failed';
+    retry_at?: number;
+    attempts?: number;
+  };
+  catalog_origin?: { key: string; title: string; year: string };
 }
 
 // 评价按作品身份（normalizeWorkTitle + normalizeWorkYear）存储，与源站无关
@@ -86,15 +97,20 @@ export type LibraryVisibility = 0 | 1 | 2 | 3;
 
 // 用户资料：登录名只在服务端使用，对外一律用 profile_id + 昵称
 export interface UserProfile {
+  level?: WatchLevel;
   username: string;
   profile_id: string;
   nickname: string | null;
   avatar_seed: string | null;
   favorites_public: LibraryVisibility;
+  bio: string | null;
+  watch_time_public: boolean;
+  counted_ms?: number;
   updated_at: number;
 }
 
 export interface PublicUserRef {
+  level?: WatchLevel;
   profileId: string;
   nickname: string | null;
   // null 时头像按 profileId 生成
@@ -103,13 +119,28 @@ export interface PublicUserRef {
   role?: 'owner' | 'admin';
 }
 
+export interface ProfileShowcaseItem {
+  key: string;
+  title: string;
+  year: string;
+  cover: string;
+  search_title?: string;
+}
+
 export interface UserProfileView extends PublicUserRef {
+  bio: string | null;
+  showcase: ProfileShowcaseItem[];
+  // 本人或对方公开观影时长时返回累计整小时数，否则为 null
+  watchHours: number | null;
+  // 仅他人主页返回，本人为 null
+  tasteMatch: import('@/lib/viewing-insights').TasteMatch | null;
   recap: { year: number } | null;
   isSelf: boolean;
   isFollowing: boolean;
   followerCount: number;
   followingCount: number;
   publicReviewCount: number;
+  listCount: number;
   favoriteCount: number;
   libraryVisibility: LibraryVisibility;
 }
@@ -147,6 +178,7 @@ export type PublicFavoritePage =
 
 export interface PublicVideoReview {
   author: PublicUserRef;
+  authorFollowed?: boolean;
   title_norm: string;
   title: string;
   year: string;
@@ -170,7 +202,7 @@ export interface ReviewTarget {
 export interface PublicReviewReply {
   id: string;
   author: PublicUserRef;
-  replyTo: { profileId: string; nickname: string | null } | null;
+  replyTo: Pick<PublicUserRef, 'profileId' | 'nickname' | 'level'> | null;
   content: string;
   created_at: number;
   isMine: boolean;
@@ -494,8 +526,20 @@ export interface SiteAnnouncement {
   publishedAt: number | null;
 }
 
+import type { ListStore } from '@/features/lists/lib/list-storage';
+
 // 存储接口
-export interface IStorage {
+export interface IStorage extends ListStore, ViewingHappinessStore {
+  getAnnualActivity(
+    username: string,
+    start: number,
+    end: number,
+  ): Promise<import('@/features/playback-stats/types').AnnualActivityData>;
+  getTrackingCalendarItems(
+    username: string,
+  ): Promise<
+    import('@/features/continue-watching/lib/tracking-calendar').TrackingCalendarItem[]
+  >;
   getAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecap'];
   getAnnualRecapYears: import('@/lib/annual-recap-storage').AnnualRecapStorage['getAnnualRecapYears'];
   saveAnnualRecap: import('@/lib/annual-recap-storage').AnnualRecapStorage['saveAnnualRecap'];
@@ -527,7 +571,13 @@ export interface IStorage {
   deleteUserDanmakuBatch(ids: string[]): Promise<number>;
   readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
+  getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>>;
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
+  getPlayRecordSnapshot(userName: string, key: string): Promise<string | null>;
   getPlayRecordsByKeys(
     userName: string,
     keys: string[],
@@ -541,7 +591,7 @@ export interface IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
-    snapshot: string,
+    snapshot: string | null,
   ): Promise<boolean>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
   getStalePlayRecordPage(
@@ -587,6 +637,11 @@ export interface IStorage {
   ): Promise<void>;
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
+  setFavoriteTracking(
+    userName: string,
+    key: string,
+    trackingEnabled: boolean,
+  ): Promise<Favorite | null>;
   saveMergedFavorite(
     userName: string,
     key: string,
@@ -644,6 +699,19 @@ export interface IStorage {
   ): Promise<MyVideoReviewPage>;
   getMyVideoReviewCount(userName: string): Promise<number>;
   getMyVideoReviewRatings(userName: string): Promise<VideoReviewRating[]>;
+  getFollowOpinions(
+    viewer: string,
+    titleNorm: string,
+    year: string,
+  ): Promise<import('@/lib/viewing-insights').FollowOpinions>;
+  getTasteMatch(
+    viewer: string,
+    username: string,
+  ): Promise<import('@/lib/viewing-insights').TasteMatch>;
+  getWorkWatchStatuses(
+    viewer: string,
+    works: { title: string; year: string }[],
+  ): Promise<(FavoriteWatchStatus | null)[]>;
   getWorkVideoReviewPage(
     titleNorm: string,
     year: string,
@@ -669,12 +737,16 @@ export interface IStorage {
       nickname?: string;
       avatarSeed?: string | null;
       libraryVisibility?: LibraryVisibility;
+      bio?: string | null;
+      showcaseKeys?: string[];
+      watchTimePublic?: boolean;
     },
   ): Promise<UserProfile>;
   isNicknameAvailable(
     nickname: string,
     exceptUsername?: string,
   ): Promise<boolean>;
+  getProfileShowcase(username: string): Promise<ProfileShowcaseItem[]>;
   getUserProfileView(
     username: string,
     viewer: string,
@@ -819,6 +891,7 @@ export interface IStorage {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）
@@ -945,13 +1018,19 @@ export interface IStorage {
   deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
 
-  setPlaybackSession(userName: string, session: PlaybackSession): Promise<void>;
+  setPlaybackSession(
+    userName: string,
+    session: PlaybackSession,
+  ): Promise<import('@/lib/watch-level-types').WatchLevelUp>;
+  getWatchLevel(
+    userName: string,
+  ): Promise<import('@/lib/watch-level-types').WatchLevelResponse>;
   saveWatchSessionReport(
     userName: string,
     session: PlaybackSession,
     buckets: PlaybackWatchBucket[],
     history?: WatchHistoryWrite,
-  ): Promise<string | null>;
+  ): Promise<import('@/lib/watch-level-types').WatchSessionSaveResult>;
   getWatchHistoryPage(
     userName: string,
     query: WatchHistoryQuery,

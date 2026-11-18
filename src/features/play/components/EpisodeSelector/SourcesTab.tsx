@@ -707,7 +707,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                       />
                     )}
                   </span>
-                  <span className='flex w-12 shrink-0 items-center justify-end gap-1 text-[11px] tabular-nums text-gray-400 dark:text-gray-500'>
+                  <span className='flex h-4 w-12 shrink-0 items-center justify-end gap-1 text-[11px] tabular-nums leading-4 text-gray-400 dark:text-gray-500'>
                     {hasError || isDeferred ? (
                       <span
                         role='button'

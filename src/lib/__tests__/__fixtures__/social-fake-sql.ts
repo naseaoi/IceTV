@@ -3,6 +3,9 @@ import type { VideoReview } from '@/lib/types';
 type Row = Record<string, any>;
 export type SocialFakeState = {
   social: Record<string, Row[]>;
+  lists: Row[];
+  favorites: Map<string, Map<string, string>>;
+  watchTotals: Map<string, number>;
   users: Map<string, string>;
   userAccess: Map<string, Row>;
   videoReviews: Map<
@@ -60,6 +63,21 @@ export function executeSocial(
     );
     return rows.length - state.social.user_annual_recaps.length;
   }
+  if (sql.startsWith('DELETE FROM user_profile_showcase')) {
+    const rows = state.social.user_profile_showcase ?? [];
+    state.social.user_profile_showcase = rows.filter(
+      (row) => row.username !== params[0],
+    );
+    return rows.length - state.social.user_profile_showcase.length;
+  }
+  if (sql.startsWith('INSERT INTO user_profile_showcase')) {
+    (state.social.user_profile_showcase ??= []).push({
+      username: params[0],
+      position: params[1],
+      favorite_key: params[2],
+    });
+    return 1;
+  }
   const table =
     /(?:INTO|UPDATE|FROM) (user_profiles|user_follows|video_review_likes|video_review_reports|video_review_replies|video_review_reply_reports)\b/.exec(
       sql,
@@ -112,6 +130,8 @@ export function executeSocial(
       'nickname_norm',
       'avatar_seed',
       'favorites_public',
+      'bio',
+      'watch_time_public',
       'updated_at',
     ]) {
       if (sql.includes(`${column} = ?`)) {
@@ -138,6 +158,8 @@ export function executeSocial(
         nickname_norm: null,
         avatar_seed: null,
         favorites_public: 0,
+        bio: null,
+        watch_time_public: 0,
         updated_at: params[params.length - 1],
       };
       if (
@@ -207,6 +229,74 @@ export function querySocial(
   params: unknown[],
   state: SocialFakeState,
 ): Row[] | undefined {
+  // 口味相合度的简化模拟：只按作品身份配对，不复现年份回退与观看状态排除
+  if (sql.includes('FROM video_reviews peer')) {
+    const reviews = [...state.videoReviews.values()];
+    const sameWork = (a: VideoReview, b: VideoReview) =>
+      a.title_norm === b.title_norm &&
+      (a.year === b.year || a.year === '' || b.year === '');
+    if (sql.includes('JOIN video_reviews own')) {
+      const [viewer, peer] = params;
+      const pairs = reviews.flatMap(({ username, review }) => {
+        if (username !== peer || !review.is_public || review.rating == null)
+          return [];
+        const own = reviews.find(
+          (row) =>
+            row.username === viewer &&
+            row.review.rating != null &&
+            sameWork(row.review, review),
+        );
+        return own ? [Math.abs(review.rating - (own.review.rating ?? 0))] : [];
+      });
+      return [
+        {
+          count: pairs.length,
+          difference: pairs.length ? pairs.reduce((a, b) => a + b, 0) : null,
+        },
+      ];
+    }
+    const [peer, viewer] = params;
+    return reviews
+      .filter(
+        ({ username, review }) =>
+          username === peer &&
+          review.is_public &&
+          (review.rating ?? 0) >= 8 &&
+          !reviews.some(
+            (row) => row.username === viewer && sameWork(row.review, review),
+          ),
+      )
+      .slice(0, 12)
+      .map(({ username, review }) => ({
+        username,
+        review_json: JSON.stringify(review),
+      }));
+  }
+  if (sql.includes('FROM user_profile_showcase s')) {
+    return (state.social.user_profile_showcase ?? [])
+      .filter((row) => row.username === params[0])
+      .sort((a, b) => a.position - b.position)
+      .flatMap((row) => {
+        const json = state.favorites
+          .get(String(params[0]))
+          ?.get(row.favorite_key);
+        return json && JSON.parse(json).origin !== 'live'
+          ? [{ favorite_key: row.favorite_key, favorite_json: json }]
+          : [];
+      });
+  }
+  if (
+    sql.startsWith(
+      'SELECT favorite_key FROM favorites WHERE username = ? AND BINARY favorite_key IN',
+    )
+  ) {
+    return [...(state.favorites.get(String(params[0])) ?? [])]
+      .filter(
+        ([key, json]) =>
+          params.slice(1).includes(key) && JSON.parse(json).origin !== 'live',
+      )
+      .map(([key]) => ({ favorite_key: key }));
+  }
   if (sql.includes('FROM user_annual_recaps WHERE')) {
     return (state.social.user_annual_recaps ?? [])
       .filter(
@@ -321,7 +411,7 @@ export function querySocial(
   }
   if (
     sql.startsWith(
-      'SELECT r.*, p.profile_id, p.nickname, p.avatar_seed FROM video_review_reports',
+      'SELECT r.*, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms FROM video_review_reports',
     )
   ) {
     return reports
@@ -387,13 +477,18 @@ export function querySocial(
   if (sql.includes('AS followers'))
     return [
       {
-        followers: follows.filter((row) => row.followee === params[0]).length,
-        following: follows.filter((row) => row.follower === params[1]).length,
+        lists: state.lists.filter(
+          (row) =>
+            row.username === params[0] &&
+            (!sql.includes('AND is_public >= 1') || Number(row.is_public) >= 1),
+        ).length,
+        followers: follows.filter((row) => row.followee === params[1]).length,
+        following: follows.filter((row) => row.follower === params[2]).length,
         reviews: [...state.videoReviews.values()].filter(
-          (row) => row.username === params[2] && row.review.is_public,
+          (row) => row.username === params[3] && row.review.is_public,
         ).length,
         followed: follows.filter(
-          (row) => row.follower === params[3] && row.followee === params[4],
+          (row) => row.follower === params[4] && row.followee === params[5],
         ).length,
       },
     ];
@@ -404,11 +499,16 @@ export function querySocial(
           row.nickname_norm === params[0] &&
           (params.length < 2 || row.username !== params[1]),
       );
-    return profiles.filter(
-      (row) =>
-        row[sql.includes('profile_id = ?') ? 'profile_id' : 'username'] ===
-        params[0],
-    );
+    return profiles
+      .filter(
+        (row) =>
+          row[sql.includes('profile_id = ?') ? 'profile_id' : 'username'] ===
+          params[0],
+      )
+      .map((row) => ({
+        ...row,
+        counted_ms: state.watchTotals.get(row.username) ?? 0,
+      }));
   }
   if (sql.includes('FROM user_follows f JOIN video_reviews')) {
     let rows = follows

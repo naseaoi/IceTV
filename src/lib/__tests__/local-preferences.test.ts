@@ -5,6 +5,7 @@ import {
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
+  PLAYBACK_RATE_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
   readAggregateSearch,
   readAutoPlayNextEnabled,
@@ -15,6 +16,7 @@ import {
   readDanmakuEpisodeSearchTitle,
   readEnableOptimization,
   readFluidSearch,
+  readPlaybackRate,
   readPreferredQualityHeight,
   readPreferredQualityPreference,
   readSeenAnnouncement,
@@ -36,6 +38,7 @@ import {
   writeDanmakuEpisodeSearchTitle,
   writeEnableOptimization,
   writeFluidSearch,
+  writePlaybackRate,
   writePreferredQualityHeight,
   writeSeenAnnouncement,
   writeSourcePreferredQualityHeight,
@@ -262,4 +265,19 @@ it('本地偏好写入受限时返回失败', () => {
   } finally {
     spy.mockRestore();
   }
+});
+
+it('播放倍速跨会话保存，异常值回退到正常速度', () => {
+  localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY);
+  expect(readPlaybackRate()).toBe(1);
+
+  expect(writePlaybackRate(1.5)).toBe(true);
+  expect(readPlaybackRate()).toBe(1.5);
+
+  expect(writePlaybackRate(Number.NaN)).toBe(false);
+  expect(readPlaybackRate()).toBe(1.5);
+
+  localStorage.setItem(PLAYBACK_RATE_STORAGE_KEY, '16');
+  expect(readPlaybackRate()).toBe(1);
+  localStorage.removeItem(PLAYBACK_RATE_STORAGE_KEY);
 });

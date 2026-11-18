@@ -30,6 +30,9 @@ patchedDependencies:
   artplayer-plugin-danmuku@5.3.0:
     hash: 94f552be2d3eb9f64a718ad92c79b1409d98816dffe4afc0700cb8bdab738014
     path: patches/artplayer-plugin-danmuku@5.3.0.patch
+  next@16.2.10:
+    hash: 9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623
+    path: patches/next@16.2.10.patch
 
 importers:
 
@@ -49,7 +52,7 @@ importers:
         version: 3.2.2(react@19.2.5)
       '@serwist/next':
         specifier: ^9.5.7
-        version: 9.5.7(next@16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)(typescript@5.9.3)
+        version: 9.5.7(next@16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)(typescript@5.9.3)
       artplayer:
         specifier: ^5.2.5
         version: 5.2.5
@@ -85,7 +88,7 @@ importers:
         version: 3.22.3(@types/node@24.0.3)
       next:
         specifier: ^16.2.10
-        version: 16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+        version: 16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -176,7 +179,7 @@ importers:
         version: 12.5.0
       next-router-mock:
         specifier: ^0.9.0
-        version: 0.9.13(next@16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
+        version: 0.9.13(next@16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
       postcss:
         specifier: ^8.5.15
         version: 8.5.15
@@ -4963,7 +4966,7 @@ snapshots:
     transitivePeerDependencies:
       - browserslist
 
-  '@serwist/next@9.5.7(next@16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)(typescript@5.9.3)':
+  '@serwist/next@9.5.7(next@16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)(typescript@5.9.3)':
     dependencies:
       '@serwist/build': 9.5.7(browserslist@4.28.1)(typescript@5.9.3)
       '@serwist/utils': 9.5.7(browserslist@4.28.1)
@@ -4972,7 +4975,7 @@ snapshots:
       browserslist: 4.28.1
       glob: 10.5.0
       kolorist: 1.8.0
-      next: 16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      next: 16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       react: 19.2.5
       semver: 7.7.4
       serwist: 9.5.7(browserslist@4.28.1)(typescript@5.9.3)
@@ -7574,9 +7577,9 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  next-router-mock@0.9.13(next@16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5):
+  next-router-mock@0.9.13(next@16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5):
     dependencies:
-      next: 16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      next: 16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       react: 19.2.5
 
   next-themes@0.4.6(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
@@ -7584,7 +7587,7 @@ snapshots:
       react: 19.2.5
       react-dom: 19.2.5(react@19.2.5)
 
-  next@16.2.10(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
+  next@16.2.10(patch_hash=9773fb106d11b2506691459020766cd3f92587371db1a8d8394161dc5d9c2623)(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
     dependencies:
       '@next/env': 16.2.10
       '@swc/helpers': 0.5.15

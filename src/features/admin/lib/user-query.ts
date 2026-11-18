@@ -22,6 +22,7 @@ export type AdminUserItem = NonNullable<
 >[number] & {
   nickname: string | null;
   lastActiveAt: number | null;
+  inviteCode: string | null;
 };
 export type AdminUserPage = {
   items: AdminUserItem[];

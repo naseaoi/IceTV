@@ -10,7 +10,7 @@ import {
   getHttpErrorMessage,
   isAbortError,
 } from '@/lib/user-facing-error';
-import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
+import { checkForUnseenUpdate, RELEASE_SEEN_EVENT } from '@/lib/version-check';
 
 export const ROLE_TEXT: Record<string, string> = {
   owner: '站长',
@@ -71,13 +71,18 @@ export function useHasUpdate(): boolean {
   useEffect(() => {
     if (!isOwner) return;
     let cancelled = false;
-    checkForUpdates()
-      .then((status) => {
-        if (!cancelled) setHasUpdate(status === UpdateStatus.HAS_UPDATE);
-      })
-      .catch((error) => console.warn('版本检查失败:', error));
+    const refresh = () => {
+      checkForUnseenUpdate()
+        .then((value) => {
+          if (!cancelled) setHasUpdate(value);
+        })
+        .catch((error) => console.warn('版本检查失败:', error));
+    };
+    refresh();
+    window.addEventListener(RELEASE_SEEN_EVENT, refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener(RELEASE_SEEN_EVENT, refresh);
     };
   }, [isOwner]);
 

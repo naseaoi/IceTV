@@ -1,6 +1,7 @@
 import type Artplayer from 'artplayer';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
+import { resolveActivePlayTime } from '@/features/play/lib/episodeResumePolicy';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import {
   writeAutoPlayNextEnabled,
@@ -24,6 +25,8 @@ type ArtPlayerSettingsOptions = {
   skipConfigRef: MutableRefObject<SkipConfig>;
   resumeTimeRef: MutableRefObject<number | null>;
   resumeModeRef: MutableRefObject<ResumeMode>;
+  stableCurrentTimeRef: MutableRefObject<number>;
+  clearTargetEpisodeProgressRef: MutableRefObject<boolean>;
   setBlockAdEnabled: Dispatch<SetStateAction<boolean>>;
   setAutoPlayNextEnabled: Dispatch<SetStateAction<boolean>>;
   handleSkipConfigChange: (newConfig: SkipConfig) => Promise<void>;
@@ -54,6 +57,8 @@ export function createArtPlayerSettings({
   skipConfigRef,
   resumeTimeRef,
   resumeModeRef,
+  stableCurrentTimeRef,
+  clearTargetEpisodeProgressRef,
   setBlockAdEnabled,
   setAutoPlayNextEnabled,
   handleSkipConfigChange,
@@ -72,8 +77,16 @@ export function createArtPlayerSettings({
               key: 'local-preference-save',
             });
           if (artPlayerRef.current) {
-            resumeTimeRef.current = artPlayerRef.current.currentTime;
-            resumeModeRef.current = 'forced';
+            const resumeTime = resolveActivePlayTime({
+              targetEpisodePending: clearTargetEpisodeProgressRef.current,
+              playerCurrentTime: artPlayerRef.current.currentTime || 0,
+              pendingResumeTime: resumeTimeRef.current,
+              stableCurrentTime: stableCurrentTimeRef.current,
+            });
+            if (resumeTime > 1) {
+              resumeTimeRef.current = resumeTime;
+              resumeModeRef.current = 'forced';
+            }
             const managedVideo = artPlayerRef.current.video;
             runManagedVideoCleanup(managedVideo);
             destroyManagedHls(managedVideo);

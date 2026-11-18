@@ -104,7 +104,7 @@ export function fetchResponseThroughProxy(
     (signal) => fetchThroughProxy(targetUrl, proxyUrl, { ...options, signal }),
     options.signal,
   ).then((buffer) => {
-    return parseProxyResponse(buffer);
+    return parseProxyResponse(buffer, targetUrl.protocol === 'https:');
   });
 }
 
@@ -213,8 +213,12 @@ function fetchHttpsStreamThroughProxy(
     let controllerRef: ReadableStreamDefaultController<Uint8Array> | null =
       null;
     let socketPaused = false;
+    let bodyDecoder: ReturnType<typeof createProxyBodyDecoder> | undefined;
+    let completed = false;
 
     const fail = (error: Error) => {
+      if (completed) return;
+      completed = true;
       if (settled) {
         controllerRef?.error(error);
         secureSocket?.destroy();
@@ -236,6 +240,7 @@ function fetchHttpsStreamThroughProxy(
         }
       },
       cancel() {
+        completed = true;
         secureSocket?.destroy();
       },
     });
@@ -264,9 +269,10 @@ function fetchHttpsStreamThroughProxy(
       const abortSocket = () =>
         secureSocket?.destroy(new Error('Proxy request aborted'));
       options.signal?.addEventListener('abort', abortSocket, { once: true });
-      secureSocket.once('close', () =>
-        options.signal?.removeEventListener('abort', abortSocket),
-      );
+      secureSocket.once('close', () => {
+        options.signal?.removeEventListener('abort', abortSocket);
+        if (!completed) fail(new Error('Truncated proxy response body'));
+      });
       if (options.signal?.aborted) {
         abortSocket();
         return;
@@ -317,6 +323,12 @@ function fetchHttpsStreamThroughProxy(
             return;
           }
 
+          try {
+            bodyDecoder = createProxyBodyDecoder(parsed.headers);
+          } catch (error) {
+            fail(error as Error);
+            return;
+          }
           settled = true;
           resolve({
             status: parsed.status,
@@ -325,9 +337,15 @@ function fetchHttpsStreamThroughProxy(
             body: stream,
           });
 
-          const bodyChunk = chunk.subarray(
-            headerEndIndex + 4 - previousHeaderBytes,
-          );
+          let bodyChunk: Buffer;
+          try {
+            bodyChunk = bodyDecoder!.push(
+              chunk.subarray(headerEndIndex + 4 - previousHeaderBytes),
+            );
+          } catch (error) {
+            fail(error as Error);
+            return;
+          }
           headerBuffer = Buffer.alloc(0);
           if (bodyChunk.length > 0) {
             const enqueued = enqueueProxyStreamChunk(
@@ -348,8 +366,15 @@ function fetchHttpsStreamThroughProxy(
           return;
         }
 
+        let decoded: Buffer;
+        try {
+          decoded = bodyDecoder!.push(chunk);
+        } catch (error) {
+          fail(error as Error);
+          return;
+        }
         const enqueued = enqueueProxyStreamChunk(
-          chunk,
+          decoded,
           options.maxBytes,
           (nextBytes) => {
             responseBytes = nextBytes;
@@ -364,7 +389,15 @@ function fetchHttpsStreamThroughProxy(
         }
       });
       secureSocket.once('end', () => {
-        controllerRef?.close();
+        try {
+          if (!bodyDecoder)
+            throw new Error('Incomplete proxy response headers');
+          bodyDecoder.finish();
+          completed = true;
+          controllerRef?.close();
+        } catch (error) {
+          fail(error as Error);
+        }
       });
       secureSocket.once('error', fail);
       secureSocket.once('timeout', () => {
@@ -544,6 +577,9 @@ function fetchThroughProxy(
         }
       });
       secureSocket.once('error', fail);
+      secureSocket.once('close', () => {
+        if (!settled) fail(new Error('Truncated proxy response body'));
+      });
       secureSocket.once('timeout', () => {
         fail(new Error('代理响应超时'));
       });
@@ -554,7 +590,10 @@ function fetchThroughProxy(
   });
 }
 
-function parseProxyResponse(responseBuffer: Buffer): ProxyFetchResult {
+function parseProxyResponse(
+  responseBuffer: Buffer,
+  rawHttpBody: boolean,
+): ProxyFetchResult {
   const headerEndIndex = responseBuffer.indexOf('\r\n\r\n');
 
   if (headerEndIndex === -1) {
@@ -585,11 +624,100 @@ function parseProxyResponse(responseBuffer: Buffer): ProxyFetchResult {
     );
   }
 
+  let body = responseBuffer.subarray(headerEndIndex + 4);
+  if (rawHttpBody) {
+    const decoder = createProxyBodyDecoder(headers);
+    body = decoder.push(body);
+    decoder.finish();
+  }
   return {
     status: statusCode,
     statusText,
     headers,
-    body: responseBuffer.subarray(headerEndIndex + 4),
+    body,
+  };
+}
+
+// CONNECT 后拿到的是 HTTP 原始字节；EOF 仅对 close-delimited 正文表示成功。
+function createProxyBodyDecoder(headers: Headers) {
+  const transfer = headers.get('transfer-encoding')?.trim().toLowerCase();
+  if (transfer && transfer !== 'chunked')
+    throw new Error('Unsupported transfer encoding');
+  const rawLength = headers.get('content-length');
+  const expected = rawLength === null ? null : Number(rawLength);
+  if (
+    rawLength !== null &&
+    (!/^\d+$/.test(rawLength) || !Number.isSafeInteger(expected))
+  ) {
+    throw new Error('Invalid Content-Length');
+  }
+  if (transfer) {
+    headers.delete('transfer-encoding');
+    headers.delete('content-length');
+  }
+  let received = 0;
+  let pending = Buffer.alloc(0);
+  let remaining = 0;
+  let state: 'size' | 'data' | 'separator' | 'trailers' | 'done' = 'size';
+  let trailerBytes = 0;
+  return {
+    push(chunk: Buffer): Buffer {
+      if (!transfer) {
+        received += chunk.length;
+        if (expected !== null && received > expected)
+          throw new Error('Proxy body exceeds Content-Length');
+        return chunk;
+      }
+      pending = Buffer.concat([pending, chunk]);
+      const output: Buffer[] = [];
+      while (pending.length) {
+        if (state === 'done') throw new Error('Data after chunked terminator');
+        if (state === 'data') {
+          const size = Math.min(remaining, pending.length);
+          output.push(pending.subarray(0, size));
+          pending = pending.subarray(size);
+          remaining -= size;
+          if (remaining === 0) state = 'separator';
+        } else if (state === 'separator') {
+          if (pending.length < 2) break;
+          if (pending.subarray(0, 2).toString() !== '\r\n')
+            throw new Error('Invalid chunk separator');
+          pending = pending.subarray(2);
+          state = 'size';
+        } else {
+          const end = pending.indexOf('\r\n');
+          if (end < 0) {
+            if (pending.length > MAX_PROXY_RESPONSE_HEADER_BYTES)
+              throw new Error('Chunk header too large');
+            break;
+          }
+          const line = pending.subarray(0, end).toString('latin1');
+          pending = pending.subarray(end + 2);
+          if (state === 'trailers') {
+            trailerBytes += end + 2;
+            if (trailerBytes > MAX_PROXY_RESPONSE_HEADER_BYTES)
+              throw new Error('Chunk trailers too large');
+            if (!line) state = 'done';
+          } else {
+            const size = line.split(';', 1)[0];
+            if (!/^[\da-f]+$/i.test(size))
+              throw new Error('Invalid chunk size');
+            remaining = Number.parseInt(size, 16);
+            if (!Number.isSafeInteger(remaining))
+              throw new Error('Invalid chunk size');
+            state = remaining ? 'data' : 'trailers';
+          }
+        }
+      }
+      return Buffer.concat(output);
+    },
+    finish() {
+      if (
+        transfer ? state !== 'done' : expected !== null && received !== expected
+      ) {
+        throw new Error('Truncated proxy response body');
+      }
+    },
   };
 }
 

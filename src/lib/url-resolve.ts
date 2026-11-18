@@ -52,20 +52,3 @@ function fallbackUrlResolve(baseUrl: string, relativePath: string) {
     return base + cleanRelative;
   }
 }
-
-export function getBaseUrl(m3u8Url: string) {
-  try {
-    const url = new URL(m3u8Url);
-    if (url.pathname.endsWith('.m3u8')) {
-      url.pathname = url.pathname.substring(
-        0,
-        url.pathname.lastIndexOf('/') + 1,
-      );
-    } else if (!url.pathname.endsWith('/')) {
-      url.pathname += '/';
-    }
-    return url.protocol + '//' + url.host + url.pathname;
-  } catch {
-    return m3u8Url.endsWith('/') ? m3u8Url : m3u8Url + '/';
-  }
-}

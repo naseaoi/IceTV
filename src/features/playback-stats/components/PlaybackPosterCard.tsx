@@ -13,6 +13,7 @@ import {
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import { useOpenListPicker } from '@/components/list-picker-context';
 import {
   POSTER_CARD_COVER_CLASS,
   POSTER_CARD_INTERACTION_CLASS,
@@ -28,6 +29,7 @@ import {
 import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
 import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { useLongPress } from '@/hooks/useLongPress';
+import { usePlaybackIntentPrefetch } from '@/hooks/usePlaybackIntentPrefetch';
 import {
   deleteFavorite,
   generateStorageKey,
@@ -77,6 +79,7 @@ export function PlaybackPosterCard({
 }: PlaybackPosterCardProps) {
   const interactionId = useId();
   const openWatchRecord = useOpenWatchRecord();
+  const openListPicker = useOpenListPicker();
   const {
     showActionSheet,
     hideActionSheet,
@@ -97,6 +100,12 @@ export function PlaybackPosterCard({
     onPrefetch?.();
     if (hasTarget) void ensureFavoritesLoaded();
   }, [ensureFavoritesLoaded, hasTarget, onPrefetch, selectable]);
+  const prefetchProps = usePlaybackIntentPrefetch({
+    source,
+    id: videoId,
+    disabled: selectable,
+    onPrefetch: handlePrefetch,
+  });
 
   const toggleFavorite = useCallback(
     async (current: boolean, notify = false) => {
@@ -165,6 +174,18 @@ export function PlaybackPosterCard({
                 onToggle: () => toggleFavorite(current, true),
               }
             : undefined,
+          addToList:
+            openListPicker && hasTarget
+              ? () =>
+                  openListPicker({
+                    source,
+                    id: videoId,
+                    title,
+                    year: year || record?.year || '',
+                    cover: cover || record?.cover || '',
+                    searchTitle: record?.search_title || undefined,
+                  })
+              : null,
           watchRecord:
             openWatchRecord && hasTarget
               ? () =>
@@ -204,6 +225,7 @@ export function PlaybackPosterCard({
       interactionId,
       onDelete,
       onPlay,
+      openListPicker,
       openWatchRecord,
       selectable,
       showActionSheet,
@@ -231,8 +253,7 @@ export function PlaybackPosterCard({
       aria-pressed={selectable ? selected : undefined}
       className={`${POSTER_CARD_INTERACTION_CLASS} outline-none`}
       onClick={onPlay}
-      onMouseEnter={handlePrefetch}
-      onFocus={handlePrefetch}
+      {...prefetchProps}
       onKeyDown={(event) => {
         if (
           event.target === event.currentTarget &&

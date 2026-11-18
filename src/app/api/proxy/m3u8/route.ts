@@ -210,6 +210,7 @@ async function handleGet(request: NextRequest) {
       skipCache,
       {
         identity,
+        signal: request.signal,
         proxyPoolStickyKey,
         startedAt,
         proxyMode,

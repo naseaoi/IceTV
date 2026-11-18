@@ -14,8 +14,8 @@ import {
 import { getErrorMessage } from '@/lib/user-facing-error';
 
 const KIND_LABELS: Record<MessageNotificationKind, string> = {
-  'tracking-update': '追更与收藏更新',
-  'follow-review': '关注的人发布评价或年度报告',
+  'tracking-update': '追更更新',
+  'follow-review': '关注动态',
   'review-reply': '评价回复',
   'new-follower': '新粉丝',
   'review-like': '评价被点赞',

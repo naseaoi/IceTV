@@ -14,6 +14,7 @@ import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
 import { ClientAuthSession } from '@/lib/auth-session';
 import { getClientAuthSession } from '@/lib/auth-session.client';
 import { PROFILE_REQUIRED_EVENT } from '@/lib/profile.client';
+import { WATCH_LEVEL_UP_EVENT } from '@/lib/watch-level';
 
 type AuthContextValue = {
   session: ClientAuthSession;
@@ -59,12 +60,15 @@ export function AuthProvider({
   }, []);
 
   useEffect(() => {
-    const handleProfileRequired = () => {
+    const handleSessionStale = () => {
       void refreshSession();
     };
-    window.addEventListener(PROFILE_REQUIRED_EVENT, handleProfileRequired);
-    return () =>
-      window.removeEventListener(PROFILE_REQUIRED_EVENT, handleProfileRequired);
+    window.addEventListener(PROFILE_REQUIRED_EVENT, handleSessionStale);
+    window.addEventListener(WATCH_LEVEL_UP_EVENT, handleSessionStale);
+    return () => {
+      window.removeEventListener(PROFILE_REQUIRED_EVENT, handleSessionStale);
+      window.removeEventListener(WATCH_LEVEL_UP_EVENT, handleSessionStale);
+    };
   }, [refreshSession]);
 
   const value = useMemo(

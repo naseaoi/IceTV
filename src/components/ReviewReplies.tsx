@@ -9,6 +9,7 @@ import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import ReportDialog from '@/components/ReportDialog';
 import UserRoleBadge from '@/components/UserRoleBadge';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { PublicReviewReply } from '@/lib/types';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
@@ -256,6 +257,7 @@ function ReplyItem({
               {displayName(reply.author.nickname)}
             </Link>
             <UserRoleBadge role={reply.author.role} />
+            <WatchLevelBadge level={reply.author.level} />
             {reply.replyTo && (
               <>
                 <span className='shrink-0 text-gray-400'>回复</span>

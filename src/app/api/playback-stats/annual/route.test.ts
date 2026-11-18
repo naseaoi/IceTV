@@ -2,10 +2,13 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { emptyAnnualActivity } from '@/features/playback-stats/lib/annual-activity';
 
 installWebPolyfills();
 const mockGuard = jest.fn();
 const mockData = jest.fn();
+const mockActivity = jest.fn();
+const mockOpinions = jest.fn();
 const mockReviews = jest.fn();
 const mockRetention = jest.fn();
 const mockRecap = jest.fn();
@@ -16,6 +19,8 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/lib/db', () => ({
   db: {
+    getAnnualActivity: (...args: unknown[]) => mockActivity(...args),
+    getFollowOpinions: (...args: unknown[]) => mockOpinions(...args),
     getAnnualRecap: (...args: unknown[]) => mockRecap(...args),
     saveAnnualRecap: (...args: unknown[]) => mockSaveRecap(...args),
     getPlaybackAnnualData: (...args: unknown[]) => mockData(...args),
@@ -33,6 +38,8 @@ const request = (query = '') =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockActivity.mockResolvedValue(emptyAnnualActivity());
+  mockOpinions.mockResolvedValue({ watchedCount: 3 });
   jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2025-12-31T20:00:00Z'));
   mockGuard.mockResolvedValue({ username: 'demo', role: 'user' });
   mockData.mockResolvedValue({
@@ -163,8 +170,51 @@ it('refreshes an existing released snapshot with its privacy and identity guard'
   expect((await GET(request('?year=2025'))).status).toBe(200);
   expect(mockSaveRecap).toHaveBeenCalledWith(
     'demo',
-    expect.objectContaining({ rhythmHidden: true, latestNight: null }),
+    expect.objectContaining({
+      rhythmHidden: true,
+      latestNight: null,
+      capsules: null,
+      social: null,
+    }),
     expect.any(Number),
     { publishedAt: 100, updatedAt: 200 },
+  );
+});
+
+it('returns private activity and reuses visible follow opinions for the leading work', async () => {
+  const startedAt = Date.parse('2025-01-01T00:00:00Z');
+  mockData.mockResolvedValue({
+    earliestStartedAt: startedAt,
+    buckets: [],
+    sessions: [
+      {
+        id: 's',
+        title: 'Show.A',
+        year: '2025',
+        cover: '',
+        source: 's',
+        source_name: 'S',
+        video_id: 'v',
+        episode_index: 1,
+        started_at: startedAt,
+        ended_at: startedAt + 60000,
+        watch_seconds: 60,
+        measurement_version: 1,
+      },
+    ],
+  });
+  const result = await (await GET(request('?year=2025&tz=UTC'))).json();
+  expect(result.social).toEqual({ newFollowing: 0, topWorkWatchers: 3 });
+  expect(result.capsules).toEqual({
+    written: 0,
+    delivered: 0,
+    nextDeliverAt: null,
+    biggestChange: null,
+  });
+  expect(mockOpinions).toHaveBeenCalledWith('demo', 'showa', '2025');
+  expect(mockActivity).toHaveBeenCalledWith(
+    'demo',
+    startedAt,
+    Date.parse('2026-01-01T00:00:00Z'),
   );
 });

@@ -27,15 +27,24 @@ export function formatDate(date: string): string {
   return `${month} 月 ${day} 日`;
 }
 
-export function formatInstantDate(at: number, timeZone: string): string {
+// 传入 reportYear 时，落在其他年份的日期带上年份
+export function formatInstantDate(
+  at: number,
+  timeZone: string,
+  reportYear?: number,
+): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
+    year: 'numeric',
     month: 'numeric',
     day: 'numeric',
   }).formatToParts(at);
   const value = (type: string) =>
     parts.find((part) => part.type === type)?.value ?? '';
-  return `${value('month')} 月 ${value('day')} 日`;
+  const date = `${value('month')} 月 ${value('day')} 日`;
+  return reportYear !== undefined && Number(value('year')) !== reportYear
+    ? `${value('year')} 年 ${date}`
+    : date;
 }
 
 export function formatClock(localTime: string): string {
@@ -156,14 +165,34 @@ export type SlideKey =
   | 'top'
   | 'ranking'
   | 'journey'
-  | 'sources'
+  | 'completions'
   | 'reviews'
+  | 'lists'
+  | 'letters'
   | 'summary'
   | 'empty';
 
+// 与观看无关的页面：评价、片单、观后信，没有观看记录时也展示
+function activitySlides(report: RecapReport): SlideKey[] {
+  const slides: SlideKey[] = [];
+  if (report.reviews.count > 0) slides.push('reviews');
+  if (
+    report.lists &&
+    (report.lists.createdCount > 0 || report.lists.itemCount > 0)
+  )
+    slides.push('lists');
+  if (
+    report.capsules &&
+    (report.capsules.written > 0 || report.capsules.delivered > 0)
+  )
+    slides.push('letters');
+  return slides;
+}
+
 export function buildSlides(report: RecapReport): SlideKey[] {
   if (report.totals.watchSeconds <= 0) {
-    return report.reviews.count > 0 ? ['intro', 'reviews', 'empty'] : ['empty'];
+    const activity = activitySlides(report);
+    return activity.length > 0 ? ['intro', ...activity, 'empty'] : ['empty'];
   }
   const slides: SlideKey[] = ['intro', 'time'];
   if (report.months.filter((value) => value > 0).length >= 2)
@@ -180,6 +209,7 @@ export function buildSlides(report: RecapReport): SlideKey[] {
   if (report.longestStreak && report.longestStreak.days >= 3)
     slides.push('streak');
   if (report.topWorks.length > 0) slides.push('top');
+  // 第 1 名已在年度作品页单独展示，榜单页从第 2 名列起，至少要有两部
   if (report.topWorks.length >= 3) slides.push('ranking');
   if (
     report.firstWork &&
@@ -188,8 +218,7 @@ export function buildSlides(report: RecapReport): SlideKey[] {
   ) {
     slides.push('journey');
   }
-  if (report.topSources.length >= 2) slides.push('sources');
-  if (report.reviews.count > 0) slides.push('reviews');
-  slides.push('summary');
+  if (report.completions?.longest) slides.push('completions');
+  slides.push(...activitySlides(report), 'summary');
   return slides;
 }

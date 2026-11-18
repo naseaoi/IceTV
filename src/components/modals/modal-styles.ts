@@ -15,7 +15,7 @@ export const MODAL_DANGER_BUTTON_CLASS = `${MODAL_BUTTON_BASE_CLASS} bg-rose-600
 export const MODAL_SECONDARY_BUTTON_CLASS = `${MODAL_BUTTON_BASE_CLASS} bg-gray-900/[0.05] text-gray-700 hover:bg-gray-900/[0.09] dark:bg-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.12]`;
 
 export const MODAL_INPUT_CLASS =
-  'h-10 w-full rounded-lg border-0 bg-gray-900/[0.04] px-3 text-sm text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] transition-colors placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:placeholder:text-gray-500 dark:focus:bg-gray-900';
+  'h-10 w-full rounded-lg border-0 bg-gray-900/[0.04] px-3 text-sm text-gray-900 ring-1 ring-inset ring-gray-900/[0.08] transition-colors placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-brand-500 disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-100 dark:ring-white/[0.08] dark:placeholder:text-gray-500 dark:focus:bg-gray-900';
 
 export const MODAL_LABEL_CLASS =
   'mb-1.5 block text-[13px] font-medium text-gray-700 dark:text-gray-300';

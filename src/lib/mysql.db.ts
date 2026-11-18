@@ -17,9 +17,16 @@ import {
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
 import {
+  type TrackingCalendarRow,
+  trackingCalendarItems,
+  trackingCalendarSql,
+} from '@/features/continue-watching/lib/tracking-calendar-storage';
+import {
   favoriteMessageQueries,
   favoriteMessagesFromRows,
   favoriteReadStatement,
+  favoriteTrackingSql,
+  favoriteTrackingStatement,
 } from '@/features/favorites/lib/favorite-tracking';
 import {
   applyFavoriteStatus,
@@ -43,11 +50,22 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type ListPlan,
+  type ListRow,
+  ListPlans,
+  listSchema,
+} from '@/features/lists/lib/list-storage';
+import { annualActivityPlan } from '@/features/playback-stats/lib/annual-activity-storage';
+import {
   type PlaybackSourceUsage,
   type PlaybackSourceUsageRow,
   aggregateSourceUsage,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
+import {
+  ViewingHappinessPlans,
+  viewingHappinessSchema,
+} from '@/features/time-capsule/storage';
 import {
   type AnnouncementRow,
   ANNOUNCEMENT_INSERT_SQL,
@@ -113,6 +131,24 @@ import {
   reviewSql,
   VideoReviewRow,
 } from '@/lib/video-reviews';
+import { WATCH_LEVEL_BUCKET_CAP_MS, watchLevelForMs } from '@/lib/watch-level';
+import type {
+  WatchLevelBackfillRow,
+  WatchLevelEventRow,
+} from '@/lib/watch-level-storage';
+import {
+  levelEventValues,
+  levelUpForDelta,
+  mapWatchLevelEvent,
+  newlyReachedLevels,
+  WATCH_LEVEL_EVENT_INSERT,
+  watchLevelBackfillSql,
+} from '@/lib/watch-level-storage';
+import type {
+  WatchLevelResponse,
+  WatchLevelUp,
+  WatchSessionSaveResult,
+} from '@/lib/watch-level-types';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -442,6 +478,8 @@ export class MySqlStorage implements IStorage {
       OAUTH_SCHEMA + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
       ...userNoticeSchema('mysql'),
       ...socialSchema('mysql'),
+      ...viewingHappinessSchema('mysql'),
+      ...listSchema('mysql'),
       ...userDanmakuSchema('mysql'),
       ...userAccessSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
@@ -548,6 +586,12 @@ export class MySqlStorage implements IStorage {
         code VARCHAR(191) NOT NULL PRIMARY KEY,
         used_count INT NOT NULL DEFAULT 0
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS invite_code_redemptions (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        code VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
+        redeemed_at BIGINT NOT NULL,
+        KEY idx_invite_code_redemptions_code (code)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS source_route_stats (
         source VARCHAR(191) NOT NULL,
         route_mode VARCHAR(16) NOT NULL,
@@ -637,6 +681,21 @@ export class MySqlStorage implements IStorage {
           throw error;
       }
     }
+    for (const column of ['view_count', 'like_count']) {
+      const [listColumns] = await this.pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM user_lists LIKE '${column}'`,
+      );
+      if (!listColumns.length) {
+        try {
+          await this.pool.execute(
+            `ALTER TABLE user_lists ADD COLUMN ${column} INT NOT NULL DEFAULT 0`,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+            throw error;
+        }
+      }
+    }
     await new MysqlConfigStateStore(this.pool).migrateSchema();
 
     for (const [name, size] of [
@@ -650,6 +709,24 @@ export class MySqlStorage implements IStorage {
         try {
           await this.pool.execute(
             `ALTER TABLE user_danmaku ADD COLUMN ${name} VARCHAR(${size}) NOT NULL DEFAULT ''`,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+            throw error;
+        }
+      }
+    }
+    for (const [name, definition] of [
+      ['bio', 'VARCHAR(240)'],
+      ['watch_time_public', 'INTEGER NOT NULL DEFAULT 0'],
+    ]) {
+      const [fields] = await this.pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM user_profiles LIKE '${name}'`,
+      );
+      if (!fields.length) {
+        try {
+          await this.pool.execute(
+            `ALTER TABLE user_profiles ADD COLUMN ${name} ${definition}`,
           );
         } catch (error) {
           if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
@@ -698,6 +775,7 @@ export class MySqlStorage implements IStorage {
     await this.migratePlaybackSchema();
     await this.migrateReviewFirstPublished();
     await this.migrateWatchHistory();
+    await this.migrateWatchLevel();
     await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
     await this.backfillUserProfiles();
@@ -785,6 +863,14 @@ export class MySqlStorage implements IStorage {
     await this.pool.execute(`CREATE TABLE IF NOT EXISTS storage_migrations (
       name VARCHAR(191) PRIMARY KEY, completed_at BIGINT NOT NULL
     ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS user_watch_totals (
+      username VARCHAR(191) PRIMARY KEY, counted_ms BIGINT NOT NULL, updated_at BIGINT NOT NULL
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS user_level_events (
+      username VARCHAR(191) NOT NULL, level INT NOT NULL, reached_at BIGINT NOT NULL,
+      source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL,
+      year VARCHAR(32) NOT NULL, episode_index INT NOT NULL, PRIMARY KEY(username, level)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
     await this.pool.execute(`CREATE TABLE IF NOT EXISTS playback_watch_buckets (
       username VARCHAR(191) NOT NULL, session_id VARCHAR(80) NOT NULL, bucket_start BIGINT NOT NULL,
       watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
@@ -800,6 +886,105 @@ export class MySqlStorage implements IStorage {
       PRIMARY KEY(username, id), UNIQUE KEY idx_watch_history_work(username, source, video_id),
       KEY idx_watch_history_page(username, last_watched_at, id)
     ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+  }
+
+  private async migrateWatchLevel(): Promise<void> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['watch_level_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['watch_level_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        const [rows] = await connection.query<
+          (RowDataPacket & WatchLevelBackfillRow)[]
+        >(watchLevelBackfillSql);
+        for (const row of rows)
+          await this.addWatchLevel(
+            connection,
+            row.username,
+            Number(row.counted_ms),
+            row,
+            Number(row.reached_at),
+          );
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'watch_level_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // 账号累计行也是跨会话的写锁，必须先于读取桶总量获取。
+  private async lockWatchLevel(
+    connection: PoolConnection,
+    username: string,
+  ): Promise<number> {
+    await connection.execute(
+      'INSERT INTO user_watch_totals (username, counted_ms, updated_at) VALUES (?, 0, 0) ON DUPLICATE KEY UPDATE username = username',
+      [username],
+    );
+    const [rows] = await connection.query<RowDataPacket[]>(
+      'SELECT counted_ms FROM user_watch_totals WHERE username = ? FOR UPDATE',
+      [username],
+    );
+    return Number(rows[0]?.counted_ms ?? 0);
+  }
+
+  private async addWatchLevel(
+    connection: PoolConnection,
+    username: string,
+    delta: number,
+    session: Pick<
+      PlaybackSession,
+      'source' | 'video_id' | 'title' | 'year' | 'episode_index'
+    >,
+    reachedAt: number,
+  ): Promise<WatchLevelUp> {
+    if (delta <= 0) return null;
+    const before = await this.lockWatchLevel(connection, username);
+    await connection.execute(
+      'UPDATE user_watch_totals SET counted_ms = counted_ms + ?, updated_at = GREATEST(updated_at, ?) WHERE username = ?',
+      [delta, reachedAt, username],
+    );
+    for (const { level } of newlyReachedLevels(before, before + delta))
+      await connection.execute(
+        WATCH_LEVEL_EVENT_INSERT + ' ON DUPLICATE KEY UPDATE level = level',
+        levelEventValues(username, level, reachedAt, session),
+      );
+    return levelUpForDelta(before, delta);
+  }
+
+  async getWatchLevel(userName: string): Promise<WatchLevelResponse> {
+    const username = normalizeUsername(userName);
+    return this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT counted_ms FROM user_watch_totals WHERE username = ?',
+        [username],
+      );
+      const countedMs = Number(rows[0]?.counted_ms ?? 0);
+      const [events] = await connection.query<
+        (RowDataPacket & WatchLevelEventRow)[]
+      >('SELECT * FROM user_level_events WHERE username = ? ORDER BY level', [
+        username,
+      ]);
+      return {
+        level: watchLevelForMs(countedMs),
+        countedMs,
+        events: events.map(mapWatchLevelEvent),
+      };
+    });
   }
 
   private async migrateWatchHistory(): Promise<void> {
@@ -986,6 +1171,33 @@ export class MySqlStorage implements IStorage {
     return parseJsonValue<PlayRecord>(rows[0]?.record_json);
   }
 
+  async getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>> {
+    await this.ensureInitialized();
+    const { findLatestPlayRecordKeyByTitle } =
+      await import('@/lib/play-record-title');
+    const username = normalizeUsername(userName);
+    const key = await findLatestPlayRecordKeyByTitle(
+      title,
+      year,
+      async (offset, limit) => {
+        const [rows] = await this.pool.query<JsonRow[]>(
+          `SELECT record_key,
+        JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.title')) AS title,
+        JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.year')) AS year FROM play_records WHERE username = ?
+        ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS DECIMAL(20, 3)) DESC,
+        record_key DESC LIMIT ? OFFSET ?`,
+          [username, limit, offset],
+        );
+        return rows as unknown as import('@/lib/play-record-title').PlayRecordTitleRow[];
+      },
+    );
+    return key ? this.getPlayRecordsByKeys(username, [key]) : {};
+  }
+
   async getPlayRecordsByKeys(
     userName: string,
     keys: string[],
@@ -1003,6 +1215,18 @@ export class MySqlStorage implements IStorage {
       if (record && row.record_key) result[row.record_key] = record;
     }
     return result;
+  }
+
+  async getPlayRecordSnapshot(
+    userName: string,
+    key: string,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1',
+      [normalizeUsername(userName), key],
+    );
+    return rows[0]?.record_json ?? null;
   }
 
   async setPlayRecord(
@@ -1024,10 +1248,22 @@ export class MySqlStorage implements IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
-    snapshot: string,
+    snapshot: string | null,
   ): Promise<boolean> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
+    if (snapshot === null) {
+      try {
+        await this.pool.execute(
+          'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
+          [username, key, JSON.stringify(record)],
+        );
+        return true;
+      } catch (error) {
+        if ((error as { code?: string }).code === 'ER_DUP_ENTRY') return false;
+        throw error;
+      }
+    }
     const [result] = await this.pool.execute(
       `UPDATE play_records
        SET record_json = ?
@@ -1310,6 +1546,35 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async setFavoriteTracking(
+    userName: string,
+    key: string,
+    trackingEnabled: boolean,
+  ): Promise<Favorite | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(favoriteTrackingStatement('mysql'), [
+        JSON.stringify(trackingEnabled),
+        username,
+        key,
+      ]);
+      const [rows] = await connection.query<JsonRow[]>(
+        `SELECT f.favorite_json FROM favorites f WHERE f.username = ? AND f.favorite_key = ? AND ${favoriteTrackingSql('mysql').trackable} FOR UPDATE`,
+        [username, key],
+      );
+      await connection.commit();
+      return parseJsonValue<Favorite>(rows[0]?.favorite_json);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
   async saveMergedFavorite(
     userName: string,
     key: string,
@@ -1545,6 +1810,172 @@ export class MySqlStorage implements IStorage {
     ]);
   }
 
+  private async runListPlan<T>(
+    plan: ListPlan<T>,
+    connection?: PoolConnection,
+  ): Promise<T> {
+    if (!connection)
+      return this.withTransaction((transaction) =>
+        this.runListPlan(plan, transaction),
+      );
+    let step = plan.next();
+    while (!step.done) {
+      const { sql, params } = step.value;
+      if (sql.startsWith('SELECT')) {
+        const [rows] = await connection.query(sql, params);
+        step = plan.next(rows as ListRow[]);
+      } else {
+        await connection.execute(sql, params);
+        step = plan.next([]);
+      }
+    }
+    return step.value;
+  }
+  async getAnnualActivity(
+    ...args: Parameters<IStorage['getAnnualActivity']>
+  ): ReturnType<IStorage['getAnnualActivity']> {
+    return this.runListPlan(annualActivityPlan('mysql', ...args));
+  }
+
+  async countCapsules(
+    ...args: Parameters<IStorage['countCapsules']>
+  ): ReturnType<IStorage['countCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').countCapsules(...args),
+    );
+  }
+  async getCompletion(
+    ...args: Parameters<IStorage['getCompletion']>
+  ): ReturnType<IStorage['getCompletion']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').getCompletion(...args),
+    );
+  }
+  async createCapsule(
+    ...args: Parameters<IStorage['createCapsule']>
+  ): ReturnType<IStorage['createCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').createCapsule(...args),
+    );
+  }
+  async getCapsules(
+    ...args: Parameters<IStorage['getCapsules']>
+  ): ReturnType<IStorage['getCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').getCapsules(...args),
+    );
+  }
+  async deleteCapsule(
+    ...args: Parameters<IStorage['deleteCapsule']>
+  ): ReturnType<IStorage['deleteCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').deleteCapsule(...args),
+    );
+  }
+  async openCapsule(
+    ...args: Parameters<IStorage['openCapsule']>
+  ): ReturnType<IStorage['openCapsule']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').openCapsule(...args),
+    );
+  }
+  async getCapsuleMessages(
+    ...args: Parameters<IStorage['getCapsuleMessages']>
+  ): ReturnType<IStorage['getCapsuleMessages']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').getCapsuleMessages(...args),
+    );
+  }
+  async readAllCapsules(
+    ...args: Parameters<IStorage['readAllCapsules']>
+  ): ReturnType<IStorage['readAllCapsules']> {
+    return this.runListPlan(
+      new ViewingHappinessPlans('mysql').readAllCapsules(...args),
+    );
+  }
+  async getTrackingCalendarItems(
+    userName: string,
+  ): ReturnType<IStorage['getTrackingCalendarItems']> {
+    const username = normalizeUsername(userName);
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query(trackingCalendarSql('mysql'), [
+      username,
+      username,
+    ]);
+    return trackingCalendarItems(rows as TrackingCalendarRow[]);
+  }
+
+  async countPlazaLists(
+    ...args: Parameters<IStorage['countPlazaLists']>
+  ): ReturnType<IStorage['countPlazaLists']> {
+    return this.runListPlan(new ListPlans('mysql').countPlazaLists(...args));
+  }
+  async getListItemCount(
+    ...args: Parameters<IStorage['getListItemCount']>
+  ): ReturnType<IStorage['getListItemCount']> {
+    return this.runListPlan(new ListPlans('mysql').getListItemCount(...args));
+  }
+  async setListLike(
+    ...args: Parameters<IStorage['setListLike']>
+  ): ReturnType<IStorage['setListLike']> {
+    return this.runListPlan(new ListPlans('mysql').setListLike(...args));
+  }
+  async recordListView(
+    ...args: Parameters<IStorage['recordListView']>
+  ): ReturnType<IStorage['recordListView']> {
+    return this.runListPlan(new ListPlans('mysql').recordListView(...args));
+  }
+  async getPlazaLists(
+    ...args: Parameters<IStorage['getPlazaLists']>
+  ): ReturnType<IStorage['getPlazaLists']> {
+    return this.runListPlan(new ListPlans('mysql').getPlazaLists(...args));
+  }
+  async getLists(
+    ...args: Parameters<IStorage['getLists']>
+  ): ReturnType<IStorage['getLists']> {
+    return this.runListPlan(new ListPlans('mysql').getLists(...args));
+  }
+  async countUserLists(
+    ...args: Parameters<IStorage['countUserLists']>
+  ): ReturnType<IStorage['countUserLists']> {
+    return this.runListPlan(new ListPlans('mysql').countUserLists(...args));
+  }
+  async getList(
+    ...args: Parameters<IStorage['getList']>
+  ): ReturnType<IStorage['getList']> {
+    return this.runListPlan(new ListPlans('mysql').getList(...args));
+  }
+  async createList(
+    ...args: Parameters<IStorage['createList']>
+  ): ReturnType<IStorage['createList']> {
+    return this.runListPlan(new ListPlans('mysql').createList(...args));
+  }
+  async updateList(
+    ...args: Parameters<IStorage['updateList']>
+  ): ReturnType<IStorage['updateList']> {
+    return this.runListPlan(new ListPlans('mysql').updateList(...args));
+  }
+  async deleteList(
+    ...args: Parameters<IStorage['deleteList']>
+  ): ReturnType<IStorage['deleteList']> {
+    return this.runListPlan(new ListPlans('mysql').deleteList(...args));
+  }
+  async addListItem(
+    ...args: Parameters<IStorage['addListItem']>
+  ): ReturnType<IStorage['addListItem']> {
+    return this.runListPlan(new ListPlans('mysql').addListItem(...args));
+  }
+  async removeListItem(
+    ...args: Parameters<IStorage['removeListItem']>
+  ): ReturnType<IStorage['removeListItem']> {
+    return this.runListPlan(new ListPlans('mysql').removeListItem(...args));
+  }
+  async reorderListItems(
+    ...args: Parameters<IStorage['reorderListItems']>
+  ): ReturnType<IStorage['reorderListItems']> {
+    return this.runListPlan(new ListPlans('mysql').reorderListItems(...args));
+  }
+
   private socialFor(
     executor: Pick<PoolConnection, 'query' | 'execute'> = this.pool,
   ) {
@@ -1586,7 +2017,9 @@ export class MySqlStorage implements IStorage {
     ...args: Parameters<IStorage['updateUserProfile']>
   ): ReturnType<IStorage['updateUserProfile']> {
     await this.ensureInitialized();
-    return this.socialFor().updateUserProfile(...args);
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).updateUserProfile(...args),
+    );
   }
 
   async isNicknameAvailable(
@@ -1632,6 +2065,11 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     return this.socialFor().getFollowRecapMessageCount(...args);
   }
+  async getProfileShowcase(username: string) {
+    await this.ensureInitialized();
+    return this.socialFor().getProfileShowcase(username);
+  }
+
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -1991,6 +2429,30 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     return this.socialFor().getMyVideoReviewRatings(...args);
   }
+  async getWorkWatchStatuses(
+    ...args: Parameters<IStorage['getWorkWatchStatuses']>
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getWorkWatchStatuses(...args),
+    );
+  }
+
+  async getFollowOpinions(
+    ...args: Parameters<IStorage['getFollowOpinions']>
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getFollowOpinions(...args),
+    );
+  }
+
+  async getTasteMatch(
+    ...args: Parameters<IStorage['getTasteMatch']>
+  ): ReturnType<IStorage['getTasteMatch']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getTasteMatch(...args),
+    );
+  }
+
   async getWorkVideoReviewPage(
     ...args: Parameters<IStorage['getWorkVideoReviewPage']>
   ): ReturnType<IStorage['getWorkVideoReviewPage']> {
@@ -2117,10 +2579,12 @@ export class MySqlStorage implements IStorage {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void> {
     await this.ensureInitialized();
     const username = assertValidUsernameFormat(userName);
     const hashed = await hashPassword(password);
+    const now = Date.now();
     await this.withTransaction(async (connection) => {
       // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
       await connection.execute(
@@ -2134,8 +2598,13 @@ export class MySqlStorage implements IStorage {
         );
       await connection.execute(
         'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
-        [username, Date.now()],
+        [username, now],
       );
+      if (inviteCode)
+        await connection.execute(
+          'INSERT INTO invite_code_redemptions (username, code, redeemed_at) VALUES (?, ?, ?)',
+          [username, inviteCode, now],
+        );
       await this.socialFor(connection).ensureUserProfile(username);
       await new MysqlUserAccessStore(connection, true).put({
         username,
@@ -2319,6 +2788,25 @@ export class MySqlStorage implements IStorage {
         )
           return false;
       }
+      await connection.query(
+        'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      await this.runListPlan(
+        new ListPlans('mysql').deleteUserLikes(username),
+        connection,
+      );
+      await connection.execute(
+        'DELETE FROM user_list_items WHERE list_id IN (SELECT id FROM user_lists WHERE username = ?)',
+        [username],
+      );
+      await connection.execute('DELETE FROM user_lists WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute(
+        'DELETE FROM user_profile_showcase WHERE username = ?',
+        [username],
+      );
       await connection.execute('DELETE FROM user_profiles WHERE username = ?', [
         username,
       ]);
@@ -2379,6 +2867,14 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM skip_configs WHERE username = ?', [
         username,
       ]);
+      await connection.execute(
+        'DELETE FROM user_watch_totals WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_level_events WHERE username = ?',
+        [username],
+      );
       await connection.execute('DELETE FROM watch_history WHERE username = ?', [
         username,
       ]);
@@ -2388,6 +2884,13 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM playback_sessions WHERE username = ?',
+        [username],
+      );
+      await connection.execute('DELETE FROM time_capsules WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute(
+        'DELETE FROM work_completions WHERE username = ?',
         [username],
       );
       await connection.execute(
@@ -2404,6 +2907,10 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM user_login_activity WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM invite_code_redemptions WHERE username = ?',
         [username],
       );
       await connection.execute(
@@ -3086,11 +3593,23 @@ export class MySqlStorage implements IStorage {
   async setPlaybackSession(
     userName: string,
     session: PlaybackSession,
-  ): Promise<void> {
+  ): Promise<WatchLevelUp> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
-    await this.pool.execute(
-      `INSERT INTO playback_sessions (
+    return this.withTransaction(async (connection) => {
+      await this.lockWatchLevel(connection, username);
+      const [existing] = await connection.query<RowDataPacket[]>(
+        'SELECT username, watch_seconds, measurement_version FROM playback_sessions WHERE id = ? FOR UPDATE',
+        [session.id],
+      );
+      if (
+        existing[0] &&
+        (existing[0].username !== username ||
+          Number(existing[0].measurement_version) !== 1)
+      )
+        return null;
+      await connection.execute(
+        `INSERT INTO playback_sessions (
         id, username, source, video_id, episode_index, title, source_name,
         cover, year, started_at, ended_at, watch_seconds, last_position,
         total_time, created_at, updated_at
@@ -3105,30 +3624,41 @@ export class MySqlStorage implements IStorage {
         year = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(year), year),
         started_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(started_at), started_at),
         ended_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(ended_at), ended_at),
-        watch_seconds = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(watch_seconds), watch_seconds),
+        watch_seconds = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, GREATEST(watch_seconds, VALUES(watch_seconds)), watch_seconds),
         last_position = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(last_position), last_position),
         total_time = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(total_time), total_time),
         created_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(created_at), created_at),
         updated_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(updated_at), updated_at)`,
-      [
-        session.id,
+        [
+          session.id,
+          username,
+          session.source,
+          session.video_id,
+          session.episode_index,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.started_at,
+          session.ended_at,
+          session.watch_seconds,
+          session.last_position,
+          session.total_time,
+          session.created_at,
+          session.updated_at,
+        ],
+      );
+      return this.addWatchLevel(
+        connection,
         username,
-        session.source,
-        session.video_id,
-        session.episode_index,
-        session.title,
-        session.source_name,
-        session.cover,
-        session.year,
-        session.started_at,
+        Math.max(
+          0,
+          session.watch_seconds - Number(existing[0]?.watch_seconds ?? 0),
+        ) * 1000,
+        session,
         session.ended_at,
-        session.watch_seconds,
-        session.last_position,
-        session.total_time,
-        session.created_at,
-        session.updated_at,
-      ],
-    );
+      );
+    });
   }
 
   async saveWatchSessionReport(
@@ -3136,20 +3666,23 @@ export class MySqlStorage implements IStorage {
     session: PlaybackSession,
     buckets: PlaybackWatchBucket[],
     history?: WatchHistoryWrite,
-  ): Promise<string | null> {
+  ): Promise<WatchSessionSaveResult> {
     const username = normalizeUsername(userName);
     return this.withTransaction(async (connection) => {
+      await this.lockWatchLevel(connection, username);
       if (!buckets.some((bucket) => bucket.watch_ms > 0)) {
         const [existing] = await connection.query<RowDataPacket[]>(
-          'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+          'SELECT username, measurement_version FROM playback_sessions WHERE id = ? FOR UPDATE',
           [session.id],
         );
-        if (existing[0]?.username !== username) return null;
+        if (existing[0]?.username !== username)
+          return { historyId: null, levelUp: null };
         const [totals] = await connection.query<RowDataPacket[]>(
           'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
           [username, session.id],
         );
-        if (!Number(totals[0]?.total)) return null;
+        if (!Number(totals[0]?.total))
+          return { historyId: null, levelUp: null };
       }
       await connection.execute(
         `INSERT INTO playback_sessions (
@@ -3176,10 +3709,14 @@ export class MySqlStorage implements IStorage {
         ],
       );
       const [owners] = await connection.query<RowDataPacket[]>(
-        'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+        'SELECT username, measurement_version FROM playback_sessions WHERE id = ? FOR UPDATE',
         [session.id],
       );
-      if (owners[0]?.username !== username) return null;
+      if (
+        owners[0]?.username !== username ||
+        Number(owners[0]?.measurement_version) !== 2
+      )
+        return { historyId: null, levelUp: null };
       await connection.execute(
         `UPDATE playback_sessions SET ended_at = GREATEST(ended_at, ?), last_position = ?, total_time = ?,
         title = ?, source_name = ?, cover = ?, year = ?, updated_at = GREATEST(updated_at, ?), measurement_version = 2
@@ -3197,12 +3734,38 @@ export class MySqlStorage implements IStorage {
           username,
         ],
       );
-      for (const bucket of buckets)
+      let delta = 0;
+      for (const bucket of buckets) {
+        const [beforeRows] = await connection.query<RowDataPacket[]>(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND bucket_start = ?',
+          [username, bucket.start],
+        );
         await connection.execute(
           `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
         VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE watch_ms = GREATEST(watch_ms, VALUES(watch_ms))`,
           [username, session.id, bucket.start, bucket.watch_ms],
         );
+        const [afterRows] = await connection.query<RowDataPacket[]>(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND bucket_start = ?',
+          [username, bucket.start],
+        );
+        delta +=
+          Math.min(
+            Number(afterRows[0]?.total ?? 0),
+            WATCH_LEVEL_BUCKET_CAP_MS,
+          ) -
+          Math.min(
+            Number(beforeRows[0]?.total ?? 0),
+            WATCH_LEVEL_BUCKET_CAP_MS,
+          );
+      }
+      const levelUp = await this.addWatchLevel(
+        connection,
+        username,
+        delta,
+        session,
+        session.ended_at,
+      );
       const [totals] = await connection.query<RowDataPacket[]>(
         'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
         [username, session.id],
@@ -3212,7 +3775,7 @@ export class MySqlStorage implements IStorage {
         'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
         [Math.floor(total / 1000), session.id, username],
       );
-      if (!history || total <= 0) return null;
+      if (!history || total <= 0) return { historyId: null, levelUp };
       const values = [
         session.title,
         session.source_name,
@@ -3232,14 +3795,14 @@ export class MySqlStorage implements IStorage {
           'SELECT id FROM watch_history WHERE username = ? AND id = ? AND source = ? AND video_id = ? FOR UPDATE',
           [username, history.id, session.source, session.video_id],
         );
-        if (!rows.length) return null;
+        if (!rows.length) return { historyId: null, levelUp };
         await connection.execute(
           `UPDATE watch_history SET title = ?, source_name = ?, cover = ?, year = ?,
           episode_index = ?, total_episodes = ?, group_label = ?, group_index = ?, group_total = ?,
           position = ?, duration = ?, last_watched_at = ? WHERE username = ? AND id = ? AND source = ? AND video_id = ?`,
           [...values, username, history.id, session.source, session.video_id],
         );
-        return history.id;
+        return { historyId: history.id, levelUp };
       }
       await connection.execute(
         `INSERT INTO watch_history (
@@ -3263,7 +3826,7 @@ export class MySqlStorage implements IStorage {
         'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
         [username, session.source, session.video_id],
       );
-      return String(rows[0].id);
+      return { historyId: String(rows[0].id), levelUp };
     });
   }
 

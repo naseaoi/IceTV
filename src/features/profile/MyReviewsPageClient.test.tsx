@@ -20,6 +20,9 @@ jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: () => ({ session: { status: 'guest' } }),
 }));
 
+jest.mock('@/components/card-actions/useMediaCardMenu', () => ({
+  useMediaCardMenu: () => ({}),
+}));
 jest.mock('@/components/PageLayout', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,

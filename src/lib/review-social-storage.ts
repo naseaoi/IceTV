@@ -1,6 +1,10 @@
-import { randomInt } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 
-import { profileFavoriteOriginSql } from '@/features/favorites/lib/library-storage';
+import {
+  profileFavoriteOriginSql,
+  workStatusSelection,
+} from '@/features/favorites/lib/library-storage';
+import type { ListPlan } from '@/features/lists/lib/list-storage';
 import {
   annualRecapSchema,
   AnnualRecapStorage,
@@ -15,12 +19,14 @@ import type { FollowReviewUserMessage } from '@/lib/message-types';
 import { publicUserRole } from '@/lib/public-user-role.server';
 import { replySchema, ReviewReplyStorage } from '@/lib/review-reply-storage';
 import { SocialNotificationStorage } from '@/lib/social-notification-storage';
+import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type { IStorage } from '@/lib/types';
 import type {
   AdminReviewReportPage,
+  Favorite,
   FollowListPage,
-  LibraryVisibility,
   MyVideoReviewPage,
+  ProfileShowcaseItem,
   PublicVideoReviewPage,
   ReviewReportReason,
   UserProfile,
@@ -32,15 +38,20 @@ import type {
 } from '@/lib/types';
 import { REVIEW_REPORT_REASONS } from '@/lib/types';
 import {
+  FOLLOW_PAGE_SIZE,
+  ProfileValidationError,
   validateAvatarSeed,
+  validateBio,
   validateLibraryVisibility,
   validateNickname,
+  validateShowcaseKeys,
+  validateWatchTimePublic,
 } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import {
   type MyReviewQuery,
   type VideoReviewRow,
-  decodeReviewCursor,
+  decodeWorkReviewCursor,
   MY_REVIEWS_PAGE_SIZE,
   publicReview,
   reviewSql,
@@ -48,6 +59,8 @@ import {
   validateMyReviewQuery,
   WORK_REVIEWS_PAGE_SIZE,
 } from '@/lib/video-reviews';
+import { tasteMatchScore } from '@/lib/viewing-insights';
+import { watchLevelForMs } from '@/lib/watch-level';
 
 export class NicknameTakenError extends Error {
   constructor() {
@@ -69,7 +82,8 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
   return [
     ...replySchema(dialect),
     annualRecapSchema(dialect),
-    `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
+    `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, bio VARCHAR(240), watch_time_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
+    `CREATE TABLE IF NOT EXISTS user_profile_showcase (username ${text} NOT NULL, position INTEGER NOT NULL, favorite_key ${dialect === 'sqlite' ? 'TEXT' : 'VARCHAR(512)'} NOT NULL, PRIMARY KEY (username, position), UNIQUE (username, favorite_key))${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_follows (follower ${text} NOT NULL, followee ${text} NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (follower, followee)${dialect === 'mysql' ? ', KEY idx_user_follows_followee (followee)' : ''})${suffix}`,
     ...['likes', 'reports'].map((kind) => {
       const actor = kind === 'likes' ? 'liker' : 'reporter';
@@ -94,13 +108,19 @@ export interface SocialExecutor {
   run(sql: string, params?: unknown[]): Promise<number>;
 }
 
-export function profileFromRow(row: UserProfile): UserProfile {
+export function profileFromRow(
+  row: UserProfile & { counted_ms?: number | null },
+): UserProfile {
   return {
     username: row.username,
+    level: watchLevelForMs(Number(row.counted_ms ?? 0)),
     profile_id: row.profile_id,
     nickname: row.nickname,
     avatar_seed: row.avatar_seed,
     favorites_public: validateLibraryVisibility(Number(row.favorites_public)),
+    bio: row.bio ?? null,
+    watch_time_public: Boolean(Number(row.watch_time_public ?? 0)),
+    counted_ms: Number(row.counted_ms ?? 0),
     updated_at: Number(row.updated_at),
   };
 }
@@ -184,14 +204,14 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
 
   async getUserProfile(username: string): Promise<UserProfile | null> {
     const rows = await this.sql.rows<UserProfile>(
-      'SELECT * FROM user_profiles WHERE username = ?',
+      'SELECT p.*, wt.counted_ms FROM user_profiles p LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE p.username = ?',
       [normalizeUsername(username)],
     );
     return rows[0] ? profileFromRow(rows[0]) : null;
   }
   async getUserProfileById(id: string): Promise<UserProfile | null> {
     const rows = await this.sql.rows<UserProfile>(
-      'SELECT * FROM user_profiles WHERE profile_id = ?',
+      'SELECT p.*, wt.counted_ms FROM user_profiles p LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE p.profile_id = ?',
       [id],
     );
     return rows[0] ? profileFromRow(rows[0]) : null;
@@ -226,43 +246,51 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
   }
   async updateUserProfile(
     username: string,
-    patch: {
-      nickname?: string;
-      avatarSeed?: string | null;
-      libraryVisibility?: LibraryVisibility;
-    },
+    patch: Parameters<IStorage['updateUserProfile']>[1],
   ): Promise<UserProfile> {
-    username = normalizeUsername(username);
     await this.ensureUserProfile(username);
-    const columns: string[] = [];
-    const params: unknown[] = [];
-    if (patch.nickname !== undefined) {
-      const validated = validateNickname(patch.nickname, {
-        allowReserved: true,
-      });
-      columns.push('nickname = ?', 'nickname_norm = ?');
-      params.push(validated.nickname, validated.nicknameNorm);
-    }
-    if (patch.avatarSeed !== undefined) {
-      columns.push('avatar_seed = ?');
-      params.push(validateAvatarSeed(patch.avatarSeed));
-    }
-    if (patch.libraryVisibility !== undefined) {
-      columns.push('favorites_public = ?');
-      params.push(validateLibraryVisibility(patch.libraryVisibility));
-    }
-    if (columns.length) {
-      try {
-        await this.sql.run(
-          `UPDATE user_profiles SET ${columns.join(', ')}, updated_at = ? WHERE username = ?`,
-          [...params, Date.now(), username],
-        );
-      } catch (error) {
-        if (isUniqueError(error)) throw new NicknameTakenError();
-        throw error;
+    const plan = updateUserProfilePlan(this.sql.dialect, username, patch);
+    let step = plan.next();
+    while (!step.done) {
+      const { sql, params } = step.value;
+      if (sql.startsWith('SELECT'))
+        step = plan.next(await this.sql.rows(sql, params));
+      else {
+        try {
+          await this.sql.run(sql, params);
+        } catch (error) {
+          if (isUniqueError(error)) throw new NicknameTakenError();
+          throw error;
+        }
+        step = plan.next([]);
       }
     }
     return (await this.getUserProfile(username))!;
+  }
+
+  async getProfileShowcase(username: string): Promise<ProfileShowcaseItem[]> {
+    const rows = await this.sql.rows<{
+      favorite_key: string;
+      favorite_json: string;
+    }>(
+      `SELECT f.favorite_key, f.favorite_json FROM user_profile_showcase s
+       JOIN favorites f ON f.username = s.username AND ${this.sql.dialect === 'mysql' ? 'BINARY f.favorite_key = BINARY s.favorite_key' : 'f.favorite_key = s.favorite_key'}
+       WHERE s.username = ? AND f.library_valid = 1 AND ${profileFavoriteOriginSql(this.sql.dialect, 'f.favorite_json')}
+       ORDER BY s.position`,
+      [normalizeUsername(username)],
+    );
+    return rows.map((row) => {
+      const favorite = JSON.parse(row.favorite_json) as Favorite;
+      return {
+        key: row.favorite_key,
+        title: favorite.title,
+        year: favorite.year,
+        cover: favorite.cover,
+        ...(favorite.search_title !== undefined
+          ? { search_title: favorite.search_title }
+          : {}),
+      };
+    });
   }
   async getAnnualRecap(
     ...args: Parameters<IStorage['getAnnualRecap']>
@@ -303,16 +331,18 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     const profile = await this.getUserProfile(username);
     if (!profile) return null;
     const isSelf = username === viewer;
-    // 片单不公开时不统计收藏，避免经由数量泄露
+    // 收藏不公开时不统计收藏数，避免经由数量泄露
     const favoritesVisible = isSelf || profile.favorites_public > 0;
-    const [counts] = await this.sql.rows<{
+    const countsQuery = this.sql.rows<{
       followers: number;
       following: number;
       reviews: number;
+      lists: number;
       followed: number;
       favorites: number;
     }>(
       `SELECT
+      (SELECT COUNT(*) FROM user_lists WHERE username = ?${isSelf ? '' : ' AND is_public >= 1'}) AS lists,
       (SELECT COUNT(*) FROM user_follows WHERE followee = ?) AS followers,
       (SELECT COUNT(*) FROM user_follows WHERE follower = ?) AS following,
       (SELECT COUNT(*) FROM video_reviews WHERE username = ? AND is_public = 1) AS reviews,
@@ -322,23 +352,39 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         username,
         username,
         username,
+        username,
         viewer,
         username,
         ...(favoritesVisible ? [username] : []),
       ],
     );
-    const year = (await this.getAnnualRecapYears(username))[0];
+    // 相合度随资料一起返回，主页首屏即可确定附加信息行是否出现
+    const [[counts], [year], showcase, tasteMatch] = await Promise.all([
+      countsQuery,
+      this.getAnnualRecapYears(username),
+      this.getProfileShowcase(username),
+      isSelf ? null : this.getTasteMatch(viewer, username),
+    ]);
     return {
+      bio: profile.bio,
+      showcase,
+      watchHours:
+        isSelf || profile.watch_time_public
+          ? Math.floor((profile.counted_ms ?? 0) / 3_600_000)
+          : null,
+      tasteMatch,
       recap: year ? { year } : null,
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,
+      level: profile.level ?? 1,
       libraryVisibility: profile.favorites_public,
       isSelf,
       isFollowing: Number(counts.followed) > 0,
       followerCount: Number(counts.followers),
       followingCount: Number(counts.following),
       publicReviewCount: Number(counts.reviews),
+      listCount: Number(counts.lists),
       favoriteCount: Number(counts.favorites),
     };
   }
@@ -373,7 +419,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     type: 'followers' | 'following',
     cursor?: string,
   ): Promise<FollowListPage> {
-    const pageSize = 30;
+    const pageSize = FOLLOW_PAGE_SIZE;
     const after = parseSocialCursor(cursor);
     const column = type === 'followers' ? 'followee' : 'follower';
     const target = type === 'followers' ? 'follower' : 'followee';
@@ -381,10 +427,12 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       profile_id: string;
       nickname: string | null;
       avatar_seed: string | null;
+      counted_ms: number | null;
       created_at: number;
     }>(
-      `SELECT p.profile_id, p.nickname, p.avatar_seed, f.created_at
+      `SELECT p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms, f.created_at
        FROM user_follows f JOIN user_profiles p ON p.username = f.${target}
+       LEFT JOIN user_watch_totals wt ON wt.username = p.username
        WHERE f.${column} = ?
        ${after ? 'AND (f.created_at < ? OR (f.created_at = ? AND p.profile_id < ?))' : ''}
        ORDER BY f.created_at DESC, p.profile_id DESC LIMIT ?`,
@@ -399,6 +447,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         profileId: row.profile_id,
         nickname: row.nickname,
         avatarSeed: row.avatar_seed,
+        level: watchLevelForMs(Number(row.counted_ms ?? 0)),
         followedAt: Number(row.created_at),
       })),
       pageSize,
@@ -419,6 +468,13 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       usernames,
     );
     const roles = new Map(access.map((user) => [user.username, user.role]));
+    const follows = viewer
+      ? await this.sql.rows<{ followee: string }>(
+          `SELECT followee FROM user_follows WHERE follower = ? AND followee IN (${usernames.map(() => '?').join(',')})`,
+          [normalizeUsername(viewer), ...usernames],
+        )
+      : [];
+    const followedAuthors = new Set(follows.map((row) => row.followee));
     return Promise.all(
       rows.map(async (row) => {
         const review = JSON.parse(row.review_json) as VideoReview;
@@ -442,10 +498,12 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
             row.username,
             roles.get(normalizeUsername(row.username)),
           ),
+          author_followed: followedAuthors.has(normalizeUsername(row.username)),
           reply_count: Number(replies.count),
           profile_id: profile.profile_id,
           nickname: profile.nickname,
           avatar_seed: profile.avatar_seed,
+          level: profile.level ?? 1,
           like_count: Number(likes.count),
           liked_by_me: Number(likes.liked) > 0,
         };
@@ -566,24 +624,179 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     };
   }
 
+  async getWorkWatchStatuses(
+    viewer: string,
+    works: { title: string; year: string }[],
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    if (!works.length) return [];
+    const result: Awaited<ReturnType<IStorage['getWorkWatchStatuses']>> = [];
+    // 避免 SQLite 参数数量限制；每批仅执行一次作品匹配查询。
+    for (let offset = 0; offset < works.length; offset += 200) {
+      const batch = works.slice(offset, offset + 200);
+      const rows = await this.sql.rows<{ status: (typeof result)[number] }>(
+        `SELECT (${workStatusSelection(this.sql.dialect, '?', 'w.title_norm', 'w.year')}) AS status
+         FROM (${batch.map((_, index) => `SELECT ${index} AS position, ? AS title_norm, ? AS year`).join(' UNION ALL ')}) w ORDER BY w.position`,
+        [
+          normalizeUsername(viewer),
+          ...batch.flatMap((work) => [
+            normalizeWorkTitle(work.title),
+            normalizeWorkYear(work.year),
+          ]),
+        ],
+      );
+      result.push(...rows.map((row) => row.status));
+    }
+    return result;
+  }
+
+  async getFollowOpinions(
+    viewer: string,
+    titleNorm: string,
+    year: string,
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    type OpinionRow = UserProfile & {
+      counted_ms: number | null;
+      status: import('@/lib/types').FavoriteWatchStatus | null;
+      review_json: string | null;
+      recent: number;
+    };
+    const rows = await this.sql.rows<OpinionRow>(
+      `SELECT profile.*, wt.counted_ms, CASE WHEN profile.favorites_public >= 2 THEN (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true)}) ELSE NULL END AS status,
+       (SELECT CASE WHEN r.is_public = 1 THEN r.review_json ELSE NULL END FROM video_reviews r WHERE r.username = profile.username AND r.title_norm = ? AND (? = '' OR r.year IN (?, '')) ORDER BY CASE WHEN r.year = ? THEN 0 ELSE 1 END, r.updated_at DESC, r.year DESC LIMIT 1) AS review_json,
+       (${workStatusSelection(this.sql.dialect, 'profile.username', '?', '?', true, 'recent')}) AS recent
+       FROM user_follows follow JOIN user_profiles profile ON profile.username = follow.followee LEFT JOIN user_watch_totals wt ON wt.username = profile.username WHERE follow.follower = ?`,
+      [
+        titleNorm,
+        year,
+        year,
+        titleNorm,
+        year,
+        year,
+        year,
+        titleNorm,
+        year,
+        year,
+        normalizeUsername(viewer),
+      ],
+    );
+    const order = { completed: 0, watching: 1, planned: 2 };
+    const items = rows
+      .map((row) => {
+        const review = row.review_json
+          ? (JSON.parse(row.review_json) as VideoReview)
+          : null;
+        return {
+          author: {
+            profileId: row.profile_id,
+            nickname: row.nickname,
+            avatarSeed: row.avatar_seed,
+            level: watchLevelForMs(Number(row.counted_ms ?? 0)),
+          },
+          status: row.status,
+          rating: review?.rating ?? null,
+          hasPublicReview: review !== null,
+          recent: Math.max(
+            row.status ? Number(row.recent ?? 0) : 0,
+            review?.updated_at ?? 0,
+          ),
+        };
+      })
+      .filter((item) => item.status !== null || item.hasPublicReview)
+      .sort(
+        (a, b) =>
+          (a.status ? order[a.status] : 3) - (b.status ? order[b.status] : 3) ||
+          b.recent - a.recent ||
+          b.author.profileId.localeCompare(a.author.profileId),
+      )
+      .map(({ recent: _recent, ...item }) => item);
+    const rated = items.filter((item) => item.rating !== null);
+    return {
+      items,
+      watchedCount: items.filter((item) => item.status === 'completed').length,
+      ratedCount: rated.length,
+      averageRating: rated.length
+        ? rated.reduce((sum, item) => sum + item.rating!, 0) / rated.length
+        : null,
+    };
+  }
+
+  async getTasteMatch(
+    viewer: string,
+    username: string,
+  ): ReturnType<IStorage['getTasteMatch']> {
+    viewer = normalizeUsername(viewer);
+    username = normalizeUsername(username);
+    const rating = (alias: string) =>
+      reviewSql(this.sql.dialect).rating.replaceAll(
+        'review_json',
+        `${alias}.review_json`,
+      );
+    // 每条对方评价只匹配本人一条：精确年份优先，其次未知年份，再按更新时间。
+    const ownYear = `COALESCE((SELECT exact.year FROM video_reviews exact WHERE exact.username = own.username AND exact.title_norm = peer.title_norm AND exact.year = peer.year), (SELECT mine.year FROM video_reviews mine WHERE mine.username = own.username AND mine.title_norm = peer.title_norm AND (mine.year = '' OR peer.year = '') ORDER BY mine.updated_at DESC, mine.year DESC LIMIT 1))`;
+    const [common] = await this.sql.rows<{
+      count: number;
+      difference: number | null;
+    }>(
+      `SELECT COUNT(*) AS count, SUM(ABS(${rating('peer')} - ${rating('own')})) AS difference
+       FROM video_reviews peer JOIN video_reviews own ON own.username = ? AND own.title_norm = peer.title_norm AND own.year = (${ownYear})
+       WHERE peer.username = ? AND peer.is_public = 1 AND ${rating('peer')} IS NOT NULL AND ${rating('own')} IS NOT NULL`,
+      [viewer, username],
+    );
+    const rows = await this.sql.rows<{ review_json: string }>(
+      `SELECT peer.review_json FROM video_reviews peer
+       WHERE peer.username = ? AND peer.is_public = 1 AND ${rating('peer')} >= 8
+       AND NOT EXISTS (SELECT 1 FROM video_reviews mine WHERE mine.username = ? AND mine.title_norm = peer.title_norm AND (mine.year = peer.year OR mine.year = '' OR peer.year = ''))
+       AND COALESCE((${workStatusSelection(this.sql.dialect, '?', 'peer.title_norm', 'peer.year')}), 'planned') NOT IN ('watching', 'completed')
+       ORDER BY ${rating('peer')} DESC, peer.updated_at DESC, peer.title_norm DESC, peer.year DESC LIMIT 12`,
+      [username, viewer, viewer],
+    );
+    return {
+      commonCount: Number(common.count),
+      score: tasteMatchScore(
+        Number(common.count),
+        Number(common.difference ?? 0),
+      ),
+      picks: rows.map((row) => {
+        const { title_norm, title, year, cover, rating } = JSON.parse(
+          row.review_json,
+        ) as VideoReview;
+        return { title_norm, title, year, cover, rating };
+      }),
+    };
+  }
+
   async getWorkVideoReviewPage(
     titleNorm: string,
     year: string,
     viewer: string,
     cursor?: string,
   ): Promise<WorkReviewSummary> {
-    const after = decodeReviewCursor(cursor);
+    viewer = normalizeUsername(viewer);
+    const binding = createHash('sha256').update(viewer).digest('hex');
+    const after = decodeWorkReviewCursor(cursor, binding, titleNorm, year);
     const queries = reviewSql(this.sql.dialect);
     const params = [titleNorm, year, year];
-    // 公开游标使用 profileId，登录名只在存储边界内用于关联。
+    const followed = 'CASE WHEN follow.followee IS NULL THEN 0 ELSE 1 END';
     const rows = await this.sql.rows<VideoReviewRow>(
       `SELECT r.username, r.review_json, p.profile_id FROM video_reviews r JOIN user_profiles p ON p.username = r.username
+       LEFT JOIN user_follows follow ON follow.followee = r.username AND follow.follower = ?
        WHERE r.title_norm = ? AND r.is_public = 1 AND (? = '' OR r.year IN (?, ''))
-       ${after ? 'AND (r.updated_at < ? OR (r.updated_at = ? AND (p.profile_id < ? OR (p.profile_id = ? AND r.year < ?))))' : ''}
-       ORDER BY r.updated_at DESC, p.profile_id DESC, r.year DESC LIMIT ${WORK_REVIEWS_PAGE_SIZE + 1}`,
+       ${after ? `AND (${followed} < ? OR (${followed} = ? AND (r.updated_at < ? OR (r.updated_at = ? AND (p.profile_id < ? OR (p.profile_id = ? AND r.year < ?))))))` : ''}
+       ORDER BY ${followed} DESC, r.updated_at DESC, p.profile_id DESC, r.year DESC LIMIT ${WORK_REVIEWS_PAGE_SIZE + 1}`,
       [
+        viewer,
         ...params,
-        ...(after ? [after[0], after[0], after[1], after[1], after[3]] : []),
+        ...(after
+          ? [
+              after.followed,
+              after.followed,
+              after.time,
+              after.time,
+              after.profileId,
+              after.profileId,
+              after.year,
+            ]
+          : []),
       ],
     );
     const [summary] = await this.sql.rows<{
@@ -615,9 +828,13 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       nextCursor:
         rows.length > WORK_REVIEWS_PAGE_SIZE && last
           ? socialCursor([
+              'work-v2',
+              binding,
+              titleNorm,
+              year,
+              Number(last.authorFollowed),
               last.updated_at,
               last.author.profileId,
-              last.title_norm,
               last.year,
             ])
           : null,
@@ -788,11 +1005,12 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         profile_id: string;
         nickname: string | null;
         avatar_seed: string | null;
+        counted_ms: number | null;
         reason: ReviewReportReason;
         detail: string;
         created_at: number;
       }>(
-        `SELECT r.*, p.profile_id, p.nickname, p.avatar_seed FROM ${row.kind === 'reply' ? 'video_review_reply_reports' : 'video_review_reports'} r JOIN user_profiles p ON p.username = r.reporter WHERE ${row.kind === 'reply' ? 'r.reply_id = ?' : 'r.author = ? AND r.title_norm = ? AND r.year = ?'} ORDER BY r.created_at DESC, r.reporter DESC LIMIT 5`,
+        `SELECT r.*, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms FROM ${row.kind === 'reply' ? 'video_review_reply_reports' : 'video_review_reports'} r JOIN user_profiles p ON p.username = r.reporter LEFT JOIN user_watch_totals wt ON wt.username = p.username WHERE ${row.kind === 'reply' ? 'r.reply_id = ?' : 'r.author = ? AND r.title_norm = ? AND r.year = ?'} ORDER BY r.created_at DESC, r.reporter DESC LIMIT 5`,
         row.kind === 'reply'
           ? [row.reply_id]
           : [row.author, row.title_norm, row.year],
@@ -812,6 +1030,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
             profileId: report.profile_id,
             nickname: report.nickname,
             avatarSeed: report.avatar_seed,
+            level: watchLevelForMs(Number(report.counted_ms ?? 0)),
           },
           reason: report.reason,
           detail: report.detail,
@@ -849,7 +1068,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       .map(parseFollowReviewMessageId)
       .filter((id) => id !== null);
     return {
-      from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username
+      from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username LEFT JOIN user_watch_totals wt ON wt.username = p.username
         WHERE f.follower = ? AND v.is_public = 1 AND v.first_published_at > f.created_at AND v.first_published_at > ?
         ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?)').join(' ')}`,
       params: [
@@ -923,7 +1142,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         first_published_at: number;
       }
     >(
-      `SELECT v.username, v.review_json, v.first_published_at, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
+      `SELECT v.username, v.review_json, v.first_published_at, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms ${from}${filter}
        ORDER BY v.first_published_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
       [...params, limit],
     );
@@ -946,6 +1165,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
           profileId: row.profile_id,
           nickname: row.nickname,
           avatarSeed: row.avatar_seed ?? null,
+          level: watchLevelForMs(Number(row.counted_ms ?? 0)),
         },
         title: r.title,
         year: r.year,
@@ -1009,4 +1229,69 @@ export function isUniqueError(error: unknown): boolean {
       'ER_DUP_ENTRY',
     ].includes(String(error.code))
   );
+}
+
+// 由两侧事务执行器驱动，资料与本命整组替换共同提交。
+export function* updateUserProfilePlan(
+  dialect: 'sqlite' | 'mysql',
+  username: string,
+  patch: Parameters<IStorage['updateUserProfile']>[1],
+): ListPlan<void> {
+  username = normalizeUsername(username);
+  const columns: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (patch.nickname !== undefined) {
+    const validated = validateNickname(patch.nickname, { allowReserved: true });
+    columns.push('nickname = ?', 'nickname_norm = ?');
+    params.push(validated.nickname, validated.nicknameNorm);
+  }
+  if (patch.avatarSeed !== undefined) {
+    columns.push('avatar_seed = ?');
+    params.push(validateAvatarSeed(patch.avatarSeed));
+  }
+  if (patch.libraryVisibility !== undefined) {
+    columns.push('favorites_public = ?');
+    params.push(validateLibraryVisibility(patch.libraryVisibility));
+  }
+  if (patch.bio !== undefined) {
+    columns.push('bio = ?');
+    params.push(patch.bio === null ? null : validateBio(patch.bio));
+  }
+  if (patch.watchTimePublic !== undefined) {
+    columns.push('watch_time_public = ?');
+    params.push(Number(validateWatchTimePublic(patch.watchTimePublic)));
+  }
+  const keys =
+    patch.showcaseKeys === undefined
+      ? undefined
+      : validateShowcaseKeys(patch.showcaseKeys);
+  yield {
+    sql: `SELECT username FROM user_profiles WHERE username = ?${dialect === 'mysql' ? ' FOR UPDATE' : ''}`,
+    params: [username],
+  };
+  if (keys?.length) {
+    const rows = yield {
+      sql: `SELECT favorite_key FROM favorites WHERE username = ? AND ${dialect === 'mysql' ? 'BINARY favorite_key' : 'favorite_key'} IN (${keys.map(() => '?').join(',')}) AND library_valid = 1 AND ${profileFavoriteOriginSql(dialect)}${dialect === 'mysql' ? ' FOR UPDATE' : ''}`,
+      params: [username, ...keys],
+    };
+    if (rows.length !== keys.length)
+      throw new ProfileValidationError('本命作品须从自己的非直播收藏中选择');
+  }
+  if (columns.length || keys !== undefined) {
+    yield {
+      sql: `UPDATE user_profiles SET ${[...columns, 'updated_at = ?'].join(', ')} WHERE username = ?`,
+      params: [...params, Date.now(), username],
+    };
+  }
+  if (keys !== undefined) {
+    yield {
+      sql: 'DELETE FROM user_profile_showcase WHERE username = ?',
+      params: [username],
+    };
+    for (const [position, key] of keys.entries())
+      yield {
+        sql: 'INSERT INTO user_profile_showcase (username, position, favorite_key) VALUES (?, ?, ?)',
+        params: [username, position, key],
+      };
+  }
 }

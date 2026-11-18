@@ -127,6 +127,8 @@ export async function handleRegister(request: NextRequest) {
         password,
         nickname,
         defaultGroup ? [defaultGroup] : undefined,
+        undefined,
+        reserved ? normalizeInviteCode(body.inviteCode) : undefined,
       );
     } catch (error) {
       if (reserved) {

@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { PlayRecordConflictError } from '@/lib/play-record-write';
 import {
   markPlayRecordUpdateRead,
   MAX_DELETE_PLAY_RECORD_KEYS,
   MAX_PLAY_RECORD_KEY_LENGTH,
   MAX_READ_PLAY_RECORD_KEYS,
-  mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
 } from '@/lib/play-records';
@@ -24,6 +24,19 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const { searchParams } = new URL(request.url);
+    if (searchParams.has('title')) {
+      const title = (searchParams.get('title') || '').trim();
+      const year = (searchParams.get('year') || '').trim();
+      if (!title || title.length > 300 || year.length > 16) {
+        return NextResponse.json({ error: '无效的作品信息' }, { status: 400 });
+      }
+      const records = await db.getLatestPlayRecordByTitle(
+        guardResult.username,
+        title,
+        year,
+      );
+      return NextResponse.json(records, { headers: NO_STORE_HEADERS });
+    }
     if (searchParams.has('keys')) {
       const keys = searchParams.getAll('keys');
       if (
@@ -115,6 +128,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (
+      (record.progress_session_id !== undefined ||
+        record.progress_sequence !== undefined) &&
+      (typeof record.progress_session_id !== 'string' ||
+        !/^[a-zA-Z0-9_-]{1,128}$/.test(record.progress_session_id) ||
+        !Number.isSafeInteger(record.progress_sequence) ||
+        record.progress_sequence! < 1)
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid progress ordering' },
+        { status: 400 },
+      );
+    }
+
     // 从key中解析source和id
     const parsed = parseStorageKey(key);
     if (!parsed) {
@@ -124,27 +151,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const now = Date.now();
-    const existingRecord = await db.getPlayRecord(
+    const saved = await db.savePlayProgress(
       guardResult.username,
       parsed.source,
       parsed.id,
+      { ...record, save_time: record.save_time ?? Date.now() },
     );
-    const finalRecord = mergePlayRecordUpdateBaseline(existingRecord, {
-      ...record,
-      save_time: record.save_time ?? now,
-      metadata_checked_at: now,
-    } as PlayRecord);
-
-    await db.savePlayRecord(
-      guardResult.username,
-      parsed.source,
-      parsed.id,
-      finalRecord,
-    );
+    if (!saved) return NextResponse.json({ success: true, ignored: true });
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
+    if (err instanceof PlayRecordConflictError) {
+      return NextResponse.json(
+        { error: '播放进度保存繁忙，请稍后重试' },
+        { status: 409 },
+      );
+    }
     console.error('保存播放记录失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
@@ -172,39 +194,29 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const existingRecord = await db.getPlayRecord(
-      guardResult.username,
-      parsed.source,
-      parsed.id,
-    );
-    if (!existingRecord) {
-      return NextResponse.json({ error: 'Record not found' }, { status: 404 });
-    }
-
-    let nextRecord: PlayRecord;
-    if (body.action === 'mark-update-read') {
-      nextRecord = markPlayRecordUpdateRead(
-        existingRecord,
-        body.readThroughEpisodes,
-      );
-    } else if (
-      body.action === 'set-tracking' &&
-      typeof body.trackingEnabled === 'boolean'
+    if (
+      body.action !== 'mark-update-read' &&
+      !(
+        body.action === 'set-tracking' &&
+        typeof body.trackingEnabled === 'boolean'
+      )
     ) {
-      nextRecord = {
-        ...existingRecord,
-        tracking_enabled: body.trackingEnabled,
-      };
-    } else {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
-
-    await db.savePlayRecord(
+    const nextRecord = await db.updatePlayRecord(
       guardResult.username,
       parsed.source,
       parsed.id,
-      nextRecord,
+      (current) => {
+        if (!current) return null;
+        return body.action === 'mark-update-read'
+          ? markPlayRecordUpdateRead(current, body.readThroughEpisodes)
+          : { ...current, tracking_enabled: body.trackingEnabled };
+      },
     );
+    if (!nextRecord) {
+      return NextResponse.json({ error: 'Record not found' }, { status: 404 });
+    }
     return NextResponse.json(nextRecord, {
       status: 200,
       headers: NO_STORE_HEADERS,

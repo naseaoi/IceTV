@@ -225,9 +225,14 @@ export function markPlayRecordUpdateRead(
   };
 }
 
+/**
+ * 发现时间以保存方已有记录为准，不采信请求带来的值；同刻度总集数增加时
+ * 才写入本次时间，消息排序与提醒水位因此不随后续进度保存前移。
+ */
 export function mergePlayRecordUpdateBaseline(
   previous: PlayRecord | null | undefined,
   next: PlayRecord,
+  now = Date.now(),
 ): PlayRecord {
   const { currentEpisode, totalEpisodes } = getPlayRecordEpisodeDisplay(next);
   const isGrouped = isGroupedPlayRecordScale(next);
@@ -250,11 +255,16 @@ export function mergePlayRecordUpdateBaseline(
     groupChanged || currentEpisode >= totalEpisodes
       ? totalEpisodes
       : Math.min(totalEpisodes, previousBaseline);
+  const totalIncreased =
+    !groupChanged &&
+    Number.isFinite(previousTotal) &&
+    totalEpisodes > Number(previousTotal);
 
   return {
     ...next,
     tracking_enabled: next.tracking_enabled ?? previous?.tracking_enabled,
     series_status: next.series_status ?? previous?.series_status,
+    update_detected_at: totalIncreased ? now : previous?.update_detected_at,
     ...(isGrouped
       ? { update_baseline_group_total: Math.max(0, baseline) }
       : { update_baseline_episodes: Math.max(0, baseline) }),

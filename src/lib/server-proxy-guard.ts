@@ -1,10 +1,12 @@
 import 'server-only';
 
 import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
 
 import { getClientIp } from '@/lib/client-ip';
-import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import {
+  ResourceLimitError,
+  resourceLimitResponse,
+} from '@/lib/server-resource-errors';
 import {
   consumeSharedQuota,
   resourceKey,
@@ -63,13 +65,10 @@ export async function requireServerProxyQuota(
     );
     return null;
   } catch (error) {
-    return (
-      resourceLimitResponse(error) ??
-      NextResponse.json(
-        { error: '服务繁忙，请稍后重试' },
-        { status: 503, headers: { 'Retry-After': '1' } },
-      )
-    );
+    const limited = resourceLimitResponse(error);
+    if (limited) return limited;
+    console.error('代理额度检查失败:', error);
+    return resourceLimitResponse(new ResourceLimitError()) as Response;
   }
 }
 

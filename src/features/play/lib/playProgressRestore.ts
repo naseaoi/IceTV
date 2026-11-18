@@ -15,6 +15,43 @@ import {
 } from '@/lib/episode-groups';
 import type { EpisodeGroup, SearchResult } from '@/lib/types';
 
+const explicitSeekTimes = new WeakMap<MutableRefObject<number>, number>();
+
+export function clearExplicitPlaybackSeek(
+  stableTime: MutableRefObject<number>,
+): void {
+  explicitSeekTimes.delete(stableTime);
+}
+
+export function recordExplicitPlaybackSeek(
+  stableTime: MutableRefObject<number>,
+  time: number,
+): void {
+  if (!Number.isFinite(time) || time < 0) return;
+  stableTime.current = Math.floor(time);
+  explicitSeekTimes.set(stableTime, stableTime.current);
+}
+
+export function hasExplicitPlaybackSeek(
+  stableTime: MutableRefObject<number>,
+): boolean {
+  return explicitSeekTimes.has(stableTime);
+}
+
+export function resolveSavedPlaybackTime(
+  playerTime: number,
+  stableTime: MutableRefObject<number>,
+): number {
+  if (
+    explicitSeekTimes.get(stableTime) === stableTime.current &&
+    stableTime.current <= 1
+  ) {
+    // 继续观看的有效点从第 2 秒开始；显式回到片头用最小有效点覆盖旧记录。
+    return Math.max(2, Math.floor(playerTime || 0));
+  }
+  return resolveProtectedPlaybackTime(playerTime, stableTime.current);
+}
+
 export function savePlaybackCheckpoint(
   currentSourceRef: MutableRefObject<string>,
   currentIdRef: MutableRefObject<string>,
@@ -29,9 +66,9 @@ export function savePlaybackCheckpoint(
   if (!currentSourceRef.current || !currentIdRef.current) return;
   if (clearTargetEpisodeProgressRef.current) return;
 
-  const currentTime = resolveProtectedPlaybackTime(
+  const currentTime = resolveSavedPlaybackTime(
     artPlayerRef.current?.currentTime || 0,
-    stableCurrentTimeRef.current,
+    stableCurrentTimeRef,
   );
 
   // 起播前的 0 进度不是有效恢复点：写进去只会用一个从未出现过的位置
@@ -158,6 +195,16 @@ export function readMatchingPlaybackCheckpoint(
   }
 
   return checkpoint;
+}
+
+// 恢复点只在当前作品真正起播后消费：读取时就删，起播失败再刷新会退回服务器上更旧的进度
+export function clearMatchingPlaybackCheckpoint(
+  currentSourceRef: MutableRefObject<string>,
+  currentIdRef: MutableRefObject<string>,
+) {
+  if (readMatchingPlaybackCheckpoint(currentSourceRef, currentIdRef)) {
+    clearPlaybackCheckpointStorage();
+  }
 }
 
 function clampRestoreEpisodeIndex(

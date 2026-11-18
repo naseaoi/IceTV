@@ -12,6 +12,7 @@ import RatingBadge from '@/components/RatingBadge';
 import ReportDialog from '@/components/ReportDialog';
 import ReviewReplies, { useReviewReplies } from '@/components/ReviewReplies';
 import UserRoleBadge from '@/components/UserRoleBadge';
+import WatchLevelBadge from '@/components/WatchLevelBadge';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { PublicVideoReview } from '@/lib/types';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
@@ -211,9 +212,15 @@ export default function PublicReviewContent({
                   {nickname}
                 </Link>
                 <UserRoleBadge role={review.author.role} />
+                <WatchLevelBadge level={review.author.level} />
                 {isMine && (
                   <span className='shrink-0 text-xs text-brand-600 dark:text-brand-400'>
                     我
+                  </span>
+                )}
+                {review.authorFollowed && !isMine && (
+                  <span className='shrink-0 text-xs text-gray-400 dark:text-gray-500'>
+                    已关注
                   </span>
                 )}
               </div>

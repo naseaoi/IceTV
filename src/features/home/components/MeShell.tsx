@@ -19,6 +19,7 @@ import { MineProfileHeader } from './MineProfileHeader';
 const ME_TABS = [
   { label: '概览', href: '/me' },
   { label: '收藏', href: '/me/favorites' },
+  { label: '片单', href: '/me/lists' },
   { label: '历史', href: '/me/history' },
   { label: '评价', href: '/me/reviews' },
 ];

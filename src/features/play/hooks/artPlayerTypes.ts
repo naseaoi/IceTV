@@ -77,4 +77,6 @@ export interface UseArtPlayerParams {
     info: CurrentSourceVideoInfo,
     context: CurrentSourceVideoInfoContext,
   ) => void;
+  // 最后一集真正播完（含跳片尾停在结尾）时调用，不自动连播的情形才会触发
+  onLastEpisodeEnded?: () => void;
 }

@@ -64,7 +64,7 @@ const SHARED_SEARCH_PAGES = createSharedServerCache<SearchPageLoadResult>({
   freshMs: 60_000,
   staleMs: 0,
 });
-// 特殊源失败与无结果都返回空数组，空结果不缓存，避免一次失败在各实例间扩散
+// 特殊源只共享非空搜索结果；失败由 loader 抛出，不写入缓存
 const SPECIAL_SOURCE_SEARCHES = createSharedServerCache<SearchResult[]>({
   name: 'special-search-v1',
   ...getServerCacheBudget('search-pages'),

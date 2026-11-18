@@ -9,6 +9,10 @@ import { FavoritePreviewSection } from '@/features/favorites/components/Favorite
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { PlaybackHistoryPreview } from '@/features/playback-stats/components/PlaybackHistoryPreview';
 import { PlaybackStatsPanel } from '@/features/playback-stats/components/PlaybackStatsPanel';
+import {
+  type CapsuleCounts,
+  CapsuleSection,
+} from '@/features/time-capsule/components/CapsuleSection';
 
 // 概览页与其骨架共用
 export const MINE_OVERVIEW_CLASS = 'space-y-4 sm:space-y-6';
@@ -43,12 +47,26 @@ export function MineSection({
   );
 }
 
+export const EMPTY_CAPSULE_COUNTS: CapsuleCounts = {
+  pending: 0,
+  delivered: 0,
+  unread: 0,
+};
+
+export const CAPSULE_SECTION_TITLE = '观后信';
+
+function renderCapsuleSection(content: ReactNode) {
+  return <MineSection title={CAPSULE_SECTION_TITLE}>{content}</MineSection>;
+}
+
 export function MinePageClient({
   favoriteSkeletonCount = 0,
   historySkeletonCount = 0,
+  capsuleCounts = EMPTY_CAPSULE_COUNTS,
 }: {
   favoriteSkeletonCount?: number;
   historySkeletonCount?: number;
+  capsuleCounts?: CapsuleCounts;
 }) {
   const {
     favoriteItems,
@@ -70,6 +88,10 @@ export function MinePageClient({
           skeletonCount={favoriteLoadingSkeletonCount}
         />
       </MineSection>
+      <CapsuleSection
+        initialCounts={capsuleCounts}
+        renderSection={renderCapsuleSection}
+      />
       <PlaybackStatsPanel />
     </div>
   );

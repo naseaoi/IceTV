@@ -3,14 +3,30 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import {
+  savePlayProgressWithRetry,
+  updatePlayRecordWithRetry,
+} from '@/lib/play-record-write';
+import type { PlayRecord } from '@/lib/types';
 
 installWebPolyfills();
 
+const mockGetLatestPlayRecordByTitle = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetPlayRecordsByKeys = jest.fn();
 const mockGetPlayRecord = jest.fn();
 const mockGetPlayRecordPage = jest.fn();
 const mockSavePlayRecord = jest.fn();
+const mockCas = jest.fn();
+const mockStore = {
+  getPlayRecordSnapshot: async () => {
+    const record = await mockGetPlayRecord();
+    return record ? JSON.stringify(record) : null;
+  },
+  setPlayRecordIfUnchanged: (...args: unknown[]) => mockCas(...args),
+  getLatestPlayRecordByTitle: (...args: unknown[]) =>
+    mockGetLatestPlayRecordByTitle(...args),
+};
 const mockDeletePlayRecord = jest.fn();
 const mockDeletePlayRecords = jest.fn();
 const mockDeleteAllPlayRecords = jest.fn();
@@ -24,12 +40,25 @@ jest.mock('@/lib/api-auth', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getLatestPlayRecordByTitle: (...args: unknown[]) =>
+      mockGetLatestPlayRecordByTitle(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getPlayRecordsByKeys: (...args: unknown[]) =>
       mockGetPlayRecordsByKeys(...args),
     getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
     getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
-    savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
+    savePlayProgress: (
+      user: string,
+      source: string,
+      id: string,
+      record: PlayRecord,
+    ) => savePlayProgressWithRetry(mockStore, user, `${source}+${id}`, record),
+    updatePlayRecord: (
+      user: string,
+      source: string,
+      id: string,
+      update: (current: PlayRecord | null) => PlayRecord | null,
+    ) => updatePlayRecordWithRetry(mockStore, user, `${source}+${id}`, update),
     deletePlayRecord: (...args: unknown[]) => mockDeletePlayRecord(...args),
     deletePlayRecords: (...args: unknown[]) => mockDeletePlayRecords(...args),
     deleteAllPlayRecords: (...args: unknown[]) =>
@@ -91,6 +120,170 @@ const records = {
 };
 
 describe('playrecords route', () => {
+  it.each([1, 2])('同会话迟到序号 %s 返回成功且不写入', async (sequence) => {
+    mockGetPlayRecord.mockResolvedValue({
+      ...records['source+new'],
+      progress_session_id: 'session-a',
+      progress_sequence: 2,
+    });
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: {
+          ...records['source+new'],
+          progress_session_id: 'session-a',
+          progress_sequence: sequence,
+          save_time: 99999,
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, ignored: true });
+    expect(mockCas).not.toHaveBeenCalled();
+  });
+
+  it('跨会话保存允许时钟与序号更小', async () => {
+    mockGetPlayRecord.mockResolvedValue({
+      ...records['source+new'],
+      progress_session_id: 'session-a',
+      progress_sequence: 100,
+    });
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: {
+          ...records['source+new'],
+          progress_session_id: 'session-b',
+          progress_sequence: 1,
+          save_time: 1,
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'demo',
+      'source',
+      'new',
+      expect.objectContaining({
+        save_time: 1,
+        progress_session_id: 'session-b',
+      }),
+    );
+  });
+
+  it('并发 CAS 冲突后重读，较新请求胜出时旧请求停止写入', async () => {
+    mockGetPlayRecord.mockResolvedValueOnce(null).mockResolvedValue({
+      ...records['source+new'],
+      progress_session_id: 'session-a',
+      progress_sequence: 3,
+    });
+    mockCas.mockResolvedValueOnce(false);
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: {
+          ...records['source+new'],
+          progress_session_id: 'session-a',
+          progress_sequence: 2,
+        },
+      }),
+    );
+    expect(await response.json()).toEqual({ success: true, ignored: true });
+    expect(mockGetPlayRecord).toHaveBeenCalledTimes(2);
+    expect(mockCas).toHaveBeenCalledTimes(1);
+  });
+
+  it('持续并发冲突最多尝试八次', async () => {
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockCas.mockResolvedValue(false);
+    try {
+      const response = await POST(
+        createJsonRequest({ key: 'source+new', record: records['source+new'] }),
+      );
+      expect(response.status).toBe(409);
+      expect(mockCas).toHaveBeenCalledTimes(8);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it.each([
+    { progress_session_id: 'session' },
+    { progress_sequence: 1 },
+    { progress_session_id: '', progress_sequence: 1 },
+    { progress_session_id: 'x'.repeat(129), progress_sequence: 1 },
+    { progress_session_id: 'session', progress_sequence: 0 },
+    { progress_session_id: 'session', progress_sequence: -1 },
+    { progress_session_id: 'session', progress_sequence: 1.5 },
+    {
+      progress_session_id: 'session',
+      progress_sequence: Number.MAX_SAFE_INTEGER + 1,
+    },
+    { progress_session_id: null, progress_sequence: 1 },
+    { progress_session_id: 'session', progress_sequence: '2' },
+  ])('拒绝无效序号字段 %p', async (ordering) => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: { ...records['source+new'], ...ordering },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockCas).not.toHaveBeenCalled();
+  });
+
+  it.each(['set-tracking', 'mark-update-read'])(
+    '元数据操作 %s 保留最新进度及序号',
+    async (action) => {
+      mockGetPlayRecord
+        .mockResolvedValueOnce(records['source+new'])
+        .mockResolvedValue({
+          ...records['source+new'],
+          progress_session_id: 'session-a',
+          progress_sequence: 5,
+          play_time: 500,
+        });
+      mockCas.mockResolvedValueOnce(false);
+      const response = await PATCH(
+        createJsonRequest({
+          key: 'source+new',
+          action,
+          trackingEnabled: false,
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        progress_session_id: 'session-a',
+        progress_sequence: 5,
+        play_time: 500,
+      });
+      expect(mockCas).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('标题查询使用当前登录用户并禁止缓存', async () => {
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({
+      'source+new': records['source+new'],
+    });
+    const response = await GET(
+      createRequest('http://localhost/api/playrecords?title=新记录&year=2024'),
+    );
+    expect(mockGetLatestPlayRecordByTitle).toHaveBeenCalledWith(
+      'demo',
+      '新记录',
+      '2024',
+    );
+    expect(await response.json()).toEqual({
+      'source+new': records['source+new'],
+    });
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+  });
+  it('拒绝空标题', async () => {
+    const response = await GET(
+      createRequest('http://localhost/api/playrecords?title='),
+    );
+    expect(response.status).toBe(400);
+  });
   it.each(['ongoing', 'ended'])(
     '保存合法作品状态 %s 并保留手动追更',
     async (series_status) => {
@@ -143,6 +336,7 @@ describe('playrecords route', () => {
     jest.clearAllMocks();
     mockGetAllPlayRecords.mockResolvedValue(records);
     mockGetPlayRecord.mockResolvedValue(null);
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({});
     mockGetPlayRecordPage.mockResolvedValue({
       items: {
         'source+new': records['source+new'],
@@ -152,6 +346,11 @@ describe('playrecords route', () => {
       nextCursor: '200|source+middle',
     });
     mockSavePlayRecord.mockResolvedValue(undefined);
+    mockCas.mockImplementation(async (user, key, record) => {
+      const [source, id] = key.split('+');
+      await mockSavePlayRecord(user, source, id, record);
+      return true;
+    });
   });
 
   it('按候选键去重读取且仅查询当前账号，缺失键省略', async () => {
@@ -343,27 +542,79 @@ describe('playrecords route', () => {
     expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
   });
 
-  it('保存播放进度时由服务端记录元数据检查时间', async () => {
-    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1234);
+  it('换源首次保存沿用同作品其他源的已知集数', async () => {
+    const oldSource: PlayRecord = {
+      ...records['source+new'],
+      index: 4,
+      total_episodes: 6,
+      update_baseline_episodes: 6,
+      tracking_enabled: true,
+    };
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({ 'old+1': oldSource });
+    const save = async (record: PlayRecord) => {
+      mockSavePlayRecord.mockClear();
+      await POST(createJsonRequest({ key: 'source+new', record }));
+      return mockSavePlayRecord.mock.calls[0][3] as PlayRecord;
+    };
+    const next = {
+      ...records['source+new'],
+      index: 4,
+      total_episodes: 7,
+      update_baseline_episodes: 7,
+    };
 
-    try {
-      const response = await POST(
-        createJsonRequest({
-          key: 'source+new',
-          record: records['source+new'],
-        }),
-      );
+    expect(await save(next)).toMatchObject({
+      update_baseline_episodes: 6,
+      tracking_enabled: true,
+      update_detected_at: expect.any(Number),
+    });
+    expect(
+      await save({ ...next, total_episodes: 5, update_baseline_episodes: 5 }),
+    ).toMatchObject({ update_baseline_episodes: 5 });
 
-      expect(response.status).toBe(200);
-      expect(mockSavePlayRecord).toHaveBeenCalledWith(
-        'demo',
-        'source',
-        'new',
-        expect.objectContaining({ metadata_checked_at: 1234 }),
-      );
-    } finally {
-      nowSpy.mockRestore();
-    }
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({
+      'old+1': { ...oldSource, year: '2020' },
+    });
+    expect(await save(next)).toMatchObject({ update_baseline_episodes: 7 });
+
+    mockGetLatestPlayRecordByTitle.mockResolvedValue({
+      'old+1': {
+        ...oldSource,
+        group_index: 4,
+        group_total: 6,
+        group_label: '第一季',
+      },
+    });
+    expect(
+      await save({
+        ...next,
+        group_index: 4,
+        group_total: 7,
+        group_label: '第二季',
+      }),
+    ).toMatchObject({ update_baseline_group_total: 7 });
+  });
+
+  it('保存播放进度不推进元数据检查时间', async () => {
+    mockGetPlayRecord.mockResolvedValue({
+      ...records['source+new'],
+      metadata_checked_at: 1234,
+    });
+
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: { ...records['source+new'], metadata_checked_at: 9999 },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'demo',
+      'source',
+      'new',
+      expect.objectContaining({ metadata_checked_at: 1234 }),
+    );
   });
 
   it('把当前可用集数标记为已读', async () => {

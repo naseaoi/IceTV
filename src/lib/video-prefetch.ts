@@ -1,14 +1,92 @@
+import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   generateStorageKey,
   getCachedPlayRecordsSnapshot,
 } from '@/lib/db.client';
+import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
 export const PREFETCH_INTENT_DELAY_MS = 180;
 
-const prefetchedDetails = new Set<string>();
+const DETAIL_WARMUP_TTL_MS = 30_000;
+const prefetchedDetails = new Map<
+  string,
+  { expiresAt: number; task: Promise<SearchResult> }
+>();
+const queuedDetails = new Set<string>();
+const searchTasks = new Map<string, Promise<PlaybackSearchResponse>>();
+
+export interface PlaybackSearchResponse {
+  results: SearchResult[];
+  totalSources?: number;
+  failedSources?: unknown[];
+}
+
+function detailKey(source: string, id: string) {
+  return JSON.stringify([
+    getAuthInfoFromBrowserCookie()?.username || '',
+    source,
+    id,
+  ]);
+}
+
+export function getSharedPlaybackDetail(
+  source: string,
+  id: string,
+): Promise<SearchResult> | null {
+  const key = detailKey(source, id);
+  const entry = prefetchedDetails.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    prefetchedDetails.delete(key);
+    return null;
+  }
+  return entry.task;
+}
+
+export function fetchSharedPlaybackDetail(
+  source: string,
+  id: string,
+): Promise<SearchResult> {
+  const existing = getSharedPlaybackDetail(source, id);
+  if (existing) return existing;
+  const key = detailKey(source, id);
+  const entry = {
+    expiresAt: Date.now() + DETAIL_WARMUP_TTL_MS,
+    task: null as unknown as Promise<SearchResult>,
+  };
+  entry.task = fetch(
+    `/api/detail?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`,
+    { credentials: 'same-origin' },
+  )
+    .then(async (response) => {
+      if (!response.ok) throw new Error('获取视频详情失败');
+      const detail = (await response.json()) as SearchResult;
+      if (!Array.isArray(detail?.episodes) || !detail.episodes.length)
+        throw new Error('无可播放剧集');
+      if (key === detailKey(source, id)) saveDetailSnapshot(source, id, detail);
+      entry.expiresAt = Date.now() + DETAIL_WARMUP_TTL_MS;
+      return detail;
+    })
+    .catch((error) => {
+      if (prefetchedDetails.get(key) === entry) prefetchedDetails.delete(key);
+      throw error;
+    });
+  prefetchedDetails.set(key, entry);
+  trimIfNeeded();
+  return entry.task;
+}
+
+export function getSharedPlaybackSearch(
+  query: string,
+): Promise<PlaybackSearchResponse> | null {
+  const task = searchTasks.get(normalizeSearchWarmupKey(query));
+  if (task) return task;
+  const results = readSearchWarmupResult(query);
+  return results ? Promise.resolve({ results }) : null;
+}
 const PREFETCH_DETAIL_MAX = 200;
 const PREFETCH_DETAIL_CONCURRENCY = 3;
 const PREFETCH_DETAIL_QUEUE_MAX = 20;
@@ -23,6 +101,15 @@ const SEARCH_WARMUP_RESULT_MAX = 30;
 const warmedSearchQueries = new Map<string, number>();
 const activeSearchWarmups = new Set<string>();
 const searchWarmupQueue: Array<{ key: string; query: string }> = [];
+
+export function clearPlaybackWarmups(): void {
+  prefetchedDetails.clear();
+  queuedDetails.clear();
+  detailPrefetchQueue.length = 0;
+  searchTasks.clear();
+  warmedSearchQueries.clear();
+  searchWarmupQueue.length = 0;
+}
 
 interface SearchWarmupEntry {
   key: string;
@@ -64,7 +151,7 @@ const detailPrefetchQueue: Array<{
 
 function trimIfNeeded() {
   if (prefetchedDetails.size <= PREFETCH_DETAIL_MAX) return;
-  const iter = prefetchedDetails.values();
+  const iter = prefetchedDetails.keys();
   const toRemove = Math.floor(PREFETCH_DETAIL_MAX / 2);
   for (let i = 0; i < toRemove; i++) {
     const next = iter.next();
@@ -95,28 +182,23 @@ function prefetchVideoDetail(
 ): void {
   if (!getAuthInfoFromBrowserCookie()?.username) return;
   if (!source || !id) return;
-  const key = `${source}::${id}`;
-  if (prefetchedDetails.has(key)) return;
-
-  prefetchedDetails.add(key);
-  trimIfNeeded();
+  const key = detailKey(source, id);
+  if (getSharedPlaybackDetail(source, id) || queuedDetails.has(key)) return;
+  queuedDetails.add(key);
 
   if (detailPrefetchQueue.length >= PREFETCH_DETAIL_QUEUE_MAX) {
     const dropped = detailPrefetchQueue.shift();
     if (dropped) {
-      prefetchedDetails.delete(dropped.key);
+      queuedDetails.delete(dropped.key);
     }
   }
 
   detailPrefetchQueue.push({
     key,
     run: async () => {
-      await fetch(
-        `/api/detail?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`,
-        { credentials: 'same-origin' },
-      ).catch(() => {
-        prefetchedDetails.delete(key);
-      });
+      queuedDetails.delete(key);
+      if (key !== detailKey(source, id)) return;
+      await fetchSharedPlaybackDetail(source, id).catch(() => undefined);
     },
   });
   drainDetailPrefetchQueue();
@@ -136,7 +218,7 @@ function trimWarmedSearchQueries() {
 }
 
 function normalizeSearchWarmupKey(query: string): string {
-  return query.trim().replace(/\s+/g, ' ').toLowerCase();
+  return `${getAuthInfoFromBrowserCookie()?.username || ''}:${query.trim().replace(/\s+/g, ' ').toLowerCase()}`;
 }
 
 function readSearchWarmupEntries(): SearchWarmupEntry[] {
@@ -204,21 +286,26 @@ function drainSearchWarmupQueue() {
     if (!task) return;
 
     activeSearchWarmups.add(task.key);
-    fetch(`/api/search?q=${encodeURIComponent(task.query)}`, {
+    const promise = fetch(`/api/search?q=${encodeURIComponent(task.query)}`, {
       credentials: 'same-origin',
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          warmedSearchQueries.delete(task.key);
-          return;
-        }
-        const data = (await response.json()) as { results?: SearchResult[] };
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('播放源搜索失败');
+      const data = (await response.json()) as PlaybackSearchResponse;
+      if (
+        data.totalSources &&
+        (data.failedSources?.length || 0) >= data.totalSources &&
+        !data.results?.length
+      )
+        throw new Error('播放源搜索失败');
+      if (task.key === normalizeSearchWarmupKey(task.query))
         saveSearchWarmupResult(task.query, data.results || []);
-      })
-      .catch(() => {
-        warmedSearchQueries.delete(task.key);
-      })
+      return data;
+    });
+    searchTasks.set(task.key, promise);
+    void promise
+      .catch(() => warmedSearchQueries.delete(task.key))
       .finally(() => {
+        searchTasks.delete(task.key);
         activeSearchWarmups.delete(task.key);
         drainSearchWarmupQueue();
       });
@@ -274,7 +361,7 @@ export function transferWarmedSearchToAggregateGroup(
 }
 
 function normalizeTitle(value: string | undefined): string {
-  return (value || '').trim().replace(/\s+/g, '').toLowerCase();
+  return normalizeWorkTitle(value || '');
 }
 
 export function findLocalPlaybackTargetByTitle(
@@ -291,8 +378,10 @@ export function findLocalPlaybackTargetByTitle(
     .map(([key, record]) => ({ key, record }))
     .filter(({ record }) => {
       if (normalizeTitle(record.title) !== normalizedTitle) return false;
-      if (!year || !record.year) return true;
-      return record.year === year;
+      return (
+        !normalizeWorkYear(year) ||
+        normalizeWorkYear(record.year) === normalizeWorkYear(year)
+      );
     })
     .sort((a, b) => b.record.save_time - a.record.save_time)[0];
 

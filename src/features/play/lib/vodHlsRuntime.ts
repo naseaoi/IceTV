@@ -8,6 +8,7 @@ import type {
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { FragmentMemoryCacheLoader } from '@/features/play/lib/fragmentMemoryCache';
+import { getHlsResourceRetryDelay } from '@/features/play/lib/hlsSourceFailure';
 import { getForwardBufferSeconds } from '@/features/play/lib/nextEpisodePreload';
 import {
   PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
@@ -17,6 +18,7 @@ import {
   type PlayerLoadingSessionState,
   beginVodStartupProgress,
   clearVodStartupProgress,
+  getVodStartupNow,
   registerStartupStateDescriber,
 } from '@/features/play/lib/playerLoading';
 import {
@@ -135,6 +137,15 @@ export function getVodRuntimeSourceUrl(video: HTMLVideoElement): string | null {
   return vodRuntimeSourceUrls.get(video) ?? null;
 }
 
+// 资源限流退避期间由运行时按 Retry-After 补拉，播放器的 play 等入口不得提前 startLoad
+const vodRuntimeResourceWaits = new WeakSet<HTMLVideoElement>();
+
+export function isVodRuntimeWaitingForResource(
+  video: HTMLVideoElement,
+): boolean {
+  return vodRuntimeResourceWaits.has(video);
+}
+
 // 原生播放没有 hls 运行时，同样登记本次加载的地址并挂上释放入口，换源和逐集解析停旧集时随之释放
 export function registerVodNativeRuntime(
   video: HTMLVideoElement,
@@ -165,11 +176,11 @@ export function registerVodNativeRuntime(
       : 0;
     if (end > bufferedEnd) {
       bufferedEnd = end;
-      progress.lastProgressAt = performance.now();
+      progress.lastProgressAt = getVodStartupNow();
     }
   };
   const onLoadedMetadata = () => {
-    progress.lastProgressAt = performance.now();
+    progress.lastProgressAt = getVodStartupNow();
   };
   const onPlaying = () => {
     if (attempt) attempt.startedAt = null;
@@ -218,7 +229,19 @@ export function createVodM3u8Loader({
   onPlaybackRecoveryExhausted,
   onCurrentSourceVideoInfo,
 }: CreateVodM3u8LoaderOptions) {
-  return function loadVodM3u8(video: HTMLVideoElement, url: string) {
+  return function loadVodM3u8(
+    video: HTMLVideoElement,
+    url: string,
+    art = artPlayerRef.current,
+  ) {
+    if (
+      !art ||
+      art.isDestroy ||
+      art !== artPlayerRef.current ||
+      art.video !== video
+    ) {
+      return;
+    }
     if (!Hls) {
       console.error('HLS.js 未加载');
       return;
@@ -318,6 +341,18 @@ export function createVodM3u8Loader({
     managedVideo.__icetvClientAdFilter = useClientAdFilter;
     managedVideo.__icetvFragmentHttpCacheRecovery = fragmentHttpCacheRecovery;
 
+    let resourceWaitAt: number | null = null;
+    const accountResourceWait = () => {
+      if (resourceWaitAt === null) return;
+      const now = getVodStartupNow();
+      const elapsed = now - resourceWaitAt;
+      resourceWaitAt = now;
+      if (attempt.startedAt !== null) attempt.startedAt += elapsed;
+      if (startupProgress) {
+        startupProgress.startedAt += elapsed;
+        startupProgress.lastProgressAt += elapsed;
+      }
+    };
     const beginMediaLoad = () => {
       const resumeTarget =
         loadingSessionRef.current.pendingInitialResumeTarget ??
@@ -331,6 +366,10 @@ export function createVodM3u8Loader({
       const observedBytes = new WeakMap<object, number>();
       const progress = beginVodStartupProgress(video, sourceKey, () => {
         if (videoRuntimeCleaned || managedVideo.hls !== hls) return;
+        if (resourceWaitAt !== null) {
+          accountResourceWait();
+          return;
+        }
         for (const entry of Object.values<{
           frag?: { stats?: { loaded?: number } };
           part?: { stats?: { loaded?: number } };
@@ -340,7 +379,7 @@ export function createVodM3u8Loader({
           const loaded = stats.loaded ?? 0;
           if (loaded > (observedBytes.get(stats) ?? 0)) {
             observedBytes.set(stats, loaded);
-            progress.lastProgressAt = performance.now();
+            progress.lastProgressAt = getVodStartupNow();
           }
         }
       });
@@ -350,7 +389,7 @@ export function createVodM3u8Loader({
     };
     let startupProgress: ReturnType<typeof beginMediaLoad> | null = null;
     const markStartupProgress = () => {
-      if (startupProgress) startupProgress.lastProgressAt = performance.now();
+      if (startupProgress) startupProgress.lastProgressAt = getVodStartupNow();
     };
 
     const playbackRoute =
@@ -472,9 +511,29 @@ export function createVodM3u8Loader({
       if (resumeTime <= 1) {
         return;
       }
+      // resumeTimeRef 只在首次起播时清空；已起播后写入它会让此后每次 canplay / progress 都跳回回落点，只登记本会话落地一次的目标
+      if (loadingSessionRef.current.playbackStartNotified) {
+        loadingSessionRef.current.pendingInitialResumeTarget = resumeTime;
+        return;
+      }
       resumeTimeRef.current = resumeTime;
       resumeModeRef.current = 'forced';
       loadingSessionRef.current.pendingInitialResumeTarget = null;
+    };
+
+    // hls.js 换地址会重新挂载媒体，浏览器随之重置自动播放资格，autoplay 属性会让用户已暂停的视频自行播放
+    let autoplaySuppressed = false;
+    const restoreAutoplay = () => {
+      if (!autoplaySuppressed) return;
+      autoplaySuppressed = false;
+      video.autoplay = true;
+      video.removeEventListener('play', restoreAutoplay);
+    };
+    const suppressAutoplayUntilPlay = () => {
+      if (autoplaySuppressed || !video.autoplay) return;
+      autoplaySuppressed = true;
+      video.autoplay = false;
+      video.addEventListener('play', restoreAutoplay);
     };
 
     const hasUntriedRoute = () =>
@@ -510,9 +569,16 @@ export function createVodM3u8Loader({
         nextServer ? '直连失败，切换代理...' : '代理失败，切换直连...',
       );
       resetSpeedFallbackTimer();
+      const userPaused =
+        video.paused && loadingSessionRef.current.playbackStartNotified;
       preservePlaybackPositionBeforeReload();
-      setIsVideoLoading(true);
-      onSourceProxyFallbackStarted?.();
+      if (userPaused) {
+        // 暂停中不会触发 playing 收起加载层，不开页面加载等待，线路在后台切换
+        suppressAutoplayUntilPlay();
+      } else {
+        setIsVideoLoading(true);
+        onSourceProxyFallbackStarted?.();
+      }
       markManagedVideoExpectedAbort(video);
       hls.stopLoad?.();
       startupProgress = beginMediaLoad();
@@ -541,6 +607,7 @@ export function createVodM3u8Loader({
 
     // 清单从未加载成功时 hls 没有 level，startLoad 不会重新请求清单，只能按当前线路重新 loadSource
     const resumeLoading = () => {
+      if (resourceWaitAt !== null) return;
       if (hls.levels?.length) {
         hls.startLoad();
         return;
@@ -585,7 +652,12 @@ export function createVodM3u8Loader({
     };
 
     const tryRecoverPlaybackStall = (reason: 'waiting' | 'stalled') => {
-      if (video.paused || video.ended || stallConfirmationTimer) {
+      if (
+        resourceWaitAt !== null ||
+        video.paused ||
+        video.ended ||
+        stallConfirmationTimer
+      ) {
         return;
       }
 
@@ -648,6 +720,7 @@ export function createVodM3u8Loader({
     };
     const onPlaying = () => {
       if (
+        resourceWaitAt !== null ||
         videoRuntimeCleaned ||
         (playbackIntentRef && playbackIntentRef.current !== intent)
       )
@@ -657,6 +730,7 @@ export function createVodM3u8Loader({
       clearStallConfirmation();
     };
     const onTimeUpdate = () => {
+      if (resourceWaitAt !== null) return;
       recoveryController.handlePlaybackProgress(video.currentTime);
     };
     const tryReportVideoInfo = () => {
@@ -674,19 +748,44 @@ export function createVodM3u8Loader({
       );
     };
 
+    let offlineFatalPending = false;
+    const onOnline = () => {
+      if (
+        !offlineFatalPending ||
+        resourceWaitAt !== null ||
+        navigator.onLine === false ||
+        videoRuntimeCleaned ||
+        managedVideo.hls !== hls ||
+        artPlayerRef.current !== art ||
+        art.isDestroy ||
+        art.video !== video ||
+        getVodRuntimeSourceUrl(video) !== url ||
+        (playbackIntentRef && playbackIntentRef.current !== intent) ||
+        video.paused ||
+        video.ended ||
+        hls.loadingEnabled
+      )
+        return;
+      offlineFatalPending = false;
+      hls.startLoad(video.currentTime || 0);
+    };
+
     const cleanupVideoRuntime = () => {
       if (videoRuntimeCleaned) return;
       videoRuntimeCleaned = true;
       managedVideo.__icetvSwitchToServerProxy = null;
       vodRuntimeSourceUrls.delete(video);
+      vodRuntimeResourceWaits.delete(video);
       clearVodStartupProgress(video);
       qualityController.dispose();
       segmentPrebufferController.dispose();
       recoveryController.dispose();
       clearStallConfirmation();
+      restoreAutoplay();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
       }
+      window.removeEventListener('online', onOnline);
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('stalled', onStalled);
       video.removeEventListener('playing', onPlaying);
@@ -695,6 +794,7 @@ export function createVodM3u8Loader({
     };
 
     assignManagedVideoCleanup(video, cleanupVideoRuntime);
+    window.addEventListener('online', onOnline);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('stalled', onStalled);
     video.addEventListener('playing', onPlaying);
@@ -722,7 +822,46 @@ export function createVodM3u8Loader({
       // bufferFullError 非致命，hls.js 已自行降低上限并安排重下失败分片；这里只把上限压到当前前向缓冲以内，不计失败也不拉流
       bufferBudgetController.handleError(data);
 
-      if (navigator.onLine === false || /abort/i.test(errorDetails)) return;
+      if (navigator.onLine === false) {
+        offlineFatalPending ||=
+          data.fatal === true && data.type === Hls.ErrorTypes.NETWORK_ERROR;
+        return;
+      }
+      if (/abort/i.test(errorDetails)) return;
+      const resourceDelay = getHlsResourceRetryDelay(data);
+      if (resourceDelay !== null || resourceWaitAt !== null) {
+        if (resourceWaitAt !== null) return;
+        resourceWaitAt = getVodStartupNow();
+        vodRuntimeResourceWaits.add(video);
+        setIsVideoLoading(true);
+        setRealtimeLoadSpeed('服务器繁忙，稍后自动重试');
+        clearStallConfirmation();
+        hls.stopLoad?.();
+        if (attempt.startedAt === null) startupProgress = beginMediaLoad();
+        const result = recoveryController.recover(
+          {
+            startLoad: () => {
+              accountResourceWait();
+              resourceWaitAt = null;
+              vodRuntimeResourceWaits.delete(video);
+              resumeLoading();
+            },
+            recoverMediaError: () => hls.recoverMediaError(),
+          },
+          Hls.ErrorTypes.NETWORK_ERROR,
+          Hls.ErrorTypes,
+          data.frag,
+          resourceDelay ?? 1000,
+        );
+        if (result === 'exhausted') {
+          runManagedVideoCleanup(video);
+          video.pause();
+          setIsVideoLoading(false);
+          setRealtimeLoadSpeed('');
+          setError('服务器繁忙，请稍后重试');
+        }
+        return;
+      }
       const isRouteNetworkError = isVodRouteNetworkError(data);
       const isFragNetworkError =
         isRouteNetworkError && /frag|segment/i.test(errorDetails);
@@ -742,7 +881,11 @@ export function createVodM3u8Loader({
             return;
           reportRouteStat(false);
           if (switchRoute(errorReason)) return;
-          if (allowAutoFallback) {
+          // 起播前两路失败直接判源失败；已起播时前向缓冲通常还能播，交给 hls.js 自身重试与致命错误恢复，耗尽再判失败
+          if (
+            allowAutoFallback &&
+            !loadingSessionRef.current.playbackStartNotified
+          ) {
             failCurrentSource(errorReason);
             return;
           }
@@ -819,7 +962,10 @@ export function createVodM3u8Loader({
       qualityController.handleFragmentLoaded(data?.frag);
       segmentPrebufferController.handlePlaybackProgress();
       // 恢复时重下的失败位置之前的分片可能命中浏览器缓存，不能当作线路恢复，否则直连失败永远凑不满回退阈值
-      if (recoveryController.handleFragmentLoaded(data?.frag)) {
+      if (
+        resourceWaitAt === null &&
+        recoveryController.handleFragmentLoaded(data?.frag)
+      ) {
         reportRouteStat(true);
         if (currentUseServerProxy) {
           serverFailureTracker.reset();

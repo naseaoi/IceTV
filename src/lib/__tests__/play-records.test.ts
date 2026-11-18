@@ -167,6 +167,36 @@ describe('play record selection', () => {
     ).toBe(11);
   });
 
+  it('records when a save first sees more episodes and keeps it afterwards', () => {
+    const previous = {
+      index: 4,
+      total_episodes: 6,
+      update_baseline_episodes: 6,
+      update_detected_at: 100,
+    } as PlayRecord;
+    const grown = mergePlayRecordUpdateBaseline(
+      previous,
+      { ...previous, total_episodes: 7, update_detected_at: 1 },
+      500,
+    );
+    expect(grown.update_detected_at).toBe(500);
+    expect(hasPlayRecordUpdate(grown)).toBe(true);
+
+    const progressed = mergePlayRecordUpdateBaseline(
+      grown,
+      { ...grown, index: 5, update_detected_at: undefined },
+      900,
+    );
+    expect(progressed.update_detected_at).toBe(500);
+    expect(
+      mergePlayRecordUpdateBaseline(
+        null,
+        { ...previous, update_detected_at: 1 },
+        900,
+      ).update_detected_at,
+    ).toBeUndefined();
+  });
+
   it('hides updates while tracking is disabled and restores them when enabled', () => {
     const record = {
       index: 2,

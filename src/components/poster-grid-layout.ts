@@ -4,6 +4,9 @@ export const POSTER_GRID_BASE_CLASS =
 // 桌面端列宽随容器自适应，避免固定列宽在宽屏右侧留白
 export const POSTER_GRID_CLASS = `${POSTER_GRID_BASE_CLASS} sm:grid-cols-[repeat(auto-fill,minmax(156px,1fr))] sm:gap-x-5`;
 
+// 桌面端左右分栏时内容区窄于页面，列宽下限相应调小
+export const SIDEBAR_POSTER_GRID_CLASS = `${POSTER_GRID_CLASS} lg:grid-cols-[repeat(auto-fill,minmax(128px,1fr))] lg:gap-x-4`;
+
 export const POSTER_GRID_ROW_GAP = 24;
 
 // 标题行 mt-2 + 13px 行高；副标题行 mt-0.5 + text-xs 行高，与 poster-card-layout 的行类对应

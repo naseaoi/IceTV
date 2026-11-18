@@ -14,9 +14,17 @@ import {
   usePlayProgress,
   waitForHistoryRestore,
 } from '@/features/play/hooks/usePlayProgress';
+import {
+  clearMatchingPlaybackCheckpoint,
+  recordExplicitPlaybackSeek,
+} from '@/features/play/lib/playProgressRestore';
 import { PLAY_CHECKPOINT_KEY } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { getPlayRecordsByKeys, savePlayRecord } from '@/lib/db.client';
+import {
+  readPlayRecordsForPlayback,
+  reportPlaybackRecordsReadFailure,
+  savePlayRecord,
+} from '@/lib/db.client';
 import { savePlayIntent } from '@/lib/play-intent';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 
@@ -25,7 +33,8 @@ jest.mock('@/lib/db.client', () => ({
   generateStorageKey: jest.fn(
     (source: string, id: string) => `${source}+${id}`,
   ),
-  getPlayRecordsByKeys: jest.fn(),
+  readPlayRecordsForPlayback: jest.fn(),
+  reportPlaybackRecordsReadFailure: jest.fn(),
   savePlayRecord: jest.fn(),
 }));
 
@@ -526,9 +535,15 @@ describe('usePlayProgress helpers', () => {
 });
 
 describe('usePlayProgress 历史恢复与起播握手', () => {
-  const mockedGetAllPlayRecords = getPlayRecordsByKeys as jest.MockedFunction<
-    typeof getPlayRecordsByKeys
-  >;
+  const mockedReadPlayRecords =
+    readPlayRecordsForPlayback as jest.MockedFunction<
+      typeof readPlayRecordsForPlayback
+    >;
+  // 默认无本地缓存，网络结果由它决定
+  const mockedGetAllPlayRecords = jest.fn<
+    Promise<Record<string, PlayRecord>>,
+    [string[]]
+  >();
   const detail: SearchResult = {
     id: 'id-a',
     title: '番剧A',
@@ -618,6 +633,10 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     jest.clearAllMocks();
     mockedGetAllPlayRecords.mockReset();
     mockedGetAllPlayRecords.mockResolvedValue({});
+    mockedReadPlayRecords.mockImplementation((keys) => ({
+      cached: null,
+      fresh: mockedGetAllPlayRecords(keys),
+    }));
     sessionStorage.clear();
   });
 
@@ -680,6 +699,212 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     expect(refs.resumeTimeRef.current).toBe(600);
   });
 
+  function attachPlayingPlayer(
+    refs: ReturnType<typeof renderHistoryRestore>['refs'],
+    currentTime: number,
+  ) {
+    const player = { currentTime, duration: 1500, notice: { show: '' } };
+    (refs.artPlayerRef as { current: unknown }).current = player;
+    // 默认集已自然播放超过自动续播窗口
+    refs.allowAutoResumeRef.current = false;
+    return player;
+  }
+
+  it('播放记录迟到前不保存默认集进度，记录到达后仍换到续播的集', async () => {
+    let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = new Promise((resolve) => {
+      resolveRecords = resolve;
+    });
+    const { result, refs, setCurrentEpisodeIndex, onRestoreEpisodeChange } =
+      renderHistoryRestore(gate);
+    await act(async () => jest.advanceTimersByTime(1_000));
+    attachPlayingPlayer(refs, 30);
+
+    await act(async () => {
+      await result.current.saveCurrentPlayProgress();
+      await result.current.saveCurrentPlayProgress(true);
+      result.current.savePlaybackCheckpoint();
+    });
+    expect(savePlayRecord).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)).toBeNull();
+
+    resolveRecords({ [recordKey]: recordAtEpisode9 });
+    await flushMicrotasks();
+    expect(onRestoreEpisodeChange).toHaveBeenCalledTimes(1);
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledWith(8);
+    expect(refs.resumeTimeRef.current).toBe(600);
+  });
+
+  it('记录迟到时当前集就是续播的集，直接跳到续播时间', async () => {
+    let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = new Promise((resolve) => {
+      resolveRecords = resolve;
+    });
+    const { refs } = renderHistoryRestore(gate, 8);
+    await act(async () => jest.advanceTimersByTime(1_000));
+    const player = attachPlayingPlayer(refs, 30);
+
+    resolveRecords({ [recordKey]: recordAtEpisode9 });
+    await flushMicrotasks();
+    expect(player.currentTime).toBe(600);
+    expect(refs.resumeTimeRef.current).toBeNull();
+  });
+
+  it('记录迟到前用户拖动过进度，按用户选择继续播放并恢复保存', async () => {
+    let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = new Promise((resolve) => {
+      resolveRecords = resolve;
+    });
+    const { result, refs, setCurrentEpisodeIndex } = renderHistoryRestore(gate);
+    await act(async () => jest.advanceTimersByTime(1_000));
+    attachPlayingPlayer(refs, 300);
+    recordExplicitPlaybackSeek(refs.stableCurrentTimeRef, 300);
+
+    resolveRecords({ [recordKey]: recordAtEpisode9 });
+    await flushMicrotasks();
+    expect(setCurrentEpisodeIndex).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.saveCurrentPlayProgress();
+    });
+    expect(savePlayRecord).toHaveBeenCalledWith(
+      detail.source,
+      detail.id,
+      expect.objectContaining({ index: 1, play_time: 300 }),
+    );
+  });
+
+  async function advance(ms: number) {
+    await act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+    await flushMicrotasks();
+  }
+
+  it('读取失败不当作没有记录：保存保持阻断并重试，读到后按记录恢复', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = Promise.reject(new Error('network'));
+    mockedGetAllPlayRecords
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValue({ [recordKey]: recordAtEpisode9 });
+    const { result, refs, setCurrentEpisodeIndex } = renderHistoryRestore(gate);
+    const released = trackRelease(gate);
+    await flushMicrotasks();
+    expect(released).toHaveBeenCalledTimes(1);
+    attachPlayingPlayer(refs, 30);
+
+    expect(reportPlaybackRecordsReadFailure).not.toHaveBeenCalled();
+    await advance(1_000);
+    expect(mockedGetAllPlayRecords).toHaveBeenCalledTimes(1);
+    expect(reportPlaybackRecordsReadFailure).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await result.current.saveCurrentPlayProgress(true);
+      result.current.savePlaybackCheckpoint();
+    });
+    expect(savePlayRecord).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)).toBeNull();
+    expect(setCurrentEpisodeIndex).not.toHaveBeenCalled();
+
+    await advance(2_000);
+    expect(mockedGetAllPlayRecords).toHaveBeenCalledTimes(2);
+    expect(reportPlaybackRecordsReadFailure).toHaveBeenCalledTimes(1);
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledWith(8);
+    expect(refs.resumeTimeRef.current).toBe(600);
+  });
+
+  it('等记录期间用户选了别的集，这一集的进度照常保存，记录到达后不再换集', async () => {
+    let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = new Promise((resolve) => {
+      resolveRecords = resolve;
+    });
+    const { result, refs, setCurrentEpisodeIndex } = renderHistoryRestore(gate);
+    await advance(1_000);
+    refs.currentEpisodeIndexRef.current = 3;
+    attachPlayingPlayer(refs, 120);
+
+    await act(async () => {
+      await result.current.saveCurrentPlayProgress();
+    });
+    expect(savePlayRecord).toHaveBeenCalledWith(
+      detail.source,
+      detail.id,
+      expect.objectContaining({ index: 4, play_time: 120 }),
+    );
+
+    resolveRecords({ [recordKey]: recordAtEpisode9 });
+    await flushMicrotasks();
+    expect(setCurrentEpisodeIndex).not.toHaveBeenCalled();
+  });
+
+  it('本地缓存先用于起播，网络记录更新时按迟到记录再恢复', async () => {
+    let resolveFresh!: (records: Record<string, PlayRecord>) => void;
+    mockedReadPlayRecords.mockReturnValue({
+      cached: { [recordKey]: recordAtEpisode9 },
+      fresh: new Promise((resolve) => {
+        resolveFresh = resolve;
+      }),
+    });
+    const gate = createHistoryRestoreGate();
+    const { result, refs, setCurrentEpisodeIndex } = renderHistoryRestore(gate);
+    const released = trackRelease(gate);
+    await flushMicrotasks();
+    expect(released).toHaveBeenCalledTimes(1);
+    expect(setCurrentEpisodeIndex).toHaveBeenLastCalledWith(8);
+    expect(refs.resumeTimeRef.current).toBe(600);
+
+    refs.clearTargetEpisodeProgressRef.current = false;
+    attachPlayingPlayer(refs, 650);
+    await act(async () => {
+      await result.current.saveCurrentPlayProgress(true);
+    });
+    expect(savePlayRecord).not.toHaveBeenCalled();
+
+    resolveFresh({
+      [recordKey]: {
+        ...recordAtEpisode9,
+        index: 11,
+        play_time: 300,
+        save_time: 3000,
+      },
+    });
+    await flushMicrotasks();
+    expect(setCurrentEpisodeIndex).toHaveBeenLastCalledWith(10);
+    expect(refs.resumeTimeRef.current).toBe(300);
+  });
+
+  it('起播复用的缓存记录与网络一致时不再跳转，保存随即恢复', async () => {
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = Promise.resolve({ [recordKey]: recordAtEpisode9 });
+    let resolveFresh!: (records: Record<string, PlayRecord>) => void;
+    gate.playRecordsFresh = new Promise((resolve) => {
+      resolveFresh = resolve;
+    });
+    const { result, refs, setCurrentEpisodeIndex } = renderHistoryRestore(gate);
+    await flushMicrotasks();
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
+
+    refs.clearTargetEpisodeProgressRef.current = false;
+    const player = attachPlayingPlayer(refs, 650);
+    resolveFresh({ [recordKey]: recordAtEpisode9 });
+    await flushMicrotasks();
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
+    expect(player.currentTime).toBe(650);
+
+    await act(async () => {
+      await result.current.saveCurrentPlayProgress();
+    });
+    expect(savePlayRecord).toHaveBeenCalledWith(
+      detail.source,
+      detail.id,
+      expect.objectContaining({ index: 9, play_time: 650 }),
+    );
+  });
+
   it('当前集已是续播的集时不再换集，续播时间照样写入', async () => {
     mockedGetAllPlayRecords.mockResolvedValue({
       [recordKey]: recordAtEpisode9,
@@ -723,6 +948,34 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     expect(refs.resumeModeRef.current).toBe('forced');
   });
 
+  it('恢复点在目标真正起播后才清除，起播失败再刷新仍能恢复', async () => {
+    savePlaybackCheckpoint(
+      { current: detail.source },
+      { current: detail.id },
+      { current: 4 },
+      { current: detail.title },
+      { current: { currentTime: 1000 } } as any,
+      { current: 1000 },
+      { current: false },
+    );
+    const gate = createHistoryRestoreGate();
+    renderHistoryRestore(gate);
+    await flushMicrotasks();
+    expect(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)).not.toBeNull();
+
+    clearMatchingPlaybackCheckpoint(
+      { current: 'other-source' },
+      { current: detail.id },
+    );
+    expect(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)).not.toBeNull();
+
+    clearMatchingPlaybackCheckpoint(
+      { current: detail.source },
+      { current: detail.id },
+    );
+    expect(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)).toBeNull();
+  });
+
   it('没有可用记录或读取失败时也立即放行，不等到上限', async () => {
     const noRecordGate = createHistoryRestoreGate();
     const { setCurrentEpisodeIndex } = renderHistoryRestore(noRecordGate);
@@ -731,7 +984,7 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     expect(releasedWithoutRecord).toHaveBeenCalledTimes(1);
     expect(setCurrentEpisodeIndex).not.toHaveBeenCalled();
 
-    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const failedGate = createHistoryRestoreGate();
     failedGate.playRecords = Promise.reject(new Error('network'));
     renderHistoryRestore(failedGate);
@@ -803,5 +1056,179 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     });
     expect(released).toHaveBeenCalledTimes(1);
     expect(gate.listeners.size).toBe(0);
+  });
+});
+
+describe('播放记录持久化边界', () => {
+  const detail = {
+    id: 'b',
+    source: 'b',
+    source_name: 'B',
+    title: 'test',
+    episodes: ['1'],
+    episodes_titles: [],
+    poster: '',
+    year: '2024',
+  };
+  const save = savePlayRecord as jest.MockedFunction<typeof savePlayRecord>;
+  function setup() {
+    const player = { current: { currentTime: 120, duration: 1500 } };
+    const stable = { current: 120 };
+    const blocked = { current: false };
+    const onSaved = jest.fn();
+    const state: {
+      current: import('@/features/play/hooks/usePlayProgress').PlayProgressSaveState;
+    } = {
+      current: {
+        inFlight: false,
+        pending: null,
+        lastSavedFingerprint: null,
+        onSaved,
+      },
+    };
+    const source = { current: 'b' };
+    const id = { current: 'b' };
+    const episode = { current: 0 };
+    const run = (immediate = false) =>
+      saveCurrentPlayProgress(
+        player as any,
+        source,
+        id,
+        { current: 'test' },
+        { current: detail },
+        episode,
+        stable,
+        blocked,
+        state,
+        { current: 0 },
+        '',
+        immediate,
+      );
+    return {
+      player,
+      stable,
+      blocked,
+      onSaved,
+      state,
+      source,
+      id,
+      episode,
+      run,
+    };
+  }
+  beforeEach(() => {
+    save.mockReset();
+    sessionStorage.clear();
+  });
+
+  it('自动播放被拒的零进度和保存失败都不触发旧源清理', async () => {
+    const ctx = setup();
+    ctx.player.current.currentTime = 0;
+    ctx.stable.current = 0;
+    await ctx.run();
+    expect(save).not.toHaveBeenCalled();
+    expect(ctx.onSaved).not.toHaveBeenCalled();
+    ctx.player.current.currentTime = 120;
+    save.mockRejectedValueOnce(new Error('offline'));
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await ctx.run();
+    expect(ctx.onSaved).not.toHaveBeenCalled();
+    save.mockResolvedValueOnce();
+    await ctx.run();
+    expect(ctx.onSaved).toHaveBeenCalledWith('b', 'b');
+    log.mockRestore();
+  });
+
+  it('换集换源延续同一会话序号，新页面独立生成会话', async () => {
+    const ctx = setup();
+    await ctx.run();
+    ctx.episode.current = 1;
+    await ctx.run();
+    ctx.source.current = 'next-source';
+    ctx.id.current = 'next-id';
+    await ctx.run(true);
+    const records = save.mock.calls.map((call) => call[2]);
+    expect(records.map((record) => record.progress_sequence)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(
+      new Set(records.map((record) => record.progress_session_id)).size,
+    ).toBe(1);
+    await setup().run();
+    expect(save.mock.calls[3][2].progress_sequence).toBe(1);
+    expect(save.mock.calls[3][2].progress_session_id).not.toBe(
+      records[0].progress_session_id,
+    );
+  });
+
+  it('普通保存未完成时退出快照立即发送，重复退出事件按指纹去重', async () => {
+    const ctx = setup();
+    let finishFirst!: () => void;
+    let finishExit!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishExit = resolve;
+        }),
+    );
+    const first = ctx.run();
+    ctx.player.current.currentTime = 180;
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
+    const exit = ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1][2].play_time).toBe(180);
+    expect(save.mock.calls[0][2].progress_session_id).toBeTruthy();
+    expect(save.mock.calls[1][2].progress_session_id).toBe(
+      save.mock.calls[0][2].progress_session_id,
+    );
+    expect(save.mock.calls[1][2].progress_sequence).toBeGreaterThan(
+      save.mock.calls[0][2].progress_sequence!,
+    );
+    await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(ctx.state.current.pending).toBeNull();
+    finishExit();
+    await exit;
+    finishFirst();
+    await first;
+    await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it('用户显式拖回片头以最小有效续播点覆盖旧进度和 checkpoint', async () => {
+    const { recordExplicitPlaybackSeek, clearExplicitPlaybackSeek } =
+      jest.requireActual('@/features/play/lib/playProgressRestore');
+    const ctx = setup();
+    ctx.player.current.currentTime = 0;
+    recordExplicitPlaybackSeek(ctx.stable, 0);
+    await ctx.run(true);
+    expect(save.mock.calls[0][2].play_time).toBe(2);
+    savePlaybackCheckpoint(
+      { current: 'b' },
+      { current: 'b' },
+      { current: 0 },
+      { current: 'test' },
+      ctx.player as any,
+      ctx.stable,
+      ctx.blocked,
+    );
+    expect(
+      JSON.parse(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)!).currentTime,
+    ).toBe(2);
+    clearExplicitPlaybackSeek(ctx.stable);
+    ctx.state.current.lastSavedFingerprint = null;
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
+    ctx.blocked.current = true;
+    recordExplicitPlaybackSeek(ctx.stable, 0);
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
   });
 });

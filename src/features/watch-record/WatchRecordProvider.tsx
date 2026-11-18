@@ -13,7 +13,7 @@ export function WatchRecordProvider({ children }: { children: ReactNode }) {
   const { session } = useAuthSession();
   const [target, setTarget] = useState<WatchRecordTarget | null>(null);
   const [open, setOpen] = useState(false);
-  // 每次打开都重新挂载面板，读取最新的片单与评价
+  // 每次打开都重新挂载面板，读取最新的收藏与评价
   const [openCount, setOpenCount] = useState(0);
   const openPanel = useCallback((next: WatchRecordTarget) => {
     setTarget(next);

@@ -6,6 +6,7 @@ import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { createFragmentMemoryCache } from '@/features/play/lib/fragmentMemoryCache';
 import { normalizeSegmentCacheKey } from '@/lib/segment-cache-key';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getUpstreamRoutes } from '@/lib/upstream-proxy-pool.server';
 import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
 
@@ -45,6 +46,14 @@ const mockOrigin = jest.fn();
 let mockSegmentsEnabled = true;
 installCryptoPolyfill();
 installStreamPolyfills();
+Object.assign(globalThis, {
+  DOMException: class extends Error {
+    constructor(message: string, name: string) {
+      super(message);
+      this.name = name;
+    }
+  },
+});
 const { GET: manifest } =
   require('./m3u8/route') as typeof import('./m3u8/route');
 const { GET: key } = require('./key/route') as typeof import('./key/route');
@@ -103,6 +112,54 @@ describe('signed playback sticky context', () => {
     if (originalPool === undefined) delete process.env.UPSTREAM_PROXY_POOL;
     else process.env.UPSTREAM_PROXY_POOL = originalPool;
     getUpstreamRoutes();
+  });
+
+  it.each([429, 503] as const)(
+    'preserves resource error metadata across all proxy routes (%s)',
+    async (status) => {
+      mockOrigin.mockRejectedValue(new ResourceLimitError(status, 17));
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      for (const [path, handler] of [
+        ['m3u8', manifest],
+        ['key', key],
+        ['segment', segment],
+      ] as const) {
+        const response = await handler(
+          request(
+            `http://localhost/api/proxy/${path}?url=${encodeURIComponent(`https://cdn.example/${path}?token=busy-${status}`)}`,
+          ),
+        );
+        expect(response.status).toBe(status);
+        expect(response.headers.get('retry-after')).toBe('17');
+        expect(response.headers.get('x-icetv-resource-limited')).toBe('1');
+        expect(response.headers.get('access-control-expose-headers')).toContain(
+          'Retry-After',
+        );
+      }
+    },
+  );
+
+  it('propagates key request cancellation to the upstream signal', async () => {
+    let upstreamSignal: AbortSignal | undefined;
+    mockOrigin.mockImplementation((_route, _url, init) => {
+      upstreamSignal = init.signal;
+      return new Promise((_resolve, reject) =>
+        init.signal.addEventListener('abort', () =>
+          reject(new DOMException('Aborted', 'AbortError')),
+        ),
+      );
+    });
+    const controller = new AbortController();
+    const req = request(
+      'http://localhost/api/proxy/key?url=https%3A%2F%2Fcdn.example%2Fkey.bin',
+    );
+    Object.assign(req, { signal: controller.signal });
+    const pending = key(req);
+    while (!upstreamSignal)
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+    await pending;
+    expect(upstreamSignal.aborted).toBe(true);
   });
 
   it.each([true, false])(

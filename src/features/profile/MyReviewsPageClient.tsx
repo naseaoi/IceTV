@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
+import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import CoverImage from '@/components/CoverImage';
 import ExpandableText from '@/components/ExpandableText';
 import {
@@ -102,8 +103,10 @@ const REVIEW_VISIBILITY_CLASS = 'rounded px-1.5 py-0.5';
 const REVIEW_BODY_SPACING_CLASS = 'mt-2';
 const REVIEW_BODY_TEXT_CLASS = 'text-sm leading-6';
 
-function reviewPlayUrl(review: VideoReview) {
-  const target = parseStorageKey(review.source_key);
+function reviewPlayUrl(
+  review: VideoReview,
+  target: { source: string; id: string } | null,
+) {
   return `/play?${new URLSearchParams({ title: review.title, year: review.year, ...(target ? { source: target.source, id: target.id } : {}) })}`;
 }
 
@@ -238,7 +241,18 @@ function ReviewCard({
   onDelete: () => void;
   onEdit: () => void;
 }) {
-  const playUrl = reviewPlayUrl(review);
+  const target = parseStorageKey(review.source_key);
+  const playUrl = reviewPlayUrl(review, target);
+  const menuProps = useMediaCardMenu({
+    target: {
+      source: target?.source,
+      id: target?.id,
+      title: review.title,
+      year: review.year,
+      cover: review.cover,
+    },
+    href: playUrl,
+  });
   return (
     <li
       data-list-motion-key={`${review.title_norm}:${review.year}`}
@@ -246,6 +260,7 @@ function ReviewCard({
     >
       <Link
         href={playUrl}
+        {...menuProps}
         aria-label={`播放${review.title}`}
         className='relative aspect-[2/3] w-16 shrink-0 self-start overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800 sm:w-20'
       >

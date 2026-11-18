@@ -7,14 +7,18 @@ import type {
 } from '@/features/favorites/lib/library-query';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 
+import { getAuthInfoFromBrowserCookie } from './auth.client';
+import { isCatalogFavoriteSource } from './catalog-favorites';
 import {
   cacheManager,
   createCacheFirstReader,
   createKeyedCacheFirstReader,
+  createKeyedNetworkReader,
   createOptimisticWriter,
   fetchFromApi,
   fetchWithAuth,
   handleDatabaseOperationFailure,
+  reportPlaybackRecordsReadFailure,
   retryClientRequest,
 } from './db.client.internal';
 import type { PlayRecordPage } from './play-records';
@@ -73,29 +77,33 @@ const _getAllFavorites = createCacheFirstReader<Record<string, Favorite>>({
   fallback: {},
 });
 
-const _getPlayRecordsByKeys = createKeyedCacheFirstReader<PlayRecord>({
+async function fetchPlayRecordsByKeys(
+  keys: string[],
+  signal: AbortSignal,
+): Promise<Record<string, PlayRecord>> {
+  const records: Record<string, PlayRecord> = {};
+  for (let index = 0; index < keys.length; index += MAX_READ_PLAY_RECORD_KEYS) {
+    if (signal.aborted)
+      throw signal.reason ?? new DOMException('Request aborted', 'AbortError');
+    const params = new URLSearchParams();
+    keys
+      .slice(index, index + MAX_READ_PLAY_RECORD_KEYS)
+      .forEach((key) => params.append('keys', key));
+    Object.assign(
+      records,
+      await fetchFromApi<Record<string, PlayRecord>>(
+        `/api/playrecords?${params}`,
+        { signal },
+      ),
+    );
+  }
+  return records;
+}
+
+const _readPlayRecordsForPlayback = createKeyedNetworkReader<PlayRecord>({
   getCached: () => cacheManager.getCachedPlayRecords(),
   setCached: (data) => cacheManager.cachePlayRecords(data),
-  fetchApi: async (keys) => {
-    const records: Record<string, PlayRecord> = {};
-    for (
-      let index = 0;
-      index < keys.length;
-      index += MAX_READ_PLAY_RECORD_KEYS
-    ) {
-      const params = new URLSearchParams();
-      keys
-        .slice(index, index + MAX_READ_PLAY_RECORD_KEYS)
-        .forEach((key) => params.append('keys', key));
-      Object.assign(
-        records,
-        await fetchFromApi<Record<string, PlayRecord>>(
-          `/api/playrecords?${params}`,
-        ),
-      );
-    }
-    return records;
-  },
+  fetchApi: fetchPlayRecordsByKeys,
   eventName: 'playRecordsUpdated',
 });
 
@@ -139,6 +147,34 @@ const _writePlayRecords = createOptimisticWriter<Record<string, PlayRecord>>({
   emptyCacheFactory: () => ({}),
 });
 
+const PLAY_RECORD_SAVE_DRAIN_TIMEOUT_MS = 5000;
+const inFlightPlayRecordSaves = new Map<Promise<void>, string>();
+
+function trackPlayRecordSave(key: string, request: Promise<void>) {
+  inFlightPlayRecordSaves.set(request, key);
+  const release = () => inFlightPlayRecordSaves.delete(request);
+  request.then(release, release);
+  return request;
+}
+
+// 服务端删除会清掉进度水位，删除后才到达的旧保存会重建记录；
+// 先等本标签页同键的保存（含重试）结束再删，超时照常删除。
+async function waitForPlayRecordSaves(keys: string[] | 'all') {
+  const keySet = keys === 'all' ? null : new Set(keys);
+  const pending = [...inFlightPlayRecordSaves]
+    .filter(([, key]) => !keySet || keySet.has(key))
+    .map(([request]) => request);
+  if (pending.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.allSettled(pending),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, PLAY_RECORD_SAVE_DRAIN_TIMEOUT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
 const _writeFavorites = createOptimisticWriter<Record<string, Favorite>>({
   getCached: () => cacheManager.getCachedFavorites(),
   setCached: (data) => cacheManager.cacheFavorites(data),
@@ -166,10 +202,18 @@ const _writeSkipConfigs = createOptimisticWriter<Record<string, SkipConfig>>({
 
 // ---- 播放记录 ----
 
-export async function getPlayRecordsByKeys(
+export interface PlaybackRecordsRead {
+  cached: Record<string, PlayRecord> | null;
+  fresh: Promise<Record<string, PlayRecord>>;
+}
+
+export { reportPlaybackRecordsReadFailure };
+
+export function readPlayRecordsForPlayback(
   keys: string[],
-): Promise<Record<string, PlayRecord>> {
-  return _getPlayRecordsByKeys(keys);
+  options?: { timeoutMs?: number },
+): PlaybackRecordsRead {
+  return _readPlayRecordsForPlayback(keys, options);
 }
 
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
@@ -271,18 +315,21 @@ export async function savePlayRecord(
       return cached;
     },
     syncToServer: () =>
-      retryClientRequest(
-        () =>
-          fetchWithAuth('/api/playrecords', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, record: normalizedRecord }),
-            keepalive: true,
-          }).then(() => {}),
-        {
-          retries: 2,
-          delayMs: 600,
-        },
+      trackPlayRecordSave(
+        key,
+        retryClientRequest(
+          () =>
+            fetchWithAuth('/api/playrecords', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key, record: normalizedRecord }),
+              keepalive: true,
+            }).then(() => {}),
+          {
+            retries: 2,
+            delayMs: 600,
+          },
+        ),
       ),
     onServerError: async (err) => {
       await handleDatabaseOperationFailure('playRecords', err);
@@ -301,10 +348,12 @@ export async function deletePlayRecord(
       delete cached[key];
       return cached;
     },
-    syncToServer: () =>
-      fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
+    syncToServer: async () => {
+      await waitForPlayRecordSaves([key]);
+      await fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
         method: 'DELETE',
-      }).then(() => {}),
+      });
+    },
     onServerError: async (err) => {
       await handleDatabaseOperationFailure(
         'playRecords',
@@ -335,12 +384,14 @@ export async function deletePlayRecords(keys: string[]): Promise<void> {
         for (const key of batch) delete cached[key];
         return cached;
       },
-      syncToServer: () =>
-        fetchWithAuth('/api/playrecords', {
+      syncToServer: async () => {
+        await waitForPlayRecordSaves(batch);
+        await fetchWithAuth('/api/playrecords', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ keys: batch }),
-        }).then(() => {}),
+        });
+      },
       onServerError: (err) =>
         handleDatabaseOperationFailure(
           'playRecords',
@@ -430,8 +481,10 @@ export async function clearAllPlayRecords(): Promise<void> {
   await _writePlayRecords({
     affectedKeys: 'all',
     mutateCached: () => ({}),
-    syncToServer: () =>
-      fetchWithAuth('/api/playrecords', { method: 'DELETE' }).then(() => {}),
+    syncToServer: async () => {
+      await waitForPlayRecordSaves('all');
+      await fetchWithAuth('/api/playrecords', { method: 'DELETE' });
+    },
     onServerError: (err) =>
       handleDatabaseOperationFailure(
         'playRecords',
@@ -539,9 +592,16 @@ export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
   return cacheManager.getCachedFavorites();
 }
 
-async function refreshFavoritesAfterWrite(): Promise<void> {
+async function refreshFavoritesAfterWrite(
+  expectedUsername?: string,
+): Promise<void> {
   const favorites =
     await fetchFromApi<Record<string, Favorite>>('/api/favorites');
+  if (
+    expectedUsername &&
+    getAuthInfoFromBrowserCookie()?.username !== expectedUsername
+  )
+    return;
   cacheManager.cacheFavorites(favorites);
   window.dispatchEvent(
     new CustomEvent('favoritesUpdated', { detail: favorites }),
@@ -576,6 +636,35 @@ export async function batchFavorites(
   }
 }
 
+const catalogBindingSessions = new Set<string>();
+
+export async function bindCatalogFavorites(key?: string): Promise<void> {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username) return;
+  if (!key) {
+    if (catalogBindingSessions.has(username)) return;
+    catalogBindingSessions.add(username);
+  }
+  try {
+    const response = await fetchWithAuth('/api/favorites/catalog-bind', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(key ? { key } : {}),
+    });
+    const payload = await response.json();
+    const results = key ? [payload] : payload.results;
+    if (getAuthInfoFromBrowserCookie()?.username !== username) return;
+    if (
+      Array.isArray(results) &&
+      results.some((result) => result.status === 'bound')
+    ) {
+      await refreshFavoritesAfterWrite(username);
+    }
+  } catch {
+    // 后台补绑定失败保持目录收藏，等待下一会话按服务端退避重试。
+  }
+}
+
 export async function saveFavorite(
   source: string,
   id: string,
@@ -591,9 +680,45 @@ export async function saveFavorite(
     const result = (await response.json()) as { key: string };
     // 合并可能删除另一目录键，成功后以服务端快照刷新，避免缓存保留幽灵收藏。
     await refreshFavoritesAfterWrite();
+    if (isCatalogFavoriteSource(result.key.split('+')[0])) {
+      void bindCatalogFavorites(result.key);
+    }
     return result.key;
   } catch (error) {
     await handleDatabaseOperationFailure('favorites', error);
+    throw error;
+  }
+}
+
+export async function setFavoriteTracking(
+  source: string,
+  id: string,
+  enabled: boolean,
+): Promise<Favorite> {
+  const key = generateStorageKey(source, id);
+  try {
+    const response = await fetchWithAuth('/api/favorites', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, trackingEnabled: enabled }),
+    });
+    const { favorite } = (await response.json()) as { favorite: Favorite };
+    const cached = cacheManager.getCachedFavorites();
+    if (cached?.[key]) {
+      const next = { ...cached, [key]: favorite };
+      cacheManager.cacheFavorites(next);
+      window.dispatchEvent(
+        new CustomEvent('favoritesUpdated', { detail: next }),
+      );
+    }
+    notifyMessagesUpdated();
+    return favorite;
+  } catch (error) {
+    await handleDatabaseOperationFailure(
+      'favorites',
+      error,
+      '追更设置保存失败，请重试',
+    );
     throw error;
   }
 }

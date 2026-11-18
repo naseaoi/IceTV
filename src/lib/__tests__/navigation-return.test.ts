@@ -50,5 +50,6 @@ describe('navigation return', () => {
     expect(getBackFallbackPath('/me/favorites')).toBe('/me');
     expect(getBackFallbackPath('/settings')).toBe('/me');
     expect(getBackFallbackPath('/u/abc')).toBe('/me');
+    expect(getBackFallbackPath('/lists/abc')).toBe('/me/lists');
   });
 });

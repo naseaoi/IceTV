@@ -37,7 +37,11 @@ const request = (body: unknown) => ({ json: async () => body }) as NextRequest;
 beforeEach(() => {
   jest.clearAllMocks();
   mockGuard.mockResolvedValue({ username: 'demo' });
-  mockV2.mockResolvedValue('history_1234');
+  mockV1.mockResolvedValue(null);
+  mockV2.mockResolvedValue({
+    historyId: 'history_1234',
+    levelUp: { level: 2 },
+  });
 });
 it('v2 桶和规范化历史一起写入并返回 id', async () => {
   const response = await POST(
@@ -55,6 +59,7 @@ it('v2 桶和规范化历史一起写入并返回 id', async () => {
   expect(await response.json()).toEqual({
     success: true,
     historyId: 'history_1234',
+    levelUp: { level: 2 },
   });
   expect(mockV2).toHaveBeenCalledWith(
     'demo',
@@ -102,11 +107,11 @@ it('v1 保持客户端秒数且不写历史，零时长不落库', async () => {
     await (
       await POST(request({ session: { ...session, watch_seconds: 0 } }))
     ).json(),
-  ).toEqual({ success: true, historyId: null });
+  ).toEqual({ success: true, historyId: null, levelUp: null });
   expect(mockV1).not.toHaveBeenCalled();
 });
 it('空桶仍交给存储确认已有累计值，已删历史返回 null', async () => {
-  mockV2.mockResolvedValue(null);
+  mockV2.mockResolvedValue({ historyId: null, levelUp: null });
   expect(
     await (
       await POST(
@@ -117,7 +122,7 @@ it('空桶仍交给存储确认已有累计值，已删历史返回 null', async
         }),
       )
     ).json(),
-  ).toEqual({ success: true, historyId: null });
+  ).toEqual({ success: true, historyId: null, levelUp: null });
 });
 it('非法 JSON 与未登录请求不会写入', async () => {
   const bad = {

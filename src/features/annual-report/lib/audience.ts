@@ -1,9 +1,13 @@
 import type { AnnualReport } from '@/features/playback-stats/types';
 
-// 本人报告与公开快照共用的展示数据；公开快照没有 availableYears，且可能隐藏作息
-export type RecapReport = Omit<AnnualReport, 'availableYears'> & {
-  rhythmHidden?: boolean;
-};
+type LaterFields = 'completions' | 'lists' | 'capsules' | 'social';
+
+// 本人报告与公开快照共用的展示数据；公开快照没有 availableYears，且可能隐藏作息。
+// 早于这些字段生成的公开快照里没有 LaterFields，按缺失处理。
+export type RecapReport = Omit<AnnualReport, 'availableYears' | LaterFields> &
+  Partial<Pick<AnnualReport, LaterFields>> & {
+    rhythmHidden?: boolean;
+  };
 
 export type RecapAudience = {
   // 本人查看自己的报告时可管理公开状态

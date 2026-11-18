@@ -19,6 +19,14 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+export function libraryChipClass(active: boolean): string {
+  return `inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[13px] font-medium transition ${
+    active
+      ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
+      : 'bg-white/75 text-gray-600 ring-1 ring-inset ring-black/[0.06] hover:bg-white hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/[0.06] dark:hover:bg-white/10 dark:hover:text-white'
+  }`;
+}
+
 // 内容库筛选胶囊，加载中计数用与真实数字等宽的占位
 export function LibraryFilterChip({
   label,
@@ -40,11 +48,7 @@ export function LibraryFilterChip({
       type='button'
       aria-pressed={active}
       onClick={onClick}
-      className={`inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[13px] font-medium transition ${
-        active
-          ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
-          : 'bg-white/75 text-gray-600 ring-1 ring-inset ring-black/[0.06] hover:bg-white hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/[0.06] dark:hover:bg-white/10 dark:hover:text-white'
-      }`}
+      className={libraryChipClass(active)}
     >
       {label}
       {loading ? (

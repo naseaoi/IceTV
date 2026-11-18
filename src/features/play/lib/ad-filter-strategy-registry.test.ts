@@ -5,16 +5,10 @@ import {
 
 describe('ad-filter-strategy-registry', () => {
   it('如意资源使用独立文本策略', () => {
-    expect(getSourceAdFilterStrategy('rycj')).toEqual({
+    expect(getSourceAdFilterStrategy('rycj')).toMatchObject({
       id: 'rycj-periodic-blocks',
       timeline: 'continuous-periodic',
-      signals: [
-        'extinf-pattern',
-        'local-duration-shift',
-        'host-anomaly',
-        'periodic-duration-profile',
-        'short-edge-blocks',
-      ],
+      signals: ['known-ad-templates', 'frame-grid-clips', 'host-anomaly'],
     });
     expect(getSourceAdFilterStrategy(' RYCJ ')).toBe(
       getSourceAdFilterStrategy('rycj'),

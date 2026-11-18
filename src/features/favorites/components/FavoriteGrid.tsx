@@ -3,6 +3,7 @@
 import { Check } from 'lucide-react';
 import Link from 'next/link';
 
+import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import CoverImage from '@/components/CoverImage';
 import {
   POSTER_BADGE_NEUTRAL_CLASS,
@@ -28,12 +29,15 @@ export function FavoriteGrid({
   readOnly = false,
   virtualized = false,
   selection,
+  gridClassName = POSTER_GRID_CLASS,
 }: {
   items: FavoriteItem[];
   emptyText?: string;
   readOnly?: boolean;
   virtualized?: boolean;
   selection?: FavoriteGridSelection;
+  // 仅作用于非虚拟化网格，虚拟化网格的列宽由布局参数决定
+  gridClassName?: string;
 }) {
   if (items.length === 0) {
     return (
@@ -66,6 +70,7 @@ export function FavoriteGrid({
       items={items}
       readOnly={readOnly}
       selection={selection}
+      gridClassName={gridClassName}
     />
   );
 }
@@ -78,16 +83,18 @@ function PlainFavoriteGrid({
   items,
   readOnly,
   selection,
+  gridClassName,
 }: {
   items: FavoriteItem[];
   readOnly: boolean;
   selection?: FavoriteGridSelection;
+  gridClassName: string;
 }) {
   const containerRef = useListLayoutMotion<HTMLDivElement>(
     items.map(favoriteKey),
   );
   return (
-    <div ref={containerRef} className={`relative ${POSTER_GRID_CLASS}`}>
+    <div ref={containerRef} className={`relative ${gridClassName}`}>
       {items.map((item) => {
         const key = favoriteKey(item);
         return (
@@ -182,9 +189,15 @@ const READ_ONLY_COVER_CLASS = 'aspect-[2/3] rounded-xl';
 const READ_ONLY_TITLE_CLASS = 'mt-2 text-sm';
 const READ_ONLY_META_CLASS = 'mt-1 text-xs';
 
-export function ReadOnlyFavoriteGridSkeleton({ count }: { count: number }) {
+export function ReadOnlyFavoriteGridSkeleton({
+  count,
+  gridClassName = POSTER_GRID_CLASS,
+}: {
+  count: number;
+  gridClassName?: string;
+}) {
   return (
-    <div className={POSTER_GRID_CLASS} role='status' aria-label='加载中'>
+    <div className={gridClassName} role='status' aria-label='加载中'>
       {Array.from({ length: count }, (_, index) => (
         <div key={index}>
           <div className={`skeleton ${READ_ONLY_COVER_CLASS}`} />
@@ -203,8 +216,22 @@ function ReadOnlyFavoriteCard({ item }: { item: FavoriteItem }) {
   const status = WATCH_STATUS_OPTIONS.find(
     (option) => option.value === item.watchStatus,
   );
+  const href = readOnlyPlayUrl(item);
+  const menuProps = useMediaCardMenu({
+    target: {
+      source: item.source,
+      id: item.id,
+      title: item.title,
+      year: item.year,
+      cover: item.poster,
+      searchTitle: item.search_title,
+      sourceName: item.source_name,
+      totalEpisodes: item.episodes,
+    },
+    href,
+  });
   return (
-    <Link href={readOnlyPlayUrl(item)} className='group block'>
+    <Link href={href} className='group block' {...menuProps}>
       <div
         className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 ${READ_ONLY_COVER_CLASS}`}
       >

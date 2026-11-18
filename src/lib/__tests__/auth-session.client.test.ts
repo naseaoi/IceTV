@@ -28,6 +28,7 @@ describe('getClientAuthSession', () => {
       ok: true,
       json: async () => ({
         authenticated: true,
+        level: 1,
         profileId: 'profileAlice',
         avatarSeed: null,
         nickname: '爱丽丝',
@@ -38,6 +39,7 @@ describe('getClientAuthSession', () => {
 
     await expect(getClientAuthSession()).resolves.toEqual({
       status: 'authenticated',
+      level: 1,
       profileId: 'profileAlice',
       avatarSeed: null,
       nickname: '爱丽丝',
@@ -59,6 +61,7 @@ describe('getClientAuthSession', () => {
         ok: true,
         json: async () => ({
           authenticated: true,
+          level: 1,
           username: 'alice',
           role: 'user',
           profileId: 'AbCdEf012345',
@@ -68,6 +71,7 @@ describe('getClientAuthSession', () => {
       });
       await expect(getClientAuthSession()).resolves.toMatchObject({
         status: 'authenticated',
+        level: 1,
         avatarSeed,
       });
     },
@@ -81,6 +85,7 @@ describe('getClientAuthSession', () => {
         ok: true,
         json: async () => ({
           authenticated: true,
+          level: 1,
           username: 'alice',
           role: 'user',
           profileId: 'AbCdEf012345',

@@ -58,6 +58,128 @@ function generateStorageKey(source: string, id: string): string {
 
 // 导出便捷方法
 class DbManager {
+  async getAnnualActivity(
+    ...args: Parameters<IStorage['getAnnualActivity']>
+  ): ReturnType<IStorage['getAnnualActivity']> {
+    return (await this.getStorage()).getAnnualActivity(...args);
+  }
+  async countCapsules(
+    ...args: Parameters<IStorage['countCapsules']>
+  ): ReturnType<IStorage['countCapsules']> {
+    return (await this.getStorage()).countCapsules(...args);
+  }
+  async getCompletion(
+    ...args: Parameters<IStorage['getCompletion']>
+  ): ReturnType<IStorage['getCompletion']> {
+    return (await this.getStorage()).getCompletion(...args);
+  }
+  async createCapsule(
+    ...args: Parameters<IStorage['createCapsule']>
+  ): ReturnType<IStorage['createCapsule']> {
+    return (await this.getStorage()).createCapsule(...args);
+  }
+  async getCapsules(
+    ...args: Parameters<IStorage['getCapsules']>
+  ): ReturnType<IStorage['getCapsules']> {
+    return (await this.getStorage()).getCapsules(...args);
+  }
+  async deleteCapsule(
+    ...args: Parameters<IStorage['deleteCapsule']>
+  ): ReturnType<IStorage['deleteCapsule']> {
+    return (await this.getStorage()).deleteCapsule(...args);
+  }
+  async openCapsule(
+    ...args: Parameters<IStorage['openCapsule']>
+  ): ReturnType<IStorage['openCapsule']> {
+    return (await this.getStorage()).openCapsule(...args);
+  }
+  async getCapsuleMessages(
+    ...args: Parameters<IStorage['getCapsuleMessages']>
+  ): ReturnType<IStorage['getCapsuleMessages']> {
+    return (await this.getStorage()).getCapsuleMessages(...args);
+  }
+  async readAllCapsules(
+    ...args: Parameters<IStorage['readAllCapsules']>
+  ): ReturnType<IStorage['readAllCapsules']> {
+    return (await this.getStorage()).readAllCapsules(...args);
+  }
+
+  async getTrackingCalendarItems(
+    ...args: Parameters<IStorage['getTrackingCalendarItems']>
+  ): ReturnType<IStorage['getTrackingCalendarItems']> {
+    return (await this.getStorage()).getTrackingCalendarItems(...args);
+  }
+  async countPlazaLists(
+    ...args: Parameters<IStorage['countPlazaLists']>
+  ): ReturnType<IStorage['countPlazaLists']> {
+    return (await this.getStorage()).countPlazaLists(...args);
+  }
+  async getListItemCount(
+    ...args: Parameters<IStorage['getListItemCount']>
+  ): ReturnType<IStorage['getListItemCount']> {
+    return (await this.getStorage()).getListItemCount(...args);
+  }
+  async setListLike(
+    ...args: Parameters<IStorage['setListLike']>
+  ): ReturnType<IStorage['setListLike']> {
+    return (await this.getStorage()).setListLike(...args);
+  }
+  async recordListView(
+    ...args: Parameters<IStorage['recordListView']>
+  ): ReturnType<IStorage['recordListView']> {
+    return (await this.getStorage()).recordListView(...args);
+  }
+  async getPlazaLists(
+    ...args: Parameters<IStorage['getPlazaLists']>
+  ): ReturnType<IStorage['getPlazaLists']> {
+    return (await this.getStorage()).getPlazaLists(...args);
+  }
+  async getLists(
+    ...args: Parameters<IStorage['getLists']>
+  ): ReturnType<IStorage['getLists']> {
+    return (await this.getStorage()).getLists(...args);
+  }
+  async countUserLists(
+    ...args: Parameters<IStorage['countUserLists']>
+  ): ReturnType<IStorage['countUserLists']> {
+    return (await this.getStorage()).countUserLists(...args);
+  }
+  async getList(
+    ...args: Parameters<IStorage['getList']>
+  ): ReturnType<IStorage['getList']> {
+    return (await this.getStorage()).getList(...args);
+  }
+  async createList(
+    ...args: Parameters<IStorage['createList']>
+  ): ReturnType<IStorage['createList']> {
+    return (await this.getStorage()).createList(...args);
+  }
+  async updateList(
+    ...args: Parameters<IStorage['updateList']>
+  ): ReturnType<IStorage['updateList']> {
+    return (await this.getStorage()).updateList(...args);
+  }
+  async deleteList(
+    ...args: Parameters<IStorage['deleteList']>
+  ): ReturnType<IStorage['deleteList']> {
+    return (await this.getStorage()).deleteList(...args);
+  }
+  async addListItem(
+    ...args: Parameters<IStorage['addListItem']>
+  ): ReturnType<IStorage['addListItem']> {
+    return (await this.getStorage()).addListItem(...args);
+  }
+  async removeListItem(
+    ...args: Parameters<IStorage['removeListItem']>
+  ): ReturnType<IStorage['removeListItem']> {
+    return (await this.getStorage()).removeListItem(...args);
+  }
+  async reorderListItems(
+    ...args: Parameters<IStorage['reorderListItems']>
+  ): ReturnType<IStorage['reorderListItems']> {
+    return (await this.getStorage()).reorderListItems(...args);
+  }
+
   private async getStorage(): Promise<IStorage> {
     return getStorage();
   }
@@ -122,6 +244,10 @@ class DbManager {
   ): ReturnType<IStorage['getFollowRecapMessageCount']> {
     return (await this.getStorage()).getFollowRecapMessageCount(...args);
   }
+  async getProfileShowcase(username: string) {
+    return (await this.getStorage()).getProfileShowcase(username);
+  }
+
   async getUserProfileView(
     ...args: Parameters<IStorage['getUserProfileView']>
   ): ReturnType<IStorage['getUserProfileView']> {
@@ -325,6 +451,24 @@ class DbManager {
   ): ReturnType<IStorage['getMyVideoReviewRatings']> {
     return (await this.getStorage()).getMyVideoReviewRatings(...args);
   }
+  async getWorkWatchStatuses(
+    ...args: Parameters<IStorage['getWorkWatchStatuses']>
+  ): ReturnType<IStorage['getWorkWatchStatuses']> {
+    return (await this.getStorage()).getWorkWatchStatuses(...args);
+  }
+
+  async getFollowOpinions(
+    ...args: Parameters<IStorage['getFollowOpinions']>
+  ): ReturnType<IStorage['getFollowOpinions']> {
+    return (await this.getStorage()).getFollowOpinions(...args);
+  }
+
+  async getTasteMatch(
+    ...args: Parameters<IStorage['getTasteMatch']>
+  ): ReturnType<IStorage['getTasteMatch']> {
+    return (await this.getStorage()).getTasteMatch(...args);
+  }
+
   async getWorkVideoReviewPage(
     ...args: Parameters<IStorage['getWorkVideoReviewPage']>
   ): ReturnType<IStorage['getWorkVideoReviewPage']> {
@@ -364,11 +508,55 @@ class DbManager {
     return storage.getPlayRecord(userName, key);
   }
 
+  async getLatestPlayRecordByTitle(
+    userName: string,
+    title: string,
+    year: string,
+  ): Promise<Record<string, PlayRecord>> {
+    return (await this.getStorage()).getLatestPlayRecordByTitle(
+      userName,
+      title,
+      year,
+    );
+  }
+
   async getPlayRecordsByKeys(
     userName: string,
     keys: string[],
   ): Promise<Record<string, PlayRecord>> {
     return (await this.getStorage()).getPlayRecordsByKeys(userName, keys);
+  }
+
+  async savePlayProgress(
+    userName: string,
+    source: string,
+    id: string,
+    record: PlayRecord,
+  ) {
+    const { savePlayProgressWithRetry } =
+      await import('@/lib/play-record-write');
+    return savePlayProgressWithRetry(
+      await this.getStorage(),
+      userName,
+      generateStorageKey(source, id),
+      record,
+    );
+  }
+
+  async updatePlayRecord(
+    userName: string,
+    source: string,
+    id: string,
+    update: (current: PlayRecord | null) => PlayRecord | null,
+  ) {
+    const { updatePlayRecordWithRetry } =
+      await import('@/lib/play-record-write');
+    return updatePlayRecordWithRetry(
+      await this.getStorage(),
+      userName,
+      generateStorageKey(source, id),
+      update,
+    );
   }
 
   async savePlayRecord(
@@ -483,6 +671,12 @@ class DbManager {
     ...args: Parameters<IStorage['getFavoriteUpdateMessagePage']>
   ) {
     return (await this.getStorage()).getFavoriteUpdateMessagePage(...args);
+  }
+
+  async setFavoriteTracking(
+    ...args: Parameters<IStorage['setFavoriteTracking']>
+  ): Promise<Favorite | null> {
+    return (await this.getStorage()).setFavoriteTracking(...args);
   }
 
   async readFavoriteUpdate(
@@ -615,6 +809,7 @@ class DbManager {
     nickname?: string,
     userGroups?: string[],
     identity?: import('@/lib/oauth-identity').OAuthIdentity,
+    inviteCode?: string,
   ): Promise<void> {
     const storage = await this.getStorage();
     await storage.registerUser(
@@ -623,6 +818,7 @@ class DbManager {
       nickname,
       userGroups,
       identity,
+      inviteCode,
     );
   }
 
@@ -963,9 +1159,13 @@ class DbManager {
   async savePlaybackSession(
     userName: string,
     session: PlaybackSession,
-  ): Promise<void> {
+  ): ReturnType<IStorage['setPlaybackSession']> {
     const storage = await this.getStorage();
-    await storage.setPlaybackSession(userName, session);
+    return storage.setPlaybackSession(userName, session);
+  }
+
+  async getWatchLevel(userName: string): ReturnType<IStorage['getWatchLevel']> {
+    return (await this.getStorage()).getWatchLevel(userName);
   }
 
   async saveWatchSessionReport(

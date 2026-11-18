@@ -18,7 +18,10 @@ import {
   DEFAULT_SITE_FOOTER_TEXT,
   normalizeSiteFooterText,
 } from '@/lib/site-footer';
-import { withSiteIconCacheBuster } from '@/lib/site-icon';
+import {
+  DEFAULT_APPLE_TOUCH_ICON,
+  withSiteIconCacheBuster,
+} from '@/lib/site-icon';
 
 const SiteContext = createContext<{
   siteName: string;
@@ -102,7 +105,7 @@ export function SiteProvider({
         updateIconLink("link[rel='icon']", nextSiteIcon || '/favicon.ico');
         updateIconLink(
           "link[rel='apple-touch-icon']",
-          nextSiteIcon || '/icons/icon-192x192.png',
+          nextSiteIcon || DEFAULT_APPLE_TOUCH_ICON,
         );
       })
       .catch(() => {

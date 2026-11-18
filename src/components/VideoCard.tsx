@@ -19,6 +19,7 @@ import {
   useCardInteractionManager,
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
+import { useOpenListPicker } from '@/components/list-picker-context';
 import {
   POSTER_CARD_INTERACTION_CLASS,
   POSTER_CARD_SUBTITLE_ROW_CLASS,
@@ -37,6 +38,7 @@ import {
   warmupDanmakuForNavigation,
   warmupDanmakuSearchForNavigation,
 } from '@/features/play/lib/danmaku/navigation-warmup';
+import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { useLongPress } from '@/hooks/useLongPress';
 import { buildExternalSubjectUrl } from '@/hooks/usePosterPlay';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
@@ -48,8 +50,10 @@ import {
   getFavoriteForWork,
   markPlayRecordUpdateRead,
   saveFavorite,
+  setFavoriteTracking,
   setPlayRecordTracking,
 } from '@/lib/db.client';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -91,6 +95,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       currentEpisode,
       hasUpdate = false,
       trackingEnabled = true,
+      trackingTarget,
       availableEpisodes,
       resumeEpisodeIndex,
       resumeGroup,
@@ -109,6 +114,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const router = useRouter();
     const interactionId = useId();
     const openWatchRecord = useOpenWatchRecord();
+    const openListPicker = useOpenListPicker();
     const prefetchTimerRef = useRef<number | null>(null);
     const {
       showActionSheet,
@@ -459,6 +465,16 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         }`;
       }
       if (actualSource && actualId) {
+        const detail = aggregateGroup?.find(
+          (item) => item.source === actualSource && item.id === actualId,
+        );
+        if (
+          from === 'search' &&
+          detail?.episodes.length &&
+          !detail.episodes.some(isLazyEpisodeUrl)
+        ) {
+          saveDetailSnapshot(actualSource, actualId, detail);
+        }
         return `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
           actualTitle,
         )}${actualYear ? `&year=${actualYear}` : ''}${
@@ -483,6 +499,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualQuery,
       actualSearchType,
       saveAggregateGroup,
+      aggregateGroup,
+      from,
     ]);
 
     const warmupDanmaku = useCallback(() => {
@@ -643,21 +661,38 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       [actualId, actualSource, from],
     );
 
-    const handleToggleTracking = useCallback(async () => {
-      if (from !== 'playrecord' || !actualSource || !actualId) return;
+    const trackingOwner =
+      from === 'playrecord'
+        ? 'record'
+        : from === 'favorite'
+          ? trackingTarget
+          : undefined;
 
-      const record = await setPlayRecordTracking(
-        actualSource,
-        actualId,
-        !visibleTrackingEnabled,
-      );
-      setVisibleTrackingEnabled(isTrackingEnabled(record));
-      setVisibleHasUpdate(hasPlayRecordUpdate(record));
-      showToast(
-        isTrackingEnabled(record) ? '已开启追更' : '已取消追更',
-        'success',
-      );
-    }, [actualId, actualSource, from, visibleTrackingEnabled]);
+    const handleToggleTracking = useCallback(async () => {
+      if (!trackingOwner || !actualSource || !actualId) return;
+
+      let enabled: boolean;
+      if (trackingOwner === 'record') {
+        const record = await setPlayRecordTracking(
+          actualSource,
+          actualId,
+          !visibleTrackingEnabled,
+        );
+        enabled = isTrackingEnabled(record);
+        if (from === 'playrecord') {
+          setVisibleHasUpdate(hasPlayRecordUpdate(record));
+        }
+      } else {
+        const favorite = await setFavoriteTracking(
+          actualSource,
+          actualId,
+          !visibleTrackingEnabled,
+        );
+        enabled = favorite.tracking_enabled !== false;
+      }
+      setVisibleTrackingEnabled(enabled);
+      showToast(enabled ? '已开启追更' : '已取消追更', 'success');
+    }, [actualId, actualSource, from, trackingOwner, visibleTrackingEnabled]);
 
     // 检查搜索结果的收藏状态
     const checkSearchFavoriteStatus = useCallback(async () => {
@@ -822,6 +857,18 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                   }),
               }
             : undefined,
+        addToList:
+          openListPicker && origin !== 'live' && recordTarget
+            ? () =>
+                openListPicker({
+                  source: recordTarget.source,
+                  id: recordTarget.id,
+                  title: actualTitle,
+                  year: actualYear,
+                  cover: actualPoster,
+                  searchTitle: actualQuery || undefined,
+                })
+            : null,
         watchRecord:
           openWatchRecord && origin !== 'live' && recordTarget
             ? () =>
@@ -840,9 +887,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                 })
             : null,
         updates:
-          from === 'playrecord' && hasRecordTarget
+          trackingOwner && hasRecordTarget
             ? {
-                hasUpdate: visibleHasUpdate,
+                hasUpdate: from === 'playrecord' && visibleHasUpdate,
                 onMarkRead: () => handleMarkUpdateRead(noopEvent),
                 tracking: visibleTrackingEnabled,
                 onToggleTracking: handleToggleTracking,
@@ -867,11 +914,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       isBangumi,
       handleClick,
       visibleTrackingEnabled,
+      trackingOwner,
       handleToggleTracking,
       handleToggleFavorite,
       handleMarkUpdateRead,
       handleDeleteRecord,
       origin,
+      openListPicker,
       openWatchRecord,
       source_name,
       actualTitle,

@@ -23,6 +23,7 @@ import {
   waitForDanmakuPlayerSwitch,
 } from '@/features/play/lib/danmaku/load-notice';
 import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
+import { resolveActivePlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { prewarmLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
 import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import {
@@ -35,7 +36,12 @@ import {
   shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
 import {
+  clearExplicitPlaybackSeek,
+  recordExplicitPlaybackSeek,
+} from '@/features/play/lib/playProgressRestore';
+import {
   applyResumeTime,
+  isProgrammaticResumeSeek,
   isWithinAutoResumeWindow,
   resolvePendingResumeTime,
   resolveResumeTimeTarget,
@@ -44,6 +50,7 @@ import {
 import {
   createVodM3u8Loader,
   getVodRuntimeSourceUrl,
+  isVodRuntimeWaitingForResource,
   pauseIfVodRuntimeReleased,
   registerVodNativeRuntime,
 } from '@/features/play/lib/vodHlsRuntime';
@@ -58,6 +65,7 @@ import {
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { writePlaybackRate } from '@/lib/local-preferences';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -67,6 +75,7 @@ import {
   isPlayerFastForwarding,
   prefetchM3U8,
   restorePlayerPlaybackRate,
+  runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import {
   configureArtplayerStatics,
@@ -143,6 +152,7 @@ export async function initializeArtPlayer(
     playbackIntentRef,
     onPlaybackRecoveryExhausted,
     onCurrentSourceVideoInfo,
+    onLastEpisodeEnded,
   } = params;
   const {
     loadingSessionRef,
@@ -283,6 +293,7 @@ export async function initializeArtPlayer(
         allowAutoResume: allowAutoResumeRef.current,
       });
       resetPlayerLoadingSessionState(loadingSessionRef.current);
+      clearExplicitPlaybackSeek(stableCurrentTimeRef);
       // 复用播放器时 Artplayer 会在 loadedmetadata 把进度归零，这里保留未落地的
       // 恢复点，交给 timeupdate/progress 重试逻辑再次 seek。
       if (carriedResumeTarget !== null) {
@@ -324,6 +335,7 @@ export async function initializeArtPlayer(
       cleanupPlayer();
     }
     resetPlayerLoadingSessionState(loadingSessionRef.current);
+    clearExplicitPlaybackSeek(stableCurrentTimeRef);
 
     const adBlockingHlsLoader = createHlsLoaderClass(
       Hls.DefaultConfig.loader as unknown as new (config: unknown) => {
@@ -398,6 +410,8 @@ export async function initializeArtPlayer(
         skipConfigRef,
         resumeTimeRef,
         resumeModeRef,
+        stableCurrentTimeRef,
+        clearTargetEpisodeProgressRef,
         setBlockAdEnabled,
         setAutoPlayNextEnabled,
         handleSkipConfigChange,
@@ -413,6 +427,8 @@ export async function initializeArtPlayer(
     if (!player) {
       return;
     }
+    // 点播恢复统一由受管运行时处理，移除 Artplayer 延迟重设旧 URL 的内建重连。
+    player.off('video:error');
     // 内置倍速设置在 ratechange 时按当前倍速查选项，快捷键 0.1 步进的倍速不在列表里会查到 null 并直接 check 崩溃
     const setting = player.setting as
       | { check?: (target: unknown) => void }
@@ -509,21 +525,45 @@ export async function initializeArtPlayer(
       });
       reportNativeRouteStat(false);
 
+      const resumeTarget = resolveActivePlayTime({
+        targetEpisodePending: clearTargetEpisodeProgressRef.current,
+        playerCurrentTime: player.currentTime || 0,
+        pendingResumeTime: resumeTimeRef.current,
+        stableCurrentTime: stableCurrentTimeRef.current,
+      });
+      const sessionStarted = loadingSessionRef.current.playbackStartNotified;
+      const userPaused = sessionStarted && player.video?.paused === true;
+      // resumeTimeRef 只在首次起播时清空，已起播后只登记本会话落地一次的目标，否则之后每次 canplay / progress 都会跳回
+      if (!sessionStarted) {
+        resumeTimeRef.current = resumeTarget;
+        resumeModeRef.current = 'forced';
+      }
+      loadingSessionRef.current.pendingInitialResumeTarget = resumeTarget;
       nativeUseServerProxy = nextServer;
       nativeAttempt.routeSwitched = true;
       nativeAttempt.triedRoutes.add(nextServer ? 'server' : 'browser');
       setRealtimeLoadSpeed('直连失败，切换代理...');
-      setIsVideoLoading(true);
-      onSourceProxyFallbackStarted?.();
+      if (!userPaused) {
+        setIsVideoLoading(true);
+        onSourceProxyFallbackStarted?.();
+      }
 
       try {
         waitForDanmakuPlayerSwitch(player, player.switchUrl(fallbackUrl));
+        player.once('video:loadedmetadata', () => {
+          if (isStalePlayerSession()) return;
+          applyResumeTime(player, resumeTarget);
+        });
         const activeVideo = player.video as HTMLVideoElement | undefined;
         if (activeVideo) {
           const managedVideo = getManagedVideo(activeVideo);
           managedVideo.__icetvUsingServerProxy = nextServer;
           ensureVideoSource(activeVideo, fallbackUrl);
-          void activeVideo.play().catch(() => {});
+          if (userPaused) {
+            activeVideo.pause();
+          } else {
+            void activeVideo.play().catch(() => {});
+          }
         }
         return true;
       } catch (error) {
@@ -550,6 +590,7 @@ export async function initializeArtPlayer(
     };
 
     const tryAutoAdvanceEpisode = () => {
+      if (isStalePlayerSession()) return false;
       const currentDetail = detailRef.current;
       const episodeIndex = currentEpisodeIndexRef.current;
       if (
@@ -567,6 +608,17 @@ export async function initializeArtPlayer(
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
       handleNextEpisode();
       return true;
+    };
+
+    const notifyIfLastEpisodeEnded = () => {
+      const episodeCount = detailRef.current?.episodes?.length ?? 0;
+      if (
+        episodeCount > 0 &&
+        currentEpisodeIndexRef.current === episodeCount - 1 &&
+        !isStalePlayerSession()
+      ) {
+        onLastEpisodeEnded?.();
+      }
     };
 
     const updateStableCurrentTime = (time: number) => {
@@ -701,10 +753,11 @@ export async function initializeArtPlayer(
     };
 
     let initialPlaybackRequestInFlight = false;
-    // hls 仍在加载时再 startLoad 会中止在途分片并从头重下，只在加载被停掉时补拉
+    // hls 仍在加载时再 startLoad 会中止在途分片并从头重下，只在加载被停掉时补拉；资源限流退避由运行时按时补拉
     const resumeHlsLoadingIfStopped = (video: HTMLVideoElement) => {
       const hls = getManagedVideo(video).hls;
-      if (hls && !hls.loadingEnabled) hls.startLoad();
+      if (hls && !hls.loadingEnabled && !isVodRuntimeWaitingForResource(video))
+        hls.startLoad();
     };
     const requestInitialPlayback = (
       video: HTMLVideoElement | null | undefined,
@@ -859,6 +912,20 @@ export async function initializeArtPlayer(
       return trackedResumeTarget;
     };
 
+    // 已起播会话里线路恢复或资源等待期间用户暂停，不会再有 playing 收起加载层；落点已到且画面就绪即结束等待
+    const finishRecoveryIfPausedReady = () => {
+      if (isStalePlayerSession()) return;
+      const activeVideo = player.video as HTMLVideoElement | null;
+      if (
+        loadingSessionRef.current.playbackStartNotified &&
+        loadingSessionRef.current.pendingInitialResumeTarget === null &&
+        activeVideo?.paused &&
+        shouldDismissLoadingFromReadyFrame(activeVideo)
+      ) {
+        finishInitialLoading(true);
+      }
+    };
+
     const finishInitialLoadingIfMediaReady = () => {
       if (isStalePlayerSession()) {
         return;
@@ -873,19 +940,24 @@ export async function initializeArtPlayer(
       }
 
       const hasReadyFrame = shouldDismissLoadingFromReadyFrame(activeVideo);
+      // 起播后播放与暂停由用户决定，就绪事件不再代为播放
+      const mayRequestPlayback =
+        hasReadyFrame && !loadingSessionRef.current.playbackStartNotified;
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         if (!completePendingResumeIfReady()) {
           retryPendingResumePosition();
         }
-        if (!isPlayingReady && hasReadyFrame) {
+        if (!isPlayingReady && mayRequestPlayback) {
           requestInitialPlayback(activeVideo);
         }
+        finishRecoveryIfPausedReady();
         return;
       }
 
-      if (hasReadyFrame) {
+      if (mayRequestPlayback) {
         requestInitialPlayback(activeVideo);
       }
+      finishRecoveryIfPausedReady();
     };
 
     const unbindDanmakuSliderDrag = bindDanmakuSliderDrag(player);
@@ -924,6 +996,7 @@ export async function initializeArtPlayer(
     });
 
     player.on('pause', () => {
+      finishRecoveryIfPausedReady();
       void releaseWakeLock();
       saveCurrentPlayProgress();
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('pause');
@@ -931,6 +1004,7 @@ export async function initializeArtPlayer(
     });
 
     player.on('video:ended', () => {
+      if (isStalePlayerSession()) return;
       void releaseWakeLock();
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('ended');
       setIsPlaying(false);
@@ -944,7 +1018,7 @@ export async function initializeArtPlayer(
         console.warn('忽略异常提前触发的播放结束事件');
         return;
       }
-      tryAutoAdvanceEpisode();
+      if (!tryAutoAdvanceEpisode()) notifyIfLastEpisodeEnded();
     });
 
     if (player.playing) {
@@ -960,6 +1034,7 @@ export async function initializeArtPlayer(
         return;
       }
       lastPlaybackRateRef.current = player.playbackRate as number;
+      writePlaybackRate(lastPlaybackRateRef.current);
     });
 
     player.on('video:canplay', () => {
@@ -973,7 +1048,7 @@ export async function initializeArtPlayer(
           Math.abs(
             (player.playbackRate as number) - lastPlaybackRateRef.current,
           ) > 0.01 &&
-          isWebkit
+          !isPlayerFastForwarding(player)
         ) {
           player.playbackRate = lastPlaybackRateRef.current as
             | 0.5
@@ -996,7 +1071,8 @@ export async function initializeArtPlayer(
     player.on('video:progress', finishInitialLoadingIfMediaReady);
 
     player.on('video:timeupdate', () => {
-      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('timeupdate');
+      if (isStalePlayerSession()) return;
+      handlePlaybackStatsEvent?.('timeupdate');
       updateStableCurrentTime(player.currentTime || 0);
 
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
@@ -1058,12 +1134,22 @@ export async function initializeArtPlayer(
       ) {
         if (!tryAutoAdvanceEpisode()) {
           player.pause();
+          notifyIfLastEpisodeEnded();
         }
         player.notice.show = `已跳过片尾 (${formatTime(skipConfigRef.current.outro_time)})`;
       }
     });
 
-    player.on('error', (error: Error) => {
+    let nativeOfflineErrorPending = false;
+    const failNativePlayback = (reason: string) => {
+      if (onPlaybackRecoveryExhausted?.(reason)) return;
+      runManagedVideoCleanup(player.video as HTMLVideoElement);
+      player.pause();
+      setIsVideoLoading(false);
+      setRealtimeLoadSpeed('');
+      setError('当前源加载失败');
+    };
+    const handlePlayerError = (error: Error) => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('error');
       console.error('播放器错误:', error);
       const activeVideo = player.video as HTMLVideoElement | undefined;
@@ -1072,27 +1158,46 @@ export async function initializeArtPlayer(
         return;
       }
       if (isStalePlayerSession()) return;
-      if (player.currentTime > 0) {
+      if (mediaKind !== 'native' || activeVideo?.error?.code === 1) return;
+      if (navigator.onLine === false) {
+        nativeOfflineErrorPending = true;
         return;
       }
-      if (
-        mediaKind !== 'native' ||
-        navigator.onLine === false ||
-        activeVideo?.error?.code === 1
-      )
-        return;
+      nativeOfflineErrorPending = false;
       if (activeVideo?.error?.code !== 2) {
-        onPlaybackRecoveryExhausted?.('native-media-error');
+        failNativePlayback('native-media-error');
         return;
       }
       reportNativeRouteStat(false);
       if (
         mediaKind === 'native' &&
-        switchNativeToServerProxy(error.message || 'network-error')
+        switchNativeToServerProxy(error?.message || 'network-error')
       )
         return;
-      onPlaybackRecoveryExhausted?.('native-network-error');
-    });
+      failNativePlayback('native-network-error');
+    };
+    const onNativeOnline = () => {
+      if (
+        nativeOfflineErrorPending &&
+        navigator.onLine !== false &&
+        !isStalePlayerSession()
+      ) {
+        handlePlayerError(new Error('network-restored'));
+      }
+    };
+    if (mediaKind === 'native')
+      window.addEventListener('online', onNativeOnline);
+    const onRuntimeReleased = () => {
+      autoAdvanceArmedRef.current = false;
+      nativeOfflineErrorPending = false;
+      window.removeEventListener('online', onNativeOnline);
+    };
+    getManagedVideo(player.video as HTMLVideoElement).__icetvOnRuntimeReleased =
+      onRuntimeReleased;
+    player.on('destroy', onRuntimeReleased);
+    player.on('error', handlePlayerError);
+    // 内建重连原本会转发 video:error；移除后由项目直接接管原生媒体错误。
+    player.on('video:error', handlePlayerError);
 
     player.on('video:timeupdate', () => {
       const now = Date.now();
@@ -1102,20 +1207,37 @@ export async function initializeArtPlayer(
     });
 
     // 媒体键、画中画等直接暂停元素时不一定经过 Artplayer 的 pause 事件
-    for (const event of ['pause', 'waiting', 'stalled', 'error'] as const) {
+    for (const event of ['pause', 'waiting', 'stalled'] as const) {
       player.on(`video:${event}`, () => {
         if (!isStalePlayerSession()) handlePlaybackStatsEvent?.(event);
       });
     }
 
+    const updateSeekProgress = (completed: boolean) => {
+      if (isStalePlayerSession()) return;
+      const programmatic = isProgrammaticResumeSeek(player, completed);
+      if (
+        !programmatic &&
+        loadingSessionRef.current.playbackStartNotified &&
+        loadingSessionRef.current.pendingInitialResumeTarget === null &&
+        !clearTargetEpisodeProgressRef.current
+      ) {
+        recordExplicitPlaybackSeek(
+          stableCurrentTimeRef,
+          player.currentTime || 0,
+        );
+      } else {
+        updateStableCurrentTime(player.currentTime || 0);
+      }
+    };
     player.on('video:seeking', () => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeking');
-      updateStableCurrentTime(player.currentTime || 0);
+      updateSeekProgress(false);
     });
 
     player.on('video:seeked', () => {
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeked');
-      updateStableCurrentTime(player.currentTime || 0);
+      updateSeekProgress(true);
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         completePendingResumeIfReady();
       }

@@ -9,7 +9,14 @@ import {
   PLAYBACK_BUCKET_MS,
 } from '@/features/playback-stats/types';
 import { resolveEpisodeGroupPosition } from '@/lib/episode-groups';
+import { showToast } from '@/lib/toast';
 import type { SearchResult, WatchHistoryWrite } from '@/lib/types';
+import {
+  type WatchLevel,
+  isWatchLevel,
+  WATCH_LEVEL_UP_EVENT,
+  watchLevelName,
+} from '@/lib/watch-level';
 
 export type PlaybackStatsEvent =
   | 'playing'
@@ -22,6 +29,13 @@ export type PlaybackStatsEvent =
   | 'ended'
   | 'error'
   | 'stop';
+
+function announceWatchLevelUp(level: WatchLevel) {
+  showToast(`观影等级升到 ${level} 级 · ${watchLevelName(level)}`, 'success', {
+    key: 'watch-level-up',
+  });
+  window.dispatchEvent(new Event(WATCH_LEVEL_UP_EVENT));
+}
 
 type Sample = { monotonic: number; wall: number; position: number };
 type SessionState = {
@@ -186,6 +200,9 @@ export function usePlaybackStatsReporter({
           throw new Error(`Playback stats request failed: ${response.status}`);
         }
         const result: PlaybackSessionReportResponse = await response.json();
+        if (isWatchLevel(result.levelUp?.level)) {
+          announceWatchLevelUp(result.levelUp.level);
+        }
         if (report.history?.id && result.historyId === null) {
           historyIdsRef.current.set(key, null);
         } else if (

@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import {
   clearUrlGuardDnsCacheForTests,
   fetchWithUrlGuard,
@@ -37,6 +39,33 @@ describe('url guard', () => {
     global.fetch = originalFetch;
     resetUrlGuardDnsLookupForTests();
     jest.useRealTimers();
+  });
+
+  it('preserves signed URL escapes through validation and upstream fetch', async () => {
+    const url = 'https://example.com/a%25b?signature=a%2Bb%26c%3Dd%25';
+    expect(validateProxyUrl(url)).toEqual({ ok: true, url });
+    await expect(validateProxyUrlForRequest(url)).resolves.toEqual({
+      ok: true,
+      url,
+    });
+    (global.fetch as jest.Mock).mockResolvedValue({ status: 200, body: null });
+    await fetchWithUrlGuard(url);
+    expect(global.fetch).toHaveBeenCalledWith(url, expect.anything());
+    expect(validateProxyUrl(encodeURIComponent(url)).ok).toBe(false);
+  });
+
+  it('keeps parent cancellation connected after response headers arrive', async () => {
+    let signal: AbortSignal | undefined;
+    (global.fetch as jest.Mock).mockImplementation(async (_url, init) => {
+      signal = init.signal;
+      return { status: 200, body: null };
+    });
+    const controller = new AbortController();
+    await fetchWithUrlGuard('https://example.com/a', {
+      signal: controller.signal,
+    });
+    controller.abort();
+    expect(signal?.aborted).toBe(true);
   });
 
   it('blocks local hostnames without DNS lookup', () => {

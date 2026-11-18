@@ -179,7 +179,7 @@ export function RecapBackdrop({
   );
 }
 
-// 幻灯片内容区：上方给标题栏、下方给翻页提示留位，内容过高时在区内滚动
+// 幻灯片内容区：内容过高时在区内滚动，上下留白与边缘淡出见 recap.css 的 .recap-scroll
 export function SlideBody({
   children,
   center = false,
@@ -193,7 +193,7 @@ export function SlideBody({
   // 横向内边距随宽度增长，宽视口里内容仍保持竖版宽度，滚动区域铺满便于触摸
   return (
     <div
-      className={`recap-scroll relative flex h-full flex-col overflow-y-auto overscroll-contain px-[max(2rem,calc(50%-14rem))] pb-24 pt-[calc(env(safe-area-inset-top)+5.5rem)] sm:px-[max(2.5rem,calc(50%-14rem))] ${RECAP_TEXT.primary} ${center ? '[justify-content:safe_center]' : ''} ${className}`}
+      className={`recap-scroll relative flex h-full flex-col overflow-y-auto overscroll-contain px-[max(2rem,calc(50%-14rem))] sm:px-[max(2.5rem,calc(50%-14rem))] ${RECAP_TEXT.primary} ${center ? '[justify-content:safe_center]' : ''} ${className}`}
     >
       {children}
     </div>

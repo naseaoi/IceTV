@@ -323,8 +323,9 @@ export async function probeSourceSearch(
 async function searchSpecialSource(
   apiSite: ApiSite,
   query: string,
-  signal?: AbortSignal,
+  options: SearchFromApiOptions = {},
 ): Promise<SearchResult[]> {
+  const { signal, reportFailure } = options;
   const search = isGirigiriSource(apiSite)
     ? searchFromGirigiri
     : searchFromXgcartoon;
@@ -338,7 +339,9 @@ async function searchSpecialSource(
     );
   } catch (error) {
     if (signal?.aborted) return [];
-    throw error;
+    if (error instanceof ResourceLimitError) throw error;
+    if (reportFailure) throw new SearchSourceUnavailableError(apiSite.name);
+    return [];
   }
 }
 
@@ -365,7 +368,7 @@ export async function searchFromApi(
 
   if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
     return uniqueSearchResults(
-      await searchSpecialSource(apiSite, query, options.signal),
+      await searchSpecialSource(apiSite, query, options),
     );
   }
 
@@ -468,7 +471,7 @@ export async function searchFirstPageFromApi(
 ): Promise<SearchResult[]> {
   if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
     return uniqueSearchResults(
-      await searchSpecialSource(apiSite, query, options.signal),
+      await searchSpecialSource(apiSite, query, options),
     );
   }
 

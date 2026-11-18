@@ -53,6 +53,62 @@ const extendedPlaylist = [
 ].join('\n');
 
 describe('m3u8 rewrite', () => {
+  it.each([
+    [
+      'https://cdn.example/hls/playlist?id=1',
+      'seg.ts',
+      'https://cdn.example/hls/seg.ts',
+    ],
+    [
+      'https://cdn.example/hls/index.m3u8',
+      './seg.ts',
+      'https://cdn.example/hls/seg.ts',
+    ],
+    ['https://cdn.example/hls/', '../seg.ts', 'https://cdn.example/seg.ts'],
+    [
+      'https://cdn.example/hls/index.m3u8',
+      '/seg.ts',
+      'https://cdn.example/seg.ts',
+    ],
+    [
+      'https://cdn.example/hls/index.m3u8',
+      '//other.example/seg.ts',
+      'https://other.example/seg.ts',
+    ],
+    [
+      'https://cdn.example/hls/index.m3u8',
+      'https://other.example/seg.ts',
+      'https://other.example/seg.ts',
+    ],
+    [
+      'https://cdn.example/hls/playlist?id=1',
+      '?part=1',
+      'https://cdn.example/hls/playlist?part=1',
+    ],
+  ])(
+    'resolves media and URI tags against final URL %s',
+    async (finalUrl, uri, expected) => {
+      const result = await getRewrittenM3U8Content(
+        {
+          content: `#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="${uri}"\n#EXT-X-MAP:URI="${uri}"\n#EXT-X-MEDIA:TYPE=AUDIO,URI="${uri}"\n#EXTINF:6,\n${uri}`,
+          finalUrl,
+          loadedAt: 1,
+        },
+        'https://original.example/index.m3u8',
+        createRequest(),
+        true,
+        false,
+        'demo',
+        false,
+        false,
+      );
+      expect(result.split('\n').at(-1)).toBe(expected);
+      expect(result.match(/URI="[^"]+"/g)).toEqual(
+        Array(3).fill(`URI="${expected}"`),
+      );
+    },
+  );
+
   function rewriteSingle(key: string) {
     const url = `https://stream.example.com/${key}/index.m3u8`;
     return getRewrittenM3U8Content(

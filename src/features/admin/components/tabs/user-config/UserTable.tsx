@@ -27,6 +27,7 @@ interface User {
   banned?: boolean;
   enabledApis?: string[];
   tags?: string[];
+  inviteCode?: string | null;
 }
 
 interface UserTableSource {
@@ -279,6 +280,12 @@ export function UserTable({
                     >
                       最后活跃 {formatLastActive(lastActiveAt[user.username])}
                     </span>
+                    {user.inviteCode && (
+                      <>
+                        {' · 邀请码 '}
+                        <span className='font-mono'>{user.inviteCode}</span>
+                      </>
+                    )}
                     {' · 用户组 '}
                     {user.tags?.length ? user.tags.join(', ') : '无'}
                     {' · 视频源 '}

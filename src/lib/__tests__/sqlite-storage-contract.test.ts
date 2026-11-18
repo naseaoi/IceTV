@@ -4,11 +4,13 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
@@ -29,7 +31,90 @@ import { announcementContract } from './__fixtures__/announcement-contract';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
-import { videoReviewContract } from './__fixtures__/video-review-contract';
+import {
+  videoReview,
+  videoReviewContract,
+} from './__fixtures__/video-review-contract';
+
+it.each([null, 20 * 3_600_000])(
+  'public references read current watch totals: %s',
+  async (countedMs) => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const sql = (
+      storage as unknown as { db: import('better-sqlite3').Database }
+    ).db;
+    try {
+      const profile = await storage.ensureUserProfile('author');
+      await storage.ensureUserProfile('reader');
+      await storage.setUserFollow('reader', 'author', true);
+      await storage.setVideoReview('author', videoReview);
+      if (countedMs !== null)
+        sql
+          .prepare(
+            'INSERT INTO user_watch_totals (username, counted_ms, updated_at) VALUES (?, ?, ?)',
+          )
+          .run('author', countedMs, Date.now());
+      const level = countedMs === null ? 1 : 3;
+      expect((await storage.getUserProfile('author'))?.level).toBe(level);
+      expect(
+        (await storage.getUserProfileById(profile.profile_id))?.level,
+      ).toBe(level);
+      expect(
+        (await storage.getUserProfileView('author', 'reader'))?.level,
+      ).toBe(level);
+      expect(
+        (await storage.getUserFollowPage('reader', 'following')).items[0].level,
+      ).toBe(level);
+      expect(
+        (await storage.getUserPublicReviewPage('author', 'reader')).items[0]
+          .author.level,
+      ).toBe(level);
+      expect(
+        (
+          await storage.getFollowOpinions(
+            'reader',
+            videoReview.title_norm,
+            videoReview.year,
+          )
+        ).items[0].author.level,
+      ).toBe(level);
+      const reply = await storage.postReviewReply(
+        'author',
+        videoReview.title_norm,
+        videoReview.year,
+        'author',
+        'Reply',
+      );
+      expect(reply?.author.level).toBe(level);
+      const response = await storage.postReviewReply(
+        'author',
+        videoReview.title_norm,
+        videoReview.year,
+        'reader',
+        'Response',
+        reply!.id,
+      );
+      expect(response?.author.level).toBe(1);
+      expect(response?.replyTo?.level).toBe(level);
+      const notice = (
+        await storage.getSocialNotifications(
+          'new-follower',
+          'author',
+          0,
+          [],
+          Date.now(),
+        )
+      )[0];
+      expect(notice.type === 'new-follower' && notice.follower.level).toBe(1);
+    } finally {
+      sql.close();
+    }
+  },
+);
+
+it('按标题读取本人最近进度并匹配归一化标题和年份', async () => {
+  await assertPlayRecordTitleLookup(new LocalSqliteStorage(':memory:'));
+});
 
 it('批量读取隔离用户并省略缺失键', async () => {
   await assertBatchReadPlayRecords(new LocalSqliteStorage(':memory:'));
@@ -1078,7 +1163,11 @@ describe('sqlite social username migration', () => {
         profile_id: 'Alice0123456',
         nickname: 'Alice',
         avatar_seed: null,
+        level: 1,
         favorites_public: 1 as const,
+        bio: null,
+        watch_time_public: false,
+        counted_ms: 0,
         updated_at: 123,
       });
       await storage.updateUserProfile('alice', { avatarSeed: 'Avatar012345' });
@@ -1114,7 +1203,21 @@ describe('sqlite social username migration', () => {
     internal.db.exec(
       "INSERT INTO user_follows VALUES ('Alice', 'Bob', 1); INSERT INTO video_review_likes VALUES ('Bob', 'work', '2026', 'Alice', 1); INSERT INTO video_review_reports VALUES ('Alice', 'work', '2026', 'Bob', 'spam', '', 1);",
     );
+    internal.db.exec(
+      "INSERT INTO user_profile_showcase VALUES ('alice', 0, 'vod+canonical'), ('Alice', 0, 'vod+legacy'), ('Alice', 1, 'vod+second'), ('OnlyShowcase', 0, 'vod+orphan');",
+    );
     internal.migrateLegacyUsernameCasing();
+    expect(
+      internal.db
+        .prepare(
+          'SELECT username, position, favorite_key FROM user_profile_showcase ORDER BY username, position',
+        )
+        .all(),
+    ).toEqual([
+      { username: 'alice', position: 0, favorite_key: 'vod+canonical' },
+      { username: 'alice', position: 1, favorite_key: 'vod+second' },
+      { username: 'onlyshowcase', position: 0, favorite_key: 'vod+orphan' },
+    ]);
     expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
       'Canon0123456',
     );
@@ -1253,4 +1356,8 @@ it('通知写入失败回滚评价删除，用户名合并迁移通知并解决�
     raw.prepare('SELECT recipient_username FROM user_notice_events').get(),
   ).toEqual({ recipient_username: 'alice' });
   raw.close();
+});
+
+it('播放记录会话序号与并发 CAS 契约', async () => {
+  await assertPlayRecordOrdering(new LocalSqliteStorage(':memory:'));
 });
