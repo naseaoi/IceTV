@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { initializeArtPlayer } from '@/features/play/hooks/useArtPlayer.init';
+import { syncNextEpisodeControl } from '@/features/play/lib/artPlayerSettings';
 import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
 import { setDanmakuLoadNoticeVisibility } from '@/features/play/lib/danmaku/load-notice';
 import { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
@@ -43,6 +44,10 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     setDanmakuLoadNoticeVisibility(player, !latest.isVideoLoading);
     if (!player) return;
     player.title = `${latest.detail?.title || latest.videoTitle} - 第${latest.currentEpisodeIndex + 1}集`;
+    syncNextEpisodeControl(
+      player,
+      latest.currentEpisodeIndex < latest.totalEpisodes - 1,
+    );
     // 分组刷新可能只移动绝对索引：更新会话与弹幕身份，保留相同地址的在途加载。
     if (
       sessionEpisodeIndexRef.current !== null &&

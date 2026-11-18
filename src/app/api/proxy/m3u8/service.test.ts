@@ -1,8 +1,13 @@
 /** @jest-environment node */
 
 import type { NextRequest } from 'next/server';
+import { gzipSync } from 'node:zlib';
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import {
+  fetchResponseThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 
 jest.mock('@/lib/proxy-auth', () => ({
   resolveProxyAuthorization: (...args: unknown[]) => mockAuthorization(...args),
@@ -19,7 +24,7 @@ jest.mock('@/lib/config', () => ({
 }));
 jest.mock('@/lib/http-proxy-json', () => ({
   fetchResponseThroughProxy: jest.fn(),
-  getProxyUrlForTarget: () => undefined,
+  getProxyUrlForTarget: jest.fn(),
 }));
 jest.mock('@/lib/url-guard', () => ({
   fetchWithUrlGuard: (...args: unknown[]) => mockFetch(...args),
@@ -57,6 +62,9 @@ const { GET } =
 const START = 1_000_000;
 const MINUTE = 60 * 1000;
 const SOURCE = 'demo';
+
+const { GET: key } =
+  require('@/app/api/proxy/key/route') as typeof import('@/app/api/proxy/key/route');
 
 function mediaPlaylist(segmentUri: string): string {
   return [
@@ -230,6 +238,71 @@ describe('m3u8 upstream identity', () => {
       }),
     );
   });
+
+  it.each([
+    ['m3u8', GET],
+    ['key', key],
+  ] as const)(
+    'does not expose raw compressed live %s bytes as decoded output',
+    async (path, handler) => {
+      const isManifest = path === 'm3u8';
+      const body = isManifest ? mediaPlaylist('seg-1.ts') : '0123456789abcdef';
+      const contentType = isManifest
+        ? 'application/vnd.apple.mpegurl'
+        : 'application/octet-stream';
+      mockAuthorization.mockResolvedValue({
+        authorized: true,
+        via: 'session',
+        username: 'viewer',
+      });
+      const warnings = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      jest
+        .mocked(getProxyUrlForTarget)
+        .mockReturnValueOnce(new URL('http://proxy.example'));
+      jest.mocked(fetchResponseThroughProxy).mockResolvedValueOnce({
+        body: gzipSync(body),
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({
+          'content-type': contentType,
+          'content-encoding': 'gzip',
+        }),
+      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(body, {
+          headers: {
+            'content-type': contentType,
+            'content-encoding': 'gzip',
+            'content-length': '10',
+          },
+        }),
+      );
+      const url =
+        'http://localhost/api/proxy/' +
+        path +
+        '?icetv-live=1&url=' +
+        encodeURIComponent('https://cdn.example/live.' + path);
+      try {
+        const response = await handler({
+          url,
+          headers: new Headers(),
+        } as NextRequest);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(body);
+        expect(response.headers.has('content-encoding')).toBe(false);
+        expect(response.headers.get('content-length')).not.toBe('10');
+        expect(fetchResponseThroughProxy).toHaveBeenLastCalledWith(
+          expect.any(URL),
+          expect.any(URL),
+          expect.objectContaining({
+            headers: { 'Accept-Encoding': 'identity' },
+          }),
+        );
+      } finally {
+        warnings.mockRestore();
+      }
+    },
+  );
 
   it('keeps live fallback outside the upstream pool', async () => {
     const url = 'https://cdn.example/identity/live.m3u8';

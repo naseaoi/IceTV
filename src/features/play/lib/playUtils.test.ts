@@ -5,6 +5,55 @@ function createPlaylist(blocks: string[][]) {
 }
 
 describe('filterAdsFromM3U8', () => {
+  it('移除首块时保留全局标签及正片继承的密钥和初始化段', () => {
+    const headers = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:7',
+      '#EXT-X-TARGETDURATION:10',
+      '#EXT-X-MEDIA-SEQUENCE:4',
+      '#EXT-X-DISCONTINUITY-SEQUENCE:2',
+      '#EXT-X-PLAYLIST-TYPE:VOD',
+      '#EXT-X-INDEPENDENT-SEGMENTS',
+    ];
+    const key = '#EXT-X-KEY:METHOD=AES-128,URI="key.bin",IV=0x1234';
+    const map = '#EXT-X-MAP:URI="init.mp4"';
+    const input = [
+      ...headers,
+      key,
+      map,
+      '#EXTINF:1,',
+      'ad-1.m4s',
+      '#EXT-X-DISCONTINUITY',
+      '#EXTINF:10,',
+      'movie-1.m4s',
+      '#EXT-X-ENDLIST',
+    ].join('\n');
+    expect(filterAdsFromM3U8(input).split('\n')).toEqual([
+      ...headers,
+      key,
+      map,
+      '#EXTINF:10,',
+      'movie-1.m4s',
+      '#EXT-X-ENDLIST',
+    ]);
+  });
+
+  it('恢复中插广告块里的密钥状态', () => {
+    const clear = '#EXT-X-KEY:METHOD=NONE';
+    const input = createPlaylist([
+      [
+        '#EXT-X-KEY:METHOD=AES-128,URI="first.bin"',
+        '#EXTINF:10,',
+        'movie-1.ts',
+      ],
+      ['#EXT-X-DISCONTINUITY', clear, '#EXTINF:1,', 'ad-1.ts'],
+      ['#EXT-X-DISCONTINUITY', '#EXTINF:10,', 'movie-2.ts', '#EXT-X-ENDLIST'],
+    ]);
+    expect(filterAdsFromM3U8(input)).toContain(
+      `${clear}\n#EXTINF:10,\nmovie-2.ts`,
+    );
+  });
+
   it('会移除夹在正片之间的短中插广告区间', () => {
     const input = createPlaylist([
       ['#EXTINF:270,', 'main-a-1.ts', '#EXTINF:280,', 'main-a-2.ts'],

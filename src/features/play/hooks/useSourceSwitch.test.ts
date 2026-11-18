@@ -278,10 +278,11 @@ describe('useSourceSwitch 自动换源', () => {
       'b-id',
     );
     await Promise.resolve();
-    expect(deletePlayRecord).toHaveBeenCalledWith('a', 'a-id');
+    expect(deletePlayRecord).not.toHaveBeenCalled();
     expect(deleteSkipConfig).not.toHaveBeenCalled();
     resolve(true);
     await cleanup;
+    expect(deletePlayRecord).not.toHaveBeenCalled();
     expect(deleteSkipConfig).toHaveBeenCalledWith('a', 'a-id');
   });
 
@@ -327,6 +328,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('未开启时页面超时和地址解析失败只停止加载并提示', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     const { result, options } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
@@ -489,6 +491,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('播放器上的运行时不属于当前地址时不回退代理，按当前源超时处理', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     const { video } = createLoadingVideo();
     const switchToServerProxy = jest.fn(() => true);
     video.__icetvSwitchToServerProxy = switchToServerProxy;
@@ -727,6 +730,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('手动换源等不到详情时，页面超时中止请求并按详情获取失败继续换源，不会一直停在切换中', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { video } = createLoadingVideo();
     const { result, options } = setupHook({
@@ -778,6 +782,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('新的换源开始时中止上一次还在等待的详情请求，结果以新的换源为准', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     const consoleError = jest
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);

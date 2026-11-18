@@ -278,7 +278,7 @@ async function getInitConfig(
       LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSource: false,
+      AutoSwitchSource: true,
       EnableDanmaku: false,
       EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
@@ -517,7 +517,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSource: false,
+      AutoSwitchSource: true,
       EnableDanmaku: false,
       EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
@@ -557,7 +557,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.SiteConfig.EnableOptimization = true;
   }
   if (typeof adminConfig.SiteConfig.AutoSwitchSource !== 'boolean') {
-    adminConfig.SiteConfig.AutoSwitchSource = false;
+    adminConfig.SiteConfig.AutoSwitchSource = true;
   }
   if (typeof adminConfig.SiteConfig.UpstreamProxyPoolSegments !== 'boolean') {
     adminConfig.SiteConfig.UpstreamProxyPoolSegments = false;

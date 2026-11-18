@@ -1,4 +1,6 @@
 export const AUTO_RESUME_WINDOW_SECONDS = 5;
+// 距结尾不足这么多秒即算播完；播完时补存的进度取整后会略短于总时长
+export const PLAYBACK_FINISHED_REMAINING_SECONDS = 5;
 
 export type ResumeMode = 'history' | 'forced' | null;
 
@@ -82,6 +84,20 @@ export function resolveResumeTimeTarget(
   }
 
   return safeTarget;
+}
+
+/** 续播点已在结尾：这集已看完，起播按从头播处理，而不是落在片尾立刻播完 */
+export function isFinishedResumeTarget(
+  targetTime: number | null | undefined,
+  duration?: number,
+): boolean {
+  return (
+    hasUsableDuration(duration) &&
+    Number.isFinite(targetTime) &&
+    (targetTime as number) > 0 &&
+    (targetTime as number) >=
+      (duration as number) - PLAYBACK_FINISHED_REMAINING_SECONDS
+  );
 }
 
 /**

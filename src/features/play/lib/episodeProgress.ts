@@ -8,7 +8,8 @@ import {
 } from '@/lib/episode-progress';
 import type { SearchResult, SkipConfig } from '@/lib/types';
 
-const FINISHED_RATIO = 0.9;
+import { PLAYBACK_FINISHED_REMAINING_SECONDS } from './resumePlayback';
+
 // 点开就切走的集不算看过：不写入每集进度，也不覆盖已有的看完记录
 export const MIN_WATCHED_SECONDS = 10;
 const SPECIAL_EPISODE_PATTERN =
@@ -94,7 +95,8 @@ export interface EpisodeProgressView {
   ratio: number;
 }
 
-// 与收藏库「看过」同为 90%；设了跳过片尾时到片尾点也算看完，否则续播会落在片尾立刻被跳走
+// 播到结尾才算看完，按比例判定会让长片在剩十多分钟时被当作看完、下次从头播；
+// 设了跳过片尾时到片尾点也算看完，否则续播会落在片尾立刻被跳走
 export function getEpisodeProgressView(
   entry: EpisodeProgressEntry | undefined,
   skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
@@ -104,7 +106,9 @@ export function getEpisodeProgressView(
     skipConfig?.enable && skipConfig.outro_time < 0
       ? entry.d + skipConfig.outro_time
       : Infinity;
-  const finished = entry.t >= entry.d * FINISHED_RATIO || entry.t >= outroAt;
+  const finished =
+    entry.t >= entry.d - PLAYBACK_FINISHED_REMAINING_SECONDS ||
+    entry.t >= outroAt;
   return { finished, ratio: finished ? 1 : Math.min(1, entry.t / entry.d) };
 }
 

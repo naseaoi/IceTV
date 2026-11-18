@@ -59,8 +59,8 @@ describe('useEpisodeSwitch 每集续播', () => {
     expect(refs.playbackRequestModeRef.current).toBe('episode');
   });
 
-  it('看完的集与没有记录的集从头播', () => {
-    const finished = setup({ 2: { k: 'n:3', t: 1350, d: 1400, at: 1 } });
+  it('播到结尾的集与没有记录的集从头播', () => {
+    const finished = setup({ 2: { k: 'n:3', t: 1397, d: 1400, at: 1 } });
     act(() => finished.switchEpisode(2));
     expect(finished.refs.resumeTimeRef.current).toBe(0);
     expect(finished.refs.resumeModeRef.current).toBeNull();

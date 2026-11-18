@@ -131,10 +131,10 @@ export function resetFluidSearch() {
 
 export function readDefaultAutoSwitchSource(): boolean {
   if (typeof window === 'undefined') {
-    return false;
+    return true;
   }
 
-  return window.RUNTIME_CONFIG?.AUTO_SWITCH_SOURCE === true;
+  return window.RUNTIME_CONFIG?.AUTO_SWITCH_SOURCE !== false;
 }
 
 export function readAutoSwitchSource(): boolean {

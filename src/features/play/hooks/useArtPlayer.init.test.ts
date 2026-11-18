@@ -146,6 +146,7 @@ jest.mock('@/features/play/lib/artPlayerSettings', () => ({
   createArtPlayerContextmenus: () => [],
   createArtPlayerControls: () => [],
   createArtPlayerSettings: () => [],
+  syncNextEpisodeControl: jest.fn(),
 }));
 
 jest.mock('@/features/play/lib/danmaku/attach', () => ({
@@ -528,6 +529,39 @@ describe('initializeArtPlayer 拉流控制', () => {
     );
     player.emit('video:ended');
     expect(params.handleNextEpisode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['起播时已知时长', true],
+    ['时长晚于首次定位才知道', false],
+  ])('续播点已在结尾时从头播：%s', async (_label, durationKnown) => {
+    const params = createParams();
+    params.resumeTimeRef.current = 1398;
+    params.resumeModeRef.current = 'forced';
+    const { player, video, loadingSessionRef } = await setupPlayer(params);
+    makeFirstFrameReady(video);
+    video.play = jest.fn().mockResolvedValue(undefined);
+    if (durationKnown) player.duration = 1400;
+    player.emit('video:loadeddata');
+    if (!durationKnown) {
+      expect(loadingSessionRef.current.pendingInitialResumeTarget).toBe(1398);
+      player.duration = 1400;
+      player.emit('video:progress');
+    }
+    expect(player.currentTime).toBe(0);
+    expect(params.resumeTimeRef.current ?? 0).toBe(0);
+    expect(loadingSessionRef.current.pendingInitialResumeTarget).not.toBe(1398);
+  });
+
+  it('未开连播时自然播完补存进度', async () => {
+    const params = createParams();
+    const { player } = await setupPlayer(params);
+    player.emit('video:playing');
+    player.duration = 1400;
+    player.currentTime = 1400;
+    (params.saveCurrentPlayProgress as jest.Mock).mockClear();
+    player.emit('video:ended');
+    expect(params.saveCurrentPlayProgress).toHaveBeenCalledTimes(1);
   });
 
   it('未开连播时片尾只暂停一次，继续播放不再被反复暂停', async () => {

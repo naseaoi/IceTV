@@ -147,6 +147,65 @@ describe('playrecords route', () => {
     expect(mockCas).not.toHaveBeenCalled();
   });
 
+  it('后提交的中间集快照补入进度表而不回退主记录', async () => {
+    const latest: PlayRecord = {
+      ...records['source+new'],
+      index: 3,
+      progress_session_id: 'session-a',
+      progress_sequence: 3,
+      episode_progress: [{ k: 'n:3', t: 1, d: 10, at: 300 }],
+    };
+    mockGetPlayRecord.mockResolvedValue(latest);
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: {
+          ...latest,
+          index: 2,
+          episode_key: 'n:2',
+          progress_sequence: 2,
+          save_time: 200,
+        },
+      }),
+    );
+    expect(await response.json()).toEqual({ success: true });
+    expect(mockSavePlayRecord.mock.calls[0]?.[3]).toEqual({
+      ...latest,
+      episode_progress: [
+        ...latest.episode_progress!,
+        { k: 'n:2', t: 1, d: 10, at: 200 },
+      ],
+    });
+  });
+
+  it.each([200, 250, 350])(
+    '迟到快照 (%s) 不覆盖同集较新或同时间快照',
+    async (saveTime) => {
+      mockGetPlayRecord.mockResolvedValue({
+        ...records['source+new'],
+        index: 3,
+        progress_session_id: 'session-a',
+        progress_sequence: 3,
+        episode_progress: [{ k: 'n:2', t: 5, d: 10, at: 250 }],
+      });
+      const response = await POST(
+        createJsonRequest({
+          key: 'source+new',
+          record: {
+            ...records['source+new'],
+            index: 2,
+            episode_key: 'n:2',
+            progress_session_id: 'session-a',
+            progress_sequence: 1,
+            save_time: saveTime,
+          },
+        }),
+      );
+      expect(await response.json()).toEqual({ success: true, ignored: true });
+      expect(mockCas).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['n:bad', '', null, 1])('拒绝非法集身份 %s', async (episodeKey) => {
     const response = await POST(
       createJsonRequest({

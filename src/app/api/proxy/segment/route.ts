@@ -1,4 +1,5 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
+import * as zlib from 'node:zlib';
 
 import {
   getProxySourceKey,
@@ -174,6 +175,7 @@ async function handleGet(request: NextRequest) {
   try {
     const headers: Record<string, string> = {
       'User-Agent': ua,
+      'Accept-Encoding': 'identity',
     };
     if (range) {
       headers.Range = range;
@@ -299,9 +301,22 @@ async function handleGet(request: NextRequest) {
       userInitiated,
     });
 
+    const contentEncoding = response.headers.get('content-encoding');
+    // Fetch 解码正文后仍保留原始响应头；环境代理则交付原始字节。
+    const decoded = contentEncoding
+      ?.toLowerCase()
+      .split(',')
+      .every((coding) => {
+        const value = coding.trim();
+        return (
+          /^(?:x-gzip|gzip|deflate|br)$/.test(value) ||
+          (value === 'zstd' && typeof zlib.createZstdDecompress === 'function')
+        );
+      });
     const responseHeaders = buildSegmentResponseHeaders(
       response.headers,
       isLiveStream,
+      decoded,
     );
 
     return new Response(
@@ -359,6 +374,7 @@ function assertSegmentContentType(
 function buildSegmentResponseHeaders(
   sourceHeaders: Headers,
   isLiveStream: boolean,
+  decoded = false,
 ) {
   const responseHeaders = new Headers();
   responseHeaders.set('Access-Control-Allow-Origin', '*');
@@ -383,9 +399,12 @@ function buildSegmentResponseHeaders(
     responseHeaders.set('Content-Type', contentType);
   }
 
-  const contentLength = sourceHeaders.get('content-length');
-  if (contentLength) {
-    responseHeaders.set('Content-Length', contentLength);
+  if (!decoded) {
+    const contentLength = sourceHeaders.get('content-length');
+    if (contentLength) responseHeaders.set('Content-Length', contentLength);
+    const contentEncoding = sourceHeaders.get('content-encoding');
+    if (contentEncoding)
+      responseHeaders.set('Content-Encoding', contentEncoding);
   }
 
   const acceptRanges = sourceHeaders.get('accept-ranges');

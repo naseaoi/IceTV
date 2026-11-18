@@ -430,14 +430,16 @@ function AuthenticatedPlayPageClient({
     const key = `${source}+${id}`;
     if (completionCheckedRef.current.has(key)) return;
     completionCheckedRef.current.add(key);
+    setCompletionTarget({ source, id, doubanId: videoDoubanId });
+  }, [currentIdRef, currentSourceRef, detailRef, videoDoubanId]);
+  const prepareCompletionCard = useCallback(() => {
     const player = artPlayerRef.current;
     if (player) {
       // 卡片挂在 body 上，全屏时会被播放器盖住
       player.fullscreen = false;
       player.fullscreenWeb = false;
     }
-    setCompletionTarget({ source, id, doubanId: videoDoubanId });
-  }, [artPlayerRef, currentIdRef, currentSourceRef, detailRef, videoDoubanId]);
+  }, [artPlayerRef]);
   const closeCompletion = useCallback(() => setCompletionTarget(null), []);
 
   const [openSourcesRequest, setOpenSourcesRequest] = useState(0);
@@ -553,16 +555,18 @@ function AuthenticatedPlayPageClient({
         saveState.onSaved === onSaved &&
         source === currentSourceRef.current &&
         id === currentIdRef.current;
+      if (!isCurrent()) return;
+      const task = pendingSourceSwitchCleanupRef.current;
+      const switched = shouldFinalizeSourceSwitchCleanup(task, source, id);
       const keepKey = generateStorageKey(source, id);
       const deduplicatedKeys = deduplicatedPlayRecordKeysRef.current;
-      if (isCurrent() && !deduplicatedKeys.has(keepKey)) {
+      if (switched || !deduplicatedKeys.has(keepKey)) {
         deduplicatedKeys.add(keepKey);
-        const task = pendingSourceSwitchCleanupRef.current;
         const preserveKey =
-          shouldFinalizeSourceSwitchCleanup(task, source, id) &&
-          task.keepPreviousPlayRecord
+          switched && task.keepPreviousPlayRecord
             ? generateStorageKey(task.previousSource, task.previousId)
             : undefined;
+        // 旧源记录仅由服务端去重事务合并并删除，失败时保留原记录。
         void deduplicatePlayRecords(keepKey, preserveKey, isCurrent)
           .then((merged) => {
             if (merged && isCurrent()) mergeLocalEpisodeProgress(merged);
@@ -1020,6 +1024,7 @@ function AuthenticatedPlayPageClient({
         target={completionTarget}
         favorited={favorited}
         onAddFavorite={handleToggleFavorite}
+        onBeforeOpen={prepareCompletionCard}
         onClose={closeCompletion}
       />
     </>

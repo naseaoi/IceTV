@@ -35,7 +35,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const channelData = await getCachedLiveChannels(sourceKey);
+    const channelData = await getCachedLiveChannels(sourceKey, {
+      includeEpg: true,
+    });
 
     if (!channelData) {
       // 频道信息未找到时返回空的节目单数据

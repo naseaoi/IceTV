@@ -225,9 +225,17 @@ async function fetchM3U8Data(
             userAgent: ua,
             maxBytes: MAX_M3U8_BYTES,
             accept: 'application/vnd.apple.mpegurl,text/plain,*/*',
+            headers: { 'Accept-Encoding': 'identity' },
             signal: context.signal,
           },
         );
+        const encoding = response.headers
+          .get('content-encoding')
+          ?.trim()
+          .toLowerCase();
+        if (encoding && encoding !== 'identity') {
+          throw new Error('Unexpected compressed body from environment proxy');
+        }
         const content = response.body.toString('utf8');
         const contentType = response.headers.get('content-type') || '';
         assertM3U8Content(content, contentType, {

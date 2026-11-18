@@ -274,7 +274,11 @@ describe('reloadDanmaku', () => {
     expect(mockLoadDanmakuForEpisode).toHaveBeenCalledWith(
       loadContext,
       expect.any(Function),
-      { forceRefresh: false, onError: expect.any(Function) },
+      {
+        forceRefresh: false,
+        isCurrent: expect.any(Function),
+        onError: expect.any(Function),
+      },
     );
   });
 
@@ -296,6 +300,7 @@ describe('reloadDanmaku', () => {
     expect(mockLoadDanmakuForEpisode.mock.calls[1][0]).toEqual(nextContext);
     expect(mockLoadDanmakuForEpisode.mock.calls[1][2]).toEqual({
       forceRefresh: false,
+      isCurrent: expect.any(Function),
       onError: expect.any(Function),
     });
     expect(api.reset).toHaveBeenCalledTimes(2);
@@ -316,7 +321,11 @@ describe('reloadDanmaku', () => {
     expect(mockLoadDanmakuForEpisode).toHaveBeenCalledWith(
       loadContext,
       expect.any(Function),
-      { forceRefresh: true, onError: expect.any(Function) },
+      {
+        forceRefresh: true,
+        isCurrent: expect.any(Function),
+        onError: expect.any(Function),
+      },
     );
   });
 

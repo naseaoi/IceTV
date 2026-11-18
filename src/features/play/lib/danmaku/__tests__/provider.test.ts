@@ -1,4 +1,5 @@
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import { danmakuSearchCache } from '@/features/play/lib/danmaku/cache.server';
 import {
   fetchDanmakuByEpisodeId,
   searchDanmakuCandidates,
@@ -98,6 +99,26 @@ describe('danmaku provider missing episodes', () => {
       total: 0,
       truncated: false,
     });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { success: false, errorMessage: 'private details' },
+    { success: false, animes: [] },
+    { animes: {} },
+    { animes: [{ episodes: {} }] },
+    { animes: [{ episodes: [{ episodeId: true }, {}] }] },
+  ])('rejects malformed searches without caching them: %o', async (payload) => {
+    danmakuSearchCache.clear();
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ animes: [] })));
+    const search = () =>
+      danmakuSearchCache.getOrLoad('test', () =>
+        searchDanmakuCandidates('test'),
+      );
+    await expect(search()).rejects.toMatchObject({ kind: 'invalid-response' });
+    await expect(search()).resolves.toEqual([]);
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 

@@ -44,6 +44,7 @@ import {
 } from '@/features/play/lib/playProgressRestore';
 import {
   applyResumeTime,
+  isFinishedResumeTarget,
   isProgrammaticResumeSeek,
   isWithinAutoResumeWindow,
   resolvePendingResumeTime,
@@ -748,6 +749,14 @@ export async function initializeArtPlayer(
       return true;
     };
 
+    // 续播点已在结尾说明这集看完了，改为从头播；入口的记录、意图与恢复点都不带时长，只能在这里按实际时长判断
+    const restartFinishedResume = () => {
+      resumeTimeRef.current = 0;
+      resumeModeRef.current = 'forced';
+      initialResumeApplied = false;
+      resetPlaybackToStartIfNeeded();
+    };
+
     const showSourceSwitchSuccessNotice = () => {
       const mode = playbackRequestModeRef.current;
       if (mode !== 'manual-source' && mode !== 'auto-source') {
@@ -905,7 +914,21 @@ export async function initializeArtPlayer(
         : null,
     }));
 
+    // 时长未知时登记的落点要等时长到位再判断是否已在结尾；hls 会直接从该位置起载，
+    // 必须先于“已到达”检查，否则落在结尾也会被当成续播成功
+    const restartIfPendingResumeFinished = () => {
+      if (
+        isFinishedResumeTarget(
+          loadingSessionRef.current.pendingInitialResumeTarget,
+          player.duration,
+        )
+      ) {
+        restartFinishedResume();
+      }
+    };
+
     const completePendingResumeIfReady = () => {
+      restartIfPendingResumeFinished();
       if (
         !hasReachedResumeTarget(
           player.currentTime || 0,
@@ -921,6 +944,7 @@ export async function initializeArtPlayer(
     };
 
     const retryPendingResumePosition = () => {
+      restartIfPendingResumeFinished();
       const target = loadingSessionRef.current.pendingInitialResumeTarget;
       if (!Number.isFinite(target) || (target ?? 0) <= 0) {
         return false;
@@ -976,7 +1000,14 @@ export async function initializeArtPlayer(
         resumeMode: resumeModeRef.current,
         allowAutoResume: allowAutoResumeRef.current,
       });
-      if (pendingResumeTime !== null) {
+      if (
+        pendingResumeTime !== null &&
+        isFinishedResumeTarget(pendingResumeTime, player.duration)
+      ) {
+        restartFinishedResume();
+        appliedResumeTarget = 0;
+        intendedResumeTarget = 0;
+      } else if (pendingResumeTime !== null) {
         intendedResumeTarget = pendingResumeTime;
         // 落点可能要等后续重试 seek 才到达，起播时再按实际位置决定是否提示
         initialResumeApplied = pendingResumeTime > 0;
@@ -1113,6 +1144,16 @@ export async function initializeArtPlayer(
 
     player.on('video:ended', () => {
       if (isStalePlayerSession()) return;
+      // 从结尾的续播点起载会立刻播完，这不是看完而是该从头播
+      if (
+        isFinishedResumeTarget(
+          loadingSessionRef.current.pendingInitialResumeTarget,
+          player.duration,
+        )
+      ) {
+        restartFinishedResume();
+        return;
+      }
       void releaseWakeLock();
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('ended');
       setIsPlaying(false);
@@ -1126,7 +1167,10 @@ export async function initializeArtPlayer(
         console.warn('忽略异常提前触发的播放结束事件');
         return;
       }
-      if (!tryAutoAdvanceEpisode()) notifyIfLastEpisodeEnded();
+      if (tryAutoAdvanceEpisode()) return;
+      // 自然播完不触发 Artplayer 的 pause，不补存的话记录停在最后一次定时保存，这集不算看完
+      saveCurrentPlayProgress();
+      notifyIfLastEpisodeEnded();
     });
 
     if (player.playing) {

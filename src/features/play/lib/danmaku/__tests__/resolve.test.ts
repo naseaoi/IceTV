@@ -118,6 +118,19 @@ describe('loadDanmakuForEpisode outcomes', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('stops before requesting comments once a newer episode load replaces it', async () => {
+    const onError = jest.fn();
+    await expect(
+      loadDanmakuForEpisode(context, () => true, {
+        onError,
+        isCurrent: () => false,
+      }),
+    ).resolves.toEqual([]);
+    expect(getPersistedEpisodeId).toHaveBeenCalled();
+    expect(fetchDanmakuComments).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('does not load or report failure while disabled', async () => {
     const onError = jest.fn();
     await expect(

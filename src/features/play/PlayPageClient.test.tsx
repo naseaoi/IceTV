@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type Artplayer from 'artplayer';
 import type { ComponentProps, ReactNode } from 'react';
 
@@ -10,6 +10,7 @@ import type {
 } from '@/features/play/hooks/usePlayInit';
 import type { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import type { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { fetchCompletion } from '@/features/play/lib/completion-client';
 import {
   holdBackgroundSourceProbes,
   releaseBackgroundSourceProbes,
@@ -104,6 +105,13 @@ jest.mock('@/components/AuthenticatedRoute', () => ({
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+jest.mock(
+  '@/features/play/components/EpisodeSelector/FollowedOpinions',
+  () => ({
+    useFollowedOpinions: () => null,
+  }),
+);
+
 jest.mock('@/features/play/components/PlayMainContent', () => ({
   PlayMainContent: (props: MainContentProps) => mockPlayMainContent(props),
 }));
@@ -166,6 +174,16 @@ jest.mock('@/features/play/hooks/useSourcePlaybackStatsRecorder', () => ({
 
 jest.mock('@/features/play/hooks/useSourceSwitch', () => ({
   useSourceSwitch: (params: SourceSwitchParams) => mockUseSourceSwitch(params),
+}));
+
+jest.mock('@/features/play/lib/completion-client', () => ({
+  fetchCompletion: jest.fn(),
+  markCompletionCelebrated: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('@/lib/video-reviews.client', () => ({
+  fetchMyVideoReview: jest.fn().mockResolvedValue(null),
+  saveVideoReview: jest.fn(),
 }));
 
 jest.mock('@/features/play/lib/danmaku/attach', () => ({
@@ -597,6 +615,42 @@ describe('PlayPageClient', () => {
     expect(mockClearFragmentMemoryCache).toHaveBeenCalledTimes(1);
   });
 
+  it.each([true, false])(
+    '完结汇总确认已展示=%s 后才决定是否退出全屏',
+    async (celebrated) => {
+      jest.useFakeTimers();
+      try {
+        renderLoadedPage();
+        const { artPlayerRef, onLastEpisodeEnded } = lastArg(mockUseArtPlayer);
+        const player = { fullscreen: true, fullscreenWeb: true };
+        artPlayerRef.current = player as unknown as Artplayer;
+        jest.mocked(fetchCompletion).mockResolvedValueOnce({
+          title: LAZY_DETAIL.title,
+          year: LAZY_DETAIL.year!,
+          cover: '',
+          episodes: 3,
+          totalWatchSeconds: 1200,
+          firstWatchedAt: null,
+          completedAt: Date.now(),
+          celebrated,
+        });
+        act(() => onLastEpisodeEnded?.());
+        const fullscreenBeforeSummary = player.fullscreen;
+        const webFullscreenBeforeSummary = player.fullscreenWeb;
+        await act(async () => jest.advanceTimersByTime(1200));
+        expect(player.fullscreen).toBe(celebrated);
+        expect(player.fullscreenWeb).toBe(celebrated);
+        expect(fullscreenBeforeSummary).toBe(true);
+        expect(webFullscreenBeforeSummary).toBe(true);
+        if (celebrated)
+          expect(screen.queryByText('看完了')).not.toBeInTheDocument();
+        else expect(screen.getByText('看完了')).toBeInTheDocument();
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
   it('清理播放器时先退出网页全屏再销毁', () => {
     renderLoadedPage();
     const { artPlayerRef, cleanupPlayer } = lastArg(mockUseArtPlayer);
@@ -616,7 +670,45 @@ describe('PlayPageClient', () => {
   });
 });
 
-it('同一播放页每个源记录只去重一次，并保留换源任务指定的旧记录', async () => {
+it('A 换 B 再回 A 时，已去重的记录键仍合并另一源新增的集进度', async () => {
+  renderLoadedPage();
+  const { currentSourceRef, currentIdRef, pendingSourceSwitchCleanupRef } =
+    latestSourceSwitch();
+  const { saveStateRef } = lastArg(mockUsePlayProgress);
+  const deduplicate = jest.mocked(deduplicatePlayRecords);
+  deduplicate.mockClear();
+  const saved = () =>
+    saveStateRef.current.onSaved?.(
+      currentSourceRef.current,
+      currentIdRef.current,
+    );
+  const switchSource = (source: string, id: string) => {
+    pendingSourceSwitchCleanupRef.current = {
+      previousSource: currentSourceRef.current,
+      previousId: currentIdRef.current,
+      nextSource: source,
+      nextId: id,
+      skipConfigCleanupReady: Promise.resolve(true),
+    };
+    currentSourceRef.current = source;
+    currentIdRef.current = id;
+  };
+
+  await act(async () => {
+    await saved();
+    switchSource('next', 'next-id');
+    await saved();
+    switchSource('giri', 'giri-id');
+    await saved();
+  });
+  expect(deduplicate.mock.calls.map(([keepKey]) => keepKey)).toEqual([
+    'giri+giri-id',
+    'next+next-id',
+    'giri+giri-id',
+  ]);
+});
+
+it('常规保存每个记录键只去重一次，并保留换源任务指定的旧记录', async () => {
   renderLoadedPage();
   const { currentSourceRef, currentIdRef, pendingSourceSwitchCleanupRef } =
     latestSourceSwitch();
@@ -646,8 +738,15 @@ it('同一播放页每个源记录只去重一次，并保留换源任务指定�
       keepPreviousPlayRecord: true,
       skipConfigCleanupReady: Promise.resolve(true),
     };
-    await saved('next', 'next-id');
-    await saved('next', 'next-id');
+    mockSourceSwitch.finalizePendingSourceSwitchCleanup.mockImplementationOnce(
+      () => {
+        pendingSourceSwitchCleanupRef.current = null;
+      },
+    );
+    await act(async () => {
+      await saved('next', 'next-id');
+      await saved('next', 'next-id');
+    });
     expect(deduplicate).toHaveBeenCalledTimes(2);
     expect(deduplicate).toHaveBeenNthCalledWith(
       1,

@@ -451,6 +451,99 @@ describe('refreshLiveChannels', () => {
     expect(saveConfig).not.toHaveBeenCalled();
   });
 
+  it('直播频道缓存未命中时不等待节目单正文', async () => {
+    const source = {
+      key: 'epg-stream',
+      name: 'EPG',
+      url: 'https://example.com/live.m3u',
+      epg: 'https://example.com/epg.xml',
+      from: 'custom' as const,
+    };
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [source],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
+    let releaseEpg: (() => void) | undefined;
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(
+        createTextResponse('频道,https://example.com/live.m3u8'),
+      )
+      .mockResolvedValueOnce(
+        createDeferredTextResponse('<tv></tv>', (release) => {
+          releaseEpg = release;
+        }),
+      );
+    const settled = jest.fn();
+    const channels = getCachedLiveChannels(source.key).then((data) => {
+      settled(data?.channelNumber);
+      return data;
+    });
+    try {
+      await waitForCondition(() => releaseEpg !== undefined);
+      expect(releaseEpg).toBeDefined();
+      expect(settled).toHaveBeenCalledWith(1);
+      const epgSettled = jest.fn();
+      const withEpg = getCachedLiveChannels(source.key, {
+        includeEpg: true,
+      }).then(epgSettled);
+      await flushAsyncWork();
+      expect(epgSettled).not.toHaveBeenCalled();
+      releaseEpg?.();
+      await withEpg;
+      expect(epgSettled).toHaveBeenCalledWith(
+        expect.objectContaining({ channelNumber: 1, epgs: {} }),
+      );
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      releaseEpg?.();
+      await channels;
+      await flushAsyncWork();
+    }
+  });
+
+  it('节目单刷新失败时保留旧值但不延长其有效期', async () => {
+    const now = Date.UTC(2026, 6, 24, 12);
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const source = {
+      key: 'epg-stream',
+      name: 'EPG',
+      url: 'https://example.com/live.m3u',
+      epg: 'https://example.com/epg.xml',
+      from: 'custom' as const,
+    };
+    mockedGetConfigForRead.mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true },
+      LiveConfig: [source],
+    } as Awaited<ReturnType<typeof getConfigForRead>>);
+    let epgAvailable = true;
+    (global.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (url === source.url)
+        return createTextResponse(
+          '#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",CCTV1\nhttps://example.com/live.m3u8',
+        );
+      if (!epgAvailable) throw new UrlValidationError('EPG unavailable');
+      const programme = createProgramme('原节目', now, now + 60 * 60 * 1000);
+      return createTextResponse(
+        `<tv><channel id="channel-1"><display-name>CCTV1</display-name></channel>${programme}</tv>`,
+      );
+    });
+    await refreshLiveChannels(source);
+    epgAvailable = false;
+    clock.mockReturnValue(now + 30 * 60 * 1000 + 1);
+    await getCachedLiveChannels(source.key);
+    await flushAsyncWork();
+    expect(
+      (await getCachedLiveChannels(source.key))?.epgs.cctv1?.[0]?.title,
+    ).toBe('原节目');
+    clock.mockReturnValue(now + 115 * 60 * 1000);
+    await refreshLiveChannels(source);
+    clock.mockReturnValue(now + 2 * 60 * 60 * 1000);
+    expect(
+      (await getCachedLiveChannels(source.key, { includeEpg: true }))?.epgs,
+    ).toEqual({});
+  });
+
   it('流式解压 EPG 并只保留时间窗口内的节目', async () => {
     const now = Date.UTC(2026, 6, 24, 12, 0, 0);
     jest.spyOn(Date, 'now').mockReturnValue(now);

@@ -4,6 +4,10 @@ import {
 } from '@/features/play/lib/sharedPlaybackTask';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import {
+  getSignedUrlFreshMs,
+  hasSignedUrlParams,
+} from '@/lib/signed-url-params';
 
 const RESOLVED_CACHE_TTL_MS = 30 * 60 * 1000;
 const RESOLVED_CACHE_MAX_SIZE = 200;
@@ -25,7 +29,7 @@ export function peekResolvedLazyEpisodeUrl(
   const key = buildCacheKey(source, lazyUrl);
   const entry = resolvedCache.get(key);
   if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
+  if (Date.now() >= entry.expiresAt) {
     resolvedCache.delete(key);
     return null;
   }
@@ -84,10 +88,11 @@ export function resolveLazyEpisodeUrl(
         signal,
       );
       if (signal.aborted) throw playbackAbortError();
-      resolvedCache.set(key, {
-        url,
-        expiresAt: Date.now() + RESOLVED_CACHE_TTL_MS,
-      });
+      const now = Date.now();
+      const freshMs = hasSignedUrlParams(url)
+        ? getSignedUrlFreshMs(url, now)
+        : RESOLVED_CACHE_TTL_MS;
+      resolvedCache.set(key, { url, expiresAt: now + freshMs });
       if (resolvedCache.size > RESOLVED_CACHE_MAX_SIZE) {
         const oldest = resolvedCache.keys().next().value;
         if (oldest) resolvedCache.delete(oldest);

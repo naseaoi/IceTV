@@ -51,7 +51,7 @@ import {
   reportVodPlaybackOutcome,
 } from '@/features/play/lib/vodPlaybackIntent';
 import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
-import { deletePlayRecord, deleteSkipConfig } from '@/lib/db.client';
+import { deleteSkipConfig } from '@/lib/db.client';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { readAutoSwitchSource } from '@/lib/local-preferences';
@@ -915,7 +915,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
       const requestId = sourceChangeRequestIdRef.current;
       await finalizeSourceSwitchCleanup(task, {
-        deletePlayRecord,
         deleteSkipConfig,
         isCurrentSource: () =>
           requestId === sourceChangeRequestIdRef.current &&

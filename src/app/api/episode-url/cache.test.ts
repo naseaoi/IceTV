@@ -70,7 +70,7 @@ describe('episode URL sharing', () => {
 
   it('shares plain addresses and keeps signed ones on this instance', async () => {
     const { cache, sharedLoads, shouldCache } = loadCacheWithSharedSpy();
-    const signedUrl = 'https://cdn.example/play.m3u8?sign=abc&expires=1';
+    const signedUrl = 'https://cdn.example/play.m3u8?sign=abc';
     expect(shouldCache('https://cdn.example/play.m3u8')).toBe(true);
     expect(shouldCache(signedUrl)).toBe(false);
 
@@ -84,6 +84,42 @@ describe('episode URL sharing', () => {
     );
     expect(loader).toHaveBeenCalledTimes(1);
     expect(sharedLoads).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['?sign=abc&expires=1794960030', 30_000],
+    ['?token=abc', 5 * 60_000],
+    ['?signature=abc&oss_expires=1794960030000', 30_000],
+    [
+      '?X-Amz-Signature=abc&X-Amz-Date=20261118T000000Z&X-Amz-Expires=30',
+      30_000,
+    ],
+  ])('never serves a stale signed address (%s)', async (query, lifetime) => {
+    const { cache } = loadCacheWithSharedSpy();
+    const now = 1794960000000;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const key = cache.getEpisodeUrlCacheKey(source, lazyUrl);
+      const signed = `https://cdn.example/play.m3u8${query}`;
+      const loader = jest
+        .fn()
+        .mockResolvedValueOnce(signed)
+        .mockRejectedValueOnce(new Error('refresh failed'));
+      await expect(cache.episodeUrlCache.getOrLoad(key, loader)).resolves.toBe(
+        signed,
+      );
+      clock.mockReturnValue(now + lifetime - 1);
+      await expect(cache.episodeUrlCache.getOrLoad(key, loader)).resolves.toBe(
+        signed,
+      );
+      clock.mockReturnValue(now + lifetime);
+      await expect(
+        cache.episodeUrlCache.getOrLoad(key, loader),
+      ).rejects.toThrow('refresh failed');
+      expect(loader).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('stops waiting for a shared load when the request is aborted', async () => {

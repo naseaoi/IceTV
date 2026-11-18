@@ -5,7 +5,10 @@ import { waitForSharedLoad } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { createSwrCache } from '@/lib/server-cache';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
-import { hasSignedUrlParams } from '@/lib/signed-url-params';
+import {
+  getSignedUrlFreshMs,
+  hasSignedUrlParams,
+} from '@/lib/signed-url-params';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
 
 const EPISODE_URL_TTL = {
@@ -26,7 +29,9 @@ const sharedEpisodeUrls = createSharedServerCache<string>({
 });
 const signedEpisodeUrls = createSwrCache<string>({
   name: 'episode-url-signed',
-  ...EPISODE_URL_TTL,
+  freshMs: 0,
+  staleMs: 0,
+  getTtl: (url) => ({ freshMs: getSignedUrlFreshMs(url) }),
   ...getServerCacheBudget('episode-url'),
 });
 
@@ -36,17 +41,15 @@ export const episodeUrlCache = {
     loader: () => Promise<string>,
     signal?: AbortSignal,
   ): Promise<string> {
-    if (signedEpisodeUrls.peek(key))
-      return signedEpisodeUrls.getOrLoad(key, loader);
-    return waitForSharedLoad(
-      () =>
-        sharedEpisodeUrls.getOrLoad(key, async () => {
-          const url = await loader();
-          if (hasSignedUrlParams(url)) signedEpisodeUrls.set(key, url);
-          return url;
-        }),
-      signal,
-    );
+    return waitForSharedLoad(async () => {
+      const signed = signedEpisodeUrls.peek(key);
+      if (signed) return signed.value;
+      return sharedEpisodeUrls.getOrLoad(key, async () => {
+        const url = await loader();
+        if (hasSignedUrlParams(url)) signedEpisodeUrls.set(key, url);
+        return url;
+      });
+    }, signal);
   },
   set(key: string, url: string) {
     if (hasSignedUrlParams(url)) signedEpisodeUrls.set(key, url);

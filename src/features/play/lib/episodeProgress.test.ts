@@ -110,11 +110,19 @@ describe('buildEpisodeProgressKeys', () => {
 describe('每集续播点', () => {
   const entry = (t: number, d = 1000) => ({ k: 'n:1', t, d, at: 1 });
 
-  it('看到一半从上次位置继续，看完或没有记录从头播', () => {
+  it('看到一半从上次位置继续，播到结尾或没有记录从头播', () => {
     expect(resolveEpisodeProgressResumeTime(entry(303))).toBe(303);
-    expect(resolveEpisodeProgressResumeTime(entry(900))).toBe(0);
+    expect(resolveEpisodeProgressResumeTime(entry(996))).toBe(0);
     expect(resolveEpisodeProgressResumeTime(undefined)).toBe(0);
     expect(resolveEpisodeProgressResumeTime(entry(1))).toBe(0);
+  });
+
+  it('离结尾还有一段时不算看完', () => {
+    expect(getEpisodeProgressView(entry(900))).toEqual({
+      finished: false,
+      ratio: 0.9,
+    });
+    expect(resolveEpisodeProgressResumeTime(entry(900))).toBe(900);
   });
 
   it('设了跳过片尾时到片尾点即算看完', () => {

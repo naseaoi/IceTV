@@ -1,4 +1,8 @@
-import { applyEpisodeProgressWrite } from '@/lib/episode-progress';
+import {
+  applyEpisodeProgressWrite,
+  createEpisodeProgressEntry,
+  mergeEpisodeProgress,
+} from '@/lib/episode-progress';
 import {
   hasPlayRecordGroupChanged,
   isGroupedPlayRecordScale,
@@ -99,7 +103,27 @@ export function savePlayProgressWithRetry(
       record.progress_session_id === current?.progress_session_id &&
       record.progress_sequence! <= (current.progress_sequence ?? 0)
     ) {
-      return null;
+      if (
+        record.progress_sequence === current.progress_sequence ||
+        record.save_time > current.save_time ||
+        !record.episode_key
+      ) {
+        return null;
+      }
+      // 退出时多集 keepalive 可能乱序；迟到请求只补进度表，不改续播集或水位。
+      const entry = createEpisodeProgressEntry(record.episode_key, record);
+      if (!entry) return null;
+      const previous = current.episode_progress?.find(({ k }) => k === entry.k);
+      if (previous && previous.at >= entry.at) return null;
+      const progress = mergeEpisodeProgress(
+        [current.episode_progress, [entry]],
+        {
+          source,
+        },
+      );
+      return progress.some(({ k }) => k === entry.k)
+        ? { ...current, episode_progress: progress }
+        : null;
     }
     const other = current
       ? null

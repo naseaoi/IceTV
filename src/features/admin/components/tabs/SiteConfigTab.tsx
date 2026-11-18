@@ -56,7 +56,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   LiveAccess: 'all',
   DefaultAggregateSearch: true,
   EnableOptimization: true,
-  AutoSwitchSource: false,
+  AutoSwitchSource: true,
   UpstreamProxyPoolSegments: false,
   EnableDanmaku: false,
   EnableUserDanmaku: false,

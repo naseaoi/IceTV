@@ -2,6 +2,7 @@
 
 import type Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
+import { gzipSync } from 'node:zlib';
 
 import { resolveProxyUserAgent } from '@/app/api/proxy/utils';
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
@@ -9,6 +10,10 @@ import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { isServerRelayPaused } from '@/lib/host-traffic.server';
+import {
+  fetchStreamThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
@@ -37,7 +42,7 @@ jest.mock('@/lib/proxy-auth', () => ({
   })),
 }));
 jest.mock('@/lib/http-proxy-json', () => ({
-  getProxyUrlForTarget: () => undefined,
+  getProxyUrlForTarget: jest.fn(),
   fetchStreamThroughProxy: jest.fn(),
 }));
 jest.mock('@/lib/url-guard', () => ({
@@ -109,6 +114,65 @@ describe('segment shared resource integration', () => {
       delete process.env.UPSTREAM_MEDIA_USER_CONCURRENCY;
     else process.env.UPSTREAM_MEDIA_USER_CONCURRENCY = originalLimit;
     (storage as unknown as { db: Database.Database }).db.close();
+  });
+
+  it.each(['gzip', 'br'])(
+    'uses identity and drops decoded %s wire headers',
+    async (encoding) => {
+      const decoded = new Uint8Array(32);
+      mockOrigin.mockResolvedValueOnce(
+        new Response(decoded, {
+          headers: {
+            'Content-Type': 'video/mp2t',
+            'Content-Length': '18',
+            'Content-Encoding': encoding,
+          },
+        }),
+      );
+      const response = await GET(request());
+      expect(response.status).toBe(200);
+      expect((await response.arrayBuffer()).byteLength).toBe(
+        decoded.byteLength,
+      );
+      expect(response.headers.has('content-length')).toBe(false);
+      expect(response.headers.has('content-encoding')).toBe(false);
+      expect(mockFetchOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Accept-Encoding': 'identity' }),
+        }),
+      );
+    },
+  );
+
+  it('preserves length and encoding for a live proxy body that is still compressed', async () => {
+    const compressed = gzipSync(Buffer.alloc(32));
+    const origin = new Response(new Uint8Array(compressed), {
+      headers: {
+        'Content-Type': 'video/mp2t',
+        'Content-Length': String(compressed.byteLength),
+        'Content-Encoding': 'gzip',
+      },
+    });
+    jest
+      .mocked(getProxyUrlForTarget)
+      .mockReturnValueOnce(new URL('http://proxy.example'));
+    jest.mocked(fetchStreamThroughProxy).mockResolvedValueOnce({
+      body: origin.body!,
+      headers: origin.headers,
+      status: 200,
+      statusText: 'OK',
+    });
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true, LiveAccess: 'all' },
+    });
+    const mediaRequest = request();
+    Object.assign(mediaRequest, { url: mediaRequest.url + '&icetv-live=1' });
+    const response = await GET(mediaRequest);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(compressed);
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+    expect(response.headers.get('content-length')).toBe(
+      String(compressed.byteLength),
+    );
   });
 
   it.each([false, true])(
