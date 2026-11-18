@@ -23,6 +23,7 @@ import type { SearchResult } from '@/lib/types';
 
 type PlayInitParams = Parameters<typeof usePlayInit>[0];
 type ArtPlayerParams = Parameters<typeof useArtPlayer>[0];
+type LazyResolveOptions = { signal?: AbortSignal; forceRefresh?: boolean };
 type SourceSwitchParams = Parameters<typeof useSourceSwitch>[0];
 type MainContentProps = ComponentProps<typeof PlayMainContent>;
 
@@ -85,7 +86,7 @@ const mockPendingLazyResolutions = new Map<
   { resolve: (url: string) => void; reject: (error: unknown) => void }
 >();
 const mockResolveLazyEpisodeUrl = jest.fn(
-  (_source: string, lazyUrl: string, _options?: { signal?: AbortSignal }) =>
+  (_source: string, lazyUrl: string, _options?: LazyResolveOptions) =>
     new Promise<string>((resolve, reject) => {
       mockPendingLazyResolutions.set(lazyUrl, { resolve, reject });
     }),
@@ -203,7 +204,7 @@ jest.mock('@/features/play/lib/lazyEpisode', () => ({
   resolveLazyEpisodeUrl: (
     source: string,
     lazyUrl: string,
-    options?: { signal?: AbortSignal },
+    options?: LazyResolveOptions,
   ) => mockResolveLazyEpisodeUrl(source, lazyUrl, options),
 }));
 
@@ -356,6 +357,49 @@ describe('PlayPageClient', () => {
     expect(
       mockSourceSwitch.handleEpisodeUrlResolveFailed,
     ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://cdn.example/fresh.m3u8',
+    'https://cdn.example/rejected.m3u8',
+  ])(
+    'refreshes a cached lazy URL only once per playback intent and reloads %s',
+    async (freshUrl) => {
+      const rejectedUrl = 'https://cdn.example/rejected.m3u8';
+      mockPeekResolvedLazyEpisodeUrl.mockReturnValueOnce(rejectedUrl);
+      renderLoadedPage();
+      const forbidden = lastArg(mockUseArtPlayer).onPlaybackUrlForbidden!;
+      const signal = new AbortController().signal;
+      const refresh = forbidden(rejectedUrl, signal);
+      expect(mockResolveLazyEpisodeUrl).toHaveBeenCalledWith(
+        LAZY_DETAIL.source,
+        LAZY_EPISODES[0],
+        expect.objectContaining({ forceRefresh: true }),
+      );
+      expect(forbidden(rejectedUrl, signal)).toBeUndefined();
+      await settleLazyEpisode(LAZY_EPISODES[0], freshUrl);
+      await expect(refresh).resolves.toBe(true);
+      expect(latestVideoUrl()).toBe(freshUrl);
+      expect(mockSourceSwitch.restartCurrentPlayback).toHaveBeenCalledTimes(1);
+      expect(forbidden(freshUrl, signal)).toBeUndefined();
+    },
+  );
+
+  it('does not force-resolve a direct URL or apply a refresh after switching episodes', async () => {
+    const rejectedUrl = 'https://cdn.example/rejected.m3u8';
+    mockPeekResolvedLazyEpisodeUrl.mockReturnValueOnce(rejectedUrl);
+    renderLoadedPage();
+    const forbidden = lastArg(mockUseArtPlayer).onPlaybackUrlForbidden!;
+    const signal = new AbortController().signal;
+    expect(
+      forbidden('https://cdn.example/direct.m3u8', signal),
+    ).toBeUndefined();
+    const refresh = forbidden(rejectedUrl, signal);
+    switchToEpisode(1);
+    await settleLazyEpisode(LAZY_EPISODES[0], 'https://cdn.example/stale.m3u8');
+    await expect(refresh).resolves.toBe(true);
+    expect(latestVideoUrl()).not.toBe('https://cdn.example/stale.m3u8');
+    expect(mockSourceSwitch.restartCurrentPlayback).not.toHaveBeenCalled();
   });
 
   it('普通详情等待不创建预算，懒解析开始登记源尝试且解析完成保留起点', async () => {

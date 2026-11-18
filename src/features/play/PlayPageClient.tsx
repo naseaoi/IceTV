@@ -57,6 +57,7 @@ import {
 import { shouldFinalizeSourceSwitchCleanup } from '@/features/play/lib/sourceSwitchCleanup';
 import { getVodRuntimeSourceUrl } from '@/features/play/lib/vodHlsRuntime';
 import {
+  type VodPlaybackIntent,
   getVodSourceAttempt,
   reportVodPlaybackOutcome,
 } from '@/features/play/lib/vodPlaybackIntent';
@@ -490,8 +491,10 @@ function AuthenticatedPlayPageClient({
   }, []);
   useEffect(() => {
     window.addEventListener(PLAYER_EXIT_EVENT, cancelEpisodeResolve);
-    return () =>
+    return () => {
       window.removeEventListener(PLAYER_EXIT_EVENT, cancelEpisodeResolve);
+      cancelEpisodeResolve();
+    };
   }, [cancelEpisodeResolve]);
 
   const {
@@ -647,9 +650,13 @@ function AuthenticatedPlayPageClient({
   });
 
   const lastResolvedLazyEpisodeRef = useRef<{
+    source: string;
     lazyUrl: string;
     url: string;
   } | null>(null);
+  const lazyRefreshAttemptsRef = useRef(
+    new WeakMap<VodPlaybackIntent, Set<string>>(),
+  );
 
   useEffect(() => {
     // 起播放行前不派生地址：历史恢复可能还要改集，提前派生会让播放器和逐集解析先按当前集白跑一遍
@@ -672,7 +679,8 @@ function AuthenticatedPlayPageClient({
     const lastResolved = lastResolvedLazyEpisodeRef.current;
     if (
       currentVideoUrl &&
-      lastResolved?.lazyUrl === targetUrl &&
+      lastResolved?.source === source &&
+      lastResolved.lazyUrl === targetUrl &&
       lastResolved.url === currentVideoUrl
     ) {
       return;
@@ -681,6 +689,7 @@ function AuthenticatedPlayPageClient({
     const cachedUrl = peekResolvedLazyEpisodeUrl(source, targetUrl);
     if (cachedUrl) {
       lastResolvedLazyEpisodeRef.current = {
+        source,
         lazyUrl: targetUrl,
         url: cachedUrl,
       };
@@ -713,6 +722,7 @@ function AuthenticatedPlayPageClient({
       .then((resolvedUrl) => {
         if (isStale()) return;
         lastResolvedLazyEpisodeRef.current = {
+          source,
           lazyUrl: targetUrl,
           url: resolvedUrl,
         };
@@ -743,6 +753,75 @@ function AuthenticatedPlayPageClient({
     sourceChangeRequestIdRef,
     stopActiveHlsLoading,
   ]);
+
+  const handlePlaybackUrlForbidden = useCallback(
+    (url: string, runtimeSignal: AbortSignal) => {
+      const resolved = lastResolvedLazyEpisodeRef.current;
+      const currentDetail = detailRef.current;
+      const intent = playbackIntentRef?.current;
+      if (
+        !resolved ||
+        !intent ||
+        resolved.url !== url ||
+        videoUrlRef.current !== url ||
+        currentDetail?.source !== resolved.source ||
+        currentDetail.episodes[currentEpisodeIndexRef.current] !==
+          resolved.lazyUrl
+      )
+        return;
+
+      const attempts =
+        lazyRefreshAttemptsRef.current.get(intent) ?? new Set<string>();
+      const key = JSON.stringify([resolved.source, resolved.lazyUrl]);
+      if (attempts.has(key)) return;
+      attempts.add(key);
+      lazyRefreshAttemptsRef.current.set(intent, attempts);
+
+      const requestId = sourceChangeRequestIdRef.current;
+      const controller = new AbortController();
+      episodeResolveControllerRef.current = controller;
+      const abort = () => controller.abort();
+      runtimeSignal.addEventListener('abort', abort, { once: true });
+      const isStale = () =>
+        controller.signal.aborted ||
+        playbackIntentRef.current !== intent ||
+        sourceChangeRequestIdRef.current !== requestId ||
+        videoUrlRef.current !== url ||
+        detailRef.current?.source !== resolved.source ||
+        detailRef.current?.id !== currentDetail.id ||
+        detailRef.current?.episodes[currentEpisodeIndexRef.current] !==
+          resolved.lazyUrl;
+
+      return resolveLazyEpisodeUrl(resolved.source, resolved.lazyUrl, {
+        forceRefresh: true,
+        signal: controller.signal,
+      })
+        .then(
+          (freshUrl) => {
+            if (isStale()) return true;
+            lastResolvedLazyEpisodeRef.current = { ...resolved, url: freshUrl };
+            // 源站可能返回同一个地址；重试代次仍须推进，才能重新加载清单。
+            setVideoUrl(freshUrl);
+            restartCurrentPlayback();
+            return true;
+          },
+          () => isStale(),
+        )
+        .finally(() => {
+          runtimeSignal.removeEventListener('abort', abort);
+          if (episodeResolveControllerRef.current === controller)
+            episodeResolveControllerRef.current = null;
+        });
+    },
+    [
+      currentEpisodeIndexRef,
+      detailRef,
+      playbackIntentRef,
+      restartCurrentPlayback,
+      setVideoUrl,
+      sourceChangeRequestIdRef,
+    ],
+  );
 
   const handleSourceDetailFetched = useCallback(
     (updated: SearchResult) => {
@@ -871,6 +950,7 @@ function AuthenticatedPlayPageClient({
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),
     onPlaybackRecoveryExhausted: handlePlaybackRecoveryExhausted,
+    onPlaybackUrlForbidden: handlePlaybackUrlForbidden,
     onLastEpisodeEnded: handleLastEpisodeEnded,
     onPlaybackStarted: useCallback(() => {
       ensureEpisodeProgressLoaded();

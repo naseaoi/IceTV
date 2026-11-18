@@ -144,7 +144,7 @@ describe('m3u8 upstream identity', () => {
     },
   );
 
-  it('shares raw results and in-flight loads across sticky contexts', async () => {
+  it('shares raw results and in-flight loads across sticky contexts without a proxy pool', async () => {
     const url = 'https://cdn.example/sticky-shared/master.m3u8';
     let finish!: (value: Response) => void;
     mockFetch.mockReset().mockImplementation(
@@ -181,6 +181,94 @@ describe('m3u8 upstream identity', () => {
       proxyPoolStickyKey: 'c'.repeat(64),
     });
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('partitions raw cache, warm and in-flight loads by routing context when the proxy pool is on', async () => {
+    const previousPool = process.env.UPSTREAM_PROXY_POOL;
+    process.env.UPSTREAM_PROXY_POOL =
+      'https://egress-a.example https://egress-b.example';
+    const url = 'https://cdn.example/sticky-pool/master.m3u8';
+    const stickyA = 'a'.repeat(64);
+    const stickyB = 'b'.repeat(64);
+    const request = (warm: boolean) =>
+      ({
+        url: `http://localhost/api/proxy/m3u8?url=${encodeURIComponent(url)}&source=${SOURCE}`,
+        headers: new Headers(warm ? { 'X-IceTV-Warm-Only': '1' } : {}),
+      }) as NextRequest;
+    const authorize = (proxyPoolStickyKey: string) =>
+      mockAuthorization.mockResolvedValueOnce({
+        authorized: true,
+        via: 'session',
+        username: 'viewer',
+        proxyPoolStickyKey,
+      });
+    const context = {
+      startedAt: Date.now(),
+      proxyMode: 'server-proxy',
+      userAction: null,
+      userInitiated: false,
+    };
+    try {
+      mockFetch.mockImplementation(
+        async (
+          target: string,
+          init: { proxyPoolStickyKey?: string; resourceContext?: unknown },
+        ) => {
+          const tag = init.proxyPoolStickyKey?.[0] ?? 'legacy';
+          return new Response(
+            mediaPlaylist(
+              target.includes('embedded') ? `${tag}.ts?token=x` : `${tag}.ts`,
+            ),
+          );
+        },
+      );
+      // 同一 sticky 的预热由正式播放复用，其他 sticky 单独回源
+      authorize(stickyA);
+      expect((await GET(request(true))).status).toBe(204);
+      authorize(stickyB);
+      expect(await (await GET(request(false))).text()).toContain('b.ts');
+      authorize(stickyA);
+      expect(await (await GET(request(false))).text()).toContain('a.ts');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(peekM3U8Cache(url, SOURCE)).toBeNull();
+      expect(
+        peekM3U8Cache(url, SOURCE, { proxyPoolStickyKey: stickyA }),
+      ).not.toBeNull();
+
+      // 入口无签名、正文才带签名时，并发加载在拿到正文前已按 sticky 分开
+      const embeddedUrl = url.replace('master', 'embedded');
+      const [first, second, third] = await Promise.all(
+        [stickyA, stickyB, stickyA].map((proxyPoolStickyKey) =>
+          loadM3U8Data(embeddedUrl, 'test', SOURCE, false, false, {
+            ...context,
+            proxyPoolStickyKey,
+          }),
+        ),
+      );
+      expect(first.content).toContain('a.ts');
+      expect(second.content).toContain('b.ts');
+      expect(third.content).toContain('a.ts');
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+
+      // 缺少 sticky 的旧签名按计额身份分区
+      const legacyUrl = url.replace('master', 'legacy');
+      await loadM3U8Data(legacyUrl, 'test', SOURCE, false, false, {
+        ...context,
+        identity: 'ip:198.51.100.1',
+      });
+      await loadM3U8Data(legacyUrl, 'test', SOURCE, false, false, {
+        ...context,
+        identity: 'ip:198.51.100.2',
+      });
+      await loadM3U8Data(legacyUrl, 'test', SOURCE, false, false, {
+        ...context,
+        identity: 'ip:198.51.100.1',
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+    } finally {
+      if (previousPool === undefined) delete process.env.UPSTREAM_PROXY_POOL;
+      else process.env.UPSTREAM_PROXY_POOL = previousPool;
+    }
   });
 
   beforeEach(() => {
@@ -413,19 +501,43 @@ describe('warm-only m3u8', () => {
     expect(mockRewrite).not.toHaveBeenCalled();
   });
 
-  it.each(['redirect-signed', 'ongoing'])(
+  it('keeps distinct upstream signature values separate and uncached', async () => {
+    const url = 'https://cdn.example/vod/distinct-tokens.m3u8';
+    const signed = (token: string) => `${url}?token=${token}`;
+    mockFetch.mockImplementation(async (target: string) =>
+      upstream(
+        mediaPlaylist(`${new URL(target).searchParams.get('token')}.ts`),
+      ),
+    );
+    const results = await Promise.all(
+      ['first', 'second'].map(async (token) =>
+        (await GET(request(signed(token), false))).text(),
+      ),
+    );
+    expect(results).toEqual([
+      mediaPlaylist('first.ts'),
+      mediaPlaylist('second.ts'),
+    ]);
+    expect((await GET(request(signed('first'), false))).status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['redirect-signed', 'embedded-signed', 'ongoing'])(
     'does not cache a response found uncacheable after loading: %s',
     async (kind) => {
       const url = `https://cdn.example/warm/${kind}.m3u8`;
-      mockFetch.mockImplementation(async () =>
-        kind === 'redirect-signed'
-          ? upstream(mediaPlaylist('seg.ts'), `${url}?token=short`)
-          : upstream('#EXTM3U\n#EXTINF:6,\nseg.ts', url),
-      );
+      mockFetch.mockImplementation(async () => {
+        if (kind === 'redirect-signed')
+          return upstream(mediaPlaylist('seg.ts'), `${url}?token=short`);
+        if (kind === 'embedded-signed')
+          return upstream(mediaPlaylist('seg.ts?token=short'), url);
+        return upstream('#EXTM3U\n#EXTINF:6,\nseg.ts', url);
+      });
       expect((await GET(request(url))).status).toBe(204);
       expect(peekM3U8Cache(url, SOURCE)).toBeNull();
       expect(mockRewrite).not.toHaveBeenCalled();
       expect((await GET(request(url, false))).status).toBe(200);
+      expect(mockRewrite.mock.lastCall?.[7]).toBe(false);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     },
   );
@@ -503,20 +615,24 @@ describe('m3u8 cache ttl', () => {
   });
 
   it.each([
+    ['segment', mediaPlaylist('seg-1.ts?token=abc&expires=1001')],
     [
-      'signed segment urls',
-      'https://cdn.example/vod/signed/index.m3u8',
-      mediaPlaylist('seg-1.ts?token=abc&expires=1700000000'),
+      'key',
+      mediaPlaylist('#EXT-X-KEY:METHOD=AES-128,URI="key?token=abc"\nseg.ts'),
     ],
     [
-      'master playlists',
-      'https://cdn.example/vod/master/index.m3u8',
-      ['#EXTM3U', '#EXT-X-STREAM-INF:BANDWIDTH=800000', 'low/index.m3u8'].join(
-        '\n',
-      ),
+      'child playlist',
+      '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nlow.m3u8?token=abc',
     ],
-  ])('keeps the one minute ttl for %s', async (_label, url, content) => {
+  ])('does not cache a playlist with a signed %s', async (label, content) => {
+    const url = `https://cdn.example/vod/signed-${label}/index.m3u8`;
     await load(url, content);
+    expect(peekM3U8Cache(url, SOURCE)).toBeNull();
+  });
+
+  it('keeps the one minute fresh ttl for unsigned master playlists', async () => {
+    const url = 'https://cdn.example/vod/master/index.m3u8';
+    await load(url, '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nlow.m3u8');
 
     clock.mockReturnValue(START + 59_000);
     expect(peekM3U8Cache(url, SOURCE)).toMatchObject({ fresh: true });

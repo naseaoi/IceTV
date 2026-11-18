@@ -101,6 +101,8 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           paramsRef.current.onSourceProxyFallbackStarted?.(),
         onPlaybackRecoveryExhausted: (reason) =>
           paramsRef.current.onPlaybackRecoveryExhausted?.(reason) ?? false,
+        onPlaybackUrlForbidden: (url, signal) =>
+          paramsRef.current.onPlaybackUrlForbidden?.(url, signal),
         onCurrentSourceVideoInfo: (info, context) =>
           paramsRef.current.onCurrentSourceVideoInfo?.(info, context),
         onDanmakuEnable: () => paramsRef.current.onDanmakuEnable?.(),

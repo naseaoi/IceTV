@@ -19,6 +19,7 @@ import {
   hasSignedUrlParams,
   SIGNED_URL_PARAM_RE,
 } from '@/lib/signed-url-params';
+import { isUpstreamProxyPoolConfigured } from '@/lib/upstream-proxy-pool.server';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 type M3U8CacheEntry = {
@@ -56,10 +57,7 @@ const m3u8Cache = createSharedServerCache<M3U8CacheEntry>({
   getTtl: getM3U8CacheTtl,
   ...getServerCacheBudget('proxy-m3u8'),
   maxWaitMs: 10_000,
-  shouldCache: (entry) =>
-    !isSignedM3U8Url(entry.finalUrl) &&
-    (entry.content.includes('#EXT-X-ENDLIST') ||
-      entry.content.includes('#EXT-X-STREAM-INF')),
+  shouldCache: isCacheableM3U8Entry,
 });
 
 const MAX_M3U8_BYTES = 2 * 1024 * 1024;
@@ -82,25 +80,57 @@ async function getProxyRequestTimeoutMs(
   );
 }
 
-export const isSignedM3U8Url = hasSignedUrlParams;
+export function shouldSkipM3U8Cache(url: string, isLive: boolean): boolean {
+  return isLive || hasSignedUrlParams(url);
+}
 
-// 完结的媒体清单内容不再变化，但内嵌的签名分片或密钥地址会过期，只有不含签名参数时才长缓存
-function getM3U8CacheTtl(entry: M3U8CacheEntry) {
-  const { content } = entry;
-  const endedMediaPlaylist =
-    content.includes('#EXT-X-ENDLIST') &&
-    !content.includes('#EXT-X-STREAM-INF');
-  return endedMediaPlaylist && !SIGNED_URL_PARAM_RE.test(content)
+export function isCacheableM3U8Entry(entry: M3U8CacheEntry): boolean {
+  // 内嵌签名的寿命可能短于缓存 TTL，且子地址的最早有效期未必可识别。
+  return (
+    !hasSignedUrlParams(entry.finalUrl) &&
+    !SIGNED_URL_PARAM_RE.test(entry.content) &&
+    (entry.content.includes('#EXT-X-ENDLIST') ||
+      entry.content.includes('#EXT-X-STREAM-INF'))
+  );
+}
+
+function getM3U8CacheTtl({ content }: M3U8CacheEntry) {
+  return content.includes('#EXT-X-ENDLIST') &&
+    !content.includes('#EXT-X-STREAM-INF')
     ? ENDED_MEDIA_M3U8_TTL
     : M3U8_TTL;
 }
 
-function getM3U8CacheKey(url: string, source: string | null): string {
-  return `${source?.trim().toLowerCase() || 'unknown'}\0${url}`;
+type M3U8Route = {
+  isLive: boolean;
+  identity?: string;
+  proxyPoolStickyKey?: string;
+};
+
+// 清单可能含绑定取用出口的子地址且无法可靠识别，启用代理池时缓存与在途合并都按选路上下文分区。
+function getM3U8CacheKey(
+  url: string,
+  source: string | null,
+  { isLive, identity, proxyPoolStickyKey }: M3U8Route,
+): string {
+  const partition =
+    isLive || !isUpstreamProxyPoolConfigured()
+      ? 'direct'
+      : proxyPoolStickyKey
+        ? `sticky:${proxyPoolStickyKey}`
+        : `legacy:${identity ?? ''}`;
+  return [partition, source?.trim().toLowerCase() || 'unknown', url].join('\0');
 }
 
-export function peekM3U8Cache(url: string, source: string | null) {
-  return m3u8Cache.peek(getM3U8CacheKey(url, source));
+export function peekM3U8Cache(
+  url: string,
+  source: string | null,
+  route: Omit<M3U8Route, 'isLive'> = {},
+) {
+  if (shouldSkipM3U8Cache(url, false)) return null;
+  return m3u8Cache.peek(
+    getM3U8CacheKey(url, source, { ...route, isLive: false }),
+  );
 }
 
 export function refreshM3U8Cache(
@@ -111,7 +141,12 @@ export function refreshM3U8Cache(
   identity?: string,
   proxyPoolStickyKey?: string,
 ): Promise<void> {
-  const cacheKey = getM3U8CacheKey(url, source);
+  if (shouldSkipM3U8Cache(url, isLive)) return Promise.resolve();
+  const cacheKey = getM3U8CacheKey(url, source, {
+    isLive,
+    identity,
+    proxyPoolStickyKey,
+  });
   const existing = m3u8RefreshInflight.get(cacheKey);
   if (existing) return existing;
 
@@ -146,8 +181,15 @@ export function loadM3U8Data(
   skipCache: boolean,
   context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
-  skipCache = skipCache || isLive || isSignedM3U8Url(url);
-  const key = getM3U8LoadInflightKey(url, ua, source, isLive, skipCache);
+  skipCache = skipCache || shouldSkipM3U8Cache(url, isLive);
+  const cacheKey = getM3U8CacheKey(url, source, {
+    isLive,
+    identity: context.identity,
+    proxyPoolStickyKey: context.proxyPoolStickyKey,
+  });
+  const key = [cacheKey, ua, isLive ? 'live' : 'vod', String(skipCache)].join(
+    '\0',
+  );
   if (context.signal?.aborted) {
     return Promise.reject(
       context.signal.reason ?? new DOMException('Aborted', 'AbortError'),
@@ -170,9 +212,7 @@ export function loadM3U8Data(
     const pending = skipCache
       ? load()
       : m3u8Cache
-          .getOrLoad(getM3U8CacheKey(url, source), async () =>
-            toM3U8CacheEntry(await load()),
-          )
+          .getOrLoad(cacheKey, async () => toM3U8CacheEntry(await load()))
           .then((entry) => ({ ...entry, status: 200, statusText: 'OK' }));
     done = pending
       .then(
@@ -187,22 +227,6 @@ export function loadM3U8Data(
   });
   m3u8LoadInflight.set(key, { task, done });
   return task.consume(context.signal);
-}
-
-function getM3U8LoadInflightKey(
-  url: string,
-  ua: string,
-  source: string | null,
-  isLive: boolean,
-  skipCache: boolean,
-) {
-  return [
-    url,
-    ua,
-    source || '',
-    isLive ? 'live' : 'vod',
-    skipCache ? 'signed' : 'cacheable',
-  ].join('\0');
 }
 
 async function fetchM3U8Data(

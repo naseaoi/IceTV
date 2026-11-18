@@ -4,11 +4,15 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type {
   CurrentSourceVideoInfo,
   CurrentSourceVideoInfoContext,
+  UseArtPlayerParams,
 } from '@/features/play/hooks/artPlayerTypes';
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { FragmentMemoryCacheLoader } from '@/features/play/lib/fragmentMemoryCache';
-import { getHlsResourceRetryDelay } from '@/features/play/lib/hlsSourceFailure';
+import {
+  getHlsErrorStatus,
+  getHlsResourceRetryDelay,
+} from '@/features/play/lib/hlsSourceFailure';
 import { getForwardBufferSeconds } from '@/features/play/lib/nextEpisodePreload';
 import {
   PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
@@ -54,6 +58,7 @@ import {
   getVodHlsBufferOverrides,
   getVodHlsLoadingOverrides,
   resolveVodSourceFragmentTimeoutMs,
+  resolveVodStartupTimeouts,
 } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { logHlsError } from '@/lib/hls-error-log';
 import {
@@ -105,6 +110,7 @@ type CreateVodM3u8LoaderOptions = {
   onSourceProxyFallbackStarted?: () => void;
   // 返回 true 表示外层已接手（如自动换源），不再展示当前源失败
   onPlaybackRecoveryExhausted?: (reason: string) => boolean;
+  onPlaybackUrlForbidden?: UseArtPlayerParams['onPlaybackUrlForbidden'];
   onCurrentSourceVideoInfo?: (
     info: CurrentSourceVideoInfo,
     context: CurrentSourceVideoInfoContext,
@@ -229,6 +235,7 @@ export function createVodM3u8Loader({
   setRealtimeLoadSpeed,
   onSourceProxyFallbackStarted,
   onPlaybackRecoveryExhausted,
+  onPlaybackUrlForbidden,
   onCurrentSourceVideoInfo,
 }: CreateVodM3u8LoaderOptions) {
   return function loadVodM3u8(
@@ -260,11 +267,10 @@ export function createVodM3u8Loader({
       sourceKey,
       detailRef.current?.id || '',
     );
+    const runtimeConfig = getRuntimeConfig();
     const fragmentTimeoutMs = resolveVodSourceFragmentTimeoutMs(
       sourceKey,
-      resolveVodFragmentTimeoutMs(
-        getRuntimeConfig()?.VOD_FRAGMENT_TIMEOUT_SECONDS,
-      ),
+      resolveVodFragmentTimeoutMs(runtimeConfig?.VOD_FRAGMENT_TIMEOUT_SECONDS),
     );
     const fragLoadPolicy = buildVodFragLoadPolicy(fragmentTimeoutMs);
     const sharedHlsConfig = createHlsConfig({
@@ -344,6 +350,7 @@ export function createVodM3u8Loader({
     managedVideo.__icetvFragmentHttpCacheRecovery = fragmentHttpCacheRecovery;
 
     let resourceWaitAt: number | null = null;
+    let cancelForbiddenRefresh: (() => void) | null = null;
     const accountResourceWait = () => {
       if (resourceWaitAt === null) return;
       const now = getVodStartupNow();
@@ -782,6 +789,7 @@ export function createVodM3u8Loader({
       qualityController.dispose();
       segmentPrebufferController.dispose();
       recoveryController.dispose();
+      cancelForbiddenRefresh?.();
       clearStallConfirmation();
       restoreAutoplay();
       if (speedFallbackTimer) {
@@ -801,6 +809,56 @@ export function createVodM3u8Loader({
     video.addEventListener('stalled', onStalled);
     video.addEventListener('playing', onPlaying);
     video.addEventListener('timeupdate', onTimeUpdate);
+
+    const tryRefreshForbiddenUrl = (reason: string) => {
+      if (!onPlaybackUrlForbidden) return false;
+      const controller = new AbortController();
+      const pending = onPlaybackUrlForbidden(url, controller.signal);
+      if (!pending) return false;
+
+      if (attempt.startedAt === null) startupProgress = beginMediaLoad();
+      resourceWaitAt = getVodStartupNow();
+      vodRuntimeResourceWaits.add(video);
+      recoveryController.cancelPendingRetry();
+      clearStallConfirmation();
+      setIsVideoLoading(true);
+      setRealtimeLoadSpeed('正在重新解析播放地址...');
+      hls.stopLoad?.();
+
+      const finish = (handled: boolean) => {
+        if (!cancelForbiddenRefresh) return;
+        cancelForbiddenRefresh();
+        cancelForbiddenRefresh = null;
+        if (
+          videoRuntimeCleaned ||
+          managedVideo.hls !== hls ||
+          (playbackIntentRef && playbackIntentRef.current !== intent)
+        )
+          return;
+
+        accountResourceWait();
+        resourceWaitAt = null;
+        vodRuntimeResourceWaits.delete(video);
+        if (handled) {
+          runManagedVideoCleanup(video);
+        } else if (!switchRoute(reason)) {
+          reportRouteStat(false);
+          failCurrentSource(reason);
+        }
+      };
+      const { idleMs } = resolveVodStartupTimeouts(
+        sourceKey,
+        runtimeConfig?.VOD_PAGE_TIMEOUT_SECONDS,
+        runtimeConfig?.VOD_FRAGMENT_TIMEOUT_SECONDS,
+      );
+      const timer = setTimeout(() => finish(false), idleMs);
+      cancelForbiddenRefresh = () => {
+        clearTimeout(timer);
+        controller.abort();
+      };
+      void pending.then(finish, () => finish(false));
+      return true;
+    };
 
     const onHlsError = function (_event: unknown, data: any) {
       if (
@@ -865,6 +923,12 @@ export function createVodM3u8Loader({
         return;
       }
       const isRouteNetworkError = isVodRouteNetworkError(data);
+      if (
+        isRouteNetworkError &&
+        getHlsErrorStatus(data) === 403 &&
+        tryRefreshForbiddenUrl(errorReason)
+      )
+        return;
       const isFragNetworkError =
         isRouteNetworkError && /frag|segment/i.test(errorDetails);
       const isFragOrLevelNetworkError =

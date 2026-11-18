@@ -20,7 +20,8 @@ export type ServerProxyKind =
   | 'bangumi-data'
   | 'danmaku'
   | 'vod-segment'
-  | 'vod-m3u8';
+  | 'vod-m3u8'
+  | 'episode-url-refresh';
 
 type RateLimitConfig = {
   maxRequests: number;
@@ -44,6 +45,7 @@ const RATE_LIMITS: Record<ServerProxyKind, RateLimitConfig> = {
   // 分片与清单按正常播放的数倍留量，只拦异常循环与外部盗链
   'vod-segment': { maxRequests: 1200, windowMs: 60_000 },
   'vod-m3u8': { maxRequests: 240, windowMs: 60_000 },
+  'episode-url-refresh': { maxRequests: 8, windowMs: 60_000 },
 };
 
 const failureStats = new Map<string, FailureStats>();

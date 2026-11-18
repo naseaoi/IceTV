@@ -44,5 +44,5 @@
 
 解析结果与特殊源搜索跨实例共享，均按源配置（`getSourceCacheKey()`）分区：
 
-- `src/app/api/episode-url/cache.ts`：不带签名参数的播放地址进共享缓存 `episode-url-v1`，30 分钟新鲜、2 小时陈旧；带签名参数的地址只留在本实例。服务端与浏览器懒解析缓存共用 `src/lib/signed-url-params.ts` 的签名有效期规则：最长 5 分钟，能解析签名到期时间时以较早者为限，签名地址到期后重新加载。共享缓存的结果格式或有效期变更时升级缓存名版本。依赖 Cookie、会话或出口 IP 的解析结果不能进共享缓存。
+- `src/app/api/episode-url/cache.ts`：不带签名参数的播放地址进共享缓存 `episode-url-v1`，30 分钟新鲜、2 小时陈旧；带签名参数的地址只留在本实例。`refresh=1` 强刷跳过两级缓存重新解析，需登录并受每账号每分钟 8 次的 `episode-url-refresh` 额度限制；同键强刷在途合并，结果写入本实例缓存并优先于共享缓存，不回写共享缓存，强刷进行中或完成后迟到的普通加载不能覆盖它。服务端与浏览器懒解析缓存共用 `src/lib/signed-url-params.ts` 的签名有效期规则：最长 5 分钟，能解析签名到期时间时以较早者为限，签名地址到期后重新加载。共享缓存的结果格式或有效期变更时升级缓存名版本。依赖 Cookie、会话或出口 IP 的解析结果不能进共享缓存。
 - giri / xgcartoon 搜索经 `loadSpecialSourceSearch()`（`src/lib/search-cache.ts`）共享非空结果 10 分钟。失败由 loader 抛出，失败与空结果均不缓存；失败源重试沿用聚合入口。

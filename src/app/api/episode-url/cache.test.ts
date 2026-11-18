@@ -33,6 +33,56 @@ describe('episode URL cache keys', () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    [
+      'https://cdn.example/rejected.m3u8',
+      'https://cdn.example/new.m3u8?token=fresh',
+    ],
+    [
+      'https://cdn.example/rejected.m3u8?token=old',
+      'https://cdn.example/new.m3u8',
+    ],
+  ])(
+    'bypasses cached %s on refresh and reuses the new local result',
+    async (oldUrl, freshUrl) => {
+      const key = getEpisodeUrlCacheKey(source, lazyUrl);
+      episodeUrlCache.set(key, oldUrl);
+      const loader = jest.fn(async () => freshUrl);
+      await expect(
+        Promise.all([
+          episodeUrlCache.refresh(key, loader),
+          episodeUrlCache.refresh(key, loader),
+          episodeUrlCache.getOrLoad(key, loader),
+        ]),
+      ).resolves.toEqual([freshUrl, freshUrl, freshUrl]);
+      await expect(episodeUrlCache.getOrLoad(key, loader)).resolves.toBe(
+        freshUrl,
+      );
+      expect(loader).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('keeps a refreshed URL ahead of an older in-flight resolution', async () => {
+    const key = getEpisodeUrlCacheKey(source, lazyUrl);
+    let finish!: (url: string) => void;
+    const pending = episodeUrlCache.getOrLoad(
+      key,
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const freshUrl = 'https://cdn.example/fresh.m3u8';
+    const refresh = jest.fn(async () => freshUrl);
+    await episodeUrlCache.refresh(key, refresh);
+    finish('https://cdn.example/stale.m3u8?token=old');
+    await pending;
+    await expect(episodeUrlCache.getOrLoad(key, refresh)).resolves.toBe(
+      freshUrl,
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('reuses unchanged configuration and separates lazy episode addresses', () => {
     const key = getEpisodeUrlCacheKey(source, lazyUrl);
     expect(getEpisodeUrlCacheKey({ ...source }, lazyUrl)).toBe(key);

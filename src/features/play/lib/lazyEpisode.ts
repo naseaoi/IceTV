@@ -12,7 +12,10 @@ import {
 const RESOLVED_CACHE_TTL_MS = 30 * 60 * 1000;
 const RESOLVED_CACHE_MAX_SIZE = 200;
 
-const resolvedCache = new Map<string, { url: string; expiresAt: number }>();
+const resolvedCache = new Map<
+  string,
+  { url: string; expiresAt: number; refreshed: boolean }
+>();
 const inflight = new Map<
   string,
   ReturnType<typeof createSharedPlaybackTask<string>>
@@ -40,10 +43,11 @@ async function requestEpisodeUrl(
   source: string,
   lazyUrl: string,
   probe: boolean,
+  forceRefresh: boolean,
   signal: AbortSignal,
 ): Promise<string> {
   const response = await (probe ? fetchSourceProbe : fetch)(
-    `/api/episode-url?source=${encodeURIComponent(source)}&url=${encodeURIComponent(lazyUrl)}`,
+    `/api/episode-url?source=${encodeURIComponent(source)}&url=${encodeURIComponent(lazyUrl)}${forceRefresh ? '&refresh=1' : ''}`,
     { signal },
   );
   if (!response.ok) {
@@ -63,7 +67,11 @@ async function requestEpisodeUrl(
 export function resolveLazyEpisodeUrl(
   source: string,
   lazyUrl: string,
-  options: { probe?: boolean; signal?: AbortSignal } = {},
+  options: {
+    probe?: boolean;
+    signal?: AbortSignal;
+    forceRefresh?: boolean;
+  } = {},
 ): Promise<string> {
   if (options.signal?.aborted) return Promise.reject(playbackAbortError());
   if (!isLazyEpisodeUrl(lazyUrl)) {
@@ -71,10 +79,21 @@ export function resolveLazyEpisodeUrl(
   }
 
   const key = buildCacheKey(source, lazyUrl);
-  const cached = peekResolvedLazyEpisodeUrl(source, lazyUrl);
-  if (cached) return Promise.resolve(cached);
+  const refreshKey = `${key}:refresh`;
+  const refreshing = inflight.get(refreshKey);
+  if (refreshing && !refreshing.signal.aborted)
+    return refreshing.consume(options.signal);
 
-  const inflightKey = `${key}:${options.probe ? 'probe' : 'playback'}`;
+  const forceRefresh = options.forceRefresh === true;
+  if (!forceRefresh) {
+    const cached = peekResolvedLazyEpisodeUrl(source, lazyUrl);
+    if (cached) return Promise.resolve(cached);
+  }
+
+  const cachedAtStart = resolvedCache.get(key);
+  const inflightKey = forceRefresh
+    ? refreshKey
+    : `${key}:${options.probe ? 'probe' : 'playback'}`;
   const pending = inflight.get(inflightKey);
   if (pending && !pending.signal.aborted)
     return pending.consume(options.signal);
@@ -84,15 +103,28 @@ export function resolveLazyEpisodeUrl(
       const url = await requestEpisodeUrl(
         source,
         lazyUrl,
-        options.probe === true,
+        options.probe === true && !forceRefresh,
+        forceRefresh,
         signal,
       );
       if (signal.aborted) throw playbackAbortError();
+      // 旧的预热或测速请求不能覆盖已经启动或完成的强刷。
+      const current = resolvedCache.get(key);
+      if (
+        !forceRefresh &&
+        (inflight.has(refreshKey) ||
+          (current?.refreshed && current !== cachedAtStart))
+      )
+        return url;
       const now = Date.now();
       const freshMs = hasSignedUrlParams(url)
         ? getSignedUrlFreshMs(url, now)
         : RESOLVED_CACHE_TTL_MS;
-      resolvedCache.set(key, { url, expiresAt: now + freshMs });
+      resolvedCache.set(key, {
+        url,
+        expiresAt: now + freshMs,
+        refreshed: forceRefresh,
+      });
       if (resolvedCache.size > RESOLVED_CACHE_MAX_SIZE) {
         const oldest = resolvedCache.keys().next().value;
         if (oldest) resolvedCache.delete(oldest);

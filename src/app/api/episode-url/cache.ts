@@ -27,13 +27,19 @@ const sharedEpisodeUrls = createSharedServerCache<string>({
   ...getServerCacheBudget('episode-url'),
   shouldCache: (url) => !hasSignedUrlParams(url),
 });
-const signedEpisodeUrls = createSwrCache<string>({
-  name: 'episode-url-signed',
-  freshMs: 0,
+const localEpisodeUrls = createSwrCache<string>({
+  name: 'episode-url-local',
+  freshMs: EPISODE_URL_TTL.freshMs,
   staleMs: 0,
-  getTtl: (url) => ({ freshMs: getSignedUrlFreshMs(url) }),
+  getTtl: (url) => ({
+    freshMs: hasSignedUrlParams(url)
+      ? getSignedUrlFreshMs(url)
+      : EPISODE_URL_TTL.freshMs,
+  }),
   ...getServerCacheBudget('episode-url'),
 });
+
+const refreshInflight = new Map<string, Promise<string>>();
 
 export const episodeUrlCache = {
   getOrLoad(
@@ -42,33 +48,63 @@ export const episodeUrlCache = {
     signal?: AbortSignal,
   ): Promise<string> {
     return waitForSharedLoad(async () => {
-      const signed = signedEpisodeUrls.peek(key);
-      if (signed) return signed.value;
+      const refreshing = refreshInflight.get(key);
+      if (refreshing) return refreshing;
+      const local = localEpisodeUrls.peek(key);
+      if (local) return local.value;
       return sharedEpisodeUrls.getOrLoad(key, async () => {
         const url = await loader();
-        if (hasSignedUrlParams(url)) signedEpisodeUrls.set(key, url);
+        if (
+          hasSignedUrlParams(url) &&
+          !refreshInflight.has(key) &&
+          !localEpisodeUrls.peek(key)
+        )
+          localEpisodeUrls.set(key, url);
         return url;
       });
     }, signal);
   },
+  refresh(
+    key: string,
+    loader: () => Promise<string>,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    return waitForSharedLoad(() => {
+      const existing = refreshInflight.get(key);
+      if (existing) return existing;
+      const task = Promise.resolve()
+        .then(loader)
+        .then((url) => {
+          // 强刷结果作为本实例优先值，旧的共享加载完成后不能覆盖它。
+          if (refreshInflight.get(key) === task) localEpisodeUrls.set(key, url);
+          return url;
+        })
+        .finally(() => {
+          if (refreshInflight.get(key) === task) refreshInflight.delete(key);
+        });
+      refreshInflight.set(key, task);
+      return task;
+    }, signal);
+  },
   set(key: string, url: string) {
-    if (hasSignedUrlParams(url)) signedEpisodeUrls.set(key, url);
+    if (hasSignedUrlParams(url)) localEpisodeUrls.set(key, url);
     else sharedEpisodeUrls.set(key, url);
   },
   clear() {
+    refreshInflight.clear();
     sharedEpisodeUrls.clear();
-    signedEpisodeUrls.clear();
+    localEpisodeUrls.clear();
   },
 };
 
 export function getEpisodeUrlCacheStats() {
   const shared = sharedEpisodeUrls.stats();
-  const signed = signedEpisodeUrls.stats();
+  const local = localEpisodeUrls.stats();
   return {
     ...shared,
-    size: shared.size + signed.size,
-    estimatedBytes: shared.estimatedBytes + signed.estimatedBytes,
-    hits: shared.hits + signed.hits,
-    misses: shared.misses + signed.misses,
+    size: shared.size + local.size,
+    estimatedBytes: shared.estimatedBytes + local.estimatedBytes,
+    hits: shared.hits + local.hits,
+    misses: shared.misses + local.misses,
   };
 }

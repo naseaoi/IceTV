@@ -76,7 +76,7 @@ const request = {
 } as NextRequest;
 
 it.each([
-  ['key', keyRoute.GET, 500],
+  ['key', keyRoute.GET, 503],
   ['logo', logoRoute.GET, 503],
   ['precheck', precheckRoute.GET, 500],
   ['subscription', subscriptionRoute.POST, 503],
@@ -109,13 +109,14 @@ it.each([
     });
     mockFetch.mockClear().mockResolvedValue({
       ok: false,
+      status: 502,
       body: { cancel: jest.fn().mockResolvedValue(undefined) },
     });
     const response = await keyRoute.GET({
       url: `${request.url}&icetv-live=${isLive ? '1' : '0'}`,
       headers: new Headers({ 'x-real-ip': '203.0.113.8' }),
     } as NextRequest);
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(502);
     expect(mockFetch).toHaveBeenCalledWith(
       'https://example.com/image.jpg',
       expect.objectContaining({

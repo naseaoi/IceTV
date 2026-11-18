@@ -128,17 +128,22 @@ const _getFavorite = createKeyedCacheFirstReader<Favorite>({
   eventName: 'favoritesUpdated',
 });
 
+function fetchSkipConfig(source: string, id: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ source, id });
+  return fetchFromApi<SkipConfig | null>(
+    `/api/skipconfigs?${params}`,
+    signal ? { signal } : undefined,
+  );
+}
+
 const _getSkipConfig = createKeyedCacheFirstReader<SkipConfig>({
   getCached: () => cacheManager.getCachedSkipConfigs(),
   setCached: (data) => cacheManager.cacheSkipConfigs(data),
   fetchApi: async ([key]) => {
     const separator = key.indexOf('+');
-    const params = new URLSearchParams({
-      source: key.slice(0, separator),
-      id: key.slice(separator + 1),
-    });
-    const config = await fetchFromApi<SkipConfig | null>(
-      `/api/skipconfigs?${params}`,
+    const config = await fetchSkipConfig(
+      key.slice(0, separator),
+      key.slice(separator + 1),
     );
     return config ? { [key]: config } : {};
   },
@@ -847,6 +852,21 @@ export async function getSkipConfig(
   const key = generateStorageKey(source, id);
   const configs = await _getSkipConfig([key]);
   return configs[key] || null;
+}
+
+// 换源迁移涉及删除旧副本，目标是否存在必须以服务端回应为准。
+export async function getFreshSkipConfig(
+  source: string,
+  id: string,
+  signal: AbortSignal,
+): Promise<SkipConfig | null> {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username || signal.aborted)
+    throw new DOMException('Skip config read cancelled', 'AbortError');
+  const config = await fetchSkipConfig(source, id, signal);
+  if (signal.aborted || getAuthInfoFromBrowserCookie()?.username !== username)
+    throw new DOMException('Skip config read cancelled', 'AbortError');
+  return config;
 }
 
 export async function saveSkipConfig(

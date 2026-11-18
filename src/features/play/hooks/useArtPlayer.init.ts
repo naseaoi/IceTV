@@ -162,6 +162,7 @@ export async function initializeArtPlayer(
     onSourceProxyFallbackStarted,
     playbackIntentRef,
     onPlaybackRecoveryExhausted,
+    onPlaybackUrlForbidden,
     onCurrentSourceVideoInfo,
     onLastEpisodeEnded,
   } = params;
@@ -383,6 +384,7 @@ export async function initializeArtPlayer(
       onSourceProxyFallbackStarted,
       playbackIntentRef,
       onPlaybackRecoveryExhausted,
+      onPlaybackUrlForbidden,
       onCurrentSourceVideoInfo,
     });
 
