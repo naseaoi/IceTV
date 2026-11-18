@@ -356,6 +356,9 @@ describe('refreshLiveChannels', () => {
       getCachedLiveChannels(source.key),
     ]);
     expect(results[0]).toBe(results[1]);
+    if ('epg' in change) {
+      await getCachedLiveChannels(source.key, { includeEpg: true });
+    }
     expect(global.fetch).toHaveBeenCalledTimes('epg' in change ? 3 : 2);
     expect(db.setLiveSourceChannelCount).toHaveBeenCalledWith(changed, 1);
   });
