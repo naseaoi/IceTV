@@ -517,6 +517,46 @@ describe('player runtime mobile controls', () => {
     expect(harness.art.toggle).toHaveBeenCalledTimes(1);
   });
 
+  it('double tap seeks on the sides and toggles playback in the middle', () => {
+    const harness = createMobileControlsHarness();
+    const art = harness.art as typeof harness.art & {
+      currentTime: number;
+      duration: number;
+    };
+    art.currentTime = 100;
+    art.duration = 1_000;
+    jest.spyOn(harness.player, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      width: 300,
+    } as DOMRect);
+    bindPlayerMobileControls(harness.art, { doubleTapSeekSeconds: 10 });
+
+    harness.emit('dblclick', new MouseEvent('click', { clientX: 280 }));
+    harness.emit('dblclick', new MouseEvent('click', { clientX: 290 }));
+    expect(art.currentTime).toBe(120);
+    expect(
+      harness.player.querySelector('.ice-seek-feedback')?.textContent,
+    ).toBe('20 秒');
+
+    harness.emit('dblclick', new MouseEvent('click', { clientX: 20 }));
+    expect(art.currentTime).toBe(110);
+    harness.emit('dblclick', new MouseEvent('click', { clientX: 150 }));
+    expect(art.currentTime).toBe(110);
+    expect(harness.art.toggle).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(1_000);
+    expect(harness.player.querySelector('.ice-seek-feedback')).toBeNull();
+  });
+
+  it('double tap toggles playback anywhere without seek option', () => {
+    const harness = createMobileControlsHarness();
+    bindPlayerMobileControls(harness.art);
+
+    harness.emit('dblclick', new MouseEvent('click', { clientX: 5 }));
+
+    expect(harness.art.toggle).toHaveBeenCalledTimes(1);
+  });
+
   it('does not bind mobile controls without ArtPlayer mobile class', () => {
     const harness = createMobileControlsHarness({ mobile: false });
     const clickListener = jest.fn();

@@ -161,3 +161,97 @@ export async function assertPlayRecordOrdering(storage: IStorage) {
     await updatePlayRecordWithRetry(storage, user, key, (current) => current),
   ).toBeNull();
 }
+
+export async function assertPlayRecordEpisodeProgress(storage: IStorage) {
+  const user = 'episode-progress-user';
+  const key = 'next+1';
+  const first = { k: 'n:1', t: 30, d: 100, at: 100 };
+  const record: PlayRecord = {
+    title: '追更作品',
+    year: '',
+    source_name: '源',
+    cover: '',
+    index: 1,
+    total_episodes: 12,
+    play_time: 25,
+    total_time: 100,
+    save_time: 300,
+  };
+  const oldSource: PlayRecord = {
+    ...record,
+    title: ' 追更·作品 ',
+    year: ' Unknown ',
+    group_label: '第 1 季',
+    group_index: 1,
+    group_total: 4,
+    save_time: 100,
+    update_baseline_group_total: 1,
+    update_detected_at: 80,
+    episode_progress: [first, { ...first, k: 'i:old:1/12' }],
+  };
+  const untrustedTable = [{ ...first, k: 'n:99', at: 999 }];
+  await storage.setPlayRecords(user, {
+    'old+1': oldSource,
+    'older+1': {
+      ...oldSource,
+      save_time: 90,
+      episode_progress: untrustedTable,
+    },
+    'other-year+1': {
+      ...record,
+      year: '2026',
+      save_time: 200,
+      episode_progress: untrustedTable,
+    },
+  });
+  const save = (next: PlayRecord) =>
+    savePlayProgressWithRetry(storage, user, key, next);
+  await save({
+    ...record,
+    episode_key: 'n:2',
+    episode_progress: untrustedTable,
+    progress_session_id: 'session-a',
+    progress_sequence: 1,
+  });
+  expect(await storage.getPlayRecord(user, key)).toMatchObject({
+    update_baseline_episodes: 12,
+    episode_progress: [{ k: 'n:2', t: 25, d: 100, at: 300 }, first],
+  });
+  expect(await storage.getPlayRecord(user, key)).not.toHaveProperty(
+    'update_detected_at',
+  );
+
+  const upsert = {
+    ...record,
+    episode_key: 'n:2',
+    play_time: 11,
+    save_time: 400,
+    progress_session_id: 'session-a',
+    progress_sequence: 2,
+  };
+  const expected = [{ k: 'n:2', t: 11, d: 100, at: 400 }, first];
+  await save(upsert);
+  const snapshot = await storage.getPlayRecordSnapshot(user, key);
+  expect(JSON.parse(snapshot!)).toMatchObject({ episode_progress: expected });
+  expect(JSON.parse(snapshot!)).not.toHaveProperty('episode_key');
+  await expect(
+    save({ ...upsert, episode_key: 'n:3', save_time: 900 }),
+  ).resolves.toBeNull();
+  expect(await storage.getPlayRecordSnapshot(user, key)).toBe(snapshot);
+
+  await save({ ...record, save_time: 500, play_time: 40 });
+  await updatePlayRecordWithRetry(
+    storage,
+    user,
+    key,
+    (current) =>
+      current &&
+      markPlayRecordUpdateRead({ ...current, tracking_enabled: false }),
+  );
+  expect(await storage.getPlayRecord(user, key)).toMatchObject({
+    tracking_enabled: false,
+    play_time: 40,
+    progress_sequence: 2,
+    episode_progress: expected,
+  });
+}

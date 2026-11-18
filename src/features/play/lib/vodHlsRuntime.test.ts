@@ -1419,3 +1419,37 @@ describe('已起播会话的线路回落', () => {
     expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
   });
 });
+
+describe('vodHlsRuntime 测速', () => {
+  it('浏览器缓存命中的分片不计入测速，等真实网络分片', () => {
+    const runtime = setupRuntime();
+    const video = createVideo();
+    runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    runtime.setRealtimeLoadSpeed.mockClear();
+
+    hls.emit(FakeHls.Events.FRAG_LOADED, {
+      frag: {
+        ...mainFragment(1),
+        stats: {
+          loaded: 1_048_576,
+          total: 1_048_576,
+          loading: { start: 1000, first: 1002, end: 1006 },
+        },
+      },
+    });
+    expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalled();
+
+    hls.emit(FakeHls.Events.FRAG_LOADED, {
+      frag: {
+        ...mainFragment(2),
+        stats: {
+          loaded: 1_048_576,
+          total: 1_048_576,
+          loading: { start: 2000, first: 2100, end: 3100 },
+        },
+      },
+    });
+    expect(runtime.setRealtimeLoadSpeed).toHaveBeenCalledWith('1.0 MB/s');
+  });
+});

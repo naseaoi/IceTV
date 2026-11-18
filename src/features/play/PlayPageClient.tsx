@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -23,6 +24,7 @@ import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
 import { useDanmakuPreference } from '@/features/play/hooks/useDanmakuPreference';
 import { useDanmakuWarmup } from '@/features/play/hooks/useDanmakuWarmup';
+import { useEpisodeProgress } from '@/features/play/hooks/useEpisodeProgress';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -38,6 +40,7 @@ import {
   preloadDanmakuPluginIfEnabled,
   reloadDanmaku,
 } from '@/features/play/lib/danmaku/attach';
+import { getEpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import { fragmentMemoryCache } from '@/features/play/lib/fragmentMemoryCache';
 import {
   peekResolvedLazyEpisodeUrl,
@@ -51,6 +54,7 @@ import {
   releaseBackgroundSourceProbes,
   writePlayerInfo,
 } from '@/features/play/lib/sourceProbeStore';
+import { shouldFinalizeSourceSwitchCleanup } from '@/features/play/lib/sourceSwitchCleanup';
 import { getVodRuntimeSourceUrl } from '@/features/play/lib/vodHlsRuntime';
 import {
   getVodSourceAttempt,
@@ -59,6 +63,7 @@ import {
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
+import { deduplicatePlayRecords, generateStorageKey } from '@/lib/db.client';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import {
@@ -112,6 +117,7 @@ function AuthenticatedPlayPageClient({
     setDetail,
     favorited,
     setFavorited,
+    skipConfig,
     setSkipConfig,
     skipConfigRef,
     lastSkipCheckRef,
@@ -318,6 +324,19 @@ function AuthenticatedPlayPageClient({
   }, []);
 
   const {
+    episodeEntries,
+    getEpisodeEntry,
+    mergeEpisodeProgress: mergeLocalEpisodeProgress,
+    acceptPlayRecord: acceptEpisodeProgressRecord,
+    ensureLoaded: ensureEpisodeProgressLoaded,
+  } = useEpisodeProgress({ currentSource, currentId, videoTitle, detail });
+  const episodeProgress = useMemo(
+    () =>
+      episodeEntries.map((entry) => getEpisodeProgressView(entry, skipConfig)),
+    [episodeEntries, skipConfig],
+  );
+
+  const {
     saveCurrentPlayProgress: doSaveCurrentProgress,
     savePlaybackCheckpoint: doSaveCheckpoint,
     requestWakeLock,
@@ -346,6 +365,7 @@ function AuthenticatedPlayPageClient({
     detail,
     setCurrentEpisodeIndex,
     onRestoreEpisodeChange: handleRestoreEpisodeChange,
+    onPlayRecordLoaded: acceptEpisodeProgressRecord,
     cleanupPlayer,
   });
 
@@ -375,6 +395,8 @@ function AuthenticatedPlayPageClient({
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
       doSaveCurrentProgress,
+      getEpisodeEntry,
+      skipConfigRef,
       setError,
       setIsVideoLoading,
       setVideoLoadingStage,
@@ -523,13 +545,48 @@ function AuthenticatedPlayPageClient({
     onPlaybackStartFailed: handlePlaybackStartFailed,
   });
 
+  const deduplicatedPlayRecordKeysRef = useRef(new Set<string>());
   useEffect(() => {
     const saveState = playProgressSaveStateRef.current;
-    saveState.onSaved = finalizePendingSourceSwitchCleanup;
+    const onSaved = (source: string, id: string) => {
+      const isCurrent = () =>
+        saveState.onSaved === onSaved &&
+        source === currentSourceRef.current &&
+        id === currentIdRef.current;
+      const keepKey = generateStorageKey(source, id);
+      const deduplicatedKeys = deduplicatedPlayRecordKeysRef.current;
+      if (isCurrent() && !deduplicatedKeys.has(keepKey)) {
+        deduplicatedKeys.add(keepKey);
+        const task = pendingSourceSwitchCleanupRef.current;
+        const preserveKey =
+          shouldFinalizeSourceSwitchCleanup(task, source, id) &&
+          task.keepPreviousPlayRecord
+            ? generateStorageKey(task.previousSource, task.previousId)
+            : undefined;
+        void deduplicatePlayRecords(keepKey, preserveKey, isCurrent)
+          .then((merged) => {
+            if (merged && isCurrent()) mergeLocalEpisodeProgress(merged);
+          })
+          .catch((error) => {
+            console.error('播放记录去重失败', error);
+          });
+      }
+      return finalizePendingSourceSwitchCleanup(source, id);
+    };
+    saveState.onSaved = onSaved;
+    saveState.onEpisodeProgress = (entry) => mergeLocalEpisodeProgress([entry]);
     return () => {
       saveState.onSaved = undefined;
+      saveState.onEpisodeProgress = undefined;
     };
-  }, [finalizePendingSourceSwitchCleanup, playProgressSaveStateRef]);
+  }, [
+    currentIdRef,
+    currentSourceRef,
+    finalizePendingSourceSwitchCleanup,
+    mergeLocalEpisodeProgress,
+    pendingSourceSwitchCleanupRef,
+    playProgressSaveStateRef,
+  ]);
 
   const resetAutoSourceSwitch = useCallback(() => {
     holdBackgroundSourceProbes();
@@ -812,6 +869,7 @@ function AuthenticatedPlayPageClient({
     onPlaybackRecoveryExhausted: handlePlaybackRecoveryExhausted,
     onLastEpisodeEnded: handleLastEpisodeEnded,
     onPlaybackStarted: useCallback(() => {
+      ensureEpisodeProgressLoaded();
       const activeSource = currentSourceRef.current;
       const activeId = currentIdRef.current;
       if (!activeSource || !activeId) {
@@ -849,6 +907,7 @@ function AuthenticatedPlayPageClient({
         artPlayerRef.current.notice.show = unavailableNotice;
       }
     }, [
+      ensureEpisodeProgressLoaded,
       recordPlaybackStarted,
       playbackIntentRef,
       showPendingPlaybackNotice,
@@ -918,6 +977,7 @@ function AuthenticatedPlayPageClient({
         detail={detail}
         detailLoading={loading && !detail}
         currentEpisodeIndex={currentEpisodeIndex}
+        episodeProgress={episodeProgress}
         isEpisodeSelectorCollapsed={isEpisodeSelectorCollapsed}
         setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}
         artRef={artRef}

@@ -1,5 +1,6 @@
 import {
   clearAllPlayRecords,
+  deduplicatePlayRecords,
   deletePlayRecord,
   deletePlayRecords,
   savePlayRecord,
@@ -125,13 +126,14 @@ describe('删除播放记录等待本标签页的进度保存', () => {
 
   it('保存长时间未结束时，超时后照常删除', async () => {
     jest.useFakeTimers();
+    const pending = deferredResponse();
     const fetchMock = jest
       .fn()
-      .mockReturnValueOnce(new Promise(() => {}))
+      .mockReturnValueOnce(pending.response)
       .mockResolvedValue(ok);
     global.fetch = fetchMock;
 
-    void savePlayRecord('s', '1', record);
+    const save = savePlayRecord('s', '1', record);
     const removal = deletePlayRecord('s', '1');
     await flush();
     jest.advanceTimersByTime(4999);
@@ -141,5 +143,59 @@ describe('删除播放记录等待本标签页的进度保存', () => {
     jest.advanceTimersByTime(1);
     await removal;
     expect(deleteCalls(fetchMock)).toHaveLength(1);
+    pending.resolve();
+    await save;
+  });
+});
+
+it('去重等待在途保存，成功后才移除服务端返回的键并同步列表', async () => {
+  const pending = deferredResponse();
+  const fetchMock = jest
+    .fn()
+    .mockReturnValueOnce(pending.response)
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ deletedKeys: ['s+1'] }),
+    });
+  global.fetch = fetchMock;
+  const save = savePlayRecord('s', '1', record);
+  const listener = jest.fn();
+  window.addEventListener('playRecordsUpdated', listener);
+  try {
+    const dedupe = deduplicatePlayRecords('s+2', 's+3');
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cacheManager.getCachedPlayRecords()).toHaveProperty('s+1');
+    pending.resolve();
+    await save;
+    await dedupe;
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/playrecords',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          action: 'deduplicate',
+          keepKey: 's+2',
+          preserveKey: 's+3',
+        }),
+      }),
+    );
+    expect(cacheManager.getCachedPlayRecords()).toEqual({ 's+2': record });
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { 's+2': record } }),
+    );
+  } finally {
+    window.removeEventListener('playRecordsUpdated', listener);
+  }
+});
+
+it('去重请求失败不重试且保留缓存', async () => {
+  const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 401 });
+  global.fetch = fetchMock;
+  await expect(deduplicatePlayRecords('s+2')).rejects.toThrow('401');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(cacheManager.getCachedPlayRecords()).toEqual({
+    's+1': record,
+    's+2': record,
   });
 });

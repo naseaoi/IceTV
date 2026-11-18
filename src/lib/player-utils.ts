@@ -287,10 +287,13 @@ export function createArtPlayerConfig(overrides?: ArtPlayerConfigOverrides) {
 export function configureArtplayerStatics(Artplayer: {
   USE_RAF: boolean;
   FULLSCREEN_WEB_IN_BODY: boolean;
+  MOBILE_DBCLICK_PLAY: boolean;
   PLAYBACK_RATE?: number[];
 }) {
   Artplayer.USE_RAF = false;
   Artplayer.FULLSCREEN_WEB_IN_BODY = true;
+  // 移动端双击由 bindPlayerMobileControls 接管（两侧快退快进、中间切换播放）
+  Artplayer.MOBILE_DBCLICK_PLAY = false;
 }
 
 // ---------------------------------------------------------------------------

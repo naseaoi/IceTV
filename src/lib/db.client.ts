@@ -21,6 +21,10 @@ import {
   reportPlaybackRecordsReadFailure,
   retryClientRequest,
 } from './db.client.internal';
+import {
+  applyEpisodeProgressWrite,
+  mergeEpisodeProgress,
+} from './episode-progress';
 import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
@@ -31,7 +35,12 @@ import {
   selectRecentPlayRecords,
 } from './play-records';
 import { getRuntimeConfig } from './runtime-config';
-import type { Favorite, PlayRecord, SkipConfig } from './types';
+import type {
+  EpisodeProgressEntry,
+  Favorite,
+  PlayRecord,
+  SkipConfig,
+} from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -306,12 +315,22 @@ export async function savePlayRecord(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   const cached = cacheManager.getCachedPlayRecords();
-  const normalizedRecord = mergePlayRecordUpdateBaseline(cached?.[key], record);
+  const { episode_progress: _ignored, ...normalizedRecord } =
+    mergePlayRecordUpdateBaseline(cached?.[key], record);
   return _writePlayRecords({
     rollbackOnError: false,
     affectedKeys: [key],
     mutateCached: (cached) => {
-      cached[key] = normalizedRecord;
+      // 缓存按服务端同样的规则合并每集进度；请求只带 episode_key，整表由服务端维护
+      const { episode_key: _key, ...cachedRecord } = normalizedRecord;
+      const episodeProgress = applyEpisodeProgressWrite(
+        cached[key]?.episode_progress,
+        normalizedRecord,
+        { source },
+      );
+      cached[key] = episodeProgress
+        ? { ...cachedRecord, episode_progress: episodeProgress }
+        : cachedRecord;
       return cached;
     },
     syncToServer: () =>
@@ -404,6 +423,60 @@ export async function deletePlayRecords(keys: string[]): Promise<void> {
     });
   }
   notifyMessagesUpdated();
+}
+
+export async function deduplicatePlayRecords(
+  keepKey: string,
+  preserveKey?: string,
+  isCurrent: () => boolean = () => true,
+): Promise<EpisodeProgressEntry[] | undefined> {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username) return;
+  // 删除键由服务端发现，发请求前先等本标签页已在途的进度保存。
+  await waitForPlayRecordSaves('all');
+  if (!isCurrent() || getAuthInfoFromBrowserCookie()?.username !== username)
+    return;
+
+  // 后台维护只请求一次，避免鉴权重试或全局提示打断播放。
+  const response = await fetch('/api/playrecords', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'deduplicate', keepKey, preserveKey }),
+    keepalive: true,
+  });
+  if (!response.ok)
+    throw new Error(`播放记录去重请求失败 (${response.status})`);
+  const { deletedKeys, episodeProgress } = (await response.json()) as {
+    deletedKeys: string[];
+    episodeProgress?: EpisodeProgressEntry[];
+  };
+  if (
+    !deletedKeys.length ||
+    getAuthInfoFromBrowserCookie()?.username !== username
+  )
+    return;
+
+  await _writePlayRecords({
+    affectedKeys: [...deletedKeys, keepKey],
+    mutateCached: (cached) => {
+      for (const key of deletedKeys) delete cached[key];
+      const kept = cached[keepKey];
+      if (kept && episodeProgress) {
+        cached[keepKey] = {
+          ...kept,
+          episode_progress: mergeEpisodeProgress([
+            kept.episode_progress,
+            episodeProgress,
+          ]),
+        };
+      }
+      return cached;
+    },
+    syncToServer: async () => {},
+    requireExistingCacheForOptimisticUpdate: true,
+  });
+  notifyMessagesUpdated();
+  return episodeProgress;
 }
 
 async function patchPlayRecordState(

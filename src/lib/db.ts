@@ -520,6 +520,18 @@ class DbManager {
     );
   }
 
+  async deduplicatePlayRecords(
+    userName: string,
+    keepKey: string,
+    preserveKey?: string,
+  ): Promise<string[]> {
+    return (await this.getStorage()).deduplicatePlayRecords(
+      userName,
+      keepKey,
+      preserveKey,
+    );
+  }
+
   async getPlayRecordsByKeys(
     userName: string,
     keys: string[],

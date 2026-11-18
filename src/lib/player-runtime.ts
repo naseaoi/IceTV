@@ -44,6 +44,8 @@ type MobileControlsArtPlayer = HoverControlsArtPlayer & {
   isLock?: boolean;
   playing?: boolean;
   playbackRate?: number;
+  currentTime?: number;
+  duration?: number;
   toggle?: () => void;
   __icetvFastForwardActive?: boolean;
 };
@@ -53,6 +55,12 @@ const PLAYER_MOBILE_TOUCH_MOVE_THRESHOLD_PX = 10;
 const PLAYER_MOBILE_CLICK_SUPPRESS_MS = 700;
 const PLAYER_DEFAULT_FAST_FORWARD_TIME_MS = 1_000;
 const PLAYER_DEFAULT_FAST_FORWARD_VALUE = 3;
+const PLAYER_DOUBLE_TAP_SEEK_ZONE_RATIO = 0.35;
+const PLAYER_DOUBLE_TAP_FEEDBACK_MS = 800;
+const SEEK_BACKWARD_ICON =
+  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>';
+const SEEK_FORWARD_ICON =
+  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></svg>';
 const PLAYER_LOCK_CONTROL_SELECTOR =
   '.art-bottom, .art-controls, .art-progress, .art-settings, .art-contextmenus';
 const PLAYER_LOCK_TOGGLE_SELECTOR = '.art-layer-lock';
@@ -71,6 +79,8 @@ const PLAYER_LOCKED_CONTROL_EVENTS = [
 
 interface PlayerMobileControlsOptions {
   enableLongPressFastForward?: boolean;
+  /** 双击画面左右两侧快退 / 快进的秒数，不传时双击任意位置切换播放 */
+  doubleTapSeekSeconds?: number;
 }
 
 export type ManagedVideoElement = HTMLVideoElement & {
@@ -361,7 +371,10 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
 
 export function bindPlayerMobileControls(
   artPlayer: unknown,
-  { enableLongPressFastForward = true }: PlayerMobileControlsOptions = {},
+  {
+    enableLongPressFastForward = true,
+    doubleTapSeekSeconds,
+  }: PlayerMobileControlsOptions = {},
 ): () => void {
   const art = artPlayer as MobileControlsArtPlayer;
   const player = art.template?.$player;
@@ -457,9 +470,66 @@ export function bindPlayerMobileControls(
     stopPlayerControlEvent(event);
   };
 
-  const handleDblClick = () => {
-    if (!art.isLock) return;
-    art.toggle?.();
+  // 连续双击同一侧累加显示总秒数
+  let seekFeedback: {
+    element: HTMLDivElement;
+    direction: -1 | 1;
+    total: number;
+    timer: number;
+  } | null = null;
+
+  const removeSeekFeedback = () => {
+    if (!seekFeedback) return;
+    window.clearTimeout(seekFeedback.timer);
+    seekFeedback.element.remove();
+    seekFeedback = null;
+  };
+
+  const showSeekFeedback = (direction: -1 | 1, seconds: number) => {
+    const total =
+      seekFeedback?.direction === direction
+        ? seekFeedback.total + seconds
+        : seconds;
+    removeSeekFeedback();
+    const element = document.createElement('div');
+    element.className = `ice-seek-feedback ice-seek-feedback-${direction < 0 ? 'backward' : 'forward'}`;
+    element.innerHTML = `${direction < 0 ? SEEK_BACKWARD_ICON : SEEK_FORWARD_ICON}<span>${total} 秒</span>`;
+    player.appendChild(element);
+    seekFeedback = {
+      element,
+      direction,
+      total,
+      timer: window.setTimeout(
+        removeSeekFeedback,
+        PLAYER_DOUBLE_TAP_FEEDBACK_MS,
+      ),
+    };
+  };
+
+  const resolveDoubleTapDirection = (event: unknown): -1 | 1 | null => {
+    if (!doubleTapSeekSeconds || !(event instanceof MouseEvent)) return null;
+    const rect = player.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    if (ratio < PLAYER_DOUBLE_TAP_SEEK_ZONE_RATIO) return -1;
+    if (ratio > 1 - PLAYER_DOUBLE_TAP_SEEK_ZONE_RATIO) return 1;
+    return null;
+  };
+
+  // Artplayer 内置的移动端双击播放已在 configureArtplayerStatics 关闭，统一在这里处理
+  const handleDblClick = (event?: unknown) => {
+    const direction = art.isLock ? null : resolveDoubleTapDirection(event);
+    const duration = art.duration ?? 0;
+    if (direction === null || !doubleTapSeekSeconds || !(duration > 0)) {
+      art.toggle?.();
+      return;
+    }
+    const current = art.currentTime ?? 0;
+    art.currentTime = Math.min(
+      Math.max(0, current + direction * doubleTapSeekSeconds),
+      duration,
+    );
+    showSeekFeedback(direction, doubleTapSeekSeconds);
   };
 
   const captureOptions: AddEventListenerOptions = {
@@ -490,6 +560,7 @@ export function bindPlayerMobileControls(
     if (disposed) return;
     disposed = true;
     clearPressTimer();
+    removeSeekFeedback();
     art.__icetvFastForwardActive = false;
     player.classList.remove('art-fast-forward');
     if (enableLongPressFastForward) {

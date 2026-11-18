@@ -2,13 +2,19 @@
 import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
 import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
-import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
+import {
+  assertPlayRecordEpisodeProgress,
+  assertPlayRecordOrdering,
+} from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
-import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
+import {
+  assertPlayRecordDeduplication,
+  assertPlayRecordTitleLookup,
+} from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
@@ -1259,6 +1265,17 @@ function createFakePool() {
 
     if (
       normalized ===
+      'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ?'
+    ) {
+      const [value, username, key] = params as [string, string, string];
+      const records = currentState.playRecords.get(username);
+      if (!records?.has(key)) return [{ affectedRows: 0 }, []];
+      records.set(key, value);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
       'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ? AND BINARY record_json = BINARY ?'
     ) {
       const [value, username, key, snapshot] = params as [
@@ -2430,7 +2447,7 @@ function createFakePool() {
 
     if (
       normalized.startsWith(
-        'SELECT record_key, JSON_UNQUOTE(JSON_EXTRACT(record_json,',
+        'SELECT record_key, CASE WHEN JSON_TYPE(JSON_EXTRACT(record_json,',
       )
     ) {
       const [username, limit, offset] = params as [string, number, number];
@@ -2455,11 +2472,42 @@ function createFakePool() {
 
     if (
       normalized ===
+      'SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1'
+    ) {
+      const [username, key] = params as [string, string];
+      const record_json = currentState.playRecords.get(username)?.get(key);
+      return [
+        record_json === undefined ? [] : [{ record_key: key, record_json }],
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
       'SELECT record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1'
     ) {
       const [username, key] = params as [string, string];
       return [
         [{ record_json: currentState.playRecords.get(username)?.get(key) }],
+        [],
+      ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records FORCE INDEX (PRIMARY) WHERE username = ? AND record_key IN (',
+      ) &&
+      normalized.endsWith('ORDER BY record_key FOR UPDATE')
+    ) {
+      const [username, ...keys] = params as string[];
+      const records = currentState.playRecords.get(username);
+      return [
+        keys.flatMap((key) => {
+          const record_json = records?.get(key);
+          return record_json === undefined
+            ? []
+            : [{ record_key: key, record_json }];
+        }),
         [],
       ];
     }
@@ -3671,6 +3719,12 @@ describe('mysql storage contract', () => {
     );
   });
 
+  it('按作品去重合并每集进度且保留保护键与扫描范围外记录', async () => {
+    await assertPlayRecordDeduplication(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+
   it('批量读取一次查询并隔离用户与缺失键', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await assertBatchReadPlayRecords(storage);
@@ -4286,6 +4340,12 @@ it('MySQL 追剧周历契约（fake pool）', async () => {
 
 it('播放记录会话序号与并发 CAS 契约', async () => {
   await assertPlayRecordOrdering(
+    new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+  );
+});
+
+it('每集进度换源继承、逐集写入与迟到保护契约', async () => {
+  await assertPlayRecordEpisodeProgress(
     new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
   );
 });

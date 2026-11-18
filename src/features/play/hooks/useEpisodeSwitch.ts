@@ -11,10 +11,12 @@ import type {
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
 import { shouldInheritCrossGroupProgress } from '@/features/play/lib/episodeGroups';
+import { resolveEpisodeProgressResumeTime } from '@/features/play/lib/episodeProgress';
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { SearchResult } from '@/lib/types';
+import type { EpisodeProgressEntry } from '@/lib/episode-progress';
+import type { SearchResult, SkipConfig } from '@/lib/types';
 
 interface UseEpisodeSwitchOptions {
   artPlayerRef: RefObject<Artplayer | null>;
@@ -27,6 +29,8 @@ interface UseEpisodeSwitchOptions {
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
   playbackRequestModeRef: RefObject<PlaybackRequestMode>;
   doSaveCurrentProgress: () => void | Promise<unknown>;
+  getEpisodeEntry: (episodeIndex: number) => EpisodeProgressEntry | undefined;
+  skipConfigRef: RefObject<SkipConfig>;
   setError: Dispatch<SetStateAction<string | null>>;
   setIsVideoLoading: Dispatch<SetStateAction<boolean>>;
   setVideoLoadingStage: Dispatch<SetStateAction<VideoLoadingStage>>;
@@ -53,6 +57,8 @@ export function useEpisodeSwitch({
   sourceSwitchEpisodeAnchorRef,
   playbackRequestModeRef,
   doSaveCurrentProgress,
+  getEpisodeEntry,
+  skipConfigRef,
   setError,
   setIsVideoLoading,
   setVideoLoadingStage,
@@ -75,8 +81,8 @@ export function useEpisodeSwitch({
         return;
       }
 
-      // 仅在 giri 源站不同分组之间切换同一集时继承当前播放时间点
-      const inheritedResumeTime = shouldInheritCrossGroupProgress(
+      // giri 不同分组之间切换同一集时继承当前播放时间点，须在保存离开集、重置时间之前取
+      const crossGroupResumeTime = shouldInheritCrossGroupProgress(
         d,
         currentEpisodeIndexRef.current,
         targetEpisodeIndex,
@@ -90,7 +96,15 @@ export function useEpisodeSwitch({
           )
         : 0;
 
+      // 保存会同步更新本地每集进度表，之后再查目标集；跨分组的同一集仍以正在看的位置为准
       doSaveCurrentProgress();
+      const inheritedResumeTime =
+        crossGroupResumeTime > 1
+          ? crossGroupResumeTime
+          : resolveEpisodeProgressResumeTime(
+              getEpisodeEntry(targetEpisodeIndex),
+              skipConfigRef.current,
+            );
       sourceSwitchEpisodeAnchorRef.current = null;
       playbackRequestModeRef.current = 'episode';
       clearTargetEpisodeProgressRef.current = true;
@@ -117,6 +131,8 @@ export function useEpisodeSwitch({
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
       doSaveCurrentProgress,
+      getEpisodeEntry,
+      skipConfigRef,
       setError,
       setIsVideoLoading,
       setVideoLoadingStage,

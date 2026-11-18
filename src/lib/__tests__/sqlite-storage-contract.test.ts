@@ -4,13 +4,19 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
-import { assertPlayRecordOrdering } from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
+import {
+  assertPlayRecordEpisodeProgress,
+  assertPlayRecordOrdering,
+} from '@/lib/__tests__/__fixtures__/play-record-ordering-contract';
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
-import { assertPlayRecordTitleLookup } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
+import {
+  assertPlayRecordDeduplication,
+  assertPlayRecordTitleLookup,
+} from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
@@ -114,6 +120,10 @@ it.each([null, 20 * 3_600_000])(
 
 it('按标题读取本人最近进度并匹配归一化标题和年份', async () => {
   await assertPlayRecordTitleLookup(new LocalSqliteStorage(':memory:'));
+});
+
+it('按作品去重合并每集进度且保留保护键与扫描范围外记录', async () => {
+  await assertPlayRecordDeduplication(new LocalSqliteStorage(':memory:'));
 });
 
 it('批量读取隔离用户并省略缺失键', async () => {
@@ -1360,4 +1370,8 @@ it('通知写入失败回滚评价删除，用户名合并迁移通知并解决�
 
 it('播放记录会话序号与并发 CAS 契约', async () => {
   await assertPlayRecordOrdering(new LocalSqliteStorage(':memory:'));
+});
+
+it('每集进度换源继承、逐集写入与迟到保护契约', async () => {
+  await assertPlayRecordEpisodeProgress(new LocalSqliteStorage(':memory:'));
 });

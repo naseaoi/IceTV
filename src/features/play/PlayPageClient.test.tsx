@@ -16,6 +16,7 @@ import {
 } from '@/features/play/lib/sourceProbeStore';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { PlayPageClient } from '@/features/play/PlayPageClient';
+import { deduplicatePlayRecords } from '@/lib/db.client';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
 
@@ -213,6 +214,11 @@ jest.mock('@/hooks/useBackNavigation', () => ({
 
 jest.mock('@/hooks/usePlayerKeyboard', () => ({
   usePlayerKeyboard: jest.fn(),
+}));
+
+jest.mock('@/lib/db.client', () => ({
+  ...jest.requireActual('@/lib/db.client'),
+  deduplicatePlayRecords: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('@/lib/player-runtime', () => ({
@@ -608,4 +614,58 @@ describe('PlayPageClient', () => {
     expect(fullscreenWebOnDestroy).toEqual([false]);
     expect(artPlayerRef.current).toBeNull();
   });
+});
+
+it('同一播放页每个源记录只去重一次，并保留换源任务指定的旧记录', async () => {
+  renderLoadedPage();
+  const { currentSourceRef, currentIdRef, pendingSourceSwitchCleanupRef } =
+    latestSourceSwitch();
+  const { saveStateRef } = lastArg(mockUsePlayProgress);
+  const deduplicate = jest.mocked(deduplicatePlayRecords);
+  deduplicate.mockClear();
+  const error = new Error('offline');
+  deduplicate.mockRejectedValueOnce(error);
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const saved = (source: string, id: string) =>
+      saveStateRef.current.onSaved?.(source, id);
+    await saved('stale', 'stale-id');
+    expect(deduplicate).not.toHaveBeenCalled();
+    await saved('giri', 'giri-id');
+    await saved('giri', 'giri-id');
+    expect(log).toHaveBeenCalledWith('播放记录去重失败', error);
+    expect(deduplicate).toHaveBeenCalledTimes(1);
+
+    currentSourceRef.current = 'next';
+    currentIdRef.current = 'next-id';
+    pendingSourceSwitchCleanupRef.current = {
+      previousSource: 'giri',
+      previousId: 'giri-id',
+      nextSource: 'next',
+      nextId: 'next-id',
+      keepPreviousPlayRecord: true,
+      skipConfigCleanupReady: Promise.resolve(true),
+    };
+    await saved('next', 'next-id');
+    await saved('next', 'next-id');
+    expect(deduplicate).toHaveBeenCalledTimes(2);
+    expect(deduplicate).toHaveBeenNthCalledWith(
+      1,
+      'giri+giri-id',
+      undefined,
+      expect.any(Function),
+    );
+    expect(deduplicate).toHaveBeenNthCalledWith(
+      2,
+      'next+next-id',
+      'giri+giri-id',
+      expect.any(Function),
+    );
+    expect(deduplicate.mock.calls[0]?.[2]?.()).toBe(false);
+    expect(
+      mockSourceSwitch.finalizePendingSourceSwitchCleanup,
+    ).toHaveBeenCalledWith('next', 'next-id');
+  } finally {
+    log.mockRestore();
+  }
 });

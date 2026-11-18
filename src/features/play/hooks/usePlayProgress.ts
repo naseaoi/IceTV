@@ -10,6 +10,10 @@ import { useCallback, useRef } from 'react';
 
 import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
 import {
+  buildEpisodeProgressKeys,
+  MIN_WATCHED_SECONDS,
+} from '@/features/play/lib/episodeProgress';
+import {
   hasExplicitPlaybackSeek,
   hasMeaningfulPlaybackTime,
   isPlaybackCheckpointCompatibleWithDetail,
@@ -34,6 +38,10 @@ import {
   reportPlaybackRecordsReadFailure,
   savePlayRecord,
 } from '@/lib/db.client';
+import {
+  type EpisodeProgressEntry,
+  createEpisodeProgressEntry,
+} from '@/lib/episode-progress';
 import { consumeMatchingPlayIntent } from '@/lib/play-intent';
 import { SearchResult } from '@/lib/types';
 
@@ -69,6 +77,8 @@ export interface PlayProgressSaveState {
   activeFingerprints?: Set<string>;
   latestSaveToken?: object;
   onSaved?: (source: string, id: string) => void | Promise<void>;
+  // 每个新快照同步通知，切集时本地每集进度表不必等保存请求返回
+  onEpisodeProgress?: (entry: EpisodeProgressEntry) => void;
 }
 
 function buildPlayProgressFingerprint(
@@ -196,6 +206,12 @@ export async function saveCurrentPlayProgress(
     save_time: Date.now(),
     search_title: searchTitle,
   };
+  const episodeKey = buildEpisodeProgressKeys(detailRef.current)[
+    currentEpisodeIndexRef.current
+  ];
+  if (episodeKey && record.play_time >= MIN_WATCHED_SECONDS) {
+    record.episode_key = episodeKey;
+  }
 
   const fingerprint = buildPlayProgressFingerprint(
     currentSourceRef.current,
@@ -208,6 +224,10 @@ export async function saveCurrentPlayProgress(
   }
 
   const state = saveStateRef.current;
+  const episodeEntry =
+    record.episode_key &&
+    createEpisodeProgressEntry(record.episode_key, record);
+  if (episodeEntry) state.onEpisodeProgress?.(episodeEntry);
   state.sessionId ??=
     typeof globalThis.crypto?.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -367,6 +387,8 @@ interface UsePlayProgressParams {
   detail: SearchResult | null;
   setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>;
   onRestoreEpisodeChange?: () => void;
+  // 起播恢复读到的当前作品记录（含缺失），供每集进度表复用，避免重复读取
+  onPlayRecordLoaded?: (key: string, record: PlayRecord | undefined) => void;
   cleanupPlayer: () => void;
 }
 
@@ -393,9 +415,14 @@ export function usePlayProgress({
   detail,
   setCurrentEpisodeIndex,
   onRestoreEpisodeChange,
+  onPlayRecordLoaded,
   cleanupPlayer,
 }: UsePlayProgressParams) {
   const searchTitleRef = useRef(searchTitle);
+  const onPlayRecordLoadedRef = useRef(onPlayRecordLoaded);
+  useEffect(() => {
+    onPlayRecordLoadedRef.current = onPlayRecordLoaded;
+  }, [onPlayRecordLoaded]);
   const restoreAppliedKeyRef = useRef('');
 
   useEffect(() => {
@@ -611,6 +638,7 @@ export function usePlayProgress({
         allRecords: Record<string, PlayRecord>,
         historyOnly: boolean,
       ) => {
+        onPlayRecordLoadedRef.current?.(key, allRecords[key]);
         const record = isPlayRecordCompatibleWithDetail(
           allRecords[key],
           activeDetail,

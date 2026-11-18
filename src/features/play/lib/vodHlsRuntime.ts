@@ -131,6 +131,8 @@ const HLS_LOAD_IN_PROGRESS_STATES: ReadonlySet<string | undefined> = new Set([
 ]);
 
 // 运行时释放时同步移除；页面层据此确认挂在 video 上的运行时仍属于当前播放地址
+const CACHED_FRAGMENT_MAX_LOAD_MS = 50;
+
 const vodRuntimeSourceUrls = new WeakMap<HTMLVideoElement, string>();
 
 export function getVodRuntimeSourceUrl(video: HTMLVideoElement): string | null {
@@ -983,9 +985,18 @@ export function createVodM3u8Loader({
       }
       const stats = data.frag.stats;
       const loadedBytes = stats.loaded ?? stats.total ?? 0;
+      const requestStart = stats.loading.start ?? 0;
       const startTime = stats.loading.first ?? 0;
       const endTime = stats.loading.end ?? 0;
       const elapsedMs = endTime > startTime ? endTime - startTime : 0;
+      // 命中浏览器 HTTP 缓存的分片几毫秒内完成，算出的速度远超线路真实能力，
+      // 若作为首片测速会写进源信息并参与换源排序，跳过等下一个网络分片
+      if (
+        requestStart > 0 &&
+        endTime - requestStart < CACHED_FRAGMENT_MAX_LOAD_MS
+      ) {
+        return;
+      }
       if (loadedBytes > 0 && elapsedMs > 0) {
         const bytesPerSecond = loadedBytes / (elapsedMs / 1000);
         const speedStr = formatBytesPerSecond(bytesPerSecond);

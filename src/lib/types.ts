@@ -33,6 +33,22 @@ export interface PlayRecord {
   tracking_enabled?: boolean;
   series_status?: 'ongoing' | 'ended';
   search_title?: string; // 搜索时使用的标题
+  // 每集进度表，服务端按集身份维护；写入方只通过 episode_key 上报当前集
+  episode_progress?: EpisodeProgressEntry[];
+  // 仅写入请求携带：当前集的集身份，存储前移除
+  episode_key?: string;
+}
+
+export interface PlayRecordTitleLookupOptions {
+  excludeKey?: string;
+  matchEmptyYear?: boolean;
+}
+
+export interface EpisodeProgressEntry {
+  k: string; // 集身份
+  t: number; // 播放进度（秒）
+  d: number; // 总时长（秒）
+  at: number; // 保存时间（时间戳）
 }
 
 export interface PlayRecordPage {
@@ -575,7 +591,13 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     userName: string,
     title: string,
     year: string,
+    options?: PlayRecordTitleLookupOptions,
   ): Promise<Record<string, PlayRecord>>;
+  deduplicatePlayRecords(
+    userName: string,
+    keepKey: string,
+    preserveKey?: string,
+  ): Promise<string[]>;
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
   getPlayRecordSnapshot(userName: string, key: string): Promise<string | null>;
   getPlayRecordsByKeys(

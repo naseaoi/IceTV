@@ -33,6 +33,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
   const playerMediaKindRef = useRef<'hls' | 'native' | null>(null);
   const sessionEpisodeIndexRef = useRef<number | null>(null);
   const playbackRouteRef = useRef<SourcePlaybackRoute | null>(null);
+  const resumePromptHandledRef = useRef(false);
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
@@ -109,6 +110,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         playerMediaKindRef,
         sessionEpisodeIndexRef,
         playbackRouteRef,
+        resumePromptHandledRef,
         isCancelled: () =>
           cancelled ||
           paramsRef.current.loading ||

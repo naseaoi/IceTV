@@ -127,12 +127,10 @@ export function createArtPlayerSettings({
       html: '跳过片头片尾',
       switch: skipConfigRef.current.enable,
       onSwitch: function (item: { switch?: boolean }) {
-        const newConfig = {
-          ...skipConfigRef.current,
-          enable: !item.switch,
-        };
-        handleSkipConfigChange(newConfig);
-        return !item.switch;
+        // handleSkipConfigChange 会同步 setting.update 改写 item.switch，返回值必须先取
+        const enable = !item.switch;
+        handleSkipConfigChange({ ...skipConfigRef.current, enable });
+        return enable;
       },
     },
     {

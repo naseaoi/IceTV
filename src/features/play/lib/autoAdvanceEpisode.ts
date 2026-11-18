@@ -48,3 +48,28 @@ export function shouldAutoAdvanceEpisode({
     currentEpisodeIndex < episodeCount - 1
   );
 }
+
+export const NEXT_EPISODE_COUNTDOWN_SECONDS = 10;
+const MIN_COUNTDOWN_EPISODE_DURATION_SECONDS = 120;
+
+/**
+ * 距离自动连播点（开启跳过片尾时为片尾点，否则为片末）的剩余秒数，
+ * 未进入倒计时窗口时返回 null。按视频时间计算，暂停时倒计时随之停住。
+ */
+export function resolveNextEpisodeCountdown(
+  currentTime: number,
+  duration: number,
+  outroOffset: number,
+): number | null {
+  if (
+    !Number.isFinite(duration) ||
+    duration < MIN_COUNTDOWN_EPISODE_DURATION_SECONDS ||
+    !Number.isFinite(currentTime) ||
+    currentTime <= 0
+  )
+    return null;
+  const advanceAt = outroOffset < 0 ? duration + outroOffset : duration;
+  const remaining = advanceAt - currentTime;
+  if (remaining <= 0 || remaining > NEXT_EPISODE_COUNTDOWN_SECONDS) return null;
+  return Math.ceil(remaining);
+}
