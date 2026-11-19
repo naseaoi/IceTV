@@ -681,10 +681,14 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                       >
                         检测暂缓
                       </span>
+                    ) : speed ? (
+                      <span className='font-medium text-gray-800 dark:text-gray-200'>
+                        {speed}
+                      </span>
                     ) : (
-                      speed && (
-                        <span className='font-medium text-gray-800 dark:text-gray-200'>
-                          {speed}
+                      videoInfo && (
+                        <span className='text-gray-400 dark:text-gray-500'>
+                          未测出网速
                         </span>
                       )
                     )}
