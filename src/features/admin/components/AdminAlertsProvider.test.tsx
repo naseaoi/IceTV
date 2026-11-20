@@ -12,6 +12,10 @@ jest.mock('@/components/AuthProvider', () => ({ useAuthSession: jest.fn() }));
 jest.mock('@/lib/admin-alert-notices', () => ({
   claimAdminAlertNotices: jest.fn(() => []),
 }));
+const mockPush = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
 jest.mock('@/lib/toast', () => ({ showToast: jest.fn() }));
 const alert = {
   key: 'subscription-failed',
@@ -83,7 +87,10 @@ it('shows fixed-key transitions and preserves badges on failed polling', async (
   await act(async () => undefined);
   expect(showToast).toHaveBeenCalledWith(alert.message, 'notice', {
     key: 'admin-alert:subscription-failed',
+    action: { label: '查看', onClick: expect.any(Function) },
   });
+  jest.mocked(showToast).mock.calls[0][2]?.action?.onClick();
+  expect(mockPush).toHaveBeenCalledWith('/admin?tab=config-file');
   (fetch as jest.Mock).mockResolvedValue({ ok: false });
   await act(async () => {
     jest.advanceTimersByTime(ADMIN_ALERT_POLL_MS);

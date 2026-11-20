@@ -15,9 +15,14 @@ interface ValidationResult {
 
 interface UseSourceValidationOptions {
   sources: DataSource[];
+  /** 服务端已把本次检测结果记入源健康数据 */
+  onComplete?: () => void;
 }
 
-export function useSourceValidation({ sources }: UseSourceValidationOptions) {
+export function useSourceValidation({
+  sources,
+  onComplete,
+}: UseSourceValidationOptions) {
   const cleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => () => cleanupRef.current?.(), []);
   const [error, setError] = useState('');
@@ -158,6 +163,7 @@ export function useSourceValidation({ sources }: UseSourceValidationOptions) {
 
             case 'complete':
               finish('');
+              onComplete?.();
               break;
           }
         } catch {

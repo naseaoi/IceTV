@@ -3,10 +3,17 @@
 import type { NextRequest } from 'next/server';
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 
 installStreamPolyfills();
 const mockFetch = jest.fn();
 const mockConfig = jest.fn();
+const mockRecord = jest.fn();
+const mockFlushHealth = jest.fn();
+jest.mock('@/lib/source-health.server', () => ({
+  recordSourceSearchOutcome: (...args: unknown[]) => mockRecord(...args),
+  flushSourceHealthSearch: () => mockFlushHealth(),
+}));
 jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: () => false,
   requireAdmin: async () => ({ username: 'admin' }),
@@ -31,6 +38,7 @@ async function flush() {
 }
 beforeEach(() => {
   jest.clearAllMocks();
+  mockFlushHealth.mockResolvedValue(undefined);
   mockConfig.mockResolvedValue({
     SourceConfig: Array.from({ length: 5 }, (_, i) => ({
       key: String(i),
@@ -66,6 +74,8 @@ it.each(['cancel', 'abort'])('%s 中止在途请求并停止排队源', async (m
   await flush();
   expect(signals.every((signal) => signal.aborted)).toBe(true);
   expect(mockFetch).toHaveBeenCalledTimes(3);
+  expect(mockRecord).not.toHaveBeenCalled();
+  expect(mockFlushHealth).toHaveBeenCalledTimes(1);
 });
 
 it('失败源取消正文，成功源输出结果和完成事件', async () => {
@@ -110,9 +120,60 @@ it('总超时持续覆盖响应体读取', async () => {
   jest.advanceTimersByTime(10_000);
   expect(upstreamSignal?.aborted).toBe(true);
   expect(await response.text()).toContain('"type":"complete"');
+  expect(mockRecord).toHaveBeenCalledWith('one', 'error', 10_000);
 });
 
 it('空源列表正常结束 SSE', async () => {
   mockConfig.mockResolvedValue({ SourceConfig: [] });
   expect(await (await GET(request())).text()).toContain('"completedSources":0');
 });
+
+it.each([
+  ['有效结果', { list: [{ vod_name: 'test movie' }] }, 'ok'],
+  ['空结果', { list: [] }, 'empty'],
+  ['无匹配标题', { list: [{ vod_name: 'other' }] }, 'empty'],
+  ['无效结构', { list: null }, 'error'],
+])('%s 写入对应健康样本', async (_label, data, outcome) => {
+  mockConfig.mockResolvedValue({
+    SourceConfig: [{ key: 'one', api: 'https://example.com' }],
+  });
+  mockFetch.mockResolvedValue(new Response(JSON.stringify(data)));
+  await (await GET(request())).text();
+  expect(mockRecord).toHaveBeenCalledWith('one', outcome, expect.any(Number));
+  expect(mockFlushHealth).toHaveBeenCalledTimes(1);
+});
+it.each([
+  ['请求失败', new Error('network'), true],
+  ['资源限额', new ResourceLimitError(), false],
+])('%s 的健康采样', async (_label, error, recorded) => {
+  mockConfig.mockResolvedValue({
+    SourceConfig: [{ key: 'one', api: 'https://example.com' }],
+  });
+  mockFetch.mockRejectedValue(error);
+  await (await GET(request())).text();
+  expect(mockRecord).toHaveBeenCalledTimes(recorded ? 1 : 0);
+  if (recorded)
+    expect(mockRecord).toHaveBeenCalledWith('one', 'error', expect.any(Number));
+});
+it('JSON 解析失败记录错误，刷新失败只记录日志', async () => {
+  mockConfig.mockResolvedValue({
+    SourceConfig: [{ key: 'one', api: 'https://example.com' }],
+  });
+  mockFetch.mockResolvedValue(new Response('bad json'));
+  mockFlushHealth.mockRejectedValue(new Error('db unavailable'));
+  expect(await (await GET(request())).text()).toContain('"type":"complete"');
+  expect(mockRecord).toHaveBeenCalledWith('one', 'error', expect.any(Number));
+  expect(console.warn).toHaveBeenCalledWith(
+    '刷新源健康数据失败:',
+    expect.any(Error),
+  );
+});
+it.each(['https://girigirilove.com', 'https://xgcartoon.com'])(
+  '特殊源 %s 保持不采样',
+  async (api) => {
+    mockConfig.mockResolvedValue({ SourceConfig: [{ key: 'special', api }] });
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ list: [] })));
+    await (await GET(request())).text();
+    expect(mockRecord).not.toHaveBeenCalled();
+  },
+);

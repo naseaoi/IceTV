@@ -19,6 +19,7 @@ import {
   type SourceUsageItem,
   SOURCE_USAGE_DAYS,
 } from '@/features/admin/hooks/useSourceInsights';
+import type { AdminSourceAlertDetail } from '@/features/admin/lib/admin-alerts';
 import { checkboxStyles } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
 import {
@@ -62,6 +63,8 @@ interface SortableSourceRowProps {
   validationStatus: SourceValidationStatus | null;
   sourceRouteStats: SourceRouteStatsView | null;
   sourceHealth: SourceHealthReportItem | null;
+  sourceAlert?: AdminSourceAlertDetail | null;
+  isHighlighted?: boolean;
   healthDays: number;
   sourceUsage?: SourceUsageItem | null;
   isProxyModeLoading: boolean;
@@ -85,6 +88,8 @@ export function SortableSourceRow({
   validationStatus,
   sourceRouteStats,
   sourceHealth,
+  sourceAlert = null,
+  isHighlighted = false,
   healthDays,
   sourceUsage = null,
   isProxyModeLoading,
@@ -139,7 +144,12 @@ export function SortableSourceRow({
     <li
       ref={setNodeRef}
       style={style}
-      className='flex flex-wrap items-center gap-3 bg-white px-3 py-3 transition-colors last:rounded-b-xl hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
+      data-source-key={source.key}
+      className={`flex flex-wrap items-center gap-3 px-3 py-3 transition-colors duration-500 last:rounded-b-xl ${
+        isHighlighted
+          ? 'bg-red-50 dark:bg-red-950/30'
+          : 'bg-white hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
+      }`}
     >
       <button
         type='button'
@@ -180,7 +190,15 @@ export function SortableSourceRow({
               已停用
             </span>
           )}
-          {sourceHealth && healthChipClass && (
+          {sourceAlert && (
+            <span
+              className={`rounded px-1.5 text-xs ${SOURCE_HEALTH_CHIP_CLASS.offline}`}
+              title={`最后成功后有 ${sourceAlert.failureDays} 天搜索失败，共 ${sourceAlert.failureCount} 次`}
+            >
+              持续失效 · {formatLastOkDate(sourceAlert.lastSuccessDate)}成功
+            </span>
+          )}
+          {!sourceAlert && sourceHealth && healthChipClass && (
             <span
               className={`rounded px-1.5 text-xs ${healthChipClass}`}
               title={healthTitle}

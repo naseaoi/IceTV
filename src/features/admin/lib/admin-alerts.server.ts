@@ -44,16 +44,24 @@ export async function getAdminAlerts(): Promise<AdminAlert[]> {
     const failures = rows.filter(
       (row) => row.bucketDate > lastSuccess && row.errorCount > 0,
     );
+    const failureCount = failures.reduce((sum, row) => sum + row.errorCount, 0);
     if (
       failures.length < ADMIN_SOURCE_FAILURE_MIN_DAYS ||
-      failures.reduce((sum, row) => sum + row.errorCount, 0) <
-        ADMIN_SOURCE_FAILURE_MIN_ATTEMPTS
+      failureCount < ADMIN_SOURCE_FAILURE_MIN_ATTEMPTS
     )
       continue;
     alerts.push({
       key: `source-offline:${source.key}`,
       type: 'source-offline',
-      message: `视频源「${source.name}」持续失效`,
+      message: lastSuccess
+        ? `视频源「${source.name}」持续失效，最后成功于 ${lastSuccess.slice(5)}`
+        : `视频源「${source.name}」近 ${SOURCE_HEALTH_RETENTION_DAYS} 天无成功记录`,
+      sourceDetail: {
+        source: source.key,
+        failureDays: failures.length,
+        failureCount,
+        lastSuccessDate: lastSuccess || null,
+      },
       startedAt: Date.parse(`${failures[0].bucketDate}T00:00:00Z`),
       count: 1,
     });

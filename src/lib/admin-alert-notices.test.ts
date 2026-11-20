@@ -115,3 +115,51 @@ it('treats a level change inside one alert group as escalation, not recovery', (
     }),
   ]);
 });
+
+it('解除时使用已提醒的源名，持续告警不重复提醒', () => {
+  const user = `owner${account}`;
+  claimAdminAlertNotices(
+    user,
+    [{ ...alert, message: '视频源「光速资源」持续失效，最后成功于 11-08' }],
+    1000,
+  );
+  expect(
+    claimAdminAlertNotices(user, [alert], ADMIN_ALERT_COOLDOWN_MS + 1000),
+  ).toEqual([]);
+  expect(
+    claimAdminAlertNotices(user, [], ADMIN_ALERT_COOLDOWN_MS + 1001),
+  ).toEqual([
+    expect.objectContaining({
+      message: '视频源「光速资源」已恢复',
+      recovered: true,
+    }),
+  ]);
+});
+it.each([undefined, '光速资源'])(
+  '兼容已有持久化数据的名称 %s',
+  (sourceName) => {
+    const user = `owner${account}`;
+    storage.set(
+      `admin-alert-notices:v1:${user}`,
+      JSON.stringify({
+        [alert.key]: {
+          active: true,
+          revision: 100,
+          notifiedAt: 1000,
+          type: alert.type,
+          sourceName,
+        },
+      }),
+    );
+    expect(
+      claimAdminAlertNotices(user, [], ADMIN_ALERT_COOLDOWN_MS + 1000),
+    ).toEqual([
+      expect.objectContaining({
+        message: sourceName
+          ? '视频源「光速资源」已恢复'
+          : '视频源持续失效告警已解除',
+        recovered: true,
+      }),
+    ]);
+  },
+);

@@ -3,6 +3,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+import type { AdminAlert } from '@/features/admin/lib/admin-alerts';
 import { adminGet, adminPost } from '@/features/admin/lib/api';
 import { showToast } from '@/lib/toast';
 import type { AdminConfig } from '@/types/admin';
@@ -13,6 +14,19 @@ import VideoSourceConfig from './VideoSourceConfigTab';
 
 let mockOnDragEnd: (event: DragEndEvent) => void;
 
+const mockRouter = { push: jest.fn(), replace: jest.fn() };
+let mockSearchParams = new URLSearchParams();
+let mockAlerts: AdminAlert[] = [];
+const mockRefreshAlerts = jest.fn();
+jest.mock('@/features/admin/components/AdminAlertsProvider', () => ({
+  useAdminAlerts: () => mockAlerts,
+  useRefreshAdminAlerts: () => mockRefreshAlerts,
+}));
+jest.mock('next/navigation', () => ({
+  useRouter: () => mockRouter,
+  usePathname: () => '/admin',
+  useSearchParams: () => mockSearchParams,
+}));
 jest.mock('@/lib/toast', () => ({
   showToast: jest.fn(),
   dismissToast: jest.fn(),
@@ -316,3 +330,66 @@ it.each(cases)(
     });
   },
 );
+
+describe('视频源告警定位', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = jest.fn();
+    mockAlerts = [
+      {
+        key: 'source-offline:video-second',
+        type: 'source-offline',
+        message: '视频源「Beta 视频」持续失效，最后成功于 11-18',
+        startedAt: 1,
+        count: 1,
+        sourceDetail: {
+          source: 'video-second',
+          failureDays: 2,
+          failureCount: 21,
+          lastSuccessDate: null,
+        },
+      },
+    ];
+  });
+  afterEach(() => {
+    mockAlerts = [];
+    mockSearchParams = new URLSearchParams();
+  });
+
+  it('告警源标出持续失效，可按告警中筛选', async () => {
+    await act(async () => {
+      render(<VideoSourceConfig config={config} refreshConfig={jest.fn()} />);
+    });
+    const alerted = screen.getByText('Beta 视频').closest('li')!;
+    expect(within(alerted).getByText(/持续失效/)).toBeInTheDocument();
+    expect(
+      within(screen.getByText('Alpha 视频').closest('li')!).queryByText(
+        /持续失效/,
+      ),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '按源站质量筛选' }));
+    fireEvent.click(screen.getByRole('option', { name: '告警中 1' }));
+    expect(screen.getByText('Beta 视频')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha 视频')).not.toBeInTheDocument();
+  });
+
+  it('从告警跳转来时清掉筛选、滚到该源并移除定位参数', async () => {
+    mockSearchParams = new URLSearchParams(
+      'tab=video-source&source=video-second',
+    );
+    await act(async () => {
+      render(<VideoSourceConfig config={config} refreshConfig={jest.fn()} />);
+    });
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    expect(mockRouter.replace).toHaveBeenCalledWith('/admin?tab=video-source', {
+      scroll: false,
+    });
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(screen.getByText('Beta 视频').closest('li')).toHaveAttribute(
+      'data-source-key',
+      'video-second',
+    );
+  });
+});
