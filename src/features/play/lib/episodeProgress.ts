@@ -83,7 +83,7 @@ export function buildEpisodeProgressKeys(
       const key =
         n && counts.get(n) === 1
           ? `${scope.prefix}n:${n}`
-          : `${scope.prefix}i:${detail.source}:${offset + 1}/${scope.count}`;
+          : `${scope.prefix}i:${detail.source}:${offset + 1}`;
       keys[scope.start + offset] = isEpisodeProgressKey(key) ? key : '';
     });
   }
@@ -110,6 +110,24 @@ export function getEpisodeProgressView(
     entry.t >= entry.d - PLAYBACK_FINISHED_REMAINING_SECONDS ||
     entry.t >= outroAt;
   return { finished, ratio: finished ? 1 : Math.min(1, entry.t / entry.d) };
+}
+
+const LEAVE_FOR_NEXT_FINISHED_RATIO = 0.1;
+const LEAVE_FOR_NEXT_FINISHED_MAX_SECONDS = 300;
+
+// 片尾曲和下集预告常被直接跳过：主动切到下一集时剩余不超过时长 10%（最多 5 分钟）就算看完
+export function isFinishedWhenLeavingForNext(
+  time: number,
+  duration: number,
+): boolean {
+  if (!(duration > 0) || time < MIN_WATCHED_SECONDS) return false;
+  return (
+    duration - time <=
+    Math.min(
+      duration * LEAVE_FOR_NEXT_FINISHED_RATIO,
+      LEAVE_FOR_NEXT_FINISHED_MAX_SECONDS,
+    )
+  );
 }
 
 /** 切到某集时的续播点：看到一半从上次位置继续，看完或没有记录从头播 */

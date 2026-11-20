@@ -17,11 +17,11 @@ const detail = {
   episodes_titles: ['第1集', '第2集', '第3集', '第4集'],
 } as SearchResult;
 
-function setup(table: Record<number, EpisodeProgressEntry>) {
+function setup(table: Record<number, EpisodeProgressEntry>, episodeIndex = 3) {
   const refs = {
     artPlayerRef: ref({ currentTime: 303 } as Artplayer),
     detailRef: ref<SearchResult | null>(detail),
-    currentEpisodeIndexRef: ref(3),
+    currentEpisodeIndexRef: ref(episodeIndex),
     resumeTimeRef: ref<number | null>(null),
     resumeModeRef: ref<'history' | 'forced' | null>(null),
     stableCurrentTimeRef: ref(303),
@@ -68,5 +68,19 @@ describe('useEpisodeSwitch 每集续播', () => {
     const empty = setup({});
     act(() => empty.switchEpisode(1));
     expect(empty.refs.resumeTimeRef.current).toBe(0);
+  });
+
+  it('只有切到紧接的下一集才按离开下一集保存', () => {
+    const next = setup({}, 1);
+    act(() => next.switchEpisode(2));
+    expect(next.save).toHaveBeenCalledWith(false, true);
+
+    const skip = setup({}, 1);
+    act(() => skip.switchEpisode(3));
+    expect(skip.save).toHaveBeenCalledWith(false, false);
+
+    const previous = setup({}, 1);
+    act(() => previous.switchEpisode(0));
+    expect(previous.save).toHaveBeenCalledWith(false, false);
   });
 });

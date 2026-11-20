@@ -58,8 +58,8 @@ export async function assertPlayRecordDeduplication(storage: IStorage) {
   const newerFirst = { ...first, t: 55, at: 200 };
   const second = { k: 'n:2', t: 7, d: 90, at: 140 };
   const third = { k: 'g:第 2 季|n:1', t: 25, d: 200, at: 150 };
-  const localIndex = { k: 'i:a:2/3', t: 21, d: 90, at: 160 };
-  const foreignIndex = { ...localIndex, k: 'i:b:2/3', at: 180 };
+  const localIndex = { k: 'i:a:2', t: 21, d: 90, at: 160 };
+  const foreignIndex = { ...localIndex, k: 'i:b:2', at: 180 };
   const protectedProgress = [{ ...second, k: 'n:42', at: 999 }];
   const keep = { ...record, save_time: 1000, episode_progress: [first] };
   await storage.setPlayRecords(user, {

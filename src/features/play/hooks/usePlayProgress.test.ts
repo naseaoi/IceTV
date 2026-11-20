@@ -487,6 +487,49 @@ describe('usePlayProgress helpers', () => {
     );
   });
 
+  it('接近结尾主动切到下一集时按看完保存离开的集', async () => {
+    const save = (time: number, leavingForNext: boolean) =>
+      saveCurrentPlayProgress(
+        { current: { currentTime: time, duration: 2832 } } as any,
+        { current: 'source-a' },
+        { current: 'id-a' },
+        { current: '番剧A' },
+        { current: detail },
+        { current: 0 },
+        { current: time },
+        { current: false },
+        {
+          current: {
+            inFlight: false,
+            pending: new Map(),
+            lastSavedFingerprint: null,
+          },
+        },
+        { current: 0 },
+        '番剧A',
+        false,
+        leavingForNext,
+      );
+    await save(2793, true);
+    expect(mockedSavePlayRecord).toHaveBeenLastCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ play_time: 2832, total_time: 2832 }),
+    );
+    await save(2793, false);
+    expect(mockedSavePlayRecord).toHaveBeenLastCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ play_time: 2793 }),
+    );
+    await save(2400, true);
+    expect(mockedSavePlayRecord).toHaveBeenLastCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ play_time: 2400 }),
+    );
+  });
+
   it('起播前的 0 进度不写 checkpoint，避免覆盖真实进度', () => {
     savePlaybackCheckpoint(
       { current: 'source-a' },
@@ -575,7 +618,11 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     return { playRecords: null, settledKey: '', listeners: new Set() };
   }
 
-  function renderHistoryRestore(gate: HistoryRestoreGate, episodeIndex = 0) {
+  function renderHistoryRestore(
+    gate: HistoryRestoreGate,
+    episodeIndex = 0,
+    onPlayRecordLoaded?: (key: string, record: PlayRecord | undefined) => void,
+  ) {
     const refs = {
       artPlayerRef: { current: null },
       currentSourceRef: { current: detail.source },
@@ -615,6 +662,7 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
           setCurrentEpisodeIndex,
           onRestoreEpisodeChange,
           cleanupPlayer,
+          onPlayRecordLoaded,
         }),
       { initialProps: { currentDetail: detail } },
     );
@@ -911,6 +959,38 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
       detail.id,
       expect.objectContaining({ index: 9, play_time: 650 }),
     );
+  });
+
+  it('网络记录与缓存保存时间相同时仍交出网络记录，补齐缓存缺的每集进度', async () => {
+    const cachedRecord: PlayRecord = {
+      ...recordAtEpisode9,
+      episode_progress: [{ k: 'n:9', t: 600, d: 1200, at: 2000 }],
+    };
+    const freshRecord: PlayRecord = {
+      ...recordAtEpisode9,
+      episode_progress: [
+        { k: 'n:9', t: 600, d: 1200, at: 2000 },
+        { k: 'n:8', t: 1190, d: 1200, at: 1500 },
+      ],
+    };
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = Promise.resolve({ [recordKey]: cachedRecord });
+    gate.playRecordsFresh = Promise.resolve({ [recordKey]: freshRecord });
+    const onPlayRecordLoaded = jest.fn();
+    const { setCurrentEpisodeIndex } = renderHistoryRestore(
+      gate,
+      0,
+      onPlayRecordLoaded,
+    );
+    await flushMicrotasks();
+
+    expect(onPlayRecordLoaded).toHaveBeenNthCalledWith(
+      1,
+      recordKey,
+      cachedRecord,
+    );
+    expect(onPlayRecordLoaded).toHaveBeenLastCalledWith(recordKey, freshRecord);
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
   });
 
   it('当前集已是续播的集时不再换集，续播时间照样写入', async () => {

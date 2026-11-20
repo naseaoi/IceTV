@@ -28,7 +28,10 @@ interface UseEpisodeSwitchOptions {
   clearTargetEpisodeProgressRef: RefObject<boolean>;
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
   playbackRequestModeRef: RefObject<PlaybackRequestMode>;
-  doSaveCurrentProgress: () => void | Promise<unknown>;
+  doSaveCurrentProgress: (
+    immediate?: boolean,
+    leavingForNext?: boolean,
+  ) => void | Promise<unknown>;
   getEpisodeEntry: (episodeIndex: number) => EpisodeProgressEntry | undefined;
   skipConfigRef: RefObject<SkipConfig>;
   setError: Dispatch<SetStateAction<string | null>>;
@@ -82,11 +85,12 @@ export function useEpisodeSwitch({
       }
 
       // giri 不同分组之间切换同一集时继承当前播放时间点，须在保存离开集、重置时间之前取
-      const crossGroupResumeTime = shouldInheritCrossGroupProgress(
+      const crossGroup = shouldInheritCrossGroupProgress(
         d,
         currentEpisodeIndexRef.current,
         targetEpisodeIndex,
-      )
+      );
+      const crossGroupResumeTime = crossGroup
         ? Math.floor(
             resolveSourceSwitchCurrentPlayTime({
               playerCurrentTime: artPlayerRef.current?.currentTime || 0,
@@ -97,7 +101,11 @@ export function useEpisodeSwitch({
         : 0;
 
       // 保存会同步更新本地每集进度表，之后再查目标集；跨分组的同一集仍以正在看的位置为准
-      doSaveCurrentProgress();
+      doSaveCurrentProgress(
+        false,
+        !crossGroup &&
+          targetEpisodeIndex === currentEpisodeIndexRef.current + 1,
+      );
       const inheritedResumeTime =
         crossGroupResumeTime > 1
           ? crossGroupResumeTime

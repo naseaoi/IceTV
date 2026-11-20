@@ -187,7 +187,7 @@ export async function assertPlayRecordEpisodeProgress(storage: IStorage) {
     save_time: 100,
     update_baseline_group_total: 1,
     update_detected_at: 80,
-    episode_progress: [first, { ...first, k: 'i:old:1/12' }],
+    episode_progress: [first, { ...first, k: 'i:old:1' }],
   };
   const untrustedTable = [{ ...first, k: 'n:99', at: 999 }];
   await storage.setPlayRecords(user, {

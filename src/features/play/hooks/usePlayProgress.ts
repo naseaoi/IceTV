@@ -11,6 +11,7 @@ import { useCallback, useRef } from 'react';
 import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
 import {
   buildEpisodeProgressKeys,
+  isFinishedWhenLeavingForNext,
   MIN_WATCHED_SECONDS,
 } from '@/features/play/lib/episodeProgress';
 import {
@@ -165,6 +166,7 @@ export async function saveCurrentPlayProgress(
   lastSaveTimeRef: MutableRefObject<number>,
   searchTitle: string,
   immediate = false,
+  leavingForNext = false,
 ) {
   const state = saveStateRef.current;
   if (
@@ -218,7 +220,11 @@ export async function saveCurrentPlayProgress(
           ...(groupLabel ? { group_label: groupLabel } : {}),
         }
       : {}),
-    play_time: Math.floor(currentTime),
+    play_time: Math.floor(
+      leavingForNext && isFinishedWhenLeavingForNext(currentTime, duration)
+        ? duration
+        : currentTime,
+    ),
     total_time: Math.floor(duration),
     save_time: Date.now(),
     search_title: searchTitle,
@@ -438,7 +444,7 @@ export function usePlayProgress({
   }, [searchTitle]);
 
   const doSave = useCallback(
-    async (immediate = false) => {
+    async (immediate = false, leavingForNext = false) => {
       if (
         isProgressWriteBlocked(
           historyRestoreGateRef.current,
@@ -470,6 +476,7 @@ export function usePlayProgress({
         lastSaveTimeRef,
         searchTitleRef.current,
         immediate,
+        leavingForNext,
       );
     },
     [
@@ -756,6 +763,9 @@ export function usePlayProgress({
           if (disposed) return;
           if (isNewerPlayRecord(freshRecords[key], initialRecords[key])) {
             applyRecords(freshRecords, true);
+          } else {
+            // 保存时间相同的缓存可能缺服务端并入的他源每集进度，进度表仍要合并网络结果
+            onPlayRecordLoadedRef.current?.(key, freshRecords[key]);
           }
         }
       } catch (err) {

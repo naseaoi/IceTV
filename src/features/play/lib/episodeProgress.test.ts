@@ -1,6 +1,7 @@
 import {
   buildEpisodeProgressKeys,
   getEpisodeProgressView,
+  isFinishedWhenLeavingForNext,
   parseStrictEpisodeNumber,
   resolveEpisodeProgressResumeTime,
 } from '@/features/play/lib/episodeProgress';
@@ -57,7 +58,7 @@ describe('buildEpisodeProgressKeys', () => {
     );
     const b = buildEpisodeProgressKeys(detail('b', ['01', 'SP', '02', '03']));
     expect(a).toEqual(['n:1', 'n:2', 'n:3']);
-    expect(b).toEqual(['n:1', 'i:b:2/4', 'n:2', 'n:3']);
+    expect(b).toEqual(['n:1', 'i:b:2', 'n:2', 'n:3']);
     expect(b.indexOf(a[1])).toBe(2);
   });
 
@@ -65,7 +66,7 @@ describe('buildEpisodeProgressKeys', () => {
     const keys = buildEpisodeProgressKeys(
       detail('a', ['第1集 上', '第1集 下', '正片']),
     );
-    expect(keys).toEqual(['i:a:1/3', 'i:a:2/3', 'i:a:3/3']);
+    expect(keys).toEqual(['i:a:1', 'i:a:2', 'i:a:3']);
     const other = buildEpisodeProgressKeys(
       detail('b', ['第1集 上', '第1集 下', '正片']),
     );
@@ -133,5 +134,20 @@ describe('每集续播点', () => {
     });
     expect(resolveEpisodeProgressResumeTime(entry(860), skip)).toBe(0);
     expect(resolveEpisodeProgressResumeTime(entry(860))).toBe(860);
+  });
+});
+
+describe('isFinishedWhenLeavingForNext', () => {
+  it('剩余不超过时长 10% 且最多 5 分钟时算看完', () => {
+    expect(isFinishedWhenLeavingForNext(2793, 2832)).toBe(true);
+    expect(isFinishedWhenLeavingForNext(1300, 1440)).toBe(true);
+    expect(isFinishedWhenLeavingForNext(1290, 1440)).toBe(false);
+    expect(isFinishedWhenLeavingForNext(6900, 7200)).toBe(true);
+    expect(isFinishedWhenLeavingForNext(6890, 7200)).toBe(false);
+  });
+
+  it('时长无效或几乎没看时不算', () => {
+    expect(isFinishedWhenLeavingForNext(50, 0)).toBe(false);
+    expect(isFinishedWhenLeavingForNext(5, 50)).toBe(false);
   });
 });

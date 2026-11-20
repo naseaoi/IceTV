@@ -5,10 +5,16 @@ export type { EpisodeProgressEntry } from '@/lib/types';
 export const MAX_EPISODE_PROGRESS_ENTRIES = 50;
 export const MAX_EPISODE_PROGRESS_KEY_LENGTH = 160;
 
-// 集身份：可选分组前缀 `g:<组标签>|`，后接 `n:<集号>`（跨源通用）或 `i:<源>:<序号>/<集数>`（只认同源）
+// 集身份：可选分组前缀 `g:<组标签>|`，后接 `n:<集号>`（跨源通用）或 `i:<源>:<序号>`（只认同源）。
+// 旧版序号身份带 `/<集数>` 后缀，连载每更新一集就整体失配；仍接受这种输入，入表时去掉后缀
 const EPISODE_PROGRESS_KEY_PATTERN =
-  /^(?:g:[^|\u0000-\u001f]{1,64}\|)?(?:n:\d{1,6}(?:\.\d{1,3})?|i:[^:\u0000-\u001f]{1,64}:\d{1,6}\/\d{1,6})$/;
-const INDEX_KEY_SOURCE_PATTERN = /(?:^|\|)i:([^:]+):\d+\/\d+$/;
+  /^(?:g:[^|\u0000-\u001f]{1,64}\|)?(?:n:\d{1,6}(?:\.\d{1,3})?|i:[^:\u0000-\u001f]{1,64}:\d{1,6}(?:\/\d{1,6})?)$/;
+const INDEX_KEY_SOURCE_PATTERN = /(?:^|\|)i:([^:]+):\d+(?:\/\d+)?$/;
+const LEGACY_INDEX_KEY_PATTERN = /((?:^|\|)i:[^:]+:\d+)\/\d+$/;
+
+export function normalizeEpisodeProgressKey(key: string): string {
+  return key.replace(LEGACY_INDEX_KEY_PATTERN, '$1');
+}
 
 export function isEpisodeProgressKey(value: unknown): value is string {
   return (
@@ -54,9 +60,10 @@ export function mergeEpisodeProgress(
     for (const item of list) {
       if (!isEpisodeProgressEntry(item)) continue;
       if (!belongsToSource(item.k, options.source)) continue;
-      const existing = byKey.get(item.k);
+      const k = normalizeEpisodeProgressKey(item.k);
+      const existing = byKey.get(k);
       if (!existing || item.at > existing.at) {
-        byKey.set(item.k, { k: item.k, t: item.t, d: item.d, at: item.at });
+        byKey.set(k, { k, t: item.t, d: item.d, at: item.at });
       }
     }
   }
@@ -70,7 +77,7 @@ export function createEpisodeProgressEntry(
   record: Pick<PlayRecord, 'play_time' | 'total_time' | 'save_time'>,
 ): EpisodeProgressEntry | null {
   const entry = {
-    k: key,
+    k: normalizeEpisodeProgressKey(key),
     t: Math.floor(record.play_time),
     d: Math.floor(record.total_time),
     at: Math.floor(record.save_time),
