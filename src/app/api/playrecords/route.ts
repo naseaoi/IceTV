@@ -12,6 +12,7 @@ import {
   MAX_READ_PLAY_RECORD_KEYS,
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
+  toPlayRecordList,
 } from '@/lib/play-records';
 import { isSeriesStatus } from '@/lib/series-status';
 import { PlayRecord } from '@/lib/types';
@@ -70,10 +71,13 @@ export async function GET(request: NextRequest) {
             ? 'updated'
             : undefined,
       );
-      return NextResponse.json(page, {
-        status: 200,
-        headers: NO_STORE_HEADERS,
-      });
+      return NextResponse.json(
+        { ...page, items: toPlayRecordList(page.items) },
+        {
+          status: 200,
+          headers: NO_STORE_HEADERS,
+        },
+      );
     }
     const limitParam = searchParams.get('limit');
     const responseRecords =
@@ -85,7 +89,7 @@ export async function GET(request: NextRequest) {
               normalizePlayRecordLimit(limitParam),
             )
           ).items;
-    return NextResponse.json(responseRecords, {
+    return NextResponse.json(toPlayRecordList(responseRecords), {
       status: 200,
       headers: NO_STORE_HEADERS,
     });

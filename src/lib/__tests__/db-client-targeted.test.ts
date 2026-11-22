@@ -5,7 +5,9 @@ import { getEpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import {
   deleteFavorite,
   getAllFavorites,
+  getAllPlayRecords,
   getFreshSkipConfig,
+  getPlayRecordPage,
   getSkipConfig,
   isFavorited,
   readPlayRecordsForPlayback,
@@ -120,10 +122,11 @@ describe('readPlayRecordsForPlayback', () => {
     },
   );
 
-  it('有缓存时立即提供快照，fresh 返回网络结果、合并缓存并广播', async () => {
+  it('有完整逐集缓存时立即提供快照，fresh 返回网络结果、合并缓存并广播', async () => {
+    const complete = { ...record, episode_progress: [] };
     cacheManager.cachePlayRecords({
-      's+1': record,
-      's+2': record,
+      's+1': complete,
+      's+2': complete,
       's+3': record,
     });
     const pending = deferred();
@@ -133,7 +136,7 @@ describe('readPlayRecordsForPlayback', () => {
     window.addEventListener('playRecordsUpdated', listener);
     try {
       const read = readPlayRecordsForPlayback(['s+1', 's+2']);
-      expect(read.cached).toEqual({ 's+1': record, 's+2': record });
+      expect(read.cached).toEqual({ 's+1': complete, 's+2': complete });
       pending.resolve({ 's+1': freshRecord });
       await expect(read.fresh).resolves.toEqual({ 's+1': freshRecord });
       expect(cacheManager.getCachedPlayRecords()).toEqual({
@@ -166,19 +169,57 @@ describe('readPlayRecordsForPlayback', () => {
     });
   });
 
-  it('有缓存时网络失败仍拒绝且保留快照', async () => {
+  it('只有列表缓存时网络失败仍拒绝，保留摘要供列表使用', async () => {
     cacheManager.cachePlayRecords({ 's+1': record });
     const error = new Error('offline');
     global.fetch = jest.fn().mockRejectedValue(error);
     const read = readPlayRecordsForPlayback(['s+1']);
-    expect(read.cached).toEqual({ 's+1': record });
+    expect(read.cached).toBeNull();
     await expect(read.fresh).rejects.toMatchObject({
       kind: 'network',
       cause: error,
     });
-    expect(cacheManager.getCachedPlayRecords()).toEqual(read.cached);
+    expect(cacheManager.getCachedPlayRecords()).toEqual({ 's+1': record });
     expect(showToast).not.toHaveBeenCalled();
   });
+
+  it.each(['all', 'page'])(
+    '%s 列表缓存不能冒充完整进度，播放定向读取补回其他集',
+    async (format) => {
+      const complete = {
+        ...record,
+        episode_progress: [{ k: 'n:2', t: 600, d: 1200, at: 1 }],
+      };
+      if (format === 'page') {
+        cacheManager.cachePlayRecords({ 's+1': complete });
+      }
+      const summary = { 's+1': record };
+      const pending = deferred();
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () =>
+            format === 'all'
+              ? summary
+              : { items: summary, total: 1, nextCursor: null },
+        })
+        .mockReturnValue(pending.response);
+      if (format === 'all') await getAllPlayRecords();
+      else await getPlayRecordPage();
+      expect(cacheManager.getCachedPlayRecords()).toEqual(summary);
+      const read = readPlayRecordsForPlayback(['s+1']);
+      expect(read.cached).toBeNull();
+      const url = new URL(
+        (global.fetch as jest.Mock).mock.calls[1][0],
+        'http://localhost',
+      );
+      expect(url.searchParams.getAll('keys')).toEqual(['s+1']);
+      pending.resolve({ 's+1': complete });
+      await expect(read.fresh).resolves.toEqual({ 's+1': complete });
+      expect(cacheManager.getCachedPlayRecords()).toEqual({ 's+1': complete });
+    },
+  );
 
   it('期间其他键写入改变修订号时返回当前缓存，不覆盖进度', async () => {
     cacheManager.cachePlayRecords({ 's+1': record });

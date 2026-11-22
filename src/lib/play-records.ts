@@ -51,6 +51,17 @@ export function selectRecentPlayRecords(
   );
 }
 
+export function toPlayRecordList(
+  records: Record<string, PlayRecord>,
+): Record<string, PlayRecord> {
+  return Object.fromEntries(
+    Object.entries(records).map(([key, record]) => {
+      const { episode_progress: _progress, ...summary } = record;
+      return [key, summary];
+    }),
+  );
+}
+
 function sortPlayRecordEntries(
   records: Record<string, PlayRecord>,
 ): Array<[string, PlayRecord]> {

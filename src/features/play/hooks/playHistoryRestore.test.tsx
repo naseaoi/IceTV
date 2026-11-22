@@ -303,6 +303,7 @@ describe('起播恢复决策', () => {
     index = 6,
     duration = 1440,
     nextTime = 0,
+    summaryCached = false,
   }: {
     autoNext?: boolean;
     knownCount?: number;
@@ -310,7 +311,17 @@ describe('起播恢复决策', () => {
     index?: number;
     duration?: number;
     nextTime?: number;
+    summaryCached?: boolean;
   } = {}) {
+    if (summaryCached) {
+      cacheManager.cachePlayRecords({
+        [generateStorageKey(SOURCE, VIDEO_ID)]: createRecord({
+          index: index + 1,
+          total_episodes: knownCount,
+          play_time: 1438,
+        }),
+      });
+    }
     saveDetailSnapshot(SOURCE, VIDEO_ID, createDetail([count]));
     savePlayIntent({
       source: SOURCE,
@@ -359,14 +370,24 @@ describe('起播恢复决策', () => {
   });
 
   it.each([
-    [300, 300],
-    [1438, 0],
-  ])('自动推进采用下一集进度 %s → %s', async (nextTime, expected) => {
-    const { result } = await setup({ count: 8, knownCount: 8, nextTime });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.currentEpisodeIndex).toBe(7);
-    expect(result.current.resumeTimeRef.current).toBe(expected);
-  });
+    [300, 300, false],
+    [1438, 0, false],
+    [300, 300, true],
+    [1438, 0, true],
+  ])(
+    '自动推进采用下一集进度 %s → %s（列表缓存 %s）',
+    async (nextTime, expected, summaryCached) => {
+      const { result } = await setup({
+        count: 8,
+        knownCount: 8,
+        nextTime,
+        summaryCached,
+      });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.currentEpisodeIndex).toBe(7);
+      expect(result.current.resumeTimeRef.current).toBe(expected);
+    },
+  );
 
   it('记录缺时长时由实际时长兜底，仍经过同一起播决策', async () => {
     const { result } = await setup({ autoNext: false, duration: 0 });
