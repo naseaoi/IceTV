@@ -39,6 +39,10 @@
 - 整版以 15 条以内为目标，`[Unreleased]` 接近上限时先合并已有条目再写新条目。
 - 发版时把 `## [Unreleased]` 改为 `## [X.Y.Z] - YYYY-MM-DD`，按上述规则复查归并后再同步 `package.json` 版本。
 
+## 在线更新检测
+
+正式通道从对应分支的更新日志读取最新版本；dev 通道以 GHCR 已发布的 dev 镜像标签为准，更新日志仅用于展示历史条目，检测失败时最新版本为空。通道规则见[网页内升级](deployment.md#网页内升级可选)。
+
 ## 本地版本显示
 
 `pnpm dev` / `pnpm dev:webpack` 使用当前提交可达的最高本地 `vX.Y.Z-dev.N` 标签，启动时不联网。显式 `NEXT_PUBLIC_APP_VERSION` 优先；无可用 dev 标签时回退至更新日志及 `package.json`。同步标签后须重启开发服务。

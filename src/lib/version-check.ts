@@ -5,6 +5,7 @@ import {
   readSeenReleaseVersion,
   writeSeenReleaseVersion,
 } from '@/lib/local-preferences';
+import { compareReleaseVersions } from '@/lib/release-version';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export enum UpdateStatus {
@@ -184,11 +185,7 @@ async function fetchLatestVersion(): Promise<string | null> {
 
     const data = await response.json();
     const version =
-      typeof data?.latestVersion === 'string'
-        ? data.latestVersion
-        : typeof data?.changelog?.[0]?.version === 'string'
-          ? data.changelog[0].version
-          : '';
+      typeof data?.latestVersion === 'string' ? data.latestVersion : '';
     return version.trim() || null;
   } catch {
     return null;
@@ -198,54 +195,11 @@ async function fetchLatestVersion(): Promise<string | null> {
 }
 
 export function compareVersions(remoteVersion: string): UpdateStatus {
-  if (remoteVersion === CURRENT_VERSION) {
-    return UpdateStatus.NO_UPDATE;
-  }
-
-  try {
-    const currentParts = CURRENT_VERSION.split('.').map((part) => {
-      const num = parseInt(part, 10);
-      if (isNaN(num) || num < 0) {
-        throw new Error(`无效的版本号格式: ${CURRENT_VERSION}`);
-      }
-      return num;
-    });
-
-    const remoteParts = remoteVersion.split('.').map((part) => {
-      const num = parseInt(part, 10);
-      if (isNaN(num) || num < 0) {
-        throw new Error(`无效的版本号格式: ${remoteVersion}`);
-      }
-      return num;
-    });
-
-    const normalizeVersion = (parts: number[]) => {
-      if (parts.length >= 3) {
-        return parts.slice(0, 3);
-      }
-      const normalized = [...parts];
-      while (normalized.length < 3) {
-        normalized.push(0);
-      }
-      return normalized;
-    };
-
-    const normalizedCurrent = normalizeVersion(currentParts);
-    const normalizedRemote = normalizeVersion(remoteParts);
-
-    for (let i = 0; i < 3; i++) {
-      if (normalizedRemote[i] > normalizedCurrent[i]) {
-        return UpdateStatus.HAS_UPDATE;
-      } else if (normalizedRemote[i] < normalizedCurrent[i]) {
-        return UpdateStatus.NO_UPDATE;
-      }
-    }
-
-    return UpdateStatus.NO_UPDATE;
-  } catch (error) {
-    console.error('版本号比较失败:', error);
+  const comparison = compareReleaseVersions(remoteVersion, CURRENT_VERSION);
+  if (comparison === null) {
     return remoteVersion !== CURRENT_VERSION
       ? UpdateStatus.HAS_UPDATE
       : UpdateStatus.NO_UPDATE;
   }
+  return comparison > 0 ? UpdateStatus.HAS_UPDATE : UpdateStatus.NO_UPDATE;
 }

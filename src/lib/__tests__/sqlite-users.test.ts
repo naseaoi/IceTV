@@ -26,6 +26,36 @@ describe('sqlite user storage', () => {
     }
   });
 
+  it('在线备份包含 WAL 中的已提交数据且原连接继续可用', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'icetv-online-backup-'));
+    const storage = new LocalSqliteStorage(join(directory, 'test.sqlite'));
+    let snapshot: Database.Database | undefined;
+    try {
+      await storage.registerUser('backup-user', 'password');
+      const destination = await storage.backup('icetv-data-test-1000.sqlite');
+      expect(destination).toBe(
+        join(directory, 'backups', 'icetv-data-test-1000.sqlite'),
+      );
+      snapshot = new Database(destination, { readonly: true });
+      expect(
+        snapshot
+          .prepare('SELECT username FROM users WHERE username = ?')
+          .get('backup-user'),
+      ).toEqual({ username: 'backup-user' });
+      await storage.registerUser('after-backup', 'password');
+      expect(await storage.checkUserExist('after-backup')).toBe(true);
+      expect(
+        snapshot
+          .prepare('SELECT username FROM users WHERE username = ?')
+          .get('after-backup'),
+      ).toBeUndefined();
+    } finally {
+      snapshot?.close();
+      (storage as unknown as { db: Database.Database }).db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the original password when duplicate registration is attempted', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 

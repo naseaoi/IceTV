@@ -14,7 +14,7 @@
     "start": "next start",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix && pnpm format",
-    "lint:strict": "eslint --max-warnings=0 src",
+    "lint:strict": "eslint --max-warnings=0 src updater",
     "check:encoding": "node scripts/check-encoding.js",
     "typecheck": "tsc --noEmit --incremental false",
     "perf:baseline": "node scripts/run-performance-baseline.js",

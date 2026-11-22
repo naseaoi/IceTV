@@ -267,6 +267,51 @@ echo '*/5 * * * * root /usr/local/bin/icetv-traffic-export' > /etc/cron.d/icetv-
 - 用量达额度 95% 时自动暂停服务器中转：`/api/proxy/segment` 与服务器模式的 `/api/proxy/m3u8` 返回带 `x-icetv-relay-paused: 1` 的 503，`/api/proxy-modes` 把「自动」源报为直连。浏览器直连播放不受影响，下个周期自动恢复；站长可在流量页手动恢复本周期中转。统计文件缺失或读取出错时不暂停；超过 30 分钟未更新的文件仍按最后一次数据判断，避免导出中断后自动放开中转。
 - 状态在进程内缓存 30 秒，暂停与恢复另受配置缓存影响，最长约 1 分钟生效。
 
+## 网页内升级（可选）
+
+dev 通道部署只检测并升级到 dev 镜像（GHCR 上最高的 `X.Y.Z-dev.N` 标签），正式版不提示。
+
+单实例 Docker Compose 部署可接入 updater，由站长在版本面板先下载镜像，再确认重启。下载期间原容器继续服务；重启前 IceTV 在线备份 SQLite，备份失败会阻止重启。新容器启动或健康检查失败时自动回退旧镜像，并再次验证旧容器健康状态。
+
+在宿主机 `/opt/icetv` 保存原 `compose.yml` 与以下 `compose.updater.yml`；实际目录不同时，同时替换挂载两侧路径。在该目录的 `.env` 中设置至少 32 字符的高熵随机 `UPDATER_TOKEN`，两服务共用同一值，生成方式见 [.env.example](../.env.example)。
+
+```yml
+services:
+  icetv:
+    environment:
+      UPDATER_URL: http://icetv-updater:9330
+      UPDATER_TOKEN: ${UPDATER_TOKEN:?请在 .env 中设置升级密钥}
+
+  icetv-updater:
+    image: ghcr.io/naseaoi/icetv-updater:latest
+    restart: unless-stopped
+    environment:
+      UPDATER_TOKEN: ${UPDATER_TOKEN:?请在 .env 中设置升级密钥}
+      UPDATER_TARGET_CONTAINER: icetv
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/icetv:/opt/icetv:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+```
+
+```bash
+cd /opt/icetv
+docker compose -f compose.yml -f compose.updater.yml up -d
+```
+
+- updater 仅通过 Compose 内网访问，**不要发布其端口**。只有 updater 挂载 Docker socket；IceTV 应用容器保持无 socket。socket 访问等同于宿主机 root 权限，即便只读挂载 socket 也能调用写 API；只使用可信镜像，保护 token、Compose 文件及内网访问权限。
+- updater 读取目标容器的 Compose 标签还原项目、服务、工作目录、按顺序排列的 `-f` 与 `--env-file`。工作目录、全部 Compose 文件、环境文件及引用的配置文件须在 updater 内按宿主机相同绝对路径可读；目录外的文件另加同路径只读挂载。启动与手动维护时沿用同一组 `-f` 参数。
+- Compose 插值变量须保存在 `.env` 或显式 `--env-file` 文件中。首次启动时仅由宿主 shell 提供的变量无法还原；updater 自身环境中同名变量也会参与插值，应保持一致。私有镜像仓库需另为 updater 配置 Docker 登录凭证。
+- 支持 `latest`、`dev` 等浮动标签与单实例镜像部署。固定版本号、digest、无 Compose 标签、挂载缺失或 updater 不可达时，版本面板保留手动更新入口。服务须使用 `image`，升级期间保持 Compose 配置与目标镜像标签稳定，并暂停外部自动更新器及镜像清理任务。
+- updater 同时只执行一个任务，状态保存在内存；任务期间保持 updater 运行。重建使用已拉取的本地镜像（`--pull never`），避免 `pull_policy: always` 再次拉取并覆盖回退镜像；原有数据卷与其他服务保持不变。
+- 新旧容器都以 Docker 健康检查通过为就绪；未配置健康检查时以连续运行 20 秒为准。自动回退只恢复镜像，数据库仍使用原数据卷；**不可逆迁移回退须恢复升级前备份**。SQLite 在线备份位于数据库同目录的 `backups/`，保留最近两份；MySQL 升级前由部署者自行备份，操作见[升级与备份](#升级与备份)。
+- updater 从镜像（而非容器）的 `NEXT_PUBLIC_APP_VERSION` 环境变量读取版本，版本面板据此显示已下载版本并判断是否需要刷新页面，所以 `Dockerfile` 运行阶段必须保留该 `ENV`。容器上覆盖的同名变量不参与判断。
+- updater 自身由部署者手动升级：沿用同一组 Compose 文件执行 `docker compose ... pull icetv-updater` 与 `docker compose ... up -d --no-deps icetv-updater`。应用与 updater 选择一致的发布通道；updater 参数默认值见 [.env.example](../.env.example)。
+
 ## 升级与备份
 
 Docker 升级使用 `docker compose pull`、`docker compose up -d`，保留原数据卷；Vercel 重新部署时保留原数据库连接。带弹幕叠加文件的部署须带同一组 `-f` 参数。

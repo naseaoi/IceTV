@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import { VersionPanel } from '@/components/VersionPanel';
@@ -51,6 +51,41 @@ function asRole(role: 'owner' | 'admin' | 'user') {
 describe('VersionPanel 后台条目', () => {
   beforeEach(() => {
     global.fetch = jest.fn().mockResolvedValue({ ok: false }) as never;
+  });
+
+  it('keeps history without offering a stable fallback when latestVersion is null', async () => {
+    asRole('admin');
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        latestVersion: null,
+        changelog: [
+          {
+            version: '9.0.0',
+            date: '2026-11-22',
+            added: ['Remote history'],
+            changed: [],
+            fixed: [],
+            admin: [],
+          },
+        ],
+      }),
+    });
+    render(<VersionPanel isOpen onClose={jest.fn()} />);
+    await screen.findByText('Remote history');
+    expect(screen.queryByText('v9.0.0 可用')).not.toBeInTheDocument();
+  });
+
+  it('offers a dev release without requiring a changelog entry', async () => {
+    asRole('admin');
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ latestVersion: '3.0.0-dev.7', changelog: [] }),
+    });
+    render(<VersionPanel isOpen onClose={jest.fn()} />);
+    await waitFor(() =>
+      expect(screen.getByText('v3.0.0-dev.7 可用')).toBeInTheDocument(),
+    );
   });
 
   it.each(['owner', 'admin'] as const)(

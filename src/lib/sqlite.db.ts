@@ -566,6 +566,17 @@ export class LocalSqliteStorage implements IStorage {
     pruneSharedCache: Database.Statement;
   };
 
+  async backup(filename: string): Promise<string> {
+    if (this.dbPath === ':memory:') {
+      throw new Error('SQLite memory databases have no backup directory');
+    }
+    const directory = path.resolve(path.dirname(this.dbPath), 'backups');
+    mkdirSync(directory, { recursive: true });
+    const destination = path.join(directory, filename);
+    await this.db.backup(destination);
+    return destination;
+  }
+
   constructor(dbPath?: string) {
     const defaultSqlitePath = process.env.DOCKER_ENV
       ? '/data/icetv-data.sqlite'
