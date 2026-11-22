@@ -66,6 +66,7 @@ interface ContinueCardProps {
   resumeGroup?: ResumeGroupIdentity;
   progress: number;
   resumeTime: number;
+  recordDuration?: number;
   query?: string;
   onDelete?: () => void;
   /** 铺满网格格子，横排滚动时保持固定宽度 */
@@ -92,6 +93,7 @@ export default function ContinueCard({
   resumeGroup,
   progress,
   resumeTime,
+  recordDuration,
   query,
   onDelete,
   fluid = false,
@@ -132,6 +134,8 @@ export default function ContinueCard({
           id,
           episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
           resumeTime,
+          recordDuration,
+          knownEpisodeCount: availableEpisodes,
           groupLabel: resumeGroup?.label,
           groupIndex: resumeGroup?.index,
           groupTotal: resumeGroup?.total,
@@ -162,6 +166,8 @@ export default function ContinueCard({
     resumeEpisodeIndex,
     resumeGroup,
     resumeTime,
+    recordDuration,
+    availableEpisodes,
   ]);
 
   const handleDelete = useCallback(() => {

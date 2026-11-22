@@ -97,6 +97,8 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         handlePlaybackStatsEvent: (event) =>
           paramsRef.current.handlePlaybackStatsEvent?.(event),
         onPlaybackStarted: () => paramsRef.current.onPlaybackStarted?.(),
+        resolveStartDuration: (duration) =>
+          paramsRef.current.resolveStartDuration?.(duration) ?? false,
         onSourceProxyFallbackStarted: () =>
           paramsRef.current.onSourceProxyFallbackStarted?.(),
         onPlaybackRecoveryExhausted: (reason) =>

@@ -281,6 +281,8 @@ export function usePlayHistorySession() {
         id: item.video_id,
         episodeIndex: Math.max(0, item.episode_index - 1),
         resumeTime: Math.max(0, item.position || 0),
+        recordDuration: item.duration,
+        knownEpisodeCount: item.group_total ?? item.total_episodes,
         ...(isGroupedPlayRecordScale(item)
           ? {
               groupLabel: item.group_label,

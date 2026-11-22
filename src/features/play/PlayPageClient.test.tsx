@@ -51,6 +51,9 @@ const mockUpdateVideoUrl = jest.fn<void, Parameters<typeof updateVideoUrl>>();
 const mockUseArtPlayer = jest.fn<void, [ArtPlayerParams]>();
 const mockPlayMainContent = jest.fn<null, [MainContentProps]>(() => null);
 const mockPlayProgress = {
+  startStateRef: { current: { parked: false, pendingDuration: null } },
+  resolveStartDuration: jest.fn(),
+  cancelPlaybackStart: jest.fn(),
   saveCurrentPlayProgress: jest.fn(),
   savePlaybackCheckpoint: jest.fn(),
   requestWakeLock: jest.fn(),

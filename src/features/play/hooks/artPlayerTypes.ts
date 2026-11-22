@@ -68,6 +68,10 @@ export interface UseArtPlayerParams {
   danmakuEnabledRef: MutableRefObject<boolean>;
   onDanmakuEnabledChange?: (enabled: boolean) => void;
   onPlaybackStarted?: () => void;
+  startStateRef?: MutableRefObject<
+    import('@/features/play/lib/playbackStartState').PlaybackStartState
+  >;
+  resolveStartDuration?: (duration: number) => boolean;
   onDanmakuEnable?: () => void;
   playbackIntentRef?: MutableRefObject<VodPlaybackIntent>;
   onSourceProxyFallbackStarted?: () => void;

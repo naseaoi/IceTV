@@ -338,6 +338,9 @@ function AuthenticatedPlayPageClient({
   );
 
   const {
+    startStateRef,
+    resolveStartDuration,
+    cancelPlaybackStart,
     saveCurrentPlayProgress: doSaveCurrentProgress,
     savePlaybackCheckpoint: doSaveCheckpoint,
     requestWakeLock,
@@ -366,6 +369,9 @@ function AuthenticatedPlayPageClient({
     detail,
     setCurrentEpisodeIndex,
     onRestoreEpisodeChange: handleRestoreEpisodeChange,
+    autoPlayNextEnabledRef,
+    skipConfigRef,
+    getEpisodeEntry,
     onPlayRecordLoaded: acceptEpisodeProgressRecord,
     cleanupPlayer,
   });
@@ -596,20 +602,31 @@ function AuthenticatedPlayPageClient({
   ]);
 
   const resetAutoSourceSwitch = useCallback(() => {
+    cancelPlaybackStart();
     holdBackgroundSourceProbes();
     resetSourceSwitchIntent();
-  }, [resetSourceSwitchIntent]);
+  }, [cancelPlaybackStart, resetSourceSwitchIntent]);
   resetAutoSourceSwitchRef.current = resetAutoSourceSwitch;
 
   // 选集中实际更新了集索引才开启新意图；同集和边界导航保留仍在运行的播放器。
   const handleEpisodeChangeRequest = useCallback(
     (episodeNumber: number) => {
       const previousIndex = currentEpisodeIndexRef.current;
+      if (episodeNumber === previousIndex && startStateRef.current.parked) {
+        void artPlayerRef.current?.play();
+        return;
+      }
       handleEpisodeChange(episodeNumber);
       if (currentEpisodeIndexRef.current !== previousIndex)
         resetAutoSourceSwitch();
     },
-    [handleEpisodeChange, resetAutoSourceSwitch, currentEpisodeIndexRef],
+    [
+      handleEpisodeChange,
+      resetAutoSourceSwitch,
+      currentEpisodeIndexRef,
+      startStateRef,
+      artPlayerRef,
+    ],
   );
   const handlePreviousEpisodeRequest = useCallback(() => {
     const previousIndex = currentEpisodeIndexRef.current;
@@ -898,6 +915,8 @@ function AuthenticatedPlayPageClient({
   );
 
   useArtPlayer({
+    startStateRef,
+    resolveStartDuration,
     artRef,
     artPlayerRef,
     videoUrl,

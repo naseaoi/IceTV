@@ -113,6 +113,15 @@ const _readPlayRecordsForPlayback = createKeyedNetworkReader<PlayRecord>({
   getCached: () => cacheManager.getCachedPlayRecords(),
   setCached: (data) => cacheManager.cachePlayRecords(data),
   fetchApi: fetchPlayRecordsByKeys,
+  mergeConcurrentRead: (current, incoming) => {
+    const progress = mergeEpisodeProgress([
+      current.episode_progress,
+      incoming.episode_progress,
+    ]);
+    return progress.length
+      ? { ...current, episode_progress: progress }
+      : current;
+  },
   eventName: 'playRecordsUpdated',
 });
 

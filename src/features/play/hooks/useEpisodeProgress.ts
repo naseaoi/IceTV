@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { buildEpisodeProgressKeys } from '@/features/play/lib/episodeProgress';
+import {
+  buildEpisodeProgressKeys,
+  getPlaybackRecordsRetryDelay,
+} from '@/features/play/lib/episodeProgress';
+import {
+  AUTH_SESSION_LOST_EVENT,
+  getAuthInfoFromBrowserCookie,
+} from '@/lib/auth.client';
 import {
   generateStorageKey,
   readPlayRecordsForPlayback,
@@ -48,19 +55,32 @@ export function useEpisodeProgress({
     setEntries(next);
   }, []);
 
-  const work = videoTitle ? normalizeWorkTitle(videoTitle) : '';
   const workRef = useRef('');
+  const work = videoTitle ? normalizeWorkTitle(videoTitle) : workRef.current;
+  const generationRef = useRef(0);
+  const loadedKeysRef = useRef(new Set<string>());
+  const retryTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
-    if (!work) return;
     if (workRef.current && workRef.current !== work) {
       entriesRef.current = [];
       setEntries([]);
     }
     workRef.current = work;
+    const cancelLoads = () => {
+      generationRef.current += 1;
+      retryTimersRef.current.forEach(clearTimeout);
+      retryTimersRef.current.clear();
+      loadedKeysRef.current.clear();
+    };
+    window.addEventListener(AUTH_SESSION_LOST_EVENT, cancelLoads);
+    return () => {
+      cancelLoads();
+      window.removeEventListener(AUTH_SESSION_LOST_EVENT, cancelLoads);
+    };
   }, [work]);
 
-  // 已并入过服务端记录的键；起播恢复读到记录时直接交给本表，不另发请求
-  const loadedKeysRef = useRef(new Set<string>());
+  // 已接收或正在补读的键；同一作品换源保留，换作品或卸载后释放。
+
   const acceptPlayRecord = useCallback(
     (key: string, record: PlayRecord | undefined) => {
       loadedKeysRef.current.add(key);
@@ -78,21 +98,36 @@ export function useEpisodeProgress({
     currentKeyRef.current = currentKey;
   }, [currentKey]);
 
-  // 带播放意图起播时不读播放记录；起播后再补读一次，不占起播路径
+  // 带播放意图起播时不读播放记录；起播后补读，失败重试不占起播路径。
   const ensureLoaded = useCallback(() => {
     const key = currentKeyRef.current;
     if (!key || loadedKeysRef.current.has(key)) return;
+    const generation = generationRef.current;
+    const username = getAuthInfoFromBrowserCookie()?.username;
+    if (!username) return;
     loadedKeysRef.current.add(key);
-    const read = readPlayRecordsForPlayback([key]);
-    if (read.cached) merge(read.cached[key]?.episode_progress);
-    read.fresh
-      .then((records) => {
-        if (currentKeyRef.current === key)
-          merge(records[key]?.episode_progress);
-      })
-      .catch(() => {
-        loadedKeysRef.current.delete(key);
-      });
+    const isCurrent = () =>
+      generationRef.current === generation &&
+      getAuthInfoFromBrowserCookie()?.username === username;
+    const load = (attempt: number) => {
+      if (!isCurrent()) return;
+      const read = readPlayRecordsForPlayback([key]);
+      if (read.cached) merge(read.cached[key]?.episode_progress);
+      read.fresh
+        .then((records) => {
+          // 集进度按作品沿用；同作品换源仍接收旧源迟到的整表。
+          if (isCurrent()) merge(records[key]?.episode_progress);
+        })
+        .catch(() => {
+          if (!isCurrent()) return;
+          const timer = setTimeout(() => {
+            retryTimersRef.current.delete(timer);
+            load(attempt + 1);
+          }, getPlaybackRecordsRetryDelay(attempt));
+          retryTimersRef.current.add(timer);
+        });
+    };
+    load(0);
   }, [merge]);
 
   const keys = useMemo(() => buildEpisodeProgressKeys(detail), [detail]);

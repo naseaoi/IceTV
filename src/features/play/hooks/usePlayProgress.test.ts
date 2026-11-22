@@ -1101,7 +1101,7 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     expect(mockedGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
-  it('读取记录期间详情刷新会重跑恢复，这次恢复不丢失', async () => {
+  it('读取记录期间详情刷新复用在途恢复，决策只提交一次', async () => {
     let resolveFirstRead!: (records: Record<string, PlayRecord>) => void;
     mockedGetAllPlayRecords
       .mockImplementationOnce(
@@ -1119,6 +1119,8 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     const refreshedDetail = { ...detail };
     refs.detailRef.current = refreshedDetail;
     rerender({ currentDetail: refreshedDetail });
+    expect(released).not.toHaveBeenCalled();
+    resolveFirstRead({ [recordKey]: recordAtEpisode9 });
     await flushMicrotasks();
 
     expect(released).toHaveBeenCalledTimes(1);

@@ -12,6 +12,11 @@ import { PLAYBACK_FINISHED_REMAINING_SECONDS } from './resumePlayback';
 
 // 点开就切走的集不算看过：不写入每集进度，也不覆盖已有的看完记录
 export const MIN_WATCHED_SECONDS = 10;
+
+export function getPlaybackRecordsRetryDelay(attempt: number): number {
+  return Math.min(1000 * 2 ** attempt, 30_000);
+}
+
 const SPECIAL_EPISODE_PATTERN =
   /^(?:sp|ova|oad|special|pv|cm)(?![a-z])|特别篇|特別篇|总集篇|總集篇|预告|預告|先行|番外/;
 const EPISODE_NUMBER_PATTERNS = [

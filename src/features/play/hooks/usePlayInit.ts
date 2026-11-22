@@ -759,7 +759,14 @@ export function usePlayInit({
       id: string,
       snapshot: SearchResult,
     ) => {
-      void fetchDetailData(source, id)
+      const promise = fetchDetailData(source, id);
+      historyRestoreGateRef.current.detailRefresh = {
+        key: `${source}+${id}`,
+        promise: promise
+          .then((fresh) => (fresh.episodes?.length ? fresh : null))
+          .catch(() => null),
+      };
+      void promise
         .then((fresh) => {
           if (signal.aborted) return;
           if (!fresh.episodes || fresh.episodes.length === 0) return;
@@ -1118,6 +1125,8 @@ export function usePlayInit({
             id: target.id,
             episodeIndex: entry[1].index - 1,
             resumeTime: entry[1].play_time,
+            recordDuration: entry[1].total_time,
+            knownEpisodeCount: entry[1].group_total ?? entry[1].total_episodes,
             groupLabel: entry[1].group_label,
             groupIndex: entry[1].group_index,
             groupTotal: entry[1].group_total,

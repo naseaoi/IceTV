@@ -1,6 +1,7 @@
 import {
   applyResumeTime,
   AUTO_RESUME_WINDOW_SECONDS,
+  isProgrammaticResumeSeek,
   isWithinAutoResumeWindow,
   resolvePendingResumeTime,
   resolveResumeTimeTarget,
@@ -16,8 +17,8 @@ describe('resumePlayback', () => {
     );
   });
 
-  it('恢复点靠近片尾时会自动回退几秒', () => {
-    expect(resolveResumeTimeTarget(118, 120)).toBe(115);
+  it('恢复到真实记录位置，靠近片尾也不回退', () => {
+    expect(resolveResumeTimeTarget(118, 120)).toBe(118);
     expect(resolveResumeTimeTarget(45, 120)).toBe(45);
   });
 
@@ -25,7 +26,7 @@ describe('resumePlayback', () => {
     const player = { currentTime: 0, duration: 120 };
 
     expect(applyResumeTime(player, 118)).toBe(true);
-    expect(player.currentTime).toBe(115);
+    expect(player.currentTime).toBe(118);
   });
 
   it('时长未知时拒绝下达 seek，避免被 clamp 成 0 后误判成功', () => {
@@ -126,5 +127,13 @@ describe('resumePlayback', () => {
         resumeMode: 'history',
       }),
     ).toBe(false);
+  });
+
+  it('程序性恢复只识别目标落点，离开目标立即交还用户', () => {
+    const player = { currentTime: 0, duration: 1470 };
+    applyResumeTime(player, 600);
+    expect(isProgrammaticResumeSeek(player, false)).toBe(true);
+    player.currentTime = 30;
+    expect(isProgrammaticResumeSeek(player, false)).toBe(false);
   });
 });
