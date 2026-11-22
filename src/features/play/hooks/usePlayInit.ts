@@ -30,7 +30,10 @@ import {
   peekResolvedLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
-import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
+import {
+  isPlayPagePath,
+  replacePlayPageUrl,
+} from '@/features/play/lib/playPageUrl';
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
   SOURCE_PROBE_CONCURRENCY,
@@ -953,6 +956,30 @@ export function usePlayInit({
       );
     };
 
+    // 短地址只有源与 ID，原源详情不可用时按本人播放记录里的标题转搜其他源
+    const restoreEntryTitleFromRecord = async (source: string, id: string) => {
+      const key = generateStorageKey(source, id);
+      const records = await withAbortableTimeout(
+        () => {
+          if (startupPlayRecordsRequest) return startupPlayRecordsRequest;
+          const read = readPlayRecordsForPlayback([key]);
+          return read.cached ? Promise.resolve(read.cached) : read.fresh;
+        },
+        HISTORY_RESTORE_WAIT_TIMEOUT_MS,
+        'History lookup timeout',
+        signal,
+      ).catch(() => null);
+      const record = records?.[key];
+      if (!record?.title) return;
+      // ref 会被状态同步覆盖，两处一起写
+      videoTitleRef.current = record.title;
+      setVideoTitle(record.title);
+      if (!videoYearRef.current) {
+        videoYearRef.current = record.year;
+        setVideoYear(record.year);
+      }
+    };
+
     const clearAggregateGroup = () => {
       const rawToClear = aggregateGroupRawToClear;
       if (!rawToClear) return;
@@ -1005,7 +1032,7 @@ export function usePlayInit({
     };
 
     const finalizePlaybackDetail = async (detailData: SearchResult) => {
-      if (signal.aborted || window.location.pathname !== '/play') {
+      if (signal.aborted || !isPlayPagePath(window.location.pathname)) {
         return;
       }
 
@@ -1025,7 +1052,7 @@ export function usePlayInit({
         setCurrentEpisodeIndex(0);
       }
 
-      if (signal.aborted || !replacePlayPageUrl(detailData, resolvedYear)) {
+      if (signal.aborted || !replacePlayPageUrl(detailData)) {
         return;
       }
       clearAggregateGroup();
@@ -1151,7 +1178,14 @@ export function usePlayInit({
         if (signal.aborted) return;
         if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
           setAvailableSources(mergeSourceBundle([], fastDetail));
-          void fetchSourcesData(searchTitle || videoTitle);
+          // 短地址不带标题，候选源搜索与过滤改用详情里的标题和年份
+          if (!videoTitleRef.current) {
+            videoTitleRef.current = fastDetail.title;
+            if (!videoYearRef.current && fastDetail.year !== 'unknown') {
+              videoYearRef.current = fastDetail.year;
+            }
+          }
+          void fetchSourcesData(searchTitle || videoTitleRef.current);
           await finalizePlaybackDetail(fastDetail);
           return;
         }
@@ -1203,7 +1237,17 @@ export function usePlayInit({
         setAvailableSources(sourcesInfo);
         setSourceSearchLoading(false);
       } else {
-        sourcesInfo = await fetchSourcesData(searchTitle || videoTitle);
+        if (
+          !searchTitle &&
+          !videoTitleRef.current &&
+          requestedSource &&
+          requestedId
+        ) {
+          await restoreEntryTitleFromRecord(requestedSource, requestedId);
+          if (signal.aborted) return;
+        }
+        const query = searchTitle || videoTitleRef.current;
+        sourcesInfo = query ? await fetchSourcesData(query) : [];
       }
       if (signal.aborted) return;
       if (requestedSource && requestedId) {

@@ -4,6 +4,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 
 import {
+  isPlayPagePath,
+  readCurrentPlayReturnTo,
+} from '@/features/play/lib/playPageUrl';
+import {
   getBackFallbackPath,
   normalizeInternalReturnPath,
   PLAYER_EXIT_EVENT,
@@ -56,10 +60,11 @@ export function useBackNavigation(fallbackHref?: string) {
   const router = useRouter();
 
   return useCallback(() => {
-    const returnTo = new URLSearchParams(window.location.search).get(
-      RETURN_TO_PARAM,
-    );
-    if (pathname.startsWith('/play')) {
+    const isPlayPage = isPlayPagePath(pathname);
+    const returnTo = isPlayPage
+      ? readCurrentPlayReturnTo()
+      : new URLSearchParams(window.location.search).get(RETURN_TO_PARAM);
+    if (isPlayPage) {
       window.dispatchEvent(new Event(PLAYER_EXIT_EVENT));
     }
     if (!returnTo && canGoBackInApp()) {

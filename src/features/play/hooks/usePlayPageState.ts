@@ -9,6 +9,7 @@ import type {
   PlayProgressSaveState,
 } from '@/features/play/hooks/usePlayProgress';
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
+import { parsePlayPagePath } from '@/features/play/lib/playPageUrl';
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type { SourceSwitchCleanupTask } from '@/features/play/lib/sourceSwitchCleanup';
@@ -51,7 +52,14 @@ export type SourceRecommendation = {
   loadSpeed: string;
 };
 
-export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
+export function usePlayPageState(
+  searchParams: ReadonlyURLSearchParams,
+  pathname?: string | null,
+) {
+  // 短地址的源与 ID 从当前地址解析：前进后退恢复的可能是缩址前的旧路由渲染结果，不能依赖服务端传参
+  const [pathTarget] = useState(() =>
+    pathname ? parsePlayPagePath(pathname) : null,
+  );
   const [loading, setLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState<LoadingStage>('searching');
   const [loadingMessage, setLoadingMessage] = useState('正在搜索播放源...');
@@ -97,9 +105,11 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const [videoCover, setVideoCover] = useState('');
   const [videoDoubanId, setVideoDoubanId] = useState(0);
   const [currentSource, setCurrentSource] = useState(
-    searchParams.get('source') || '',
+    pathTarget?.source || searchParams.get('source') || '',
   );
-  const [currentId, setCurrentId] = useState(searchParams.get('id') || '');
+  const [currentId, setCurrentId] = useState(
+    pathTarget?.id || searchParams.get('id') || '',
+  );
 
   const [searchTitle] = useState(searchParams.get('stitle') || '');
   const [searchType] = useState(searchParams.get('stype') || '');

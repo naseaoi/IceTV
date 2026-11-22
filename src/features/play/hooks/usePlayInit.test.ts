@@ -1140,8 +1140,8 @@ describe('usePlayInit 直达入口读取播放记录', () => {
       jest.advanceTimersByTime(1_000);
     });
     expect(params.setLoading).toHaveBeenLastCalledWith(false);
-    expect(new URLSearchParams(window.location.search).get('source')).toBe(
-      series.source,
+    expect(window.location.pathname).toBe(
+      `/play/${series.source}/${series.id}`,
     );
     const detailRequestCount = apiRequests('/api/detail').length;
     const searchRequestCount = apiRequests('/api/search').length;
@@ -1232,10 +1232,86 @@ describe('入口恢复与失效源回退', () => {
         resumeTime: 0,
       });
       expect(notice).toHaveBeenCalledTimes(1);
-      expect(window.location.search).toContain('source=fallback');
+      expect(window.location.pathname).toBe(
+        `/play/${candidate.source}/${candidate.id}`,
+      );
       expect(params.setError).not.toHaveBeenCalled();
     },
   );
+
+  function searchQueries(): string[] {
+    return (global.fetch as jest.Mock).mock.calls
+      .map(([input]) => new URL(String(input), window.location.origin))
+      .filter((url) => url.pathname === '/api/search')
+      .map((url) => url.searchParams.get('q') || '');
+  }
+
+  const shortUrlEntry = () => ({
+    videoTitle: '',
+    searchTitle: '',
+    videoTitleRef: { current: '' },
+    needPreferRef: { current: false },
+    optimizationEnabled: false,
+  });
+
+  it('短地址不带标题时按详情标题搜索候选源', async () => {
+    const series = { ...createSeries('direct-s', 3), title: '详情标题' };
+    global.fetch = jest.fn((input) => {
+      const url = String(input);
+      if (url.startsWith('/api/detail')) return reply(series);
+      if (url.startsWith('/api/playrecords')) return reply({});
+      return reply({ results: [] });
+    }) as unknown as typeof fetch;
+    const params = setupHook(null, {
+      ...shortUrlEntry(),
+      currentSource: series.source,
+      currentId: series.id,
+    });
+    await waitFor(() => expect(params.setDetail).toHaveBeenCalledWith(series));
+    await waitFor(() => expect(searchQueries()).toEqual(['详情标题']));
+  });
+
+  it('短地址的原源失效时按本人播放记录的标题转搜其他源', async () => {
+    signIn();
+    const candidate = { ...createSeries('fallback', 3), title: '记录标题' };
+    global.fetch = jest.fn((input) => {
+      const url = String(input);
+      if (url.startsWith('/api/detail')) return reply(null, false);
+      if (url.startsWith('/api/playrecords')) {
+        return reply({
+          'removed+old': { title: '记录标题', year: '2024', index: 1 },
+        });
+      }
+      return reply({ results: [candidate] });
+    }) as unknown as typeof fetch;
+    const params = setupHook(null, {
+      ...shortUrlEntry(),
+      currentSource: 'removed',
+      currentId: 'old',
+      onSourceUnavailable: jest.fn(),
+    });
+    await waitFor(() =>
+      expect(params.setDetail).toHaveBeenCalledWith(candidate),
+    );
+    expect(searchQueries()).toEqual(['记录标题']);
+  });
+
+  it('短地址的原源失效且无记录时直接报未找到，不发空搜索', async () => {
+    global.fetch = jest.fn((input) =>
+      String(input).startsWith('/api/playrecords')
+        ? reply({})
+        : reply(null, false),
+    ) as unknown as typeof fetch;
+    const params = setupHook(null, {
+      ...shortUrlEntry(),
+      currentSource: 'removed',
+      currentId: 'old',
+    });
+    await waitFor(() =>
+      expect(params.setError).toHaveBeenCalledWith('未找到匹配结果'),
+    );
+    expect(searchQueries()).toEqual([]);
+  });
 
   it('原源无记录时不写跨源意图，按候选自己的播放记录恢复', async () => {
     signIn();

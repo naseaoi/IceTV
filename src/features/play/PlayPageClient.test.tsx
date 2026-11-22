@@ -101,6 +101,7 @@ const mockGetVodRuntimeSourceUrl = jest.fn<string | null, [HTMLVideoElement]>(
 );
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/play',
   useSearchParams: () => mockSearchParams,
 }));
 

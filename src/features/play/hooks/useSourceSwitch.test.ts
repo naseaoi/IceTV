@@ -24,6 +24,7 @@ import {
   writeDanmakuEpisodeId,
   writeDanmakuEpisodeSearchTitle,
 } from '@/lib/local-preferences';
+import { readPlayReturnTo } from '@/lib/navigation-return';
 import type { ManagedVideoElement } from '@/lib/player-runtime';
 import {
   readSourcePlaybackStats,
@@ -1164,7 +1165,7 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     window.history.replaceState(
       { marker: 'next-router-state' },
       '',
-      '/play?source=a&id=a-id&title=%E6%B5%8B%E8%AF%95%E5%89%A7&year=2024&stitle=%E6%B5%8B%E8%AF%95&prefer=true',
+      '/play?source=a&id=a-id&title=%E6%B5%8B%E8%AF%95%E5%89%A7&year=2024&stitle=%E6%B5%8B%E8%AF%95&prefer=true&tab=reviews&returnTo=%2Fsearch%3Fq%3Dx',
     );
   });
 
@@ -1173,7 +1174,7 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     jest.restoreAllMocks();
   });
 
-  it('地址栏改为新源，保留搜索参数，去掉起播专用参数，不沿用旧路由状态', async () => {
+  it('地址栏改为新源的短路径，只保留未消费的一次性参数，不沿用旧路由状态', async () => {
     const { result } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
@@ -1183,14 +1184,10 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
 
     await result.current.handleSourceChange('b', 'b-id', '测试剧 国语');
 
-    const params = new URLSearchParams(window.location.search);
-    expect(window.location.pathname).toBe('/play');
-    expect(params.get('source')).toBe('b');
-    expect(params.get('id')).toBe('b-id');
-    expect(params.get('title')).toBe('测试剧 国语');
-    expect(params.get('year')).toBe('2024');
-    expect(params.get('stitle')).toBe('测试');
-    expect(params.has('prefer')).toBe(false);
+    expect(window.location.pathname).toBe('/play/b/b-id');
+    expect(window.location.search).toBe('?tab=reviews');
+    // returnTo 移出地址后仍归当前播放页，刷新后返回按钮可用
+    expect(readPlayReturnTo('/play/b/b-id')).toBe('/search?q=x');
     // 带着旧路由状态时 Next 不同步新地址，之后的路由更新会把地址改回旧源
     expect(window.history.state).toBeNull();
   });
@@ -1207,11 +1204,11 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
 
     await result.current.handleSourceChange('short', 'short-id', '测试剧');
     expect(options.setCurrentSource).not.toHaveBeenCalled();
-    expect(new URLSearchParams(window.location.search).get('source')).toBe('a');
+    expect(window.location.pathname).toBe('/play');
 
     expect(result.current.handleLoadingTimeout()).toBe(true);
     await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
-    expect(new URLSearchParams(window.location.search).get('id')).toBe('b-id');
+    expect(window.location.pathname).toBe('/play/b/b-id');
   });
 
   it('换源的程序性暂停不留下 Artplayer 的暂停提示', async () => {

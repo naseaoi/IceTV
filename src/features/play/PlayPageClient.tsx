@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   useCallback,
   useEffect,
@@ -104,7 +104,8 @@ function AuthenticatedPlayPageClient({
     preloadDanmakuPluginIfEnabled();
   }, []);
 
-  const state = usePlayPageState(searchParams);
+  const pathname = usePathname();
+  const state = usePlayPageState(searchParams, pathname);
   const {
     loading,
     setLoading,
