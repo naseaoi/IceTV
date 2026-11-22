@@ -17,6 +17,7 @@ import {
   resolveXgcartoonEpisodeUrlByPath,
 } from '@/lib/downstream-sources/xgcartoon';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
@@ -74,14 +75,23 @@ async function handleGet(request: NextRequest, guardResult: ActiveUserInfo) {
       return NextResponse.json({ error: '无效的API来源' }, { status: 400 });
     }
 
+    const forceRefresh = searchParams.get('refresh') === '1';
+    if (forceRefresh) {
+      const quotaFailure = await requireServerProxyQuota(
+        'episode-url-refresh',
+        request,
+        guardResult.username,
+      );
+      if (quotaFailure) return quotaFailure;
+    }
+
     const cacheKey = getEpisodeUrlCacheKey(apiSite, lazyUrl);
-    const url = IS_DEVELOPMENT
-      ? await resolveEpisodeUrl(target.kind, apiSite, target.path)
-      : await episodeUrlCache.getOrLoad(
-          cacheKey,
-          () => resolveEpisodeUrl(target.kind, apiSite, target.path),
-          request.signal,
-        );
+    const loader = () => resolveEpisodeUrl(target.kind, apiSite, target.path);
+    const url = forceRefresh
+      ? await episodeUrlCache.refresh(cacheKey, loader, request.signal)
+      : IS_DEVELOPMENT
+        ? await loader()
+        : await episodeUrlCache.getOrLoad(cacheKey, loader, request.signal);
 
     return NextResponse.json(
       { url },

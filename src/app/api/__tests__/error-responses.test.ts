@@ -13,6 +13,7 @@ import {
 import { startCronTask } from '@/lib/cron/runner';
 import { getCachedDetail } from '@/lib/detail-cache';
 import { resolveGirigiriEpisodePlayUrlByPath } from '@/lib/downstream-sources/giri';
+import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 installWebPolyfills();
@@ -69,6 +70,9 @@ jest.mock('@/lib/detail-cache', () => ({ getCachedDetail: jest.fn() }));
 jest.mock('@/lib/downstream-sources/giri', () => ({
   isGirigiriSource: () => true,
   resolveGirigiriEpisodePlayUrlByPath: jest.fn(),
+}));
+jest.mock('@/lib/server-proxy-guard', () => ({
+  requireServerProxyQuota: jest.fn().mockResolvedValue(null),
 }));
 jest.mock('@/lib/downstream-sources/xgcartoon', () => ({
   isXgcartoonSource: () => false,
@@ -129,6 +133,35 @@ it.each([
     expect(console.error).toHaveBeenCalledWith(expect.any(String), error);
   },
 );
+
+it('enforces authenticated account quota before forced episode resolution', async () => {
+  const forced = request();
+  Object.assign(forced, { url: `${forced.url}&refresh=1` });
+  jest
+    .mocked(requireServerProxyQuota)
+    .mockResolvedValueOnce(
+      new Response(null, { status: 429, headers: { 'Retry-After': '10' } }),
+    );
+  const denied = await episodeGet(forced);
+  expect(denied.status).toBe(429);
+  expect(denied.headers.get('Retry-After')).toBe('10');
+  expect(requireServerProxyQuota).toHaveBeenCalledWith(
+    'episode-url-refresh',
+    forced,
+    'user',
+  );
+  expect(resolveGirigiriEpisodePlayUrlByPath).not.toHaveBeenCalled();
+
+  jest
+    .mocked(resolveGirigiriEpisodePlayUrlByPath)
+    .mockResolvedValueOnce('https://cdn.example/fresh.m3u8');
+  const response = await episodeGet(forced);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  expect(await response.json()).toEqual({
+    url: 'https://cdn.example/fresh.m3u8',
+  });
+});
 
 it.each(['add', 'edit'])(
   '%s hides upstream errors without changing the 400 status',

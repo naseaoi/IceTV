@@ -34,6 +34,23 @@ interface UsePlayerKeyboardParams {
 
 const FRAME_STEP_LOADING_GUARD_MS = 600;
 
+const ACTIVATION_KEYS = new Set(['Enter', ' ']);
+const ACTIVATABLE_CONTROL_SELECTOR =
+  'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]';
+
+// 只让出键盘聚焦（:focus-visible）的控件：鼠标点过的按钮仍保持焦点，
+// 若一律让出，点完选集再按空格会重复点击按钮而不是暂停
+function isKeyboardActivatingControl(
+  event: KeyboardEvent,
+  target: HTMLElement,
+): boolean {
+  if (!ACTIVATION_KEYS.has(event.key) || !(target instanceof Element)) {
+    return false;
+  }
+  const control = target.closest(ACTIVATABLE_CONTROL_SELECTOR);
+  return control !== null && control.matches(':focus-visible');
+}
+
 function clampRate(rate: number): number {
   const rounded = Math.round(rate * 10) / 10;
   return Math.min(RATE_MAX, Math.max(RATE_MIN, rounded));
@@ -161,6 +178,15 @@ export function usePlayerKeyboard({
       );
     };
 
+    const toggleMute = () => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      player.muted = !player.muted;
+      player.notice.show = player.muted
+        ? '已静音'
+        : `音量: ${Math.round(player.volume * 100)}`;
+    };
+
     const toggleFullscreen = () => {
       const player = artPlayerRef.current;
       if (!player) return;
@@ -193,6 +219,7 @@ export function usePlayerKeyboard({
       seekForwardLong: () => seekBy(SEEK_STEP_LONG_SECONDS),
       volumeUp: () => changeVolume(VOLUME_STEP),
       volumeDown: () => changeVolume(-VOLUME_STEP),
+      toggleMute,
       fullscreen: toggleFullscreen,
       resetRate,
       decreaseRate: () => changeRate(-RATE_STEP),
@@ -211,7 +238,8 @@ export function usePlayerKeyboard({
       if (
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
+        target.isContentEditable ||
+        isKeyboardActivatingControl(e, target)
       ) {
         return;
       }

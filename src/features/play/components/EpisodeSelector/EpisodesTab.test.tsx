@@ -35,6 +35,25 @@ describe('EpisodesTab', () => {
     expect(container.querySelector('[data-play-episodes-skeleton]')).toBeNull();
   });
 
+  it('marks finished and partly watched episodes', () => {
+    render(
+      <EpisodesTab
+        totalEpisodes={3}
+        episodes_titles={['第1集', '第2集', '第3集']}
+        episodesPerPage={50}
+        value={3}
+        episodeProgress={[
+          { finished: true, ratio: 1 },
+          { finished: false, ratio: 0.36 },
+          null,
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /^1\s*已看完$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^2\s*看到 36%$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '3' })).toBeTruthy();
+  });
+
   it('shows one movie slot without fabricated pagination', () => {
     const { container } = render(
       <EpisodesTab

@@ -1440,6 +1440,109 @@ div:has(> [data-player-overlay]) .art-loading {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
+/* --- 播放器内操作提示（续播、连播倒计时） --- */
+.ice-player-prompt {
+  position: absolute;
+  z-index: 70;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - var(--art-padding) * 2);
+  padding: 5px 5px 5px 14px;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: bottom var(--art-transition-duration) ease;
+}
+
+.ice-player-prompt-start {
+  left: var(--art-padding);
+}
+
+.ice-player-prompt-end {
+  right: var(--art-padding);
+}
+
+.art-video-player.art-control-show .ice-player-prompt,
+.art-video-player.art-hover .ice-player-prompt {
+  bottom: calc(var(--art-control-height) + var(--art-bottom-gap) + 28px);
+}
+
+.ice-player-prompt-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 4px;
+}
+
+.ice-player-prompt-action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: #d1d5db;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.ice-player-prompt-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ice-player-prompt-action-primary {
+  color: #8fc4e6;
+  background: rgba(95, 168, 216, 0.16);
+}
+
+.ice-player-prompt-action-primary:hover {
+  background: rgba(95, 168, 216, 0.28);
+}
+
+.art-video-player.art-mobile .ice-player-prompt {
+  bottom: 10px;
+  gap: 2px;
+  padding: 3px 3px 3px 10px;
+  font-size: 12px;
+}
+
+.art-video-player.art-mobile.art-control-show .ice-player-prompt {
+  bottom: calc(var(--art-control-height) + var(--art-bottom-gap) + 16px);
+}
+
+.art-video-player.art-mobile .ice-player-prompt-action {
+  padding: 3px 8px;
+}
+
+/* --- 移动端双击快退快进反馈 --- */
+.ice-seek-feedback {
+  position: absolute;
+  z-index: 70;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.ice-seek-feedback-backward {
+  left: 12%;
+}
+
+.ice-seek-feedback-forward {
+  right: 12%;
+}
+
 /* --- 信息面板 --- */
 .art-info {
   background: rgba(0, 0, 0, 0.9) !important;

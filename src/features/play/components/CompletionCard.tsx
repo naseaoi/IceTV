@@ -57,11 +57,13 @@ export function CompletionCard({
   target,
   favorited,
   onAddFavorite,
+  onBeforeOpen,
   onClose,
 }: {
   target: CompletionTarget | null;
   favorited: boolean;
   onAddFavorite: () => Promise<void> | void;
+  onBeforeOpen: () => void;
   onClose: () => void;
 }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -82,6 +84,7 @@ export function CompletionCard({
             summary.year,
           ).catch(() => null);
           if (!active) return;
+          onBeforeOpen();
           setLoaded({ target, summary, review });
           void markCompletionCelebrated(target.source, target.id).catch(
             () => undefined,
@@ -95,9 +98,9 @@ export function CompletionCard({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [onClose, target]);
+  }, [onBeforeOpen, onClose, target]);
 
-  const open = Boolean(target && loaded);
+  const open = loaded !== null && loaded.target === target;
   const retained = useRetainedValue(open ? loaded : null);
 
   return (

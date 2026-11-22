@@ -21,6 +21,10 @@ import {
   reportPlaybackRecordsReadFailure,
   retryClientRequest,
 } from './db.client.internal';
+import {
+  applyEpisodeProgressWrite,
+  mergeEpisodeProgress,
+} from './episode-progress';
 import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
@@ -31,7 +35,12 @@ import {
   selectRecentPlayRecords,
 } from './play-records';
 import { getRuntimeConfig } from './runtime-config';
-import type { Favorite, PlayRecord, SkipConfig } from './types';
+import type {
+  EpisodeProgressEntry,
+  Favorite,
+  PlayRecord,
+  SkipConfig,
+} from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -119,17 +128,22 @@ const _getFavorite = createKeyedCacheFirstReader<Favorite>({
   eventName: 'favoritesUpdated',
 });
 
+function fetchSkipConfig(source: string, id: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ source, id });
+  return fetchFromApi<SkipConfig | null>(
+    `/api/skipconfigs?${params}`,
+    signal ? { signal } : undefined,
+  );
+}
+
 const _getSkipConfig = createKeyedCacheFirstReader<SkipConfig>({
   getCached: () => cacheManager.getCachedSkipConfigs(),
   setCached: (data) => cacheManager.cacheSkipConfigs(data),
   fetchApi: async ([key]) => {
     const separator = key.indexOf('+');
-    const params = new URLSearchParams({
-      source: key.slice(0, separator),
-      id: key.slice(separator + 1),
-    });
-    const config = await fetchFromApi<SkipConfig | null>(
-      `/api/skipconfigs?${params}`,
+    const config = await fetchSkipConfig(
+      key.slice(0, separator),
+      key.slice(separator + 1),
     );
     return config ? { [key]: config } : {};
   },
@@ -306,12 +320,22 @@ export async function savePlayRecord(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   const cached = cacheManager.getCachedPlayRecords();
-  const normalizedRecord = mergePlayRecordUpdateBaseline(cached?.[key], record);
+  const { episode_progress: _ignored, ...normalizedRecord } =
+    mergePlayRecordUpdateBaseline(cached?.[key], record);
   return _writePlayRecords({
     rollbackOnError: false,
     affectedKeys: [key],
     mutateCached: (cached) => {
-      cached[key] = normalizedRecord;
+      // 缓存按服务端同样的规则合并每集进度；请求只带 episode_key，整表由服务端维护
+      const { episode_key: _key, ...cachedRecord } = normalizedRecord;
+      const episodeProgress = applyEpisodeProgressWrite(
+        cached[key]?.episode_progress,
+        normalizedRecord,
+        { source },
+      );
+      cached[key] = episodeProgress
+        ? { ...cachedRecord, episode_progress: episodeProgress }
+        : cachedRecord;
       return cached;
     },
     syncToServer: () =>
@@ -404,6 +428,60 @@ export async function deletePlayRecords(keys: string[]): Promise<void> {
     });
   }
   notifyMessagesUpdated();
+}
+
+export async function deduplicatePlayRecords(
+  keepKey: string,
+  preserveKey?: string,
+  isCurrent: () => boolean = () => true,
+): Promise<EpisodeProgressEntry[] | undefined> {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username) return;
+  // 删除键由服务端发现，发请求前先等本标签页已在途的进度保存。
+  await waitForPlayRecordSaves('all');
+  if (!isCurrent() || getAuthInfoFromBrowserCookie()?.username !== username)
+    return;
+
+  // 后台维护只请求一次，避免鉴权重试或全局提示打断播放。
+  const response = await fetch('/api/playrecords', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'deduplicate', keepKey, preserveKey }),
+    keepalive: true,
+  });
+  if (!response.ok)
+    throw new Error(`播放记录去重请求失败 (${response.status})`);
+  const { deletedKeys, episodeProgress } = (await response.json()) as {
+    deletedKeys: string[];
+    episodeProgress?: EpisodeProgressEntry[];
+  };
+  if (
+    !deletedKeys.length ||
+    getAuthInfoFromBrowserCookie()?.username !== username
+  )
+    return;
+
+  await _writePlayRecords({
+    affectedKeys: [...deletedKeys, keepKey],
+    mutateCached: (cached) => {
+      for (const key of deletedKeys) delete cached[key];
+      const kept = cached[keepKey];
+      if (kept && episodeProgress) {
+        cached[keepKey] = {
+          ...kept,
+          episode_progress: mergeEpisodeProgress([
+            kept.episode_progress,
+            episodeProgress,
+          ]),
+        };
+      }
+      return cached;
+    },
+    syncToServer: async () => {},
+    requireExistingCacheForOptimisticUpdate: true,
+  });
+  notifyMessagesUpdated();
+  return episodeProgress;
 }
 
 async function patchPlayRecordState(
@@ -774,6 +852,21 @@ export async function getSkipConfig(
   const key = generateStorageKey(source, id);
   const configs = await _getSkipConfig([key]);
   return configs[key] || null;
+}
+
+// 换源迁移涉及删除旧副本，目标是否存在必须以服务端回应为准。
+export async function getFreshSkipConfig(
+  source: string,
+  id: string,
+  signal: AbortSignal,
+): Promise<SkipConfig | null> {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username || signal.aborted)
+    throw new DOMException('Skip config read cancelled', 'AbortError');
+  const config = await fetchSkipConfig(source, id, signal);
+  if (signal.aborted || getAuthInfoFromBrowserCookie()?.username !== username)
+    throw new DOMException('Skip config read cancelled', 'AbortError');
+  return config;
 }
 
 export async function saveSkipConfig(

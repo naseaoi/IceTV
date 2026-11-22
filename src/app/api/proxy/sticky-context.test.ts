@@ -139,6 +139,46 @@ describe('signed playback sticky context', () => {
     },
   );
 
+  it.each([400, 401, 403, 404, 408, 410, 429, 500, 502, 503, 504])(
+    'preserves upstream HTTP %s across all proxy routes without exposing the body',
+    async (status) => {
+      mockOrigin.mockImplementation(
+        async () =>
+          new Response('private upstream body with token=secret', { status }),
+      );
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      for (const [path, handler] of [
+        ['m3u8', manifest],
+        ['key', key],
+        ['segment', segment],
+      ] as const) {
+        const response = await handler(
+          request(
+            `http://localhost/api/proxy/${path}?url=${encodeURIComponent(`https://cdn.example/${path}?token=http-${status}`)}`,
+          ),
+        );
+        expect(response.status).toBe(status);
+        const payload = await response.json();
+        expect(payload.error).toEqual(expect.any(String));
+        expect(JSON.stringify(payload)).not.toContain('token=secret');
+        expect(response.headers.has('x-icetv-resource-limited')).toBe(false);
+      }
+    },
+  );
+
+  it('keeps unexpected key fetch errors generic and returns HTTP 500', async () => {
+    mockOrigin.mockRejectedValue(
+      new Error('https://private.example/key?token=secret'),
+    );
+    const response = await key(
+      request(
+        'http://localhost/api/proxy/key?url=https%3A%2F%2Fcdn.example%2Fkey.bin',
+      ),
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Failed to fetch key' });
+  });
+
   it('propagates key request cancellation to the upstream signal', async () => {
     let upstreamSignal: AbortSignal | undefined;
     mockOrigin.mockImplementation((_route, _url, init) => {

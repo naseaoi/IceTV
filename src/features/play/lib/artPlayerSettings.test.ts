@@ -122,3 +122,38 @@ describe('去广告重建播放器的续播点', () => {
     ).toEqual({ resumeTime: 125, mode: 'forced' });
   });
 });
+
+it('跳过片头片尾开关返回新状态，不受保存时同步改写的 item.switch 影响', () => {
+  const item: { switch?: boolean } = { switch: false };
+  const handleSkipConfigChange = jest.fn(
+    (config: { enable: boolean; intro_time: number; outro_time: number }) => {
+      // useSkipConfig 保存时同步 setting.update 改写开关项
+      item.switch = config.enable;
+      return Promise.resolve();
+    },
+  );
+  const settings = createArtPlayerSettings({
+    artPlayerRef: { current: null },
+    blockAdEnabled: false,
+    autoPlayNextEnabled: true,
+    autoPlayNextEnabledRef: { current: true },
+    skipConfigRef: {
+      current: { enable: false, intro_time: 90, outro_time: 0 },
+    },
+    resumeTimeRef: { current: null },
+    resumeModeRef: { current: null },
+    stableCurrentTimeRef: { current: 0 },
+    clearTargetEpisodeProgressRef: { current: false },
+    setBlockAdEnabled: jest.fn(),
+    setAutoPlayNextEnabled: jest.fn(),
+    handleSkipConfigChange,
+  });
+  const skipSwitch = settings.find((s) => s.name === '跳过片头片尾');
+
+  expect(skipSwitch?.onSwitch?.(item)).toBe(true);
+  expect(handleSkipConfigChange).toHaveBeenCalledWith({
+    enable: true,
+    intro_time: 90,
+    outro_time: 0,
+  });
+});

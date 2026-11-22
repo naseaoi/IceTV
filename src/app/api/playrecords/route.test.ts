@@ -3,10 +3,12 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { requireActiveUser } from '@/lib/api-auth';
 import {
   savePlayProgressWithRetry,
   updatePlayRecordWithRetry,
 } from '@/lib/play-record-write';
+import { MAX_PLAY_RECORD_KEY_LENGTH } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
 installWebPolyfills();
@@ -27,6 +29,7 @@ const mockStore = {
   getLatestPlayRecordByTitle: (...args: unknown[]) =>
     mockGetLatestPlayRecordByTitle(...args),
 };
+const mockDeduplicatePlayRecords = jest.fn();
 const mockDeletePlayRecord = jest.fn();
 const mockDeletePlayRecords = jest.fn();
 const mockDeleteAllPlayRecords = jest.fn();
@@ -59,6 +62,8 @@ jest.mock('@/lib/db', () => ({
       id: string,
       update: (current: PlayRecord | null) => PlayRecord | null,
     ) => updatePlayRecordWithRetry(mockStore, user, `${source}+${id}`, update),
+    deduplicatePlayRecords: (...args: unknown[]) =>
+      mockDeduplicatePlayRecords(...args),
     deletePlayRecord: (...args: unknown[]) => mockDeletePlayRecord(...args),
     deletePlayRecords: (...args: unknown[]) => mockDeletePlayRecords(...args),
     deleteAllPlayRecords: (...args: unknown[]) =>
@@ -140,6 +145,95 @@ describe('playrecords route', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, ignored: true });
     expect(mockCas).not.toHaveBeenCalled();
+  });
+
+  it('后提交的中间集快照补入进度表而不回退主记录', async () => {
+    const latest: PlayRecord = {
+      ...records['source+new'],
+      index: 3,
+      progress_session_id: 'session-a',
+      progress_sequence: 3,
+      episode_progress: [{ k: 'n:3', t: 1, d: 10, at: 300 }],
+    };
+    mockGetPlayRecord.mockResolvedValue(latest);
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: {
+          ...latest,
+          index: 2,
+          episode_key: 'n:2',
+          progress_sequence: 2,
+          save_time: 200,
+        },
+      }),
+    );
+    expect(await response.json()).toEqual({ success: true });
+    expect(mockSavePlayRecord.mock.calls[0]?.[3]).toEqual({
+      ...latest,
+      episode_progress: [
+        ...latest.episode_progress!,
+        { k: 'n:2', t: 1, d: 10, at: 200 },
+      ],
+    });
+  });
+
+  it.each([200, 250, 350])(
+    '迟到快照 (%s) 不覆盖同集较新或同时间快照',
+    async (saveTime) => {
+      mockGetPlayRecord.mockResolvedValue({
+        ...records['source+new'],
+        index: 3,
+        progress_session_id: 'session-a',
+        progress_sequence: 3,
+        episode_progress: [{ k: 'n:2', t: 5, d: 10, at: 250 }],
+      });
+      const response = await POST(
+        createJsonRequest({
+          key: 'source+new',
+          record: {
+            ...records['source+new'],
+            index: 2,
+            episode_key: 'n:2',
+            progress_session_id: 'session-a',
+            progress_sequence: 1,
+            save_time: saveTime,
+          },
+        }),
+      );
+      expect(await response.json()).toEqual({ success: true, ignored: true });
+      expect(mockCas).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['n:bad', '', null, 1])('拒绝非法集身份 %s', async (episodeKey) => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: { ...records['source+new'], episode_key: episodeKey },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockCas).not.toHaveBeenCalled();
+  });
+
+  it('只接受本集快照，忽略客户端提交的整表', async () => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: {
+          ...records['source+new'],
+          episode_key: 'n:1',
+          episode_progress: [{ k: 'n:2', t: 99, d: 100, at: 500 }],
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const saved = mockSavePlayRecord.mock.calls[0][3] as PlayRecord;
+    expect(saved.episode_progress).toEqual([
+      { k: 'n:1', t: 1, d: 10, at: 300 },
+    ]);
+    expect(saved).not.toHaveProperty('episode_key');
   });
 
   it('跨会话保存允许时钟与序号更小', async () => {
@@ -656,6 +750,79 @@ describe('playrecords route', () => {
       'new',
       expect.objectContaining({ tracking_enabled: false }),
     );
+  });
+
+  it('去重仅操作当前用户并返回删除键和保留记录进度', async () => {
+    const episodeProgress = [{ k: 'n:1', t: 25, d: 60, at: 330 }];
+    mockDeduplicatePlayRecords.mockResolvedValueOnce(['other+1']);
+    mockGetPlayRecordsByKeys.mockResolvedValueOnce({
+      'source+new': {
+        ...records['source+new'],
+        episode_progress: episodeProgress,
+      },
+    });
+    const response = await PATCH(
+      createJsonRequest({
+        action: 'deduplicate',
+        keepKey: 'source+new',
+        preserveKey: 'source+old',
+        username: 'other',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      deletedKeys: ['other+1'],
+      episodeProgress,
+    });
+    expect(mockGetPlayRecordsByKeys).toHaveBeenCalledWith('demo', [
+      'source+new',
+    ]);
+    expect(mockDeduplicatePlayRecords).toHaveBeenCalledWith(
+      'demo',
+      'source+new',
+      'source+old',
+    );
+  });
+
+  it('去重没有删除记录时不重新读取进度', async () => {
+    mockDeduplicatePlayRecords.mockResolvedValueOnce([]);
+    const response = await PATCH(
+      createJsonRequest({ action: 'deduplicate', keepKey: 'source+new' }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deletedKeys: [] });
+    expect(mockGetPlayRecordsByKeys).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { keepKey: 123 },
+    { keepKey: '+bad' },
+    { keepKey: 'bad+' },
+    { keepKey: `source+${'a'.repeat(MAX_PLAY_RECORD_KEY_LENGTH)}` },
+    { keepKey: 'source+new', preserveKey: null },
+    { keepKey: 'source+new', preserveKey: 'invalid' },
+    {
+      keepKey: 'source+new',
+      preserveKey: `source+${'a'.repeat(MAX_PLAY_RECORD_KEY_LENGTH)}`,
+    },
+  ])('拒绝无效或超长的去重键', async (keys) => {
+    const response = await PATCH(
+      createJsonRequest({ action: 'deduplicate', ...keys }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockDeduplicatePlayRecords).not.toHaveBeenCalled();
+    expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it('鉴权失败时不会执行去重', async () => {
+    jest.mocked(requireActiveUser).mockResolvedValueOnce({
+      response: Response.json({}, { status: 401 }),
+    } as Awaited<ReturnType<typeof requireActiveUser>>);
+    const response = await PATCH(
+      createJsonRequest({ action: 'deduplicate', keepKey: 'source+new' }),
+    );
+    expect(response.status).toBe(401);
+    expect(mockDeduplicatePlayRecords).not.toHaveBeenCalled();
   });
 
   it('拒绝无效的播放记录状态操作', async () => {

@@ -58,6 +58,16 @@ function generateStorageKey(source: string, id: string): string {
 
 // 导出便捷方法
 class DbManager {
+  async backupSqlite(filename: string): Promise<string | undefined> {
+    if (getStorageType() === 'mysql') return undefined;
+    const { LocalSqliteStorage } = await import('@/lib/sqlite.db');
+    const storage = await this.getStorage();
+    if (!(storage instanceof LocalSqliteStorage)) {
+      throw new Error('SQLite storage is unavailable');
+    }
+    return storage.backup(filename);
+  }
+
   async getAnnualActivity(
     ...args: Parameters<IStorage['getAnnualActivity']>
   ): ReturnType<IStorage['getAnnualActivity']> {
@@ -517,6 +527,18 @@ class DbManager {
       userName,
       title,
       year,
+    );
+  }
+
+  async deduplicatePlayRecords(
+    userName: string,
+    keepKey: string,
+    preserveKey?: string,
+  ): Promise<string[]> {
+    return (await this.getStorage()).deduplicatePlayRecords(
+      userName,
+      keepKey,
+      preserveKey,
     );
   }
 

@@ -71,3 +71,30 @@ it('卸载关闭连接并清理计时器', async () => {
   expect(clear).toHaveBeenCalled();
   clear.mockRestore();
 });
+
+it('检测完成后通知调用方，失败收尾不通知', async () => {
+  const onComplete = jest.fn();
+  const { result } = renderHook(() =>
+    useSourceValidation({
+      sources: [
+        { key: 'a', name: '甲', api: 'https://a.test', from: 'custom' },
+      ],
+      onComplete,
+    }),
+  );
+  await act(async () => {
+    await result.current.startValidation('测试');
+  });
+  act(() => FakeEventSource.latest.onerror?.());
+  expect(onComplete).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await result.current.startValidation('测试');
+  });
+  act(() =>
+    FakeEventSource.latest.onmessage?.({
+      data: JSON.stringify({ type: 'complete', completedSources: 1 }),
+    }),
+  );
+  expect(onComplete).toHaveBeenCalledTimes(1);
+});

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { isEpisodeProgressKey } from '@/lib/episode-progress';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { PlayRecordConflictError } from '@/lib/play-record-write';
 import {
@@ -117,6 +118,8 @@ export async function POST(request: NextRequest) {
       !record.title ||
       !record.source_name ||
       record.index < 1 ||
+      (record.episode_key !== undefined &&
+        !isEpisodeProgressKey(record.episode_key)) ||
       (record.series_status !== undefined &&
         !isSeriesStatus(record.series_status)) ||
       (record.tracking_enabled !== undefined &&
@@ -151,11 +154,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const nextRecord = { ...record, save_time: record.save_time ?? Date.now() };
+    delete nextRecord.episode_progress;
     const saved = await db.savePlayProgress(
       guardResult.username,
       parsed.source,
       parsed.id,
-      { ...record, save_time: record.save_time ?? Date.now() },
+      nextRecord,
     );
     if (!saved) return NextResponse.json({ success: true, ignored: true });
 
@@ -175,19 +180,55 @@ export async function POST(request: NextRequest) {
   }
 }
 
+function isPlayRecordKey(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= MAX_PLAY_RECORD_KEY_LENGTH &&
+    !!parseStorageKey(value)
+  );
+}
+
 export async function PATCH(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const body = (await request.json()) as {
+    const body = (await request.json().catch(() => null)) as {
       key?: string;
-      action?: 'mark-update-read' | 'set-tracking';
+      action?: 'mark-update-read' | 'set-tracking' | 'deduplicate';
       trackingEnabled?: boolean;
       readThroughEpisodes?: number;
-    };
-    const parsed = body.key ? parseStorageKey(body.key) : null;
-    if (!parsed) {
+      keepKey?: unknown;
+      preserveKey?: unknown;
+    } | null;
+    if (body?.action === 'deduplicate') {
+      const { keepKey, preserveKey } = body;
+      if (
+        !isPlayRecordKey(keepKey) ||
+        (preserveKey !== undefined && !isPlayRecordKey(preserveKey))
+      ) {
+        return NextResponse.json(
+          { error: '无效的播放记录键' },
+          { status: 400 },
+        );
+      }
+      const deletedKeys = await db.deduplicatePlayRecords(
+        guardResult.username,
+        keepKey,
+        preserveKey,
+      );
+      const retained = deletedKeys.length
+        ? await db.getPlayRecordsByKeys(guardResult.username, [keepKey])
+        : undefined;
+      return NextResponse.json(
+        { deletedKeys, episodeProgress: retained?.[keepKey]?.episode_progress },
+        { headers: NO_STORE_HEADERS },
+      );
+    }
+    const parsed = isPlayRecordKey(body?.key)
+      ? parseStorageKey(body.key)
+      : null;
+    if (!body || !parsed) {
       return NextResponse.json(
         { error: 'Invalid key format' },
         { status: 400 },

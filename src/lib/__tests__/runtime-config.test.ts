@@ -63,13 +63,13 @@ describe('runtime config', () => {
     const config = applyClientServerConfig({});
 
     expect(config.VOD_FRAGMENT_TIMEOUT_SECONDS).toBe(10);
-    expect(config.AUTO_SWITCH_SOURCE).toBe(false);
+    expect(config.AUTO_SWITCH_SOURCE).toBe(true);
   });
 
   it('keeps the configured auto source switch default', () => {
     expect(
-      applyClientServerConfig({ AutoSwitchSource: true }).AUTO_SWITCH_SOURCE,
-    ).toBe(true);
+      applyClientServerConfig({ AutoSwitchSource: false }).AUTO_SWITCH_SOURCE,
+    ).toBe(false);
   });
 
   it('uses the first configured category name as the custom entry label', () => {

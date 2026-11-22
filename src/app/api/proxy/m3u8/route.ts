@@ -29,10 +29,11 @@ import {
 } from '@/lib/url-guard';
 
 import {
-  isSignedM3U8Url,
+  isCacheableM3U8Entry,
   loadM3U8Data,
   peekM3U8Cache,
   refreshM3U8Cache,
+  shouldSkipM3U8Cache,
 } from './service';
 
 export const runtime = 'nodejs';
@@ -153,13 +154,15 @@ async function handleGet(request: NextRequest) {
     });
   }
 
-  const skipCache = isLive || isSignedM3U8Url(validation.url);
+  const skipCache = shouldSkipM3U8Cache(validation.url, isLive);
   if (warmOnly && skipCache) return warmOnlyResponse();
   const ua = await resolveProxyUserAgent(source);
 
   try {
     // 查询 VOD 清单缓存（fresh/stale 皆命中；stale 命中时触发后台刷新）
-    const cached = skipCache ? null : peekM3U8Cache(validation.url, source);
+    const cached = skipCache
+      ? null
+      : peekM3U8Cache(validation.url, source, { identity, proxyPoolStickyKey });
     if (cached) {
       const { value, fresh } = cached;
       if (!fresh) {
@@ -227,7 +230,7 @@ async function handleGet(request: NextRequest) {
       forceServer,
       source,
       isLive,
-      !skipCache,
+      !skipCache && isCacheableM3U8Entry(loaded),
       proxyPoolStickyKey,
     );
     const headers = new Headers();

@@ -129,32 +129,32 @@ describe('local preferences', () => {
     expect(readEnableOptimization()).toBe(false);
   });
 
-  it('keeps auto source switch off without a site default', () => {
-    expect(readAutoSwitchSource()).toBe(false);
+  it('turns auto source switch on without a site default', () => {
+    expect(readAutoSwitchSource()).toBe(true);
   });
 
   it('uses the site default for auto source switch until overridden', () => {
     window.RUNTIME_CONFIG = {
-      AUTO_SWITCH_SOURCE: true,
+      AUTO_SWITCH_SOURCE: false,
     } as typeof window.RUNTIME_CONFIG;
-    expect(readAutoSwitchSource()).toBe(true);
-
-    writeAutoSwitchSource(false);
-    expect(localStorage.getItem(AUTO_SWITCH_SOURCE_STORAGE_KEY)).toBe('false');
     expect(readAutoSwitchSource()).toBe(false);
+
+    writeAutoSwitchSource(true);
+    expect(localStorage.getItem(AUTO_SWITCH_SOURCE_STORAGE_KEY)).toBe('true');
+    expect(readAutoSwitchSource()).toBe(true);
 
     resetAutoSwitchSource();
     expect(localStorage.getItem(AUTO_SWITCH_SOURCE_STORAGE_KEY)).toBeNull();
-    expect(readAutoSwitchSource()).toBe(true);
+    expect(readAutoSwitchSource()).toBe(false);
   });
 
   it('ignores the retired auto switch on timeout key', () => {
-    localStorage.setItem('autoSwitchSourceOnTimeout', 'true');
+    localStorage.setItem('autoSwitchSourceOnTimeout', 'false');
 
     expect(AUTO_SWITCH_SOURCE_STORAGE_KEY).not.toBe(
       'autoSwitchSourceOnTimeout',
     );
-    expect(readAutoSwitchSource()).toBe(false);
+    expect(readAutoSwitchSource()).toBe(true);
   });
 
   it('stores block ad preference through the shared helper', () => {

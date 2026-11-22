@@ -51,6 +51,13 @@ it('requires ten failures across two dates and preserves source key', async () =
   expect(await getAdminAlerts()).toEqual([
     expect.objectContaining({
       key: 'source-offline:one',
+      message: '视频源「One」近 30 天无成功记录',
+      sourceDetail: {
+        source: 'one',
+        failureDays: 2,
+        failureCount: 10,
+        lastSuccessDate: null,
+      },
       startedAt: Date.parse('2026-11-09T00:00:00Z'),
     }),
   ]);
@@ -184,4 +191,27 @@ describe('getTrafficAlerts', () => {
       }),
     ]);
   });
+});
+
+it('告警依据仅统计最后成功日之后的失败', async () => {
+  (db.getSourceHealthSearchDaily as jest.Mock).mockResolvedValue([
+    row('2026-11-06', 100),
+    row('2026-11-07', 5, 1),
+    row('2026-11-09', 7),
+    row('2026-11-10', 9),
+  ]);
+  (db.getSourcePlayReporterSummary as jest.Mock).mockResolvedValue([
+    { source: 'one', lastSuccessDate: '2026-11-08' },
+  ]);
+  expect(await getAdminAlerts()).toEqual([
+    expect.objectContaining({
+      message: '视频源「One」持续失效，最后成功于 11-08',
+      sourceDetail: {
+        source: 'one',
+        failureDays: 2,
+        failureCount: 16,
+        lastSuccessDate: '2026-11-08',
+      },
+    }),
+  ]);
 });

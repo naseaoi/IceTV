@@ -45,6 +45,7 @@ export async function withSourceProbeBudget(
         ),
       {
         kind: 'probe',
+        trackUpstreamCooldown: false,
         identity: `user:${guard.username}`,
         signal: request.signal,
       },

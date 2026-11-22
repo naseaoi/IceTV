@@ -279,6 +279,26 @@ describe('m3u8 rewrite', () => {
     expect(result).not.toContain('/api/proxy/key');
   });
 
+  it('preserves literal dollar patterns when rewriting direct URI attributes', async () => {
+    const uri = "https://stream.example.com/init-$&-$'-$`.mp4";
+    const tag = '#EXT-X-MAP:URI="' + uri + '",BYTERANGE="32@0"';
+    const result = await getRewrittenM3U8Content(
+      {
+        content: `#EXTM3U\n${tag}`,
+        finalUrl: 'https://stream.example.com/live/index.m3u8',
+        loadedAt: 1,
+      },
+      'https://stream.example.com/live/index.m3u8',
+      createRequest('?allowCORS=true&icetv-live=1'),
+      true,
+      false,
+      'live-source',
+      true,
+      false,
+    );
+    expect(result).toBe(`#EXTM3U\n${tag}`);
+  });
+
   it('keeps live media resources behind the server proxy by default', async () => {
     const result = await getRewrittenM3U8Content(
       {

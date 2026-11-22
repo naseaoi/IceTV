@@ -9,6 +9,7 @@ import {
 } from '@/features/play/lib/vodHlsRuntime';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
+import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
 import {
   HLS_FATAL_MEDIA_RECOVERY_LIMIT,
@@ -225,6 +226,93 @@ function setupRuntime() {
 }
 
 describe('vodHlsRuntime 运行时释放', () => {
+  it.each(
+    [false, true].flatMap((autoFallback) =>
+      ['manifestLoadError', 'keyLoadError'].map((details) => ({
+        autoFallback,
+        details,
+      })),
+    ),
+  )(
+    'hands $details HTTP 403 to lazy refresh before normal recovery (auto fallback: $autoFallback)',
+    async ({ autoFallback, details }) => {
+      mockIsServerProxy.mockReturnValue(true);
+      mockShouldAutoFallbackToServer.mockReturnValue(autoFallback);
+      const runtime = setupRuntime();
+      let finish!: (handled: boolean) => void;
+      runtime.options.onPlaybackUrlForbidden = jest.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const video = createVideo();
+      runtime.load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      const forbidden = {
+        type: FakeHls.ErrorTypes.NETWORK_ERROR,
+        details,
+        fatal: details === 'manifestLoadError',
+        response: { code: 403 },
+      };
+      hls.emit(FakeHls.Events.ERROR, forbidden);
+      hls.emit(FakeHls.Events.ERROR, forbidden);
+      expect(runtime.options.onPlaybackUrlForbidden).toHaveBeenCalledTimes(1);
+      expect(runtime.options.onPlaybackUrlForbidden).toHaveBeenCalledWith(
+        EPISODE_1,
+        expect.any(AbortSignal),
+      );
+      expect(hls.loadSource).toHaveBeenCalledTimes(1);
+      expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+      expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      finish(false);
+      await Promise.resolve();
+      if (autoFallback) {
+        expect(hls.loadSource).toHaveBeenLastCalledWith(EPISODE_1);
+        expect(hls.loadSource).toHaveBeenCalledTimes(2);
+        expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      } else {
+        expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+          `networkError:${details}`,
+        );
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'aborts a pending 403 refresh on deadline or release (released: %s)',
+    (released) => {
+      jest.useFakeTimers();
+      mockIsServerProxy.mockReturnValue(true);
+      mockShouldAutoFallbackToServer.mockReturnValue(false);
+      const runtime = setupRuntime();
+      const refresh = jest.fn(
+        (_url: string, _signal: AbortSignal) => new Promise<boolean>(() => {}),
+      );
+      runtime.options.onPlaybackUrlForbidden = refresh;
+      const video = createVideo();
+      runtime.load(video, EPISODE_1);
+      getFakeHls(video).emit(FakeHls.Events.ERROR, {
+        ...FATAL_MANIFEST_ERROR,
+        response: { code: 403 },
+      });
+      const signal = refresh.mock.calls[0][1];
+      const { idleMs } = resolveVodStartupTimeouts(
+        DETAIL.source,
+        undefined,
+        undefined,
+      );
+      jest.advanceTimersByTime(idleMs - 1);
+      expect(signal.aborted).toBe(false);
+      if (released) runManagedVideoCleanup(video);
+      jest.advanceTimersByTime(1);
+      expect(signal.aborted).toBe(true);
+      expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(
+        released ? 0 : 1,
+      );
+    },
+  );
+
   it('backs off resource limits without route failure, freezes budgets and stops after three retries', async () => {
     jest.useFakeTimers();
     mockIsServerProxy.mockReturnValue(true);
@@ -1417,5 +1505,39 @@ describe('已起播会话的线路回落', () => {
       'networkError:fragLoadError',
     );
     expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
+  });
+});
+
+describe('vodHlsRuntime 测速', () => {
+  it('浏览器缓存命中的分片不计入测速，等真实网络分片', () => {
+    const runtime = setupRuntime();
+    const video = createVideo();
+    runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    runtime.setRealtimeLoadSpeed.mockClear();
+
+    hls.emit(FakeHls.Events.FRAG_LOADED, {
+      frag: {
+        ...mainFragment(1),
+        stats: {
+          loaded: 1_048_576,
+          total: 1_048_576,
+          loading: { start: 1000, first: 1002, end: 1006 },
+        },
+      },
+    });
+    expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalled();
+
+    hls.emit(FakeHls.Events.FRAG_LOADED, {
+      frag: {
+        ...mainFragment(2),
+        stats: {
+          loaded: 1_048_576,
+          total: 1_048_576,
+          loading: { start: 2000, first: 2100, end: 3100 },
+        },
+      },
+    });
+    expect(runtime.setRealtimeLoadSpeed).toHaveBeenCalledWith('1.0 MB/s');
   });
 });

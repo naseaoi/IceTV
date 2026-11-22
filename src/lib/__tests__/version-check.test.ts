@@ -53,6 +53,21 @@ describe('version check', () => {
     jest.resetModules();
   });
 
+  it('treats an unavailable latest version as failure even with stable history', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        latestVersion: null,
+        changelog: [{ version: '999.0.0' }],
+      }),
+    });
+    const { checkLatestRelease, UpdateStatus } = loadVersionCheckModule();
+    await expect(checkLatestRelease()).resolves.toEqual({
+      status: UpdateStatus.FETCH_FAILED,
+      latestVersion: null,
+    });
+  });
+
   it('throttles failed checks before retrying', async () => {
     let now = 1_000;
     jest.spyOn(Date, 'now').mockImplementation(() => now);
@@ -156,5 +171,38 @@ describe('version check', () => {
     const newer = loadVersionCheckModule();
     await expect(newer.checkForUnseenUpdate()).resolves.toBe(true);
     localStorage.clear();
+  });
+});
+
+describe('dev version ordering', () => {
+  afterEach(() => {
+    jest.dontMock('@/lib/version');
+    jest.resetModules();
+  });
+
+  const versions = [
+    '0.7.2-dev.6',
+    '0.7.2-dev.7',
+    '0.7.2',
+    '0.7.3-dev.1',
+    '0.7.3',
+  ];
+  it.each(versions)('compares %s against every version', (current) => {
+    jest.doMock('@/lib/version', () => ({ CURRENT_VERSION: current }));
+    const { compareVersions, UpdateStatus } = loadVersionCheckModule();
+    for (const remote of versions) {
+      expect(compareVersions(remote)).toBe(
+        versions.indexOf(remote) > versions.indexOf(current)
+          ? UpdateStatus.HAS_UPDATE
+          : UpdateStatus.NO_UPDATE,
+      );
+    }
+    expect(compareVersions('invalid')).toBe(UpdateStatus.HAS_UPDATE);
+  });
+
+  it('compares dev sequence numbers numerically', () => {
+    jest.doMock('@/lib/version', () => ({ CURRENT_VERSION: '0.7.2-dev.9' }));
+    const { compareVersions, UpdateStatus } = loadVersionCheckModule();
+    expect(compareVersions('0.7.2-dev.10')).toBe(UpdateStatus.HAS_UPDATE);
   });
 });

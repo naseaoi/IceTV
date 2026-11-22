@@ -77,6 +77,7 @@
 - `error.tsx`、`global-error.tsx` 生产只展示通用提示，开发展示类型、信息、编号、堆栈。
 - 业务可恢复错误返回明确文案，不要抛给全局错误边界。
 - API 返回的 `error` 只放可展示信息；兜底 `catch` 不要把任意异常的 `message` 透传给客户端，敏感上下文只打服务端日志。
+- 生产构建经 `next.config.js` 的 `removeConsole` 剥离 `console.log` / `info` / `debug`，生产需要留存的日志（审计、告警）用 `console.warn` / `console.error`。
 
 ## 测试
 

@@ -505,7 +505,7 @@ describe('config cache persistence', () => {
 
     const checked = configSelfCheck(config);
 
-    expect(checked.SiteConfig.AutoSwitchSource).toBe(false);
+    expect(checked.SiteConfig.AutoSwitchSource).toBe(true);
     expect(checked.SiteConfig.VodFragmentTimeoutSeconds).toBe(10);
   });
 

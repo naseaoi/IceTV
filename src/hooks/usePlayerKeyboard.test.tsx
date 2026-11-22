@@ -20,6 +20,7 @@ function createPlayerHarness() {
     currentTime: 50,
     duration: 100,
     volume: 0.5,
+    muted: false,
     playbackRate: 1,
     fullscreen: false,
     playing: true,
@@ -115,6 +116,66 @@ describe('usePlayerKeyboard', () => {
 
     expect(player.currentTime).toBe(55);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('lets a keyboard-focused button handle Enter and Space', () => {
+    const { artPlayerRef, player } = createPlayerHarness();
+    renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    const matches = jest
+      .spyOn(button, 'matches')
+      .mockImplementation((selector) => selector === ':focus-visible');
+
+    const dispatchOnButton = (key: string) => {
+      const event = new KeyboardEvent('keydown', {
+        key,
+        bubbles: true,
+        cancelable: true,
+      });
+      act(() => button.dispatchEvent(event));
+      return event;
+    };
+
+    const enter = dispatchOnButton('Enter');
+    const space = dispatchOnButton(' ');
+    const arrow = dispatchOnButton('ArrowRight');
+
+    expect(enter.defaultPrevented).toBe(false);
+    expect(space.defaultPrevented).toBe(false);
+    expect(player.fullscreen).toBe(false);
+    expect(player.toggle).not.toHaveBeenCalled();
+    expect(arrow.defaultPrevented).toBe(true);
+
+    // 鼠标点过的按钮不匹配 :focus-visible，空格仍控制播放
+    matches.mockReturnValue(false);
+    dispatchOnButton(' ');
+    expect(player.toggle).toHaveBeenCalledTimes(1);
+    button.remove();
+  });
+
+  it('toggles mute with M in both modes', () => {
+    const { artPlayerRef, player } = createPlayerHarness();
+    renderHook(() => usePlayerKeyboard({ artPlayerRef, mode: 'live' }));
+
+    dispatchShortcut('m');
+    expect(player.muted).toBe(true);
+    dispatchShortcut('M');
+    expect(player.muted).toBe(false);
+  });
+
+  it('keeps an older action that the user already bound to M', () => {
+    window.localStorage.setItem(
+      'playerShortcuts',
+      JSON.stringify({ frameForward: { key: 'm' } }),
+    );
+    const { artPlayerRef, player } = createPlayerHarness();
+    renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+    dispatchShortcut('m');
+
+    expect(player.muted).toBe(false);
+    expect(player.pause).toHaveBeenCalled();
   });
 
   it('keeps the loading spinner hidden while stepping frames', () => {

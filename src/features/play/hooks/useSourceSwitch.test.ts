@@ -1,15 +1,22 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type Artplayer from 'artplayer';
-import type { SetStateAction } from 'react';
+import { type SetStateAction, useEffect, useState } from 'react';
 
 import type {
   PlaybackRequestMode,
   VideoQualityInfo,
 } from '@/features/play/hooks/usePlayPageState';
+import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
 import { reportVodPlaybackOutcome } from '@/features/play/lib/vodPlaybackIntent';
-import { deletePlayRecord, deleteSkipConfig } from '@/lib/db.client';
+import {
+  deletePlayRecord,
+  deleteSkipConfig,
+  getFreshSkipConfig,
+  getSkipConfig,
+  saveSkipConfig,
+} from '@/lib/db.client';
 import {
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   readDanmakuEpisodeId,
@@ -37,7 +44,10 @@ jest.mock('@/lib/source-route-stats.client', () => ({
 jest.mock('@/lib/db.client', () => ({
   deletePlayRecord: jest.fn(),
   deleteSkipConfig: jest.fn(),
+  getFreshSkipConfig: jest.fn(),
+  getSkipConfig: jest.fn(),
   saveSkipConfig: jest.fn(),
+  subscribeToDataUpdates: () => () => undefined,
 }));
 
 jest.mock('@/lib/play-intent', () => ({
@@ -122,7 +132,7 @@ function createLoadingVideo() {
   return { video, pause, runtimeCleanup, stopLoad };
 }
 
-function setupHook({
+function setupSourceSwitchOptions({
   availableSources,
   fullDetails = {},
   videoInfo = new Map(),
@@ -208,8 +218,70 @@ function setupHook({
     onPlaybackStartFailed: jest.fn(),
   };
 
+  return { options, player };
+}
+
+function setupHook(input: Parameters<typeof setupSourceSwitchOptions>[0]) {
+  const { options, player } = setupSourceSwitchOptions(input);
   const { result } = renderHook(() => useSourceSwitch(options));
   return { result, options, player };
+}
+
+function setupSkipConfigIntegration() {
+  const availableSources = ['a', 'b', 'c'].map((source) =>
+    createSource(source, THREE_EPISODES),
+  );
+  const { options } = setupSourceSwitchOptions({ availableSources });
+  const persisted = new Map<string, typeof options.skipConfigRef.current>();
+  jest
+    .mocked(getSkipConfig)
+    .mockReset()
+    .mockImplementation(async (source) => persisted.get(source) ?? null);
+  jest
+    .mocked(getFreshSkipConfig)
+    .mockReset()
+    .mockImplementation(async (source) => persisted.get(source) ?? null);
+  jest
+    .mocked(saveSkipConfig)
+    .mockReset()
+    .mockImplementation(async (source, _id, config) => {
+      persisted.set(source, config);
+    });
+  jest
+    .mocked(deleteSkipConfig)
+    .mockReset()
+    .mockImplementation(async (source) => {
+      persisted.delete(source);
+    });
+
+  const { result } = renderHook(() => {
+    const [currentSource, setCurrentSource] = useState('a');
+    const [currentId, setCurrentId] = useState('a-id');
+    const [, setSkipConfig] = useState(options.skipConfigRef.current);
+    useEffect(() => {
+      options.currentSourceRef.current = currentSource;
+      options.currentIdRef.current = currentId;
+    }, [currentSource, currentId]);
+    const skip = useSkipConfig({
+      currentSource,
+      currentId,
+      currentSourceRef: options.currentSourceRef,
+      currentIdRef: options.currentIdRef,
+      skipConfigRef: options.skipConfigRef,
+      artPlayerRef: options.artPlayerRef,
+      setSkipConfig,
+    });
+    return {
+      ...skip,
+      ...useSourceSwitch({
+        ...options,
+        ...skip,
+        setCurrentSource,
+        setCurrentId,
+      }),
+    };
+  });
+  return { result, options, persisted };
 }
 
 function fetchedDetailUrls(): string[] {
@@ -278,10 +350,11 @@ describe('useSourceSwitch 自动换源', () => {
       'b-id',
     );
     await Promise.resolve();
-    expect(deletePlayRecord).toHaveBeenCalledWith('a', 'a-id');
+    expect(deletePlayRecord).not.toHaveBeenCalled();
     expect(deleteSkipConfig).not.toHaveBeenCalled();
     resolve(true);
     await cleanup;
+    expect(deletePlayRecord).not.toHaveBeenCalled();
     expect(deleteSkipConfig).toHaveBeenCalledWith('a', 'a-id');
   });
 
@@ -326,7 +399,131 @@ describe('useSourceSwitch 自动换源', () => {
     jest.restoreAllMocks();
   });
 
+  describe('换源跳过配置迁移', () => {
+    const config = { enable: true, intro_time: 15, outro_time: -20 };
+
+    it('连续换源时不把中间源的过期缓存当作持久化配置', async () => {
+      const { result, options, persisted } = setupSkipConfigIntegration();
+      await act(async () => result.current.handleSkipConfigChange(config));
+      jest.mocked(getSkipConfig).mockResolvedValueOnce({
+        enable: false,
+        intro_time: 0,
+        outro_time: 0,
+      });
+      let finishRead!: (value: null) => void;
+      jest.mocked(getFreshSkipConfig).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRead = resolve;
+          }),
+      );
+      await act(async () =>
+        result.current.handleSourceChange('b', 'b-id', '测试剧'),
+      );
+      const abandonedCleanup =
+        result.current.finalizePendingSourceSwitchCleanup('b', 'b-id');
+      await act(async () => {});
+      expect(deleteSkipConfig).not.toHaveBeenCalled();
+      await act(async () =>
+        result.current.handleSourceChange('c', 'c-id', '测试剧'),
+      );
+      await act(async () => {
+        finishRead(null);
+        await abandonedCleanup;
+      });
+      expect(options.skipConfigRef.current).toEqual(config);
+      expect(persisted.get('c')).toEqual(config);
+      expect(persisted.get('a')).toEqual(config);
+      expect(saveSkipConfig).not.toHaveBeenCalledWith(
+        'b',
+        'b-id',
+        expect.anything(),
+      );
+    });
+
+    it.each([true, false])(
+      '换源后立即切集，旧配置等待迁移完成（成功=%s）',
+      async (success) => {
+        const { result, options, persisted } = setupSkipConfigIntegration();
+        await act(async () => result.current.handleSkipConfigChange(config));
+        let finishWrite!: () => void;
+        jest.mocked(saveSkipConfig).mockImplementationOnce(
+          (source, _id, value) =>
+            new Promise((resolve, reject) => {
+              finishWrite = () => {
+                if (success) {
+                  persisted.set(source, value);
+                  resolve();
+                } else {
+                  reject(new Error('offline'));
+                }
+              };
+            }),
+        );
+        await act(async () =>
+          result.current.handleSourceChange('b', 'b-id', '测试剧'),
+        );
+        // 模拟新源首集的进度已经保存，迁移写入尚未完成时切到下一集。
+        const cleanup = result.current.finalizePendingSourceSwitchCleanup(
+          'b',
+          'b-id',
+        );
+        act(() => {
+          options.currentEpisodeIndexRef.current = 0;
+          result.current.resetAutoSourceSwitch();
+        });
+        expect(persisted.get('a')).toEqual(config);
+        expect(deleteSkipConfig).not.toHaveBeenCalled();
+        await act(async () => {
+          finishWrite();
+          await cleanup;
+        });
+        expect(persisted.get('b')).toEqual(success ? config : undefined);
+        expect(persisted.get('a')).toEqual(success ? undefined : config);
+        expect(options.skipConfigRef.current).toEqual(
+          success ? config : { enable: false, intro_time: 0, outro_time: 0 },
+        );
+      },
+    );
+
+    it('连续换源时旧源的在途写入先于清理完成', async () => {
+      const { result, persisted } = setupSkipConfigIntegration();
+      await act(async () => result.current.handleSkipConfigChange(config));
+      let finishWrite!: () => void;
+      jest.mocked(saveSkipConfig).mockImplementationOnce(
+        (source, _id, value) =>
+          new Promise((resolve) => {
+            finishWrite = () => {
+              persisted.set(source, value);
+              resolve();
+            };
+          }),
+      );
+      await act(async () =>
+        result.current.handleSourceChange('b', 'b-id', '测试剧'),
+      );
+      await act(async () =>
+        result.current.handleSourceChange('c', 'c-id', '测试剧'),
+      );
+      expect(persisted.get('c')).toEqual(config);
+      const cleanup = result.current.finalizePendingSourceSwitchCleanup(
+        'c',
+        'c-id',
+      );
+      await act(async () => {});
+      expect(deleteSkipConfig).not.toHaveBeenCalled();
+      await act(async () => {
+        finishWrite();
+        await cleanup;
+      });
+      expect(deleteSkipConfig).toHaveBeenCalledWith('b', 'b-id');
+      expect(persisted.has('b')).toBe(false);
+      expect(persisted.get('a')).toEqual(config);
+    });
+  });
+
   it('未开启时页面超时和地址解析失败只停止加载并提示', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     const { result, options } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
@@ -489,6 +686,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('播放器上的运行时不属于当前地址时不回退代理，按当前源超时处理', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     const { video } = createLoadingVideo();
     const switchToServerProxy = jest.fn(() => true);
     video.__icetvSwitchToServerProxy = switchToServerProxy;
@@ -727,6 +925,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('手动换源等不到详情时，页面超时中止请求并按详情获取失败继续换源，不会一直停在切换中', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { video } = createLoadingVideo();
     const { result, options } = setupHook({
@@ -778,6 +977,7 @@ describe('useSourceSwitch 自动换源', () => {
   });
 
   it('新的换源开始时中止上一次还在等待的详情请求，结果以新的换源为准', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
     const consoleError = jest
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);

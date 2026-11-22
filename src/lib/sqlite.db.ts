@@ -85,6 +85,12 @@ import {
   oauthIdentityParams,
   readOAuthIdentity,
 } from '@/lib/oauth-identity';
+import {
+  type PlayRecordTitleRow,
+  findDuplicatePlayRecordKeys,
+  findLatestPlayRecordKeyByTitle,
+  prepareDuplicatePlayRecordMerge,
+} from '@/lib/play-record-title';
 import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
 import {
   newProfileId,
@@ -179,6 +185,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  PlayRecordTitleLookupOptions,
   SharedCacheRecord,
   SiteAnnouncement,
   SkipConfig,
@@ -558,6 +565,17 @@ export class LocalSqliteStorage implements IStorage {
     releaseSharedCacheLease: Database.Statement;
     pruneSharedCache: Database.Statement;
   };
+
+  async backup(filename: string): Promise<string> {
+    if (this.dbPath === ':memory:') {
+      throw new Error('SQLite memory databases have no backup directory');
+    }
+    const directory = path.resolve(path.dirname(this.dbPath), 'backups');
+    mkdirSync(directory, { recursive: true });
+    const destination = path.join(directory, filename);
+    await this.db.backup(destination);
+    return destination;
+  }
 
   constructor(dbPath?: string) {
     const defaultSqlitePath = process.env.DOCKER_ENV
@@ -2109,38 +2127,88 @@ export class LocalSqliteStorage implements IStorage {
     userName: string,
     key: string,
   ): Promise<PlayRecord | null> {
-    const username = normalizeUsername(userName);
+    return this.readPlayRecord(normalizeUsername(userName), key);
+  }
+
+  private readPlayRecord(username: string, key: string): PlayRecord | null {
     const row = this.stmts.getPlayRecord.get(username, key) as
       | { record_json: string }
       | undefined;
     return parseJsonValue<PlayRecord>(row?.record_json);
   }
 
+  private async readPlayRecordTitlePage(
+    username: string,
+    offset: number,
+    limit: number,
+  ) {
+    return this.db
+      .prepare(
+        `SELECT record_key, json_extract(record_json, '$.title') AS title,
+        json_extract(record_json, '$.year') AS year FROM play_records WHERE username = ?
+        ORDER BY CAST(json_extract(record_json, '$.save_time') AS REAL) DESC, record_key DESC LIMIT ? OFFSET ?`,
+      )
+      .all(username, limit, offset) as PlayRecordTitleRow[];
+  }
+
   async getLatestPlayRecordByTitle(
     userName: string,
     title: string,
     year: string,
+    options?: PlayRecordTitleLookupOptions,
   ): Promise<Record<string, PlayRecord>> {
-    const { findLatestPlayRecordKeyByTitle } =
-      await import('@/lib/play-record-title');
     const username = normalizeUsername(userName);
     const key = await findLatestPlayRecordKeyByTitle(
       title,
       year,
-      async (offset, limit) =>
-        this.db
-          .prepare(
-            `SELECT record_key, json_extract(record_json, '$.title') AS title,
-        json_extract(record_json, '$.year') AS year FROM play_records WHERE username = ?
-        ORDER BY CAST(json_extract(record_json, '$.save_time') AS REAL) DESC, record_key DESC LIMIT ? OFFSET ?`,
-          )
-          .all(
-            username,
-            limit,
-            offset,
-          ) as import('@/lib/play-record-title').PlayRecordTitleRow[],
+      (offset, limit) => this.readPlayRecordTitlePage(username, offset, limit),
+      options,
     );
     return key ? this.getPlayRecordsByKeys(username, [key]) : {};
+  }
+
+  async deduplicatePlayRecords(
+    userName: string,
+    keepKey: string,
+    preserveKey?: string,
+  ): Promise<string[]> {
+    const username = normalizeUsername(userName);
+    const keepRecord = this.readPlayRecord(username, keepKey);
+    const keys = await findDuplicatePlayRecordKeys(
+      keepKey,
+      keepRecord,
+      preserveKey,
+      (offset, limit) => this.readPlayRecordTitlePage(username, offset, limit),
+    );
+    if (!keepRecord || !keys.length) return [];
+
+    // 两个去重请求不能各自删掉对方要保留的记录。
+    return this.db
+      .transaction(() => {
+        const current = this.readPlayRecord(username, keepKey);
+        if (
+          !current ||
+          current.title !== keepRecord.title ||
+          current.year !== keepRecord.year
+        )
+          return [];
+        const { deletedKeys, updatedRecord } = prepareDuplicatePlayRecordMerge(
+          keepKey,
+          current,
+          keys,
+          (key) => this.readPlayRecord(username, key),
+        );
+        if (updatedRecord) {
+          this.db
+            .prepare(
+              'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ?',
+            )
+            .run(JSON.stringify(updatedRecord), username, keepKey);
+        }
+        this.deletePlayRecordKeys(username, deletedKeys);
+        return deletedKeys;
+      })
+      .immediate();
   }
 
   async getPlayRecordsByKeys(
@@ -2365,13 +2433,17 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    this.deletePlayRecordKeys(normalizeUsername(userName), keys);
+  }
+
+  private deletePlayRecordKeys(username: string, keys: string[]): void {
     if (keys.length === 0) return;
     const uniqueKeys = [...new Set(keys)];
     this.db
       .prepare(
         `DELETE FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
       )
-      .run(normalizeUsername(userName), ...uniqueKeys);
+      .run(username, ...uniqueKeys);
   }
 
   async deleteAllPlayRecords(userName: string): Promise<void> {

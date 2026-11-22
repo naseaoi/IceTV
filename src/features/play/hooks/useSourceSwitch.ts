@@ -51,7 +51,7 @@ import {
   reportVodPlaybackOutcome,
 } from '@/features/play/lib/vodPlaybackIntent';
 import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
-import { deletePlayRecord, deleteSkipConfig } from '@/lib/db.client';
+import { deleteSkipConfig } from '@/lib/db.client';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { readAutoSwitchSource } from '@/lib/local-preferences';
@@ -63,7 +63,7 @@ import {
   readSourcePlaybackStats,
   recordSourceManualSelection,
 } from '@/lib/source-playback-stats';
-import { SearchResult, SkipConfig } from '@/lib/types';
+import type { SearchResult } from '@/lib/types';
 
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 
@@ -214,6 +214,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   const sourceSwitchInFlightRef = useRef(false);
   // 进行中换源的详情请求；被新的换源取代或等待超过页面超时都要中止，否则加载层会一直停在切换中
   const sourceDetailAbortRef = useRef<AbortController | null>(null);
+  const sourceSwitchCleanupGenerationRef = useRef(0);
   // 拒绝换源后当前源要重新加载，重载会清掉播放器提示，留到重新起播后再显示
   const pendingPlaybackNoticeRef = useRef<string | null>(null);
 
@@ -229,7 +230,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     pendingPlaybackNoticeRef.current = null;
   }, [sourceChangeRequestIdRef, cancelEpisodeResolve]);
 
-  useEffect(() => () => resetAutoSourceSwitch(), [resetAutoSourceSwitch]);
+  useEffect(
+    () => () => {
+      sourceSwitchCleanupGenerationRef.current += 1;
+      resetAutoSourceSwitch();
+    },
+    [resetAutoSourceSwitch],
+  );
 
   const stopActiveHlsLoading = useCallback(() => {
     const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
@@ -344,9 +351,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       const previousSource = currentSourceRef.current;
       const previousId = currentIdRef.current;
       const previousDetail = detailRef.current;
-      const previousSkipConfig: SkipConfig = { ...skipConfigRef.current };
+      const previousSkipConfig = { ...skipConfigRef.current };
       const currentPlayTime = resolveCurrentPlayTime();
 
+      sourceSwitchCleanupGenerationRef.current += 1;
       pendingSourceSwitchCleanupRef.current = null;
 
       try {
@@ -590,20 +598,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setVideoYear(nextYear);
         setVideoCover(newDetail.poster);
         setVideoDoubanId(newDetail.douban_id || 0);
-        setCurrentSource(newDetail.source);
-        setCurrentId(newDetail.id);
-        setDetail(newDetail);
-        currentEpisodeIndexRef.current = targetIndex;
-        setCurrentEpisodeIndex(targetIndex);
-        // 刷新和分享要落到新源；init 只在挂载时读一次地址参数，替换地址不会重新搜索起播
-        replacePlayPageUrl(
-          { source: newDetail.source, id: newDetail.id, title: nextTitle },
-          nextYear,
-        );
-        setRealtimeLoadSpeed('正在加载新源...');
-        // 换源等待期间页面超时被压下，新源从这里重新计时
-        setVideoLoadingAttempt((prev) => prev + 1);
-
+        // 登记时仍需读取旧源的写入队列，目标源的加载也必须看到迁移登记。
         if (
           previousSource &&
           previousId &&
@@ -622,6 +617,19 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             keepPreviousPlayRecord: clearTargetEpisodeProgress,
           };
         }
+        setCurrentSource(newDetail.source);
+        setCurrentId(newDetail.id);
+        setDetail(newDetail);
+        currentEpisodeIndexRef.current = targetIndex;
+        setCurrentEpisodeIndex(targetIndex);
+        // 刷新和分享要落到新源；init 只在挂载时读一次地址参数，替换地址不会重新搜索起播
+        replacePlayPageUrl(
+          { source: newDetail.source, id: newDetail.id, title: nextTitle },
+          nextYear,
+        );
+        setRealtimeLoadSpeed('正在加载新源...');
+        // 换源等待期间页面超时被压下，新源从这里重新计时
+        setVideoLoadingAttempt((prev) => prev + 1);
 
         if (commitBeforeDetail) {
           const committedDetail = newDetail;
@@ -913,22 +921,17 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
       pendingSourceSwitchCleanupRef.current = null;
 
-      const requestId = sourceChangeRequestIdRef.current;
+      // 跳过配置按源与视频保存，同源切集不能使已开始的清理失效。
+      const generation = sourceSwitchCleanupGenerationRef.current;
       await finalizeSourceSwitchCleanup(task, {
-        deletePlayRecord,
         deleteSkipConfig,
         isCurrentSource: () =>
-          requestId === sourceChangeRequestIdRef.current &&
+          generation === sourceSwitchCleanupGenerationRef.current &&
           activeSource === currentSourceRef.current &&
           activeId === currentIdRef.current,
       });
     },
-    [
-      pendingSourceSwitchCleanupRef,
-      currentSourceRef,
-      currentIdRef,
-      sourceChangeRequestIdRef,
-    ],
+    [pendingSourceSwitchCleanupRef, currentSourceRef, currentIdRef],
   );
 
   return {

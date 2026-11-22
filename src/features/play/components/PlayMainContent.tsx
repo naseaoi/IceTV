@@ -18,6 +18,7 @@ import type {
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
+import type { EpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import {
   type VodStartupProgress,
   describeVodStartupState,
@@ -37,6 +38,7 @@ interface PlayMainContentProps {
   detail: SearchResult | null;
   detailLoading: boolean;
   currentEpisodeIndex: number;
+  episodeProgress?: (EpisodeProgressView | null)[];
   isEpisodeSelectorCollapsed: boolean;
   setIsEpisodeSelectorCollapsed: (collapsed: boolean) => void;
   artRef: RefObject<HTMLDivElement | null>;
@@ -243,6 +245,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     detail,
     detailLoading,
     currentEpisodeIndex,
+    episodeProgress,
     isEpisodeSelectorCollapsed,
     setIsEpisodeSelectorCollapsed,
     artRef,
@@ -482,6 +485,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
           totalEpisodes={totalEpisodes}
           episodes_titles={detail?.episodes_titles || []}
           value={currentEpisodeIndex + 1}
+          episodeProgress={episodeProgress}
           onChange={onEpisodeChange}
           onSourceChange={onSourceChange}
           currentSource={currentSource}

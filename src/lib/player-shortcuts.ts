@@ -20,6 +20,7 @@ export type PlayerShortcutAction =
   | 'seekForwardLong'
   | 'volumeUp'
   | 'volumeDown'
+  | 'toggleMute'
   | 'fullscreen'
   | 'resetRate'
   | 'decreaseRate'
@@ -56,6 +57,8 @@ export const DEFAULT_PLAYER_SHORTCUTS: PlayerShortcutMap = {
   frameForward: { key: 'f' },
   prevEpisode: { key: 'ArrowLeft', altKey: true },
   nextEpisode: { key: 'ArrowRight', altKey: true },
+  // 后加的默认键放在末尾：按键冲突时按对象顺序匹配，用户已自定义到同一键的旧动作优先
+  toggleMute: { key: 'm' },
 };
 
 export const PLAYER_SHORTCUT_ACTIONS: {
@@ -69,6 +72,7 @@ export const PLAYER_SHORTCUT_ACTIONS: {
   { action: 'seekForwardLong', label: '快进 30 秒' },
   { action: 'volumeUp', label: '音量 +' },
   { action: 'volumeDown', label: '音量 -' },
+  { action: 'toggleMute', label: '静音 / 取消静音' },
   { action: 'fullscreen', label: '全屏' },
   { action: 'resetRate', label: '恢复默认倍速' },
   { action: 'decreaseRate', label: '降低倍速 0.1' },
@@ -83,6 +87,7 @@ const LIVE_PLAYER_SHORTCUT_ACTIONS = new Set<PlayerShortcutAction>([
   'playPause',
   'volumeUp',
   'volumeDown',
+  'toggleMute',
   'fullscreen',
 ]);
 

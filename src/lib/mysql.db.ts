@@ -96,6 +96,12 @@ import {
   oauthIdentityParams,
   readOAuthIdentity,
 } from '@/lib/oauth-identity';
+import {
+  type PlayRecordTitleRow,
+  findDuplicatePlayRecordKeys,
+  findLatestPlayRecordKeyByTitle,
+  prepareDuplicatePlayRecordMerge,
+} from '@/lib/play-record-title';
 import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
 import { ReviewSocialStorage, socialSchema } from '@/lib/review-social-storage';
 import {
@@ -180,6 +186,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  PlayRecordTitleLookupOptions,
   SharedCacheRecord,
   SiteAnnouncement,
   SkipConfig,
@@ -1171,31 +1178,100 @@ export class MySqlStorage implements IStorage {
     return parseJsonValue<PlayRecord>(rows[0]?.record_json);
   }
 
+  private async readPlayRecordTitlePage(
+    username: string,
+    offset: number,
+    limit: number,
+    executor: Pick<PoolConnection, 'query'> = this.pool,
+  ) {
+    const [rows] = await executor.query<(RowDataPacket & PlayRecordTitleRow)[]>(
+      `SELECT record_key,
+        CASE WHEN JSON_TYPE(JSON_EXTRACT(record_json, '$.title')) = 'STRING'
+          THEN JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.title')) END AS title,
+        CASE WHEN JSON_TYPE(JSON_EXTRACT(record_json, '$.year')) = 'STRING'
+          THEN JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.year')) END AS year
+        FROM play_records WHERE username = ?
+        ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS DECIMAL(20, 3)) DESC,
+        record_key DESC LIMIT ? OFFSET ?`,
+      [username, limit, offset],
+    );
+    return rows;
+  }
+
   async getLatestPlayRecordByTitle(
     userName: string,
     title: string,
     year: string,
+    options?: PlayRecordTitleLookupOptions,
   ): Promise<Record<string, PlayRecord>> {
     await this.ensureInitialized();
-    const { findLatestPlayRecordKeyByTitle } =
-      await import('@/lib/play-record-title');
     const username = normalizeUsername(userName);
     const key = await findLatestPlayRecordKeyByTitle(
       title,
       year,
-      async (offset, limit) => {
-        const [rows] = await this.pool.query<JsonRow[]>(
-          `SELECT record_key,
-        JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.title')) AS title,
-        JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.year')) AS year FROM play_records WHERE username = ?
-        ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS DECIMAL(20, 3)) DESC,
-        record_key DESC LIMIT ? OFFSET ?`,
-          [username, limit, offset],
-        );
-        return rows as unknown as import('@/lib/play-record-title').PlayRecordTitleRow[];
-      },
+      (offset, limit) => this.readPlayRecordTitlePage(username, offset, limit),
+      options,
     );
     return key ? this.getPlayRecordsByKeys(username, [key]) : {};
+  }
+
+  async deduplicatePlayRecords(
+    userName: string,
+    keepKey: string,
+    preserveKey?: string,
+  ): Promise<string[]> {
+    const username = normalizeUsername(userName);
+    return this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<JsonRow[]>(
+        'SELECT record_key, record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1',
+        [username, keepKey],
+      );
+      const keep = rows[0];
+      if (keep?.record_key !== keepKey) return [];
+      const keepRecord = parseJsonValue<PlayRecord>(keep.record_json);
+      const keys = await findDuplicatePlayRecordKeys(
+        keepKey,
+        keepRecord,
+        preserveKey,
+        (offset, limit) =>
+          this.readPlayRecordTitlePage(username, offset, limit, connection),
+      );
+      if (!keepRecord || !keys.length) return [];
+
+      // 一次按主键顺序锁住保留行和待删行，避免交叉去重时各自先锁住不同的保留行。
+      const lockKeys = [keepKey, ...keys].sort();
+      const [lockedRows] = await connection.query<JsonRow[]>(
+        `SELECT record_key, record_json FROM play_records FORCE INDEX (PRIMARY)
+         WHERE username = ? AND record_key IN (${lockKeys.map(() => '?').join(', ')})
+         ORDER BY record_key FOR UPDATE`,
+        [username, ...lockKeys],
+      );
+      const lockedRecords = new Map(
+        lockedRows.map((row) => [row.record_key, row.record_json]),
+      );
+      const current = parseJsonValue<PlayRecord>(lockedRecords.get(keepKey));
+      if (
+        !current ||
+        current.title !== keepRecord.title ||
+        current.year !== keepRecord.year
+      )
+        return [];
+
+      const { deletedKeys, updatedRecord } = prepareDuplicatePlayRecordMerge(
+        keepKey,
+        current,
+        keys,
+        (key) => parseJsonValue<PlayRecord>(lockedRecords.get(key)),
+      );
+      if (updatedRecord) {
+        await connection.execute(
+          'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ?',
+          [JSON.stringify(updatedRecord), username, keepKey],
+        );
+      }
+      await this.deletePlayRecordKeys(username, deletedKeys, connection);
+      return deletedKeys;
+    });
   }
 
   async getPlayRecordsByKeys(
@@ -1462,12 +1538,25 @@ export class MySqlStorage implements IStorage {
   }
 
   async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
-    if (keys.length === 0) return;
+    if (!keys.length) return;
     await this.ensureInitialized();
+    await this.deletePlayRecordKeys(
+      normalizeUsername(userName),
+      keys,
+      this.pool,
+    );
+  }
+
+  private async deletePlayRecordKeys(
+    username: string,
+    keys: string[],
+    executor: Pick<PoolConnection, 'execute'>,
+  ): Promise<void> {
+    if (!keys.length) return;
     const uniqueKeys = [...new Set(keys)];
-    await this.pool.execute(
+    await executor.execute(
       `DELETE FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
-      [normalizeUsername(userName), ...uniqueKeys],
+      [username, ...uniqueKeys],
     );
   }
 

@@ -1,5 +1,6 @@
 import {
   isTrustworthyPlaybackEnd,
+  resolveNextEpisodeCountdown,
   shouldAutoAdvanceEpisode,
 } from '@/features/play/lib/autoAdvanceEpisode';
 
@@ -50,5 +51,24 @@ describe('isTrustworthyPlaybackEnd', () => {
 
   it('短视频用固定 90s 兜底，不因比例过小误拦', () => {
     expect(isTrustworthyPlaybackEnd(30, 100)).toBe(true);
+  });
+});
+
+describe('resolveNextEpisodeCountdown', () => {
+  it('片末前 10 秒内返回向上取整的剩余秒数', () => {
+    expect(resolveNextEpisodeCountdown(1385, 1400, 0)).toBeNull();
+    expect(resolveNextEpisodeCountdown(1390.2, 1400, 0)).toBe(10);
+    expect(resolveNextEpisodeCountdown(1399.5, 1400, 0)).toBe(1);
+    expect(resolveNextEpisodeCountdown(1400, 1400, 0)).toBeNull();
+  });
+
+  it('开启跳过片尾时以片尾点为准', () => {
+    expect(resolveNextEpisodeCountdown(1335, 1400, -60)).toBe(5);
+    expect(resolveNextEpisodeCountdown(1345, 1400, -60)).toBeNull();
+  });
+
+  it('时长过短或未知时不显示', () => {
+    expect(resolveNextEpisodeCountdown(55, 60, 0)).toBeNull();
+    expect(resolveNextEpisodeCountdown(5, Number.NaN, 0)).toBeNull();
   });
 });

@@ -83,9 +83,19 @@ export async function GET(request: NextRequest) {
               userAgent: ua,
               maxBytes: MAX_KEY_BYTES,
               accept: '*/*',
+              headers: { 'Accept-Encoding': 'identity' },
               signal: request.signal,
             },
           );
+          const encoding = response.headers
+            .get('content-encoding')
+            ?.trim()
+            .toLowerCase();
+          if (encoding && encoding !== 'identity') {
+            throw new Error(
+              'Unexpected compressed body from environment proxy',
+            );
+          }
           return new Response(bufferToArrayBuffer(response.body), {
             status: response.status,
             statusText: response.statusText,
@@ -129,7 +139,7 @@ export async function GET(request: NextRequest) {
       await response.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: 'Failed to fetch key' },
-        { status: 500 },
+        { status: response.status },
       );
     }
     const keyData = await readArrayBufferLimited(response, MAX_KEY_BYTES);

@@ -3,6 +3,7 @@ import type Artplayer from 'artplayer';
 
 import {
   deleteSkipConfig,
+  getFreshSkipConfig,
   getSkipConfig,
   saveSkipConfig,
 } from '@/lib/db.client';
@@ -12,6 +13,7 @@ import { useSkipConfig } from './useSkipConfig';
 
 jest.mock('@/lib/db.client', () => ({
   deleteSkipConfig: jest.fn(),
+  getFreshSkipConfig: jest.fn(),
   getSkipConfig: jest.fn(),
   saveSkipConfig: jest.fn(),
   subscribeToDataUpdates: (
@@ -31,6 +33,7 @@ const initial = { enable: false, intro_time: 0, outro_time: 0 };
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(getSkipConfig).mockReset().mockResolvedValue(initial);
+  jest.mocked(getFreshSkipConfig).mockReset().mockImplementation(getSkipConfig);
   jest.mocked(saveSkipConfig).mockReset().mockResolvedValue(undefined);
   jest.mocked(deleteSkipConfig).mockReset().mockResolvedValue(undefined);
 });

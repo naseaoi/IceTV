@@ -10,6 +10,11 @@ import { useCallback, useRef } from 'react';
 
 import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
 import {
+  buildEpisodeProgressKeys,
+  isFinishedWhenLeavingForNext,
+  MIN_WATCHED_SECONDS,
+} from '@/features/play/lib/episodeProgress';
+import {
   hasExplicitPlaybackSeek,
   hasMeaningfulPlaybackTime,
   isPlaybackCheckpointCompatibleWithDetail,
@@ -25,7 +30,10 @@ import {
   WakeLockSentinel,
 } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { applyResumeTime } from '@/features/play/lib/resumePlayback';
+import {
+  applyResumeTime,
+  isFinishedResumeTarget,
+} from '@/features/play/lib/resumePlayback';
 import { createScreenWakeLockController } from '@/features/play/lib/screenWakeLock';
 import {
   generateStorageKey,
@@ -34,6 +42,10 @@ import {
   reportPlaybackRecordsReadFailure,
   savePlayRecord,
 } from '@/lib/db.client';
+import {
+  type EpisodeProgressEntry,
+  createEpisodeProgressEntry,
+} from '@/lib/episode-progress';
 import { consumeMatchingPlayIntent } from '@/lib/play-intent';
 import { SearchResult } from '@/lib/types';
 
@@ -50,7 +62,7 @@ export {
 } from '@/features/play/lib/playProgressRestore';
 
 // ---------------------------------------------------------------------------
-// 保存播放进度到 IndexedDB
+// 保存播放进度
 // ---------------------------------------------------------------------------
 
 type PendingPlayProgressSave = {
@@ -63,12 +75,15 @@ type PendingPlayProgressSave = {
 export interface PlayProgressSaveState {
   sessionId?: string;
   sequence?: number;
+  lastSnapshotTime?: number;
   inFlight: boolean;
-  pending: PendingPlayProgressSave | null;
+  pending: Map<string, PendingPlayProgressSave>;
   lastSavedFingerprint: string | null;
   activeFingerprints?: Set<string>;
   latestSaveToken?: object;
   onSaved?: (source: string, id: string) => void | Promise<void>;
+  // 每个新快照同步通知，切集时本地每集进度表不必等保存请求返回
+  onEpisodeProgress?: (entry: EpisodeProgressEntry) => void;
 }
 
 function buildPlayProgressFingerprint(
@@ -83,10 +98,18 @@ function buildPlayProgressFingerprint(
 
 async function persistPlayProgressSave(
   state: PlayProgressSaveState,
+  lastSaveTimeRef: MutableRefObject<number>,
   payload: PendingPlayProgressSave,
 ): Promise<void> {
   const active = (state.activeFingerprints ??= new Set());
+  if (
+    active.has(payload.fingerprint) ||
+    payload.fingerprint === state.lastSavedFingerprint
+  ) {
+    return;
+  }
   active.add(payload.fingerprint);
+  lastSaveTimeRef.current = Date.now();
   const token = {};
   state.latestSaveToken = token;
   try {
@@ -95,33 +118,38 @@ async function persistPlayProgressSave(
       state.lastSavedFingerprint = payload.fingerprint;
     }
     await state.onSaved?.(payload.source, payload.id);
+  } catch (err) {
+    console.error('保存播放进度失败:', err);
   } finally {
     active.delete(payload.fingerprint);
   }
 }
 
-async function flushPlayProgressSave(
-  saveStateRef: MutableRefObject<PlayProgressSaveState>,
+async function flushPendingPlayProgress(
+  state: PlayProgressSaveState,
   lastSaveTimeRef: MutableRefObject<number>,
-  payload: PendingPlayProgressSave,
+  immediate: boolean,
 ): Promise<void> {
-  saveStateRef.current.inFlight = true;
-  lastSaveTimeRef.current = Date.now();
-
+  if (immediate) {
+    // 退出时同步启动每个 keepalive 请求，不能等上一个响应才发送下一集。
+    const pending = [...state.pending.values()];
+    state.pending.clear();
+    await Promise.all(
+      pending.map((payload) =>
+        persistPlayProgressSave(state, lastSaveTimeRef, payload),
+      ),
+    );
+    return;
+  }
+  if (state.inFlight) return;
+  state.inFlight = true;
   try {
-    await persistPlayProgressSave(saveStateRef.current, payload);
-  } finally {
-    saveStateRef.current.inFlight = false;
-
-    const pending = saveStateRef.current.pending;
-    saveStateRef.current.pending = null;
-
-    if (
-      pending &&
-      pending.fingerprint !== saveStateRef.current.lastSavedFingerprint
-    ) {
-      await flushPlayProgressSave(saveStateRef, lastSaveTimeRef, pending);
+    for (const [key, payload] of state.pending) {
+      state.pending.delete(key);
+      await persistPlayProgressSave(state, lastSaveTimeRef, payload);
     }
+  } finally {
+    state.inFlight = false;
   }
 }
 
@@ -138,19 +166,19 @@ export async function saveCurrentPlayProgress(
   lastSaveTimeRef: MutableRefObject<number>,
   searchTitle: string,
   immediate = false,
+  leavingForNext = false,
 ) {
+  const state = saveStateRef.current;
   if (
     !artPlayerRef.current ||
     !currentSourceRef.current ||
     !currentIdRef.current ||
     !videoTitleRef.current ||
-    !detailRef.current?.source_name
+    !detailRef.current?.source_name ||
+    // 目标集尚未真正起播前，禁止把上一集的时间写进当前集记录。
+    clearTargetEpisodeProgressRef.current
   ) {
-    return;
-  }
-
-  // 目标集尚未真正起播前，禁止把上一集的时间写进当前集记录。
-  if (clearTargetEpisodeProgressRef.current) {
+    if (immediate) await flushPendingPlayProgress(state, lastSaveTimeRef, true);
     return;
   }
 
@@ -163,6 +191,7 @@ export async function saveCurrentPlayProgress(
 
   // 播放时间太短或视频时长无效，不保存
   if (!hasMeaningfulPlaybackTime(currentTime) || !duration) {
+    if (immediate) await flushPendingPlayProgress(state, lastSaveTimeRef, true);
     return;
   }
 
@@ -191,11 +220,21 @@ export async function saveCurrentPlayProgress(
           ...(groupLabel ? { group_label: groupLabel } : {}),
         }
       : {}),
-    play_time: Math.floor(currentTime),
+    play_time: Math.floor(
+      leavingForNext && isFinishedWhenLeavingForNext(currentTime, duration)
+        ? duration
+        : currentTime,
+    ),
     total_time: Math.floor(duration),
     save_time: Date.now(),
     search_title: searchTitle,
   };
+  const episodeKey = buildEpisodeProgressKeys(detailRef.current)[
+    currentEpisodeIndexRef.current
+  ];
+  if (episodeKey && record.play_time >= MIN_WATCHED_SECONDS) {
+    record.episode_key = episodeKey;
+  }
 
   const fingerprint = buildPlayProgressFingerprint(
     currentSourceRef.current,
@@ -203,11 +242,21 @@ export async function saveCurrentPlayProgress(
     record,
   );
 
-  if (fingerprint === saveStateRef.current.lastSavedFingerprint) {
+  const key = `${generateStorageKey(currentSourceRef.current, currentIdRef.current)}|${record.index}`;
+  if (fingerprint === state.lastSavedFingerprint && !state.pending.has(key)) {
+    if (immediate) await flushPendingPlayProgress(state, lastSaveTimeRef, true);
     return;
   }
 
-  const state = saveStateRef.current;
+  // 并发补写同一集时按采样时间取最新，避免同一毫秒内的两个快照平局。
+  record.save_time = state.lastSnapshotTime = Math.max(
+    record.save_time,
+    (state.lastSnapshotTime ?? 0) + 1,
+  );
+  const episodeEntry =
+    record.episode_key &&
+    createEpisodeProgressEntry(record.episode_key, record);
+  if (episodeEntry) state.onEpisodeProgress?.(episodeEntry);
   state.sessionId ??=
     typeof globalThis.crypto?.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -215,30 +264,15 @@ export async function saveCurrentPlayProgress(
   record.progress_session_id = state.sessionId;
   record.progress_sequence = state.sequence = (state.sequence ?? 0) + 1;
 
-  const payload = {
+  // 同集仅保留最新快照，并按最新的采样顺序排队。
+  state.pending.delete(key);
+  state.pending.set(key, {
     source: currentSourceRef.current,
     id: currentIdRef.current,
     record,
     fingerprint,
-  };
-  try {
-    if (immediate) {
-      // savePlayRecord 使用 keepalive；退出时直接发出，不等待普通保存队列。
-      saveStateRef.current.pending = null;
-      if (saveStateRef.current.activeFingerprints?.has(fingerprint)) return;
-      lastSaveTimeRef.current = Date.now();
-      await persistPlayProgressSave(saveStateRef.current, payload);
-      return;
-    }
-    if (saveStateRef.current.inFlight) {
-      saveStateRef.current.pending = payload;
-      return;
-    }
-
-    await flushPlayProgressSave(saveStateRef, lastSaveTimeRef, payload);
-  } catch (err) {
-    console.error('保存播放进度失败:', err);
-  }
+  });
+  await flushPendingPlayProgress(state, lastSaveTimeRef, immediate);
 }
 
 // 起播前凭恢复点和已拿到的播放记录预判续播的集，取舍规则与 initFromHistory 一致
@@ -367,6 +401,8 @@ interface UsePlayProgressParams {
   detail: SearchResult | null;
   setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>;
   onRestoreEpisodeChange?: () => void;
+  // 起播恢复读到的当前作品记录（含缺失），供每集进度表复用，避免重复读取
+  onPlayRecordLoaded?: (key: string, record: PlayRecord | undefined) => void;
   cleanupPlayer: () => void;
 }
 
@@ -393,9 +429,14 @@ export function usePlayProgress({
   detail,
   setCurrentEpisodeIndex,
   onRestoreEpisodeChange,
+  onPlayRecordLoaded,
   cleanupPlayer,
 }: UsePlayProgressParams) {
   const searchTitleRef = useRef(searchTitle);
+  const onPlayRecordLoadedRef = useRef(onPlayRecordLoaded);
+  useEffect(() => {
+    onPlayRecordLoadedRef.current = onPlayRecordLoaded;
+  }, [onPlayRecordLoaded]);
   const restoreAppliedKeyRef = useRef('');
 
   useEffect(() => {
@@ -403,7 +444,7 @@ export function usePlayProgress({
   }, [searchTitle]);
 
   const doSave = useCallback(
-    async (immediate = false) => {
+    async (immediate = false, leavingForNext = false) => {
       if (
         isProgressWriteBlocked(
           historyRestoreGateRef.current,
@@ -413,6 +454,13 @@ export function usePlayProgress({
           stableCurrentTimeRef,
         )
       ) {
+        if (immediate) {
+          await flushPendingPlayProgress(
+            saveStateRef.current,
+            lastSaveTimeRef,
+            true,
+          );
+        }
         return;
       }
       await saveCurrentPlayProgress(
@@ -428,6 +476,7 @@ export function usePlayProgress({
         lastSaveTimeRef,
         searchTitleRef.current,
         immediate,
+        leavingForNext,
       );
     },
     [
@@ -501,8 +550,6 @@ export function usePlayProgress({
   }, [saveIntervalRef]);
 
   useEffect(() => {
-    // 切换到新视频时丢弃旧请求的排队状态，避免旧进度回写到新条目。
-    saveStateRef.current.pending = null;
     saveStateRef.current.lastSavedFingerprint = null;
   }, [currentSource, currentId, saveStateRef]);
 
@@ -611,6 +658,7 @@ export function usePlayProgress({
         allRecords: Record<string, PlayRecord>,
         historyOnly: boolean,
       ) => {
+        onPlayRecordLoadedRef.current?.(key, allRecords[key]);
         const record = isPlayRecordCompatibleWithDetail(
           allRecords[key],
           activeDetail,
@@ -673,6 +721,8 @@ export function usePlayProgress({
 
         const activeEpisodeIndex = currentEpisodeIndexRef.current;
         if (player && targetTime > 0 && targetIndex === activeEpisodeIndex) {
+          // 记录停在已看完的结尾，已从头起播的这集照常播放
+          if (isFinishedResumeTarget(targetTime, player.duration)) return;
           try {
             if (applyResumeTime(player, targetTime)) {
               allowAutoResumeRef.current = false;
@@ -713,6 +763,9 @@ export function usePlayProgress({
           if (disposed) return;
           if (isNewerPlayRecord(freshRecords[key], initialRecords[key])) {
             applyRecords(freshRecords, true);
+          } else {
+            // 保存时间相同的缓存可能缺服务端并入的他源每集进度，进度表仍要合并网络结果
+            onPlayRecordLoadedRef.current?.(key, freshRecords[key]);
           }
         }
       } catch (err) {

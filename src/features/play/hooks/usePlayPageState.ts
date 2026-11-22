@@ -197,7 +197,7 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const lastSaveTimeRef = useRef<number>(0);
   const playProgressSaveStateRef = useRef<PlayProgressSaveState>({
     inFlight: false,
-    pending: null,
+    pending: new Map(),
     lastSavedFingerprint: null,
   });
   const historyRestoreGateRef = useRef<HistoryRestoreGate>({

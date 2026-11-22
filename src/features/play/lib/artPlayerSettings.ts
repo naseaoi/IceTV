@@ -127,12 +127,10 @@ export function createArtPlayerSettings({
       html: '跳过片头片尾',
       switch: skipConfigRef.current.enable,
       onSwitch: function (item: { switch?: boolean }) {
-        const newConfig = {
-          ...skipConfigRef.current,
-          enable: !item.switch,
-        };
-        handleSkipConfigChange(newConfig);
-        return !item.switch;
+        // handleSkipConfigChange 会同步 setting.update 改写 item.switch，返回值必须先取
+        const enable = !item.switch;
+        handleSkipConfigChange({ ...skipConfigRef.current, enable });
+        return enable;
       },
     },
     {
@@ -193,11 +191,25 @@ export function createArtPlayerSettings({
   ];
 }
 
+export const NEXT_EPISODE_CONTROL_NAME = 'nextEpisode';
+
+// 单集与末集没有下一集，隐藏按钮而不是留一个点了没反应的入口
+export function syncNextEpisodeControl(
+  player: Artplayer,
+  hasNextEpisode: boolean,
+) {
+  const control = (
+    player.controls as unknown as Record<string, HTMLElement | undefined>
+  )[NEXT_EPISODE_CONTROL_NAME];
+  if (control) control.style.display = hasNextEpisode ? '' : 'none';
+}
+
 export function createArtPlayerControls({
   handleNextEpisode,
 }: ArtPlayerControlsOptions) {
   return [
     {
+      name: NEXT_EPISODE_CONTROL_NAME,
       position: 'left',
       index: 13,
       html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" fill="currentColor"/></svg></i>',

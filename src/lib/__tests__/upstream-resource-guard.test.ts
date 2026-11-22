@@ -3,6 +3,7 @@
 import type Database from 'better-sqlite3';
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import { requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import {
   ResourceLimitError,
@@ -16,6 +17,10 @@ import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
 import { UPSTREAM_COOLDOWN_POLICY } from '@/lib/upstream-resource-policy';
 
 jest.unmock('@/lib/upstream-resource-guard.server');
+jest.mock('@/lib/api-auth', () => ({
+  requireActiveUser: jest.fn(),
+  isGuardFailure: (result: object) => 'response' in result,
+}));
 installStreamPolyfills();
 
 describe('upstream resources', () => {
@@ -61,6 +66,43 @@ describe('upstream resources', () => {
         headers: retryAfter === undefined ? {} : { 'Retry-After': retryAfter },
       });
     }
+
+    it.each([429, 503])(
+      'does not cool down other probes after a local %s',
+      async (status) => {
+        const { NextRequest } =
+          require('next/server') as typeof import('next/server');
+        const { withSourceProbeBudget } =
+          await import('@/features/play/lib/sourceProbeGuard.server');
+        jest.spyOn(db, 'getSharedResourceStore').mockResolvedValue(store);
+        const extend = jest.spyOn(store, 'extendCooldown');
+        const headers = { 'X-IceTV-Probe': '1' };
+        jest
+          .mocked(requireActiveUser)
+          .mockResolvedValueOnce({
+            username: 'viewer',
+            role: 'user',
+            isOwner: false,
+          })
+          .mockResolvedValueOnce({
+            username: 'another-viewer',
+            role: 'user',
+            isOwner: false,
+          });
+        const response = await withSourceProbeBudget(
+          new NextRequest('https://icetv.example/api/detail', { headers }),
+          async () => limited(status, '300'),
+        );
+        const next = await withSourceProbeBudget(
+          new NextRequest('https://icetv.example/api/episode-url', { headers }),
+          async () => new Response(null, { status: 204 }),
+        );
+        expect(next.status).toBe(204);
+        expect(response.status).toBe(status);
+        expect(response.headers.get('retry-after')).toBe('300');
+        expect(extend).not.toHaveBeenCalled();
+      },
+    );
 
     it('cancels the triggering body, releases leases and refuses before any admission', async () => {
       const cancel = jest.fn().mockRejectedValue(new Error('cancel failed'));

@@ -24,6 +24,10 @@ import {
 } from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import SkeletonText from '@/components/SkeletonText';
+import {
+  EpisodeProgressMark,
+  getEpisodeProgressLabel,
+} from '@/features/play/components/EpisodeSelector/EpisodeProgressMark';
 import { EpisodesTab } from '@/features/play/components/EpisodeSelector/EpisodesTab';
 import type { InfoRating } from '@/features/play/components/EpisodeSelector/InfoTab';
 import {
@@ -36,6 +40,7 @@ import { SectionTitle } from '@/features/play/components/EpisodeSelector/Section
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 import { useDoubanRating } from '@/features/play/hooks/useDoubanRating';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
+import type { EpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import { useVideoReviews } from '@/features/reviews/hooks/useVideoReviews';
 import { MOBILE_QUERY } from '@/hooks/useIsMobileViewport';
 import {
@@ -242,6 +247,8 @@ interface EpisodeSelectorProps {
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
   /** 递增时打开换源面板（播放失败提示里的「选择其他源」） */
   openSourcesRequest?: number;
+  /** 每集观看进度，下标为集索引 */
+  episodeProgress?: (EpisodeProgressView | null)[];
 }
 
 type MobileSheetKey = 'episodes' | 'sources' | 'danmaku' | 'reviews';
@@ -258,6 +265,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   onSourceChange,
   currentSource,
   currentId,
+  episodeProgress,
   videoTitle,
   searchKeyword,
   availableSources = [],
@@ -417,6 +425,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         afterSelect?.();
       }}
       episodeGroups={detail?.episode_groups}
+      episodeProgress={episodeProgress}
       variantSources={variantSources}
       currentSource={currentSource}
       currentId={currentId}
@@ -568,19 +577,25 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           <div className='scrollbar-hide -mx-4 mt-2 flex scroll-px-4 gap-2 overflow-x-auto px-4 pb-1'>
             {stripEpisodes.map((episodeNumber) => {
               const active = episodeNumber === value;
+              const progress = episodeProgress?.[episodeNumber - 1];
+              const progressLabel = getEpisodeProgressLabel(progress);
               return (
                 <button
                   key={episodeNumber}
                   type='button'
                   aria-current={active ? 'true' : undefined}
-                  className={`h-10 min-w-[44px] shrink-0 rounded-lg px-2 text-sm font-medium tabular-nums transition-colors ${
+                  className={`relative h-10 min-w-[44px] shrink-0 overflow-hidden rounded-lg px-2 text-sm font-medium tabular-nums transition-colors ${
                     active
                       ? 'bg-brand-600 text-white'
                       : 'bg-gray-900/[0.05] text-gray-700 dark:bg-white/[0.06] dark:text-gray-200'
                   }`}
-                  onClick={() => onChange?.(episodeNumber)}
+                  onClick={() => onChange?.(episodeNumber - 1)}
                 >
-                  {episodeNumber}
+                  <EpisodeProgressMark progress={progress} active={active} />
+                  <span className='relative'>{episodeNumber}</span>
+                  {progressLabel && (
+                    <span className='sr-only'>{progressLabel}</span>
+                  )}
                 </button>
               );
             })}

@@ -1,6 +1,7 @@
 import {
   deleteFavorite,
   getAllFavorites,
+  getFreshSkipConfig,
   getSkipConfig,
   isFavorited,
   readPlayRecordsForPlayback,
@@ -279,6 +280,30 @@ it('收藏按键存在判断、跳过配置按 source/id 读取，局部结果�
   );
   expect(cacheManager.getCachedFavorites()).toBeNull();
   expect(cacheManager.getCachedSkipConfigs()).toBeNull();
+});
+
+it('换源确认等待服务端返回，不把过期跳过配置当成已保存', async () => {
+  const cached = { 's+1': { enable: true, intro_time: 12, outro_time: 0 } };
+  cacheManager.cacheSkipConfigs(cached);
+  const pending = deferred();
+  global.fetch = jest.fn().mockReturnValue(pending.response);
+  const { signal } = new AbortController();
+  const read = getFreshSkipConfig('s', '1', signal);
+  expect(global.fetch).toHaveBeenCalledWith('/api/skipconfigs?source=s&id=1', {
+    signal,
+  });
+  pending.resolve(null);
+  await expect(read).resolves.toBeNull();
+});
+
+it('换源确认请求失败时拒绝，不回落到缓存或无配置', async () => {
+  cacheManager.cacheSkipConfigs({
+    's+1': { enable: true, intro_time: 12, outro_time: 0 },
+  });
+  global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500 });
+  await expect(
+    getFreshSkipConfig('s', '1', new AbortController().signal),
+  ).rejects.toMatchObject({ status: 500 });
 });
 
 it('全量 cache-first 后台刷新合并且结束后允许再次刷新', async () => {

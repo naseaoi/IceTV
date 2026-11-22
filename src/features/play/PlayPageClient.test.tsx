@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type Artplayer from 'artplayer';
 import type { ComponentProps, ReactNode } from 'react';
 
@@ -10,17 +10,20 @@ import type {
 } from '@/features/play/hooks/usePlayInit';
 import type { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import type { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { fetchCompletion } from '@/features/play/lib/completion-client';
 import {
   holdBackgroundSourceProbes,
   releaseBackgroundSourceProbes,
 } from '@/features/play/lib/sourceProbeStore';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { PlayPageClient } from '@/features/play/PlayPageClient';
+import { deduplicatePlayRecords } from '@/lib/db.client';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
 
 type PlayInitParams = Parameters<typeof usePlayInit>[0];
 type ArtPlayerParams = Parameters<typeof useArtPlayer>[0];
+type LazyResolveOptions = { signal?: AbortSignal; forceRefresh?: boolean };
 type SourceSwitchParams = Parameters<typeof useSourceSwitch>[0];
 type MainContentProps = ComponentProps<typeof PlayMainContent>;
 
@@ -83,7 +86,7 @@ const mockPendingLazyResolutions = new Map<
   { resolve: (url: string) => void; reject: (error: unknown) => void }
 >();
 const mockResolveLazyEpisodeUrl = jest.fn(
-  (_source: string, lazyUrl: string, _options?: { signal?: AbortSignal }) =>
+  (_source: string, lazyUrl: string, _options?: LazyResolveOptions) =>
     new Promise<string>((resolve, reject) => {
       mockPendingLazyResolutions.set(lazyUrl, { resolve, reject });
     }),
@@ -102,6 +105,13 @@ jest.mock('@/components/AuthenticatedRoute', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
+
+jest.mock(
+  '@/features/play/components/EpisodeSelector/FollowedOpinions',
+  () => ({
+    useFollowedOpinions: () => null,
+  }),
+);
 
 jest.mock('@/features/play/components/PlayMainContent', () => ({
   PlayMainContent: (props: MainContentProps) => mockPlayMainContent(props),
@@ -167,6 +177,16 @@ jest.mock('@/features/play/hooks/useSourceSwitch', () => ({
   useSourceSwitch: (params: SourceSwitchParams) => mockUseSourceSwitch(params),
 }));
 
+jest.mock('@/features/play/lib/completion-client', () => ({
+  fetchCompletion: jest.fn(),
+  markCompletionCelebrated: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('@/lib/video-reviews.client', () => ({
+  fetchMyVideoReview: jest.fn().mockResolvedValue(null),
+  saveVideoReview: jest.fn(),
+}));
+
 jest.mock('@/features/play/lib/danmaku/attach', () => ({
   applyDanmakuHeatmapVisibility: jest.fn(),
   ensureDanmakuLoaded: jest.fn(),
@@ -184,7 +204,7 @@ jest.mock('@/features/play/lib/lazyEpisode', () => ({
   resolveLazyEpisodeUrl: (
     source: string,
     lazyUrl: string,
-    options?: { signal?: AbortSignal },
+    options?: LazyResolveOptions,
   ) => mockResolveLazyEpisodeUrl(source, lazyUrl, options),
 }));
 
@@ -213,6 +233,11 @@ jest.mock('@/hooks/useBackNavigation', () => ({
 
 jest.mock('@/hooks/usePlayerKeyboard', () => ({
   usePlayerKeyboard: jest.fn(),
+}));
+
+jest.mock('@/lib/db.client', () => ({
+  ...jest.requireActual('@/lib/db.client'),
+  deduplicatePlayRecords: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('@/lib/player-runtime', () => ({
@@ -332,6 +357,49 @@ describe('PlayPageClient', () => {
     expect(
       mockSourceSwitch.handleEpisodeUrlResolveFailed,
     ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://cdn.example/fresh.m3u8',
+    'https://cdn.example/rejected.m3u8',
+  ])(
+    'refreshes a cached lazy URL only once per playback intent and reloads %s',
+    async (freshUrl) => {
+      const rejectedUrl = 'https://cdn.example/rejected.m3u8';
+      mockPeekResolvedLazyEpisodeUrl.mockReturnValueOnce(rejectedUrl);
+      renderLoadedPage();
+      const forbidden = lastArg(mockUseArtPlayer).onPlaybackUrlForbidden!;
+      const signal = new AbortController().signal;
+      const refresh = forbidden(rejectedUrl, signal);
+      expect(mockResolveLazyEpisodeUrl).toHaveBeenCalledWith(
+        LAZY_DETAIL.source,
+        LAZY_EPISODES[0],
+        expect.objectContaining({ forceRefresh: true }),
+      );
+      expect(forbidden(rejectedUrl, signal)).toBeUndefined();
+      await settleLazyEpisode(LAZY_EPISODES[0], freshUrl);
+      await expect(refresh).resolves.toBe(true);
+      expect(latestVideoUrl()).toBe(freshUrl);
+      expect(mockSourceSwitch.restartCurrentPlayback).toHaveBeenCalledTimes(1);
+      expect(forbidden(freshUrl, signal)).toBeUndefined();
+    },
+  );
+
+  it('does not force-resolve a direct URL or apply a refresh after switching episodes', async () => {
+    const rejectedUrl = 'https://cdn.example/rejected.m3u8';
+    mockPeekResolvedLazyEpisodeUrl.mockReturnValueOnce(rejectedUrl);
+    renderLoadedPage();
+    const forbidden = lastArg(mockUseArtPlayer).onPlaybackUrlForbidden!;
+    const signal = new AbortController().signal;
+    expect(
+      forbidden('https://cdn.example/direct.m3u8', signal),
+    ).toBeUndefined();
+    const refresh = forbidden(rejectedUrl, signal);
+    switchToEpisode(1);
+    await settleLazyEpisode(LAZY_EPISODES[0], 'https://cdn.example/stale.m3u8');
+    await expect(refresh).resolves.toBe(true);
+    expect(latestVideoUrl()).not.toBe('https://cdn.example/stale.m3u8');
+    expect(mockSourceSwitch.restartCurrentPlayback).not.toHaveBeenCalled();
   });
 
   it('普通详情等待不创建预算，懒解析开始登记源尝试且解析完成保留起点', async () => {
@@ -591,6 +659,42 @@ describe('PlayPageClient', () => {
     expect(mockClearFragmentMemoryCache).toHaveBeenCalledTimes(1);
   });
 
+  it.each([true, false])(
+    '完结汇总确认已展示=%s 后才决定是否退出全屏',
+    async (celebrated) => {
+      jest.useFakeTimers();
+      try {
+        renderLoadedPage();
+        const { artPlayerRef, onLastEpisodeEnded } = lastArg(mockUseArtPlayer);
+        const player = { fullscreen: true, fullscreenWeb: true };
+        artPlayerRef.current = player as unknown as Artplayer;
+        jest.mocked(fetchCompletion).mockResolvedValueOnce({
+          title: LAZY_DETAIL.title,
+          year: LAZY_DETAIL.year!,
+          cover: '',
+          episodes: 3,
+          totalWatchSeconds: 1200,
+          firstWatchedAt: null,
+          completedAt: Date.now(),
+          celebrated,
+        });
+        act(() => onLastEpisodeEnded?.());
+        const fullscreenBeforeSummary = player.fullscreen;
+        const webFullscreenBeforeSummary = player.fullscreenWeb;
+        await act(async () => jest.advanceTimersByTime(1200));
+        expect(player.fullscreen).toBe(celebrated);
+        expect(player.fullscreenWeb).toBe(celebrated);
+        expect(fullscreenBeforeSummary).toBe(true);
+        expect(webFullscreenBeforeSummary).toBe(true);
+        if (celebrated)
+          expect(screen.queryByText('看完了')).not.toBeInTheDocument();
+        else expect(screen.getByText('看完了')).toBeInTheDocument();
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
   it('清理播放器时先退出网页全屏再销毁', () => {
     renderLoadedPage();
     const { artPlayerRef, cleanupPlayer } = lastArg(mockUseArtPlayer);
@@ -608,4 +712,103 @@ describe('PlayPageClient', () => {
     expect(fullscreenWebOnDestroy).toEqual([false]);
     expect(artPlayerRef.current).toBeNull();
   });
+});
+
+it('A 换 B 再回 A 时，已去重的记录键仍合并另一源新增的集进度', async () => {
+  renderLoadedPage();
+  const { currentSourceRef, currentIdRef, pendingSourceSwitchCleanupRef } =
+    latestSourceSwitch();
+  const { saveStateRef } = lastArg(mockUsePlayProgress);
+  const deduplicate = jest.mocked(deduplicatePlayRecords);
+  deduplicate.mockClear();
+  const saved = () =>
+    saveStateRef.current.onSaved?.(
+      currentSourceRef.current,
+      currentIdRef.current,
+    );
+  const switchSource = (source: string, id: string) => {
+    pendingSourceSwitchCleanupRef.current = {
+      previousSource: currentSourceRef.current,
+      previousId: currentIdRef.current,
+      nextSource: source,
+      nextId: id,
+      skipConfigCleanupReady: Promise.resolve(true),
+    };
+    currentSourceRef.current = source;
+    currentIdRef.current = id;
+  };
+
+  await act(async () => {
+    await saved();
+    switchSource('next', 'next-id');
+    await saved();
+    switchSource('giri', 'giri-id');
+    await saved();
+  });
+  expect(deduplicate.mock.calls.map(([keepKey]) => keepKey)).toEqual([
+    'giri+giri-id',
+    'next+next-id',
+    'giri+giri-id',
+  ]);
+});
+
+it('常规保存每个记录键只去重一次，并保留换源任务指定的旧记录', async () => {
+  renderLoadedPage();
+  const { currentSourceRef, currentIdRef, pendingSourceSwitchCleanupRef } =
+    latestSourceSwitch();
+  const { saveStateRef } = lastArg(mockUsePlayProgress);
+  const deduplicate = jest.mocked(deduplicatePlayRecords);
+  deduplicate.mockClear();
+  const error = new Error('offline');
+  deduplicate.mockRejectedValueOnce(error);
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const saved = (source: string, id: string) =>
+      saveStateRef.current.onSaved?.(source, id);
+    await saved('stale', 'stale-id');
+    expect(deduplicate).not.toHaveBeenCalled();
+    await saved('giri', 'giri-id');
+    await saved('giri', 'giri-id');
+    expect(log).toHaveBeenCalledWith('播放记录去重失败', error);
+    expect(deduplicate).toHaveBeenCalledTimes(1);
+
+    currentSourceRef.current = 'next';
+    currentIdRef.current = 'next-id';
+    pendingSourceSwitchCleanupRef.current = {
+      previousSource: 'giri',
+      previousId: 'giri-id',
+      nextSource: 'next',
+      nextId: 'next-id',
+      keepPreviousPlayRecord: true,
+      skipConfigCleanupReady: Promise.resolve(true),
+    };
+    mockSourceSwitch.finalizePendingSourceSwitchCleanup.mockImplementationOnce(
+      () => {
+        pendingSourceSwitchCleanupRef.current = null;
+      },
+    );
+    await act(async () => {
+      await saved('next', 'next-id');
+      await saved('next', 'next-id');
+    });
+    expect(deduplicate).toHaveBeenCalledTimes(2);
+    expect(deduplicate).toHaveBeenNthCalledWith(
+      1,
+      'giri+giri-id',
+      undefined,
+      expect.any(Function),
+    );
+    expect(deduplicate).toHaveBeenNthCalledWith(
+      2,
+      'next+next-id',
+      'giri+giri-id',
+      expect.any(Function),
+    );
+    expect(deduplicate.mock.calls[0]?.[2]?.()).toBe(false);
+    expect(
+      mockSourceSwitch.finalizePendingSourceSwitchCleanup,
+    ).toHaveBeenCalledWith('next', 'next-id');
+  } finally {
+    log.mockRestore();
+  }
 });

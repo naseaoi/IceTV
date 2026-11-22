@@ -55,7 +55,7 @@ function SearchHistoryDropdown({
     >
       <ul
         ref={containerRef}
-        className={`relative ${expanded ? 'max-h-80 overflow-y-auto' : ''}`}
+        className={`relative ${expanded ? 'max-h-80 overflow-y-auto overscroll-contain' : ''}`}
       >
         {visible.map((item) => (
           <li

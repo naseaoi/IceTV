@@ -49,6 +49,11 @@ function getLabelWithoutEpisodeCount({
     : null;
 }
 
+// 组标签可能带随上游更新变化的集数（如「繁中 12」），作为身份时去掉
+export function getEpisodeGroupIdentityLabel(group: EpisodeGroup): string {
+  return getLabelWithoutEpisodeCount(group) ?? normalizeGroupLabel(group.label);
+}
+
 export function areEpisodeGroupLabelsEquivalent(
   previous: EpisodeGroupLabelIdentity,
   next: EpisodeGroupLabelIdentity,

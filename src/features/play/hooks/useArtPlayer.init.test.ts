@@ -85,6 +85,7 @@ class MockArtplayer {
   static instances: MockArtplayer[] = [];
 
   video = document.createElement('video');
+  template = { $player: document.createElement('div') };
   url: string;
   title = '';
   playing = false;
@@ -145,6 +146,7 @@ jest.mock('@/features/play/lib/artPlayerSettings', () => ({
   createArtPlayerContextmenus: () => [],
   createArtPlayerControls: () => [],
   createArtPlayerSettings: () => [],
+  syncNextEpisodeControl: jest.fn(),
 }));
 
 jest.mock('@/features/play/lib/danmaku/attach', () => ({
@@ -261,6 +263,7 @@ async function setupPlayer(params = createParams()) {
     playerMediaKindRef: { current: null },
     sessionEpisodeIndexRef: { current: null },
     playbackRouteRef: { current: null },
+    resumePromptHandledRef: { current: false },
     isCancelled: () => false,
   });
   expect(params.setError).not.toHaveBeenCalledWith('播放器初始化失败');
@@ -274,6 +277,16 @@ async function setupPlayer(params = createParams()) {
   }
   const hls = getManagedVideo(video).hls as unknown as MockHls;
   return { params, player, video, hls, loadingSessionRef };
+}
+
+function findPromptButton(player: MockArtplayer, label: string) {
+  const button = Array.from(
+    player.template.$player.querySelectorAll<HTMLButtonElement>(
+      '.ice-player-prompt button',
+    ),
+  ).find((item) => item.textContent === label);
+  if (!button) throw new Error(`未找到提示按钮：${label}`);
+  return button;
 }
 
 // 首帧已就绪但尚未播放，满足起播条件
@@ -444,6 +457,132 @@ describe('initializeArtPlayer 拉流控制', () => {
       expect(params.handleNextEpisode).not.toHaveBeenCalled();
     },
   );
+
+  it('自动跳过片头后，拖回片头重看不再被跳走', async () => {
+    const params = createParams();
+    params.skipConfigRef.current = {
+      enable: true,
+      intro_time: 90,
+      outro_time: 0,
+    };
+    const { player } = await setupPlayer(params);
+    player.duration = 1400;
+    player.currentTime = 10;
+    player.emit('video:timeupdate');
+    expect(player.currentTime).toBe(90);
+
+    jest.advanceTimersByTime(2000);
+    player.currentTime = 10;
+    player.emit('video:timeupdate');
+    expect(player.currentTime).toBe(10);
+
+    // 换集后播放器上暂留上一集的时间，不能当作新一集已越过片头
+    player.option.url = EPISODE_2;
+    player.currentTime = 1200;
+    jest.advanceTimersByTime(2000);
+    player.emit('video:timeupdate');
+    player.currentTime = 0;
+    jest.advanceTimersByTime(2000);
+    player.emit('video:timeupdate');
+    expect(player.currentTime).toBe(90);
+  });
+
+  it('临近片末显示连播倒计时，立即播放直接切到下一集', async () => {
+    const params = createParams();
+    params.autoPlayNextEnabledRef.current = true;
+    const { player } = await setupPlayer(params);
+    player.emit('video:playing');
+    player.duration = 1400;
+    player.currentTime = 1392.5;
+    player.emit('video:timeupdate');
+    const prompt = player.template.$player.querySelector('.ice-player-prompt');
+    expect(prompt?.textContent).toContain('下一集 · 8 秒后播放');
+
+    player.currentTime = 1395.5;
+    player.emit('video:timeupdate');
+    expect(prompt?.textContent).toContain('5 秒后播放');
+
+    findPromptButton(player, '立即播放').click();
+    expect(params.handleNextEpisode).toHaveBeenCalledTimes(1);
+    expect(player.template.$player.querySelector('.ice-player-prompt')).toBe(
+      null,
+    );
+  });
+
+  it('取消连播倒计时后本集播完不再自动切集', async () => {
+    const params = createParams();
+    params.autoPlayNextEnabledRef.current = true;
+    const { player } = await setupPlayer(params);
+    player.emit('video:playing');
+    player.duration = 1400;
+    player.currentTime = 1395;
+    player.emit('video:timeupdate');
+    findPromptButton(player, '取消').click();
+    expect(player.template.$player.querySelector('.ice-player-prompt')).toBe(
+      null,
+    );
+
+    player.currentTime = 1399.8;
+    player.emit('video:timeupdate');
+    expect(player.template.$player.querySelector('.ice-player-prompt')).toBe(
+      null,
+    );
+    player.emit('video:ended');
+    expect(params.handleNextEpisode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['起播时已知时长', true],
+    ['时长晚于首次定位才知道', false],
+  ])('续播点已在结尾时从头播：%s', async (_label, durationKnown) => {
+    const params = createParams();
+    params.resumeTimeRef.current = 1398;
+    params.resumeModeRef.current = 'forced';
+    const { player, video, loadingSessionRef } = await setupPlayer(params);
+    makeFirstFrameReady(video);
+    video.play = jest.fn().mockResolvedValue(undefined);
+    if (durationKnown) player.duration = 1400;
+    player.emit('video:loadeddata');
+    if (!durationKnown) {
+      expect(loadingSessionRef.current.pendingInitialResumeTarget).toBe(1398);
+      player.duration = 1400;
+      player.emit('video:progress');
+    }
+    expect(player.currentTime).toBe(0);
+    expect(params.resumeTimeRef.current ?? 0).toBe(0);
+    expect(loadingSessionRef.current.pendingInitialResumeTarget).not.toBe(1398);
+  });
+
+  it('未开连播时自然播完补存进度', async () => {
+    const params = createParams();
+    const { player } = await setupPlayer(params);
+    player.emit('video:playing');
+    player.duration = 1400;
+    player.currentTime = 1400;
+    (params.saveCurrentPlayProgress as jest.Mock).mockClear();
+    player.emit('video:ended');
+    expect(params.saveCurrentPlayProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it('未开连播时片尾只暂停一次，继续播放不再被反复暂停', async () => {
+    const params = createParams();
+    params.skipConfigRef.current = {
+      enable: true,
+      intro_time: 0,
+      outro_time: -60,
+    };
+    const { player } = await setupPlayer(params);
+    player.emit('video:playing');
+    player.duration = 1400;
+    player.currentTime = 1345;
+    player.emit('video:timeupdate');
+    expect(player.pause).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(2000);
+    player.currentTime = 1347;
+    player.emit('video:timeupdate');
+    expect(player.pause).toHaveBeenCalledTimes(1);
+  });
 
   it('统计事件独立于跳片头设置，并屏蔽已释放运行时的迟到采样', async () => {
     const params = createParams();

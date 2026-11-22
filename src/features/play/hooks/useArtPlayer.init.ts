@@ -10,6 +10,8 @@ import {
 } from '@/features/play/lib/artPlayerSettings';
 import {
   isTrustworthyPlaybackEnd,
+  NEXT_EPISODE_COUNTDOWN_SECONDS,
+  resolveNextEpisodeCountdown,
   shouldAutoAdvanceEpisode,
 } from '@/features/play/lib/autoAdvanceEpisode';
 import {
@@ -35,12 +37,14 @@ import {
   shouldDismissLoadingFromCanPlay,
   shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
+import { createPlayerPrompt } from '@/features/play/lib/playerPrompt';
 import {
   clearExplicitPlaybackSeek,
   recordExplicitPlaybackSeek,
 } from '@/features/play/lib/playProgressRestore';
 import {
   applyResumeTime,
+  isFinishedResumeTarget,
   isProgrammaticResumeSeek,
   isWithinAutoResumeWindow,
   resolvePendingResumeTime,
@@ -93,6 +97,12 @@ import {
 } from '@/lib/proxy-modes';
 import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
+// 暂停、切后台、关页、换集都会立即保存，定时保存只兜底异常退出
+const PERIODIC_PROGRESS_SAVE_INTERVAL_MS = 20_000;
+const DOUBLE_TAP_SEEK_SECONDS = 10;
+const RESUME_PROMPT_MIN_SECONDS = 10;
+const RESUME_PROMPT_DURATION_MS = 6_000;
+
 interface UseArtPlayerInitState {
   loadingSessionRef: MutableRefObject<PlayerLoadingSessionState>;
   autoAdvanceArmedRef: MutableRefObject<boolean>;
@@ -100,6 +110,7 @@ interface UseArtPlayerInitState {
   playerMediaKindRef: MutableRefObject<'hls' | 'native' | null>;
   sessionEpisodeIndexRef: MutableRefObject<number | null>;
   playbackRouteRef: MutableRefObject<SourcePlaybackRoute | null>;
+  resumePromptHandledRef: MutableRefObject<boolean>;
   isCancelled: () => boolean;
 }
 
@@ -151,6 +162,7 @@ export async function initializeArtPlayer(
     onSourceProxyFallbackStarted,
     playbackIntentRef,
     onPlaybackRecoveryExhausted,
+    onPlaybackUrlForbidden,
     onCurrentSourceVideoInfo,
     onLastEpisodeEnded,
   } = params;
@@ -161,6 +173,7 @@ export async function initializeArtPlayer(
     playerMediaKindRef,
     sessionEpisodeIndexRef,
     playbackRouteRef,
+    resumePromptHandledRef,
     isCancelled,
   } = state;
 
@@ -371,6 +384,7 @@ export async function initializeArtPlayer(
       onSourceProxyFallbackStarted,
       playbackIntentRef,
       onPlaybackRecoveryExhausted,
+      onPlaybackUrlForbidden,
       onCurrentSourceVideoInfo,
     });
 
@@ -452,7 +466,13 @@ export async function initializeArtPlayer(
 
     playerMediaKindRef.current = mediaKind;
     bindPlayerHoverControls(player);
-    bindPlayerMobileControls(player);
+    bindPlayerMobileControls(player, {
+      doubleTapSeekSeconds: DOUBLE_TAP_SEEK_SECONDS,
+    });
+    const resumePrompt = createPlayerPrompt(player, 'start');
+    const nextEpisodePrompt = createPlayerPrompt(player, 'end');
+    // 用户在本集取消了连播倒计时：片末与片尾点都不再自动切集，片尾也不再被暂停
+    let autoAdvanceCancelledUrl: string | null = null;
     let nativeUseServerProxy = mediaKind === 'native' && preUseProxy;
     const nativeIntent =
       playbackIntentRef?.current ?? createVodPlaybackIntent();
@@ -591,6 +611,7 @@ export async function initializeArtPlayer(
 
     const tryAutoAdvanceEpisode = () => {
       if (isStalePlayerSession()) return false;
+      if (autoAdvanceCancelledUrl === player.option.url) return false;
       const currentDetail = detailRef.current;
       const episodeIndex = currentEpisodeIndexRef.current;
       if (
@@ -605,9 +626,87 @@ export async function initializeArtPlayer(
         return false;
       }
       autoAdvancedRef.current = true;
+      nextEpisodePrompt.hide();
+      resumePrompt.hide();
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
       handleNextEpisode();
       return true;
+    };
+
+    const updateNextEpisodeCountdown = () => {
+      const episodeCount = detailRef.current?.episodes?.length ?? 0;
+      const eligible =
+        autoPlayNextEnabledRef.current &&
+        autoAdvanceArmedRef.current &&
+        !autoAdvancedRef.current &&
+        autoAdvanceCancelledUrl !== player.option.url &&
+        loadingSessionRef.current.pendingInitialResumeTarget === null &&
+        currentEpisodeIndexRef.current < episodeCount - 1;
+      const outroOffset = skipConfigRef.current.enable
+        ? skipConfigRef.current.outro_time
+        : 0;
+      const remaining = eligible
+        ? resolveNextEpisodeCountdown(
+            player.currentTime || 0,
+            player.duration || 0,
+            outroOffset,
+          )
+        : null;
+      if (remaining === null) {
+        nextEpisodePrompt.hide();
+        return;
+      }
+      const text = `下一集 · ${remaining} 秒后播放`;
+      if (nextEpisodePrompt.visible) {
+        nextEpisodePrompt.setText(text);
+        return;
+      }
+      resumePrompt.hide();
+      nextEpisodePrompt.show(text, [
+        {
+          label: '立即播放',
+          primary: true,
+          onClick: () => {
+            nextEpisodePrompt.hide();
+            tryAutoAdvanceEpisode();
+          },
+        },
+        {
+          label: '取消',
+          onClick: () => {
+            autoAdvanceCancelledUrl = player.option.url;
+            nextEpisodePrompt.hide();
+          },
+        },
+      ]);
+    };
+
+    let resumePromptUrl: string | null = null;
+    const showInitialResumePrompt = () => {
+      const resumedAt = player.currentTime || 0;
+      const duration = player.duration || 0;
+      // 续播点已在片末时马上会连播下一集，不提示
+      if (
+        resumedAt < RESUME_PROMPT_MIN_SECONDS ||
+        (duration > 0 && duration - resumedAt <= NEXT_EPISODE_COUNTDOWN_SECONDS)
+      )
+        return;
+      resumePromptUrl = player.option.url;
+      resumePrompt.show(
+        `已从 ${formatTime(resumedAt)} 继续播放`,
+        [
+          {
+            label: '从头播放',
+            primary: true,
+            onClick: () => {
+              resumePrompt.hide();
+              const { enable, intro_time } = skipConfigRef.current;
+              player.currentTime = enable && intro_time > 0 ? intro_time : 0;
+            },
+          },
+        ],
+        RESUME_PROMPT_DURATION_MS,
+      );
     };
 
     const notifyIfLastEpisodeEnded = () => {
@@ -650,6 +749,14 @@ export async function initializeArtPlayer(
       stableCurrentTimeRef.current = 0;
       loadingSessionRef.current.pendingInitialResumeTarget = 0;
       return true;
+    };
+
+    // 续播点已在结尾说明这集看完了，改为从头播；入口的记录、意图与恢复点都不带时长，只能在这里按实际时长判断
+    const restartFinishedResume = () => {
+      resumeTimeRef.current = 0;
+      resumeModeRef.current = 'forced';
+      initialResumeApplied = false;
+      resetPlaybackToStartIfNeeded();
     };
 
     const showSourceSwitchSuccessNotice = () => {
@@ -731,6 +838,7 @@ export async function initializeArtPlayer(
       // 换源开始或逐集解析停旧集时运行时已释放，视频上仍是被放弃的旧地址，它的就绪和起播不能当作本次加载完成
       getVodRuntimeSourceUrl(player.video as HTMLVideoElement) === null;
 
+    let initialResumeApplied = false;
     const finishInitialLoading = (playing = false) => {
       if (isStalePlayerSession()) {
         return;
@@ -746,10 +854,20 @@ export async function initializeArtPlayer(
       reportPlayerRouteStarted();
       if (!firstStart) return;
 
+      // 进入页面后的首次起播与切集续播时提示；去广告重建、换源各自有提示或无需提示。
+      // 复用播放器换集时续播点在 loadedmetadata 落地，不经过 initialResumeApplied，按起播位置判断
+      const showResumePrompt =
+        playbackRequestModeRef.current === 'episode' ||
+        (!resumePromptHandledRef.current &&
+          initialResumeApplied &&
+          playbackRequestModeRef.current === 'initial');
+      resumePromptHandledRef.current = true;
+      initialResumeApplied = false;
       resumeTimeRef.current = null;
       resumeModeRef.current = null;
       autoAdvanceArmedRef.current = true;
       notifyPlayerPlaybackStarted();
+      if (showResumePrompt) showInitialResumePrompt();
     };
 
     let initialPlaybackRequestInFlight = false;
@@ -798,7 +916,21 @@ export async function initializeArtPlayer(
         : null,
     }));
 
+    // 时长未知时登记的落点要等时长到位再判断是否已在结尾；hls 会直接从该位置起载，
+    // 必须先于“已到达”检查，否则落在结尾也会被当成续播成功
+    const restartIfPendingResumeFinished = () => {
+      if (
+        isFinishedResumeTarget(
+          loadingSessionRef.current.pendingInitialResumeTarget,
+          player.duration,
+        )
+      ) {
+        restartFinishedResume();
+      }
+    };
+
     const completePendingResumeIfReady = () => {
+      restartIfPendingResumeFinished();
       if (
         !hasReachedResumeTarget(
           player.currentTime || 0,
@@ -814,6 +946,7 @@ export async function initializeArtPlayer(
     };
 
     const retryPendingResumePosition = () => {
+      restartIfPendingResumeFinished();
       const target = loadingSessionRef.current.pendingInitialResumeTarget;
       if (!Number.isFinite(target) || (target ?? 0) <= 0) {
         return false;
@@ -869,9 +1002,17 @@ export async function initializeArtPlayer(
         resumeMode: resumeModeRef.current,
         allowAutoResume: allowAutoResumeRef.current,
       });
-
-      if (pendingResumeTime !== null) {
+      if (
+        pendingResumeTime !== null &&
+        isFinishedResumeTarget(pendingResumeTime, player.duration)
+      ) {
+        restartFinishedResume();
+        appliedResumeTarget = 0;
+        intendedResumeTarget = 0;
+      } else if (pendingResumeTime !== null) {
         intendedResumeTarget = pendingResumeTime;
+        // 落点可能要等后续重试 seek 才到达，起播时再按实际位置决定是否提示
+        initialResumeApplied = pendingResumeTime > 0;
         try {
           const safeResumeTarget = resolveResumeTimeTarget(
             pendingResumeTime,
@@ -1005,6 +1146,16 @@ export async function initializeArtPlayer(
 
     player.on('video:ended', () => {
       if (isStalePlayerSession()) return;
+      // 从结尾的续播点起载会立刻播完，这不是看完而是该从头播
+      if (
+        isFinishedResumeTarget(
+          loadingSessionRef.current.pendingInitialResumeTarget,
+          player.duration,
+        )
+      ) {
+        restartFinishedResume();
+        return;
+      }
       void releaseWakeLock();
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('ended');
       setIsPlaying(false);
@@ -1018,7 +1169,10 @@ export async function initializeArtPlayer(
         console.warn('忽略异常提前触发的播放结束事件');
         return;
       }
-      if (!tryAutoAdvanceEpisode()) notifyIfLastEpisodeEnded();
+      if (tryAutoAdvanceEpisode()) return;
+      // 自然播完不触发 Artplayer 的 pause，不补存的话记录停在最后一次定时保存，这集不算看完
+      saveCurrentPlayProgress();
+      notifyIfLastEpisodeEnded();
     });
 
     if (player.playing) {
@@ -1070,6 +1224,8 @@ export async function initializeArtPlayer(
     player.on('video:loadeddata', finishInitialLoadingIfMediaReady);
     player.on('video:progress', finishInitialLoadingIfMediaReady);
 
+    let introSettledUrl: string | null = null;
+    let outroSettledUrl: string | null = null;
     player.on('video:timeupdate', () => {
       if (isStalePlayerSession()) return;
       handlePlaybackStatsEvent?.('timeupdate');
@@ -1106,6 +1262,10 @@ export async function initializeArtPlayer(
         }
       }
 
+      if (resumePrompt.visible && resumePromptUrl !== player.option.url)
+        resumePrompt.hide();
+      updateNextEpisodeCountdown();
+
       if (!skipConfigRef.current.enable) {
         return;
       }
@@ -1119,19 +1279,32 @@ export async function initializeArtPlayer(
       }
       lastSkipCheckRef.current = now;
 
-      if (
-        skipConfigRef.current.intro_time > 0 &&
-        skipCurrentTime < skipConfigRef.current.intro_time
-      ) {
-        player.currentTime = skipConfigRef.current.intro_time;
-        player.notice.show = `已跳过片头 (${formatTime(skipConfigRef.current.intro_time)})`;
+      // 每集只自动跳一次片头：跳过后或本集起播后已越过片头，用户拖回片头重看不再被弹走。
+      // 换集初期播放器上可能还是上一集的时间，起播确认前不据此判定已越过。
+      const introTime = skipConfigRef.current.intro_time;
+      const episodeUrl = player.option.url;
+      if (introTime > 0 && introSettledUrl !== episodeUrl) {
+        if (skipCurrentTime < introTime) {
+          player.currentTime = introTime;
+          player.notice.show = `已跳过片头 (${formatTime(introTime)})`;
+          introSettledUrl = episodeUrl;
+        } else if (
+          loadingSessionRef.current.playbackStartNotified &&
+          !clearTargetEpisodeProgressRef.current
+        ) {
+          introSettledUrl = episodeUrl;
+        }
       }
 
+      // 片尾每集只处理一次：未连播时暂停后用户继续播放，不再反复被暂停
       if (
         skipConfigRef.current.outro_time < 0 &&
         skipDuration > 0 &&
+        outroSettledUrl !== episodeUrl &&
+        autoAdvanceCancelledUrl !== episodeUrl &&
         skipCurrentTime > player.duration + skipConfigRef.current.outro_time
       ) {
+        outroSettledUrl = episodeUrl;
         if (!tryAutoAdvanceEpisode()) {
           player.pause();
           notifyIfLastEpisodeEnded();
@@ -1201,7 +1374,7 @@ export async function initializeArtPlayer(
 
     player.on('video:timeupdate', () => {
       const now = Date.now();
-      if (now - lastSaveTimeRef.current > 5000) {
+      if (now - lastSaveTimeRef.current > PERIODIC_PROGRESS_SAVE_INTERVAL_MS) {
         saveCurrentPlayProgress();
       }
     });

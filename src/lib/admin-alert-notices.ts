@@ -11,6 +11,7 @@ interface AlertNoticeState {
   notifiedAt: number;
   type: AdminAlertType;
   group?: string;
+  sourceName?: string;
 }
 type NoticeHistory = Record<string, AlertNoticeState>;
 const memory = new Map<string, NoticeHistory>();
@@ -36,7 +37,9 @@ function readHistory(key: string): NoticeHistory {
               Number.isFinite(item.revision) &&
               Number.isFinite(item.notifiedAt) &&
               Object.hasOwn(RECOVERY_TEXT, item.type) &&
-              (item.group === undefined || typeof item.group === 'string'),
+              (item.group === undefined || typeof item.group === 'string') &&
+              (item.sourceName === undefined ||
+                typeof item.sourceName === 'string'),
           ),
         ) as NoticeHistory;
         for (const [alertKey, item] of Object.entries(memory.get(key) ?? {})) {
@@ -86,6 +89,9 @@ export function claimAdminAlertNotices(
       revision: alert.startedAt,
       notifiedAt: now,
       type: alert.type,
+      ...(alert.type === 'source-offline'
+        ? { sourceName: /^视频源「(.*)」/.exec(alert.message)?.[1] }
+        : {}),
       ...(alert.group ? { group: alert.group } : {}),
     };
   }
@@ -102,7 +108,10 @@ export function claimAdminAlertNotices(
     }
     notices.push({
       key: `admin-alert:${alertKey}`,
-      message: RECOVERY_TEXT[previous.type],
+      message:
+        previous.type === 'source-offline' && previous.sourceName
+          ? `视频源「${previous.sourceName}」已恢复`
+          : RECOVERY_TEXT[previous.type],
       recovered: true,
     });
     history[alertKey] = { ...previous, active: false, notifiedAt: now };

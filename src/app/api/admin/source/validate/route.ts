@@ -3,11 +3,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { runWithConcurrency } from '@/lib/concurrency';
 import { API_CONFIG, getConfigForRead } from '@/lib/config';
+import { isGirigiriSource } from '@/lib/downstream-sources/giri';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { isXgcartoonSource } from '@/lib/downstream-sources/xgcartoon';
 import {
   readJsonLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import {
+  type SourceSearchOutcome,
+  flushSourceHealthSearch,
+  recordSourceSearchOutcome,
+} from '@/lib/source-health.server';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
@@ -97,77 +105,81 @@ export async function GET(request: NextRequest) {
 
       // 为每个源创建验证 Promise
       const validationTasks = apiSites.map((site) => async () => {
+        if (upstreamController.signal.aborted) return;
+        const abortState = createTimedAbortController(
+          upstreamController.signal,
+          10000,
+        );
+        const startedAt = Date.now();
+        let outcome: SourceSearchOutcome = 'error';
+        let resourceLimited = false;
         try {
           // 构建搜索URL，只获取第一页
           const searchUrl = `${site.api}?ac=videolist&wd=${encodeURIComponent(
             searchKeyword,
           )}`;
 
-          const abortState = createTimedAbortController(
-            upstreamController.signal,
-            10000,
+          const response = await fetchWithUrlGuard(searchUrl, {
+            headers: API_CONFIG.search.headers,
+            signal: abortState.signal,
+          });
+
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => {});
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await readJsonLimited<any>(
+            response,
+            UPSTREAM_METADATA_MAX_BYTES,
           );
 
-          try {
-            const response = await fetchWithUrlGuard(searchUrl, {
-              headers: API_CONFIG.search.headers,
-              signal: abortState.signal,
+          // 检查结果是否有效
+          let status: 'valid' | 'no_results' | 'invalid';
+          if (
+            data &&
+            data.list &&
+            Array.isArray(data.list) &&
+            data.list.length > 0
+          ) {
+            // 检查是否有标题包含搜索词的结果
+            const validResults = data.list.filter((item: any) => {
+              const title = item.vod_name || '';
+              return title.toLowerCase().includes(searchKeyword.toLowerCase());
             });
 
-            if (!response.ok) {
-              await response.body?.cancel().catch(() => {});
-              throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await readJsonLimited<any>(
-              response,
-              UPSTREAM_METADATA_MAX_BYTES,
-            );
-
-            // 检查结果是否有效
-            let status: 'valid' | 'no_results' | 'invalid';
-            if (
-              data &&
-              data.list &&
-              Array.isArray(data.list) &&
-              data.list.length > 0
-            ) {
-              // 检查是否有标题包含搜索词的结果
-              const validResults = data.list.filter((item: any) => {
-                const title = item.vod_name || '';
-                return title
-                  .toLowerCase()
-                  .includes(searchKeyword.toLowerCase());
-              });
-
-              if (validResults.length > 0) {
-                status = 'valid';
-              } else {
-                status = 'no_results';
-              }
+            if (validResults.length > 0) {
+              status = 'valid';
             } else {
               status = 'no_results';
             }
+          } else {
+            status = 'no_results';
+          }
 
-            // 发送该源的验证结果
-            completedSources++;
+          outcome = Array.isArray(data?.list)
+            ? status === 'valid'
+              ? 'ok'
+              : 'empty'
+            : 'error';
 
-            if (!streamClosed) {
-              const sourceEvent = `data: ${JSON.stringify({
-                type: 'source_result',
-                source: site.key,
-                status,
-              })}\n\n`;
+          // 发送该源的验证结果
+          completedSources++;
 
-              if (!safeEnqueue(encoder.encode(sourceEvent))) {
-                streamClosed = true;
-                return;
-              }
+          if (!streamClosed) {
+            const sourceEvent = `data: ${JSON.stringify({
+              type: 'source_result',
+              source: site.key,
+              status,
+            })}\n\n`;
+
+            if (!safeEnqueue(encoder.encode(sourceEvent))) {
+              streamClosed = true;
+              return;
             }
-          } finally {
-            abortState.cleanup();
           }
         } catch (error) {
+          resourceLimited = error instanceof ResourceLimitError;
           console.warn(`验证失败 ${site.name}:`, error);
 
           // 发送源错误事件
@@ -185,11 +197,32 @@ export async function GET(request: NextRequest) {
               return;
             }
           }
+        } finally {
+          abortState.cleanup();
+          const abortedByParent =
+            upstreamController.signal.aborted && !abortState.isTimeout();
+          if (
+            !resourceLimited &&
+            !abortedByParent &&
+            !isGirigiriSource(site) &&
+            !isXgcartoonSource(site)
+          ) {
+            recordSourceSearchOutcome(
+              site.key,
+              outcome,
+              Date.now() - startedAt,
+            );
+          }
         }
       });
 
       try {
         await runWithConcurrency(validationTasks, 3, () => !streamClosed);
+        try {
+          await flushSourceHealthSearch();
+        } catch (error) {
+          console.warn('刷新源健康数据失败:', error);
+        }
         if (!streamClosed) {
           const completeEvent = `data: ${JSON.stringify({
             type: 'complete',

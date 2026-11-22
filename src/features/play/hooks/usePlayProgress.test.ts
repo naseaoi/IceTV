@@ -449,7 +449,7 @@ describe('usePlayProgress helpers', () => {
       {
         current: {
           inFlight: false,
-          pending: null,
+          pending: new Map(),
           lastSavedFingerprint: null,
         },
       },
@@ -471,7 +471,11 @@ describe('usePlayProgress helpers', () => {
       { current: 120 },
       { current: false },
       {
-        current: { inFlight: false, pending: null, lastSavedFingerprint: null },
+        current: {
+          inFlight: false,
+          pending: new Map(),
+          lastSavedFingerprint: null,
+        },
       },
       { current: 0 },
       '番剧A',
@@ -480,6 +484,49 @@ describe('usePlayProgress helpers', () => {
       'source-a',
       'id-a',
       expect.objectContaining({ series_status: 'ended' }),
+    );
+  });
+
+  it('接近结尾主动切到下一集时按看完保存离开的集', async () => {
+    const save = (time: number, leavingForNext: boolean) =>
+      saveCurrentPlayProgress(
+        { current: { currentTime: time, duration: 2832 } } as any,
+        { current: 'source-a' },
+        { current: 'id-a' },
+        { current: '番剧A' },
+        { current: detail },
+        { current: 0 },
+        { current: time },
+        { current: false },
+        {
+          current: {
+            inFlight: false,
+            pending: new Map(),
+            lastSavedFingerprint: null,
+          },
+        },
+        { current: 0 },
+        '番剧A',
+        false,
+        leavingForNext,
+      );
+    await save(2793, true);
+    expect(mockedSavePlayRecord).toHaveBeenLastCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ play_time: 2832, total_time: 2832 }),
+    );
+    await save(2793, false);
+    expect(mockedSavePlayRecord).toHaveBeenLastCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ play_time: 2793 }),
+    );
+    await save(2400, true);
+    expect(mockedSavePlayRecord).toHaveBeenLastCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ play_time: 2400 }),
     );
   });
 
@@ -571,7 +618,11 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     return { playRecords: null, settledKey: '', listeners: new Set() };
   }
 
-  function renderHistoryRestore(gate: HistoryRestoreGate, episodeIndex = 0) {
+  function renderHistoryRestore(
+    gate: HistoryRestoreGate,
+    episodeIndex = 0,
+    onPlayRecordLoaded?: (key: string, record: PlayRecord | undefined) => void,
+  ) {
     const refs = {
       artPlayerRef: { current: null },
       currentSourceRef: { current: detail.source },
@@ -585,7 +636,11 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
       stableCurrentTimeRef: { current: 0 },
       clearTargetEpisodeProgressRef: { current: false },
       saveStateRef: {
-        current: { inFlight: false, pending: null, lastSavedFingerprint: null },
+        current: {
+          inFlight: false,
+          pending: new Map(),
+          lastSavedFingerprint: null,
+        },
       },
       lastSaveTimeRef: { current: 0 },
       saveIntervalRef: { current: null },
@@ -607,6 +662,7 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
           setCurrentEpisodeIndex,
           onRestoreEpisodeChange,
           cleanupPlayer,
+          onPlayRecordLoaded,
         }),
       { initialProps: { currentDetail: detail } },
     );
@@ -905,6 +961,38 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     );
   });
 
+  it('网络记录与缓存保存时间相同时仍交出网络记录，补齐缓存缺的每集进度', async () => {
+    const cachedRecord: PlayRecord = {
+      ...recordAtEpisode9,
+      episode_progress: [{ k: 'n:9', t: 600, d: 1200, at: 2000 }],
+    };
+    const freshRecord: PlayRecord = {
+      ...recordAtEpisode9,
+      episode_progress: [
+        { k: 'n:9', t: 600, d: 1200, at: 2000 },
+        { k: 'n:8', t: 1190, d: 1200, at: 1500 },
+      ],
+    };
+    const gate = createHistoryRestoreGate();
+    gate.playRecords = Promise.resolve({ [recordKey]: cachedRecord });
+    gate.playRecordsFresh = Promise.resolve({ [recordKey]: freshRecord });
+    const onPlayRecordLoaded = jest.fn();
+    const { setCurrentEpisodeIndex } = renderHistoryRestore(
+      gate,
+      0,
+      onPlayRecordLoaded,
+    );
+    await flushMicrotasks();
+
+    expect(onPlayRecordLoaded).toHaveBeenNthCalledWith(
+      1,
+      recordKey,
+      cachedRecord,
+    );
+    expect(onPlayRecordLoaded).toHaveBeenLastCalledWith(recordKey, freshRecord);
+    expect(setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
+  });
+
   it('当前集已是续播的集时不再换集，续播时间照样写入', async () => {
     mockedGetAllPlayRecords.mockResolvedValue({
       [recordKey]: recordAtEpisode9,
@@ -1065,7 +1153,7 @@ describe('播放记录持久化边界', () => {
     source: 'b',
     source_name: 'B',
     title: 'test',
-    episodes: ['1'],
+    episodes: ['1', '2', '3'],
     episodes_titles: [],
     poster: '',
     year: '2024',
@@ -1081,7 +1169,7 @@ describe('播放记录持久化边界', () => {
     } = {
       current: {
         inFlight: false,
-        pending: null,
+        pending: new Map(),
         lastSavedFingerprint: null,
         onSaved,
       },
@@ -1193,12 +1281,69 @@ describe('播放记录持久化边界', () => {
     );
     await ctx.run(true);
     expect(save).toHaveBeenCalledTimes(2);
-    expect(ctx.state.current.pending).toBeNull();
+    expect(ctx.state.current.pending.size).toBe(0);
     finishExit();
     await exit;
     finishFirst();
     await first;
     await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    '慢网下保留中间集的最新快照（立即保存=%s）',
+    async (immediate) => {
+      const ctx = setup();
+      let finishFirst!: () => void;
+      save.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirst = resolve;
+          }),
+      );
+      const first = ctx.run();
+      ctx.episode.current = 1;
+      ctx.player.current.currentTime = 180;
+      await ctx.run();
+      ctx.player.current.currentTime = 240;
+      await ctx.run();
+      ctx.episode.current = 2;
+      ctx.player.current.currentTime = 300;
+      await ctx.run(immediate);
+      expect(save.mock.calls.map(([, , record]) => record.index)).toEqual(
+        immediate ? [1, 2, 3] : [1],
+      );
+      finishFirst();
+      await first;
+      expect(
+        save.mock.calls.map(([, , record]) => [record.index, record.play_time]),
+      ).toEqual([
+        [1, 120],
+        [2, 240],
+        [3, 300],
+      ]);
+    },
+  );
+
+  it('切集尚未起播时隐藏页面，仍立即提交已有待写快照', async () => {
+    const ctx = setup();
+    let finishFirst!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    const first = ctx.run();
+    ctx.episode.current = 1;
+    ctx.player.current.currentTime = 240;
+    await ctx.run();
+    ctx.episode.current = 2;
+    ctx.blocked.current = true;
+    await ctx.run(true);
+    expect(save.mock.calls.map(([, , record]) => record.index)).toEqual([1, 2]);
+    finishFirst();
+    await first;
     expect(save).toHaveBeenCalledTimes(2);
   });
 

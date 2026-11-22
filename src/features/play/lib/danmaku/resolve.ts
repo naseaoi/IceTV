@@ -38,6 +38,8 @@ export interface DanmakuLoadOptions {
   onError?: (error?: unknown) => void;
   // 站点开启用户弹幕时回传本集的发送目标
   onUserTarget?: (target: UserDanmakuTarget) => void;
+  // 连续切集时被替换的加载在各请求之间提前结束，后一集不必排队等它跑完
+  isCurrent?: () => boolean;
 }
 
 export interface DanmakuLoadContext {
@@ -104,6 +106,7 @@ async function loadThirdPartyDanmaku(
   scopeKey: string,
   options: DanmakuLoadOptions,
 ): Promise<ThirdPartyDanmaku> {
+  const superseded = () => options.isCurrent?.() === false;
   try {
     let candidates = await resolveEpisodeCandidates(
       context.source,
@@ -116,6 +119,7 @@ async function loadThirdPartyDanmaku(
 
     let candidateIndex = 0;
     while (candidateIndex < candidates.length) {
+      if (superseded()) return NO_THIRD_PARTY;
       const candidate = candidates[candidateIndex];
       candidateIndex += 1;
       let items: DanmakuItem[];
@@ -228,6 +232,7 @@ export async function loadDanmakuForEpisode(
     scopeKey,
     options,
   );
+  if (options.isCurrent?.() === false) return [];
   const offset = readDanmakuOffset(scopeKey);
   if (!isUserDanmakuEnabled()) return applyOffset(items, offset);
 

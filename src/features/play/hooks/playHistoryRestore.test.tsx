@@ -173,7 +173,7 @@ function usePlayPageHarness() {
     clearTargetEpisodeProgressRef: useRef(false),
     saveStateRef: useRef({
       inFlight: false,
-      pending: null,
+      pending: new Map(),
       lastSavedFingerprint: null,
     }),
     lastSaveTimeRef: useRef(0),

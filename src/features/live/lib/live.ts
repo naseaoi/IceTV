@@ -49,21 +49,25 @@ export interface LiveChannels {
 type LiveConfigEntry = NonNullable<AdminConfig['LiveConfig']>[number];
 
 const CACHE_FRESH_MS = 30 * 60 * 1000;
+const CACHE_STALE_MS = 90 * 60 * 1000;
 const DEFAULT_LIVE_REFRESH_CONCURRENCY = 2;
 const cachedLiveChannels = createSwrCache<{
   configKey: string;
   data: LiveChannels;
+  epgExpiresAt: number;
 }>({
   name: 'live-channels',
   freshMs: CACHE_FRESH_MS,
-  staleMs: 90 * 60 * 1000,
+  staleMs: CACHE_STALE_MS,
   maxSize: 64,
   maxWeightBytes: 32 * 1024 * 1024,
 });
-const inflightRequests = new Map<
-  string,
-  { configKey: string; promise: Promise<LiveChannels> }
->();
+type LiveRefresh = {
+  configKey: string;
+  playlist: Promise<LiveChannels>;
+  complete: Promise<LiveChannels>;
+};
+const inflightRequests = new Map<string, LiveRefresh>();
 
 function getLiveConfigCacheKey(liveInfo: LiveConfigEntry) {
   return JSON.stringify([
@@ -92,6 +96,7 @@ export async function isLiveEntryEnabled() {
 
 export async function getCachedLiveChannels(
   key: string,
+  { includeEpg = false }: { includeEpg?: boolean } = {},
 ): Promise<LiveChannels | null> {
   const config = await getConfigForRead();
   if (!isLiveEntryEnabledInConfig(config)) return null;
@@ -100,75 +105,96 @@ export async function getCachedLiveChannels(
   if (!liveInfo || liveInfo.disabled) return null;
 
   const entry = cachedLiveChannels.peek(key);
-  if (entry && entry.value.configKey === getLiveConfigCacheKey(liveInfo)) {
-    if (!entry.fresh) {
-      void loadLiveChannels(liveInfo).catch((error) => {
-        console.warn(`后台刷新直播源失败 [${liveInfo.name || key}]:`, error);
-      });
-    }
-    return entry.value.data;
-  }
+  const cached =
+    entry?.value.configKey === getLiveConfigCacheKey(liveInfo) ? entry : null;
+  if (cached?.fresh) return withUnexpiredEpg(cached.value);
 
-  const data = await loadLiveChannels(liveInfo);
+  const { playlist, complete } = loadLiveChannels(liveInfo);
+  if (cached || !includeEpg) {
+    void complete.catch((error) => {
+      if (cached)
+        console.warn(`后台刷新直播源失败 [${liveInfo.name || key}]:`, error);
+    });
+  }
+  if (cached) return withUnexpiredEpg(cached.value);
+
+  const data = await (includeEpg ? complete : playlist);
   return data.channelNumber > 0 ? data : null;
+}
+
+function withUnexpiredEpg({
+  data,
+  epgExpiresAt,
+}: {
+  data: LiveChannels;
+  epgExpiresAt: number;
+}) {
+  return epgExpiresAt && epgExpiresAt <= Date.now()
+    ? { ...data, epgs: {} }
+    : data;
 }
 
 export async function refreshLiveChannels(
   liveInfo: LiveConfigEntry,
   persistCount = true,
 ): Promise<number> {
-  return (await loadLiveChannels(liveInfo, persistCount)).channelNumber;
+  return (await loadLiveChannels(liveInfo, persistCount).complete)
+    .channelNumber;
 }
 
 function loadLiveChannels(
   liveInfo: LiveConfigEntry,
   persistCount = true,
-): Promise<LiveChannels> {
+): LiveRefresh {
+  const { key } = liveInfo;
   const configKey = getLiveConfigCacheKey(liveInfo);
-  const existing = inflightRequests.get(liveInfo.key);
-  if (persistCount && existing?.configKey === configKey) {
-    return existing.promise;
-  }
+  const existing = inflightRequests.get(key);
+  if (persistCount && existing?.configKey === configKey) return existing;
 
-  const doRefresh = async (): Promise<LiveChannels> => {
-    const ua = liveInfo.ua?.trim() || defaultUA;
-    const sourceUrl = liveInfo.url.trim();
-    const text = await fetchLivePlaylistText(sourceUrl, ua);
-    const result = parseLivePlaylist(liveInfo.key, text);
-    const epgUrl = liveInfo.epg?.trim() || result.tvgUrl;
-    const epgs = await parseEpg(
-      epgUrl,
-      ua,
-      result.channels.map((channel) => ({
-        tvgId: channel.tvgId,
-        name: channel.name,
-      })),
-    );
-    const data: LiveChannels = {
-      channelNumber: result.channels.length,
-      channels: result.channels,
-      epgUrl,
-      epgs,
-    };
-    // 删除缓存或配置切换后，迟到的刷新只交付原调用者。
-    if (
-      persistCount &&
-      inflightRequests.get(liveInfo.key)?.promise === refreshRequest
-    ) {
-      cachedLiveChannels.set(liveInfo.key, { configKey, data });
-      await db.setLiveSourceChannelCount(liveInfo, data.channelNumber);
-    }
-    return data;
-  };
-
-  if (!persistCount) return doRefresh();
-  const refreshRequest = doRefresh().finally(() => {
-    if (inflightRequests.get(liveInfo.key)?.promise === refreshRequest) {
-      inflightRequests.delete(liveInfo.key);
-    }
-  });
-  inflightRequests.set(liveInfo.key, { configKey, promise: refreshRequest });
-  return refreshRequest;
+  const ua = liveInfo.ua?.trim() || defaultUA;
+  const previous = persistCount
+    ? cachedLiveChannels.peek(key)?.value
+    : undefined;
+  // 删除缓存或配置切换后，迟到的刷新只交付原调用者。
+  const isCurrent = () => inflightRequests.get(key) === refresh;
+  const playlist = fetchLivePlaylistText(liveInfo.url.trim(), ua).then(
+    async (text): Promise<LiveChannels> => {
+      const { channels, tvgUrl } = parseLivePlaylist(key, text);
+      if (isCurrent())
+        await db.setLiveSourceChannelCount(liveInfo, channels.length);
+      return {
+        channelNumber: channels.length,
+        channels,
+        epgUrl: liveInfo.epg?.trim() || tvgUrl,
+        epgs: {},
+      };
+    },
+  );
+  const complete = playlist
+    .then(async (playlistData) => {
+      const { epgUrl, channels } = playlistData;
+      const epgs = await parseEpg(epgUrl, ua, channels);
+      const now = Date.now();
+      const fallback =
+        previous?.configKey === configKey &&
+        previous.data.epgUrl === epgUrl &&
+        previous.epgExpiresAt > now
+          ? previous
+          : undefined;
+      const data = { ...playlistData, epgs: epgs ?? fallback?.data.epgs ?? {} };
+      const epgExpiresAt = epgs
+        ? now + CACHE_FRESH_MS + CACHE_STALE_MS
+        : (fallback?.epgExpiresAt ?? 0);
+      if (isCurrent())
+        cachedLiveChannels.set(key, { configKey, data, epgExpiresAt });
+      return data;
+    })
+    .finally(() => {
+      if (isCurrent()) inflightRequests.delete(key);
+    });
+  const refresh = { configKey, playlist, complete };
+  if (persistCount) inflightRequests.set(key, refresh);
+  return refresh;
 }
 
 export async function refreshLiveChannelSources(
@@ -256,13 +282,7 @@ async function parseEpg(
   epgUrl: string,
   ua: string,
   channels: { tvgId: string; name: string }[],
-): Promise<{
-  [key: string]: {
-    start: string;
-    end: string;
-    title: string;
-  }[];
-}> {
+): Promise<LiveChannels['epgs'] | undefined> {
   if (!epgUrl) {
     return {};
   }
@@ -271,9 +291,8 @@ async function parseEpg(
     return await fetchEpgData(epgUrl, ua, channels);
   } catch (error) {
     console.warn('解析节目单失败:', error);
+    return undefined;
   }
-
-  return {};
 }
 
 async function fetchEpgData(

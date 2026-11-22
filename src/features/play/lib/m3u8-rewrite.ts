@@ -327,15 +327,11 @@ function rewriteUriAttribute(
   if (!uriMatch) return line;
 
   const resolvedUrl = resolveUrl(baseUrl, uriMatch[2]);
-  if (allowDirect) {
-    return line.replace(
-      uriMatch[0],
-      `${uriMatch[1]}${resolvedUrl}${uriMatch[3]}`,
-    );
-  }
-  return buildProxyUrl(resolvedUrl).then((proxyUrl) =>
-    line.replace(uriMatch[0], `${uriMatch[1]}${proxyUrl}${uriMatch[3]}`),
-  );
+  const replaceUri = (url: string) =>
+    line.replace(uriMatch[0], () => `${uriMatch[1]}${url}${uriMatch[3]}`);
+  return allowDirect
+    ? replaceUri(resolvedUrl)
+    : buildProxyUrl(resolvedUrl).then(replaceUri);
 }
 
 function createUriAttributePattern(attributeName: string): RegExp {

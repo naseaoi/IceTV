@@ -149,7 +149,12 @@ async function readJson(
   }
 }
 
+function invalidResponse() {
+  return new DanmakuProviderError('invalid-response', '弹幕服务返回格式异常');
+}
+
 type SearchResponse = {
+  success?: unknown;
   animes?: {
     animeTitle?: unknown;
     typeDescription?: unknown;
@@ -167,18 +172,25 @@ export async function searchDanmakuCandidates(
     timeoutMs,
   )) as SearchResponse;
 
-  if (!payload || !Array.isArray(payload.animes)) {
-    return [];
+  if (payload?.success === false || !Array.isArray(payload?.animes)) {
+    throw invalidResponse();
   }
 
+  let hasEpisodes = false;
   const grouped: DanmakuMatchCandidate[][] = [];
   for (const anime of payload.animes) {
     const animeTitle =
       typeof anime?.animeTitle === 'string' ? anime.animeTitle : '';
-    const episodes = Array.isArray(anime?.episodes) ? anime.episodes : [];
+    if (!Array.isArray(anime?.episodes)) {
+      throw invalidResponse();
+    }
+    const episodes = anime.episodes;
+    hasEpisodes ||= episodes.length > 0;
     const group: DanmakuMatchCandidate[] = [];
     for (const episode of episodes) {
-      const episodeId = Number(episode?.episodeId);
+      const id = episode?.episodeId;
+      if (typeof id !== 'number' && typeof id !== 'string') continue;
+      const episodeId = Number(id);
       if (!Number.isSafeInteger(episodeId) || episodeId <= 0) continue;
       group.push({
         episodeId,
@@ -194,6 +206,7 @@ export async function searchDanmakuCandidates(
     if (group.length > 0) grouped.push(group);
   }
 
+  if (hasEpisodes && grouped.length === 0) throw invalidResponse();
   return interleaveBySource(grouped);
 }
 
@@ -228,7 +241,7 @@ export async function fetchDanmakuByEpisodeId(
   )) as CommentResponse;
 
   if (!Array.isArray(payload?.comments)) {
-    throw new DanmakuProviderError('invalid-response', '弹幕服务返回格式异常');
+    throw invalidResponse();
   }
   return normalizeComments(payload.comments, limit);
 }

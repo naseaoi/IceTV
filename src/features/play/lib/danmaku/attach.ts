@@ -223,6 +223,7 @@ export async function createDanmakuPluginIfEnabled(
 
   const isEnabled = () => enabledRef.current;
   let initialContext: AttachedDanmakuContext | undefined;
+  let attachedPlayer: PlayerWithPlugins | undefined;
   const sendState: UserDanmakuSendState | null = isUserDanmakuFeatureEnabled()
     ? { player: null, target: null }
     : null;
@@ -230,6 +231,9 @@ export async function createDanmakuPluginIfEnabled(
   try {
     const plugin = await createDanmakuPlugin({
       loadItems: buildDanmakuLoader(context, isEnabled, {
+        isCurrent: () =>
+          !attachedPlayer ||
+          attachedDanmakuContexts.get(attachedPlayer) === initialContext,
         onError: (error) => {
           if (initialContext) {
             initialContext.failed = true;
@@ -265,6 +269,7 @@ export async function createDanmakuPluginIfEnabled(
         userDanmakuSendStates.set(player, sendState);
       }
       markDanmakuContextAttached(player, context, enabledRef.current);
+      attachedPlayer = player;
       initialContext = attachedDanmakuContexts.get(player);
       if (initialContext) {
         initialContext.loadEnabled = enabledRef.current;
@@ -473,6 +478,7 @@ export async function reloadDanmaku(
     let loadedCount = 0;
     const loader = buildDanmakuLoader(context, () => loadEnabled, {
       forceRefresh: nextContext.refreshData,
+      isCurrent: () => attachedDanmakuContexts.get(player) === nextContext,
       onError: (error) => {
         nextContext.failed = true;
         if (error instanceof DanmakuRateLimitError) {

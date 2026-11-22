@@ -18,10 +18,15 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
+import {
+  useAdminAlerts,
+  useRefreshAdminAlerts,
+} from '@/features/admin/components/AdminAlertsProvider';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
@@ -46,6 +51,10 @@ import {
 } from '@/features/admin/hooks/useSourceInsights';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
 import {
+  type AdminSourceAlertDetail,
+  ADMIN_SOURCE_FOCUS_PARAM,
+} from '@/features/admin/lib/admin-alerts';
+import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
@@ -60,11 +69,17 @@ import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
-type SourceHealthFilter = 'all' | 'cleanup' | 'relay';
+type SourceHealthFilter = 'all' | 'alert' | 'cleanup' | 'relay';
 
 function isSourceHealthFilter(value: string): value is SourceHealthFilter {
-  return value === 'all' || value === 'cleanup' || value === 'relay';
+  return (
+    value === 'all' ||
+    value === 'alert' ||
+    value === 'cleanup' ||
+    value === 'relay'
+  );
 }
+const SOURCE_FOCUS_HIGHLIGHT_MS = 4000;
 type SourceSortMode = 'manual' | 'quality';
 
 function toRouteModeStats(item: SourceRouteStatsItem): RouteModeStats {
@@ -114,6 +129,19 @@ const VideoSourceConfig = ({
     () => buildSourceRouteStats(routeStats),
     [routeStats],
   );
+  const adminAlerts = useAdminAlerts();
+  const refreshAdminAlerts = useRefreshAdminAlerts();
+  const sourceAlerts = useMemo(
+    () =>
+      new Map(
+        adminAlerts.flatMap((alert): [string, AdminSourceAlertDetail][] =>
+          alert.sourceDetail
+            ? [[alert.sourceDetail.source, alert.sourceDetail]]
+            : [],
+        ),
+      ),
+    [adminAlerts],
+  );
   const [filterQuery, setFilterQuery] = useState('');
   const [healthFilter, setHealthFilter] = useState<SourceHealthFilter>('all');
   const [sortMode, setSortMode] = useState<SourceSortMode>('manual');
@@ -128,6 +156,10 @@ const VideoSourceConfig = ({
       ).length,
     [sources, sourceHealth],
   );
+  const alertCount = useMemo(
+    () => sources.filter((item) => sourceAlerts.has(item.key)).length,
+    [sources, sourceAlerts],
+  );
   const relayCount = useMemo(
     () => sources.filter((item) => item.proxyMode === 'server').length,
     [sources],
@@ -136,9 +168,11 @@ const VideoSourceConfig = ({
     const matched = sources.filter(
       (item) =>
         (healthFilter === 'all' ||
-          (healthFilter === 'cleanup'
-            ? isSourceCleanupCandidate(sourceHealth.get(item.key))
-            : item.proxyMode === 'server')) &&
+          (healthFilter === 'alert'
+            ? sourceAlerts.has(item.key)
+            : healthFilter === 'cleanup'
+              ? isSourceCleanupCandidate(sourceHealth.get(item.key))
+              : item.proxyMode === 'server')) &&
         [item.name, item.key, item.api, item.detail].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
         ),
@@ -146,7 +180,49 @@ const VideoSourceConfig = ({
     return sortMode === 'quality'
       ? sortByHealth(matched, sourceHealth)
       : matched;
-  }, [sources, sourceHealth, healthFilter, sortMode, normalizedQuery]);
+  }, [
+    sources,
+    sourceAlerts,
+    sourceHealth,
+    healthFilter,
+    sortMode,
+    normalizedQuery,
+  ]);
+
+  // 从告警跳转来时定位到该源：清掉会把它筛掉的条件，滚到该行并短暂高亮，随后移除地址参数
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const focusSourceKey = searchParams.get(ADMIN_SOURCE_FOCUS_PARAM);
+  const [highlightedSourceKey, setHighlightedSourceKey] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (!focusSourceKey || !sources.length) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete(ADMIN_SOURCE_FOCUS_PARAM);
+    router.replace(`${pathname}?${params}`, { scroll: false });
+    if (!sources.some((item) => item.key === focusSourceKey)) return;
+    setFilterQuery('');
+    setHealthFilter('all');
+    setHighlightedSourceKey(focusSourceKey);
+  }, [focusSourceKey, sources, searchParams, router, pathname]);
+  useEffect(() => {
+    if (!highlightedSourceKey) return;
+    const frame = requestAnimationFrame(() => {
+      Array.from(document.querySelectorAll<HTMLElement>('[data-source-key]'))
+        .find((row) => row.dataset.sourceKey === highlightedSourceKey)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    const timer = setTimeout(
+      () => setHighlightedSourceKey(null),
+      SOURCE_FOCUS_HIGHLIGHT_MS,
+    );
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [highlightedSourceKey]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -336,7 +412,7 @@ const VideoSourceConfig = ({
     error: validationError,
     startValidation,
     getValidationStatus,
-  } = useSourceValidation({ sources });
+  } = useSourceValidation({ sources, onComplete: refreshAdminAlerts });
 
   const handleOpenValidationModal = (sourceKeys?: string[]) => {
     setSearchKeyword('');
@@ -455,6 +531,9 @@ const VideoSourceConfig = ({
             }
             options={[
               { value: 'all', label: '全部' },
+              ...(alertCount > 0 || healthFilter === 'alert'
+                ? [{ value: 'alert', label: `告警中 ${alertCount}` }]
+                : []),
               { value: 'cleanup', label: `待清理 ${cleanupCount}` },
               { value: 'relay', label: `代理 ${relayCount}` },
             ]}
@@ -580,13 +659,15 @@ const VideoSourceConfig = ({
             >
               {visibleRows.length === 0 && (
                 <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {healthFilter === 'cleanup' && !normalizedQuery
-                    ? '没有待清理的视频源'
-                    : healthFilter === 'relay' && !normalizedQuery
-                      ? '没有使用代理的视频源'
-                      : isFiltering
-                        ? '没有匹配的视频源'
-                        : '暂无视频源'}
+                  {healthFilter === 'alert' && !normalizedQuery
+                    ? '没有告警中的视频源'
+                    : healthFilter === 'cleanup' && !normalizedQuery
+                      ? '没有待清理的视频源'
+                      : healthFilter === 'relay' && !normalizedQuery
+                        ? '没有使用代理的视频源'
+                        : isFiltering
+                          ? '没有匹配的视频源'
+                          : '暂无视频源'}
                 </li>
               )}
               {visibleRows.map((source) => (
@@ -598,6 +679,8 @@ const VideoSourceConfig = ({
                   validationStatus={getValidationStatus(source.key)}
                   sourceRouteStats={sourceRouteStats[source.key] || null}
                   sourceHealth={sourceHealth.get(source.key) || null}
+                  sourceAlert={sourceAlerts.get(source.key) || null}
+                  isHighlighted={highlightedSourceKey === source.key}
                   healthDays={SOURCE_INSIGHT_DAYS}
                   sourceUsage={sourceUsage.get(source.key) || null}
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}

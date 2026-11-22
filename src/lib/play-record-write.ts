@@ -1,10 +1,16 @@
 import {
+  applyEpisodeProgressWrite,
+  createEpisodeProgressEntry,
+  mergeEpisodeProgress,
+} from '@/lib/episode-progress';
+import {
   hasPlayRecordGroupChanged,
   isGroupedPlayRecordScale,
   mergePlayRecordUpdateBaseline,
 } from '@/lib/play-records';
-import { normalizeWorkYear } from '@/lib/source-match';
+import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type { IStorage, PlayRecord } from '@/lib/types';
+import { parseStorageKey } from '@/lib/utils';
 
 export const PLAY_RECORD_WRITE_ATTEMPTS = 8;
 
@@ -54,10 +60,6 @@ function isSameEpisodeScale(left: PlayRecord, right: PlayRecord): boolean {
   );
 }
 
-/**
- * 换源后新记录没有旧总集数可比，基线会直接取新源总集数，新源已多出的集数不再提醒。
- * 首次保存时沿用同作品（标题与年份一致）、同刻度的其他源记录作为合并依据。
- */
 async function findOtherSourceRecord(
   storage: PlayProgressStore,
   username: string,
@@ -69,13 +71,14 @@ async function findOtherSourceRecord(
       username,
       record.title,
       record.year || '',
+      { excludeKey: key, matchEmptyYear: true },
     );
     const [otherKey, other] = Object.entries(matches)[0] ?? [];
     if (
       !other ||
       otherKey === key ||
       normalizeWorkYear(other.year) !== normalizeWorkYear(record.year) ||
-      !isSameEpisodeScale(other, record)
+      normalizeWorkTitle(other.title) !== normalizeWorkTitle(record.title)
     ) {
       return null;
     }
@@ -93,24 +96,46 @@ export function savePlayProgressWithRetry(
   record: PlayRecord,
 ): Promise<PlayRecord | null> {
   let otherSourceRecord: Promise<PlayRecord | null> | undefined;
+  const source = parseStorageKey(key)?.source;
   return updatePlayRecordWithRetry(storage, username, key, async (current) => {
     if (
       record.progress_session_id !== undefined &&
       record.progress_session_id === current?.progress_session_id &&
       record.progress_sequence! <= (current.progress_sequence ?? 0)
     ) {
-      return null;
-    }
-    if (!current) {
-      otherSourceRecord ??= findOtherSourceRecord(
-        storage,
-        username,
-        key,
-        record,
+      if (
+        record.progress_sequence === current.progress_sequence ||
+        record.save_time > current.save_time ||
+        !record.episode_key
+      ) {
+        return null;
+      }
+      // 退出时多集 keepalive 可能乱序；迟到请求只补进度表，不改续播集或水位。
+      const entry = createEpisodeProgressEntry(record.episode_key, record);
+      if (!entry) return null;
+      const previous = current.episode_progress?.find(({ k }) => k === entry.k);
+      if (previous && previous.at >= entry.at) return null;
+      const progress = mergeEpisodeProgress(
+        [current.episode_progress, [entry]],
+        {
+          source,
+        },
       );
+      return progress.some(({ k }) => k === entry.k)
+        ? { ...current, episode_progress: progress }
+        : null;
     }
-    const previous = current ?? (await otherSourceRecord) ?? null;
-    return mergePlayRecordUpdateBaseline(previous, {
+    const other = current
+      ? null
+      : await (otherSourceRecord ??= findOtherSourceRecord(
+          storage,
+          username,
+          key,
+          record,
+        ));
+    const previous =
+      current ?? (other && isSameEpisodeScale(other, record) ? other : null);
+    const next = mergePlayRecordUpdateBaseline(previous, {
       ...record,
       // 检查时间只由定时刷新推进；客户端详情可能来自过期快照，不能顶替服务端检查
       metadata_checked_at: current?.metadata_checked_at,
@@ -119,5 +144,14 @@ export function savePlayProgressWithRetry(
         record.progress_session_id ?? current?.progress_session_id,
       progress_sequence: record.progress_sequence ?? current?.progress_sequence,
     });
+    const progress = applyEpisodeProgressWrite(
+      (current ?? other)?.episode_progress,
+      record,
+      { source },
+    );
+    if (progress) next.episode_progress = progress;
+    else delete next.episode_progress;
+    delete next.episode_key;
+    return next;
   });
 }

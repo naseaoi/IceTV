@@ -9,17 +9,21 @@ import {
   Github,
   Plus,
   RefreshCw,
+  RotateCw,
   ShieldCheck,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import {
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
 import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
+import Spinner from '@/components/Spinner';
+import { useWebUpgrade } from '@/features/upgrade/useWebUpgrade';
 import { changelog, ChangelogEntry } from '@/lib/changelog';
 import { getPrimaryRepoUrl } from '@/lib/update-source';
 import { CURRENT_VERSION } from '@/lib/version';
@@ -40,6 +44,9 @@ interface TimelineEntry {
 }
 
 const VISIBLE_COUNT = 5;
+
+const UPDATE_ACTION_CLASS =
+  'inline-flex h-8 flex-shrink-0 items-center gap-1.5 rounded-full bg-brand-600 px-3.5 text-xs font-medium text-white transition-colors hover:bg-brand-500 disabled:cursor-default disabled:hover:bg-brand-600';
 
 type ChangeKind = 'added' | 'changed' | 'fixed' | 'admin';
 
@@ -113,6 +120,10 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   const showAdminChanges =
     session.status === 'authenticated' &&
     (session.role === 'owner' || session.role === 'admin');
+  const isOwner =
+    session.status === 'authenticated' && session.role === 'owner';
+  const upgrade = useWebUpgrade(isOpen && hasUpdate && isOwner);
+  const [confirmRestart, setConfirmRestart] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -138,15 +149,12 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
         : [];
       setRemoteChangelog(parsed);
       const remoteVersion =
-        typeof data?.latestVersion === 'string'
-          ? data.latestVersion
-          : parsed[0]?.version;
-      if (remoteVersion) {
-        setLatestVersion(remoteVersion);
-        setIsHasUpdate(
+        typeof data?.latestVersion === 'string' ? data.latestVersion : '';
+      setLatestVersion(remoteVersion);
+      setIsHasUpdate(
+        !!remoteVersion &&
           compareVersions(remoteVersion) === UpdateStatus.HAS_UPDATE,
-        );
-      }
+      );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         return;
@@ -243,6 +251,71 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     );
   };
 
+  const renderUpdateAction = () => {
+    const { view, submitting } = upgrade;
+    switch (view.kind) {
+      case 'upgrade':
+        return (
+          <button
+            type='button'
+            onClick={() => void upgrade.pull()}
+            disabled={submitting}
+            className={UPDATE_ACTION_CLASS}
+          >
+            {submitting ? (
+              <Spinner className='h-3.5 w-3.5' />
+            ) : (
+              <Download className='h-3.5 w-3.5' />
+            )}
+            升级
+          </button>
+        );
+      case 'pulling':
+      case 'restarting':
+        return (
+          <button type='button' disabled className={UPDATE_ACTION_CLASS}>
+            <Spinner className='h-3.5 w-3.5' />
+            {view.kind === 'pulling' ? '下载中' : '重启中'}
+          </button>
+        );
+      case 'restart':
+        return (
+          <button
+            type='button'
+            onClick={() => setConfirmRestart(true)}
+            disabled={submitting}
+            className={UPDATE_ACTION_CLASS}
+          >
+            <RotateCw className='h-3.5 w-3.5' />
+            重启
+          </button>
+        );
+      case 'refresh':
+        return (
+          <button
+            type='button'
+            onClick={() => window.location.reload()}
+            className={UPDATE_ACTION_CLASS}
+          >
+            <RotateCw className='h-3.5 w-3.5' />
+            刷新
+          </button>
+        );
+      default:
+        return repoUrl ? (
+          <a
+            href={repoUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className={UPDATE_ACTION_CLASS}
+          >
+            前往更新
+            <ArrowUpRight className='h-3 w-3' />
+          </a>
+        ) : null;
+    }
+  };
+
   return (
     <ModalShell
       isOpen={isOpen && open}
@@ -289,23 +362,30 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
 
         <div className='flex-1 overflow-y-auto px-5 pb-5 pt-4'>
           {hasUpdate && (
-            <div className='mb-5 flex items-center justify-between gap-3 rounded-xl bg-brand-50 px-4 py-3 dark:bg-brand-500/10'>
-              <div className='flex min-w-0 items-center gap-2.5'>
-                <Download className='h-4 w-4 flex-shrink-0 text-brand-600 dark:text-brand-300' />
-                <p className='truncate text-sm text-gray-900 dark:text-gray-100'>
-                  v{latestVersion} 可用
-                </p>
+            <div className='mb-5 rounded-xl bg-brand-50 px-4 py-3 dark:bg-brand-500/10'>
+              <div className='flex items-center justify-between gap-3'>
+                <div className='flex min-w-0 items-center gap-2.5'>
+                  <Download className='h-4 w-4 flex-shrink-0 text-brand-600 dark:text-brand-300' />
+                  <p className='truncate text-sm text-gray-900 dark:text-gray-100'>
+                    {upgrade.view.kind === 'restart' &&
+                    upgrade.view.pulledVersion
+                      ? `v${upgrade.view.pulledVersion} 已下载`
+                      : `v${latestVersion} 可用`}
+                  </p>
+                </div>
+                {renderUpdateAction()}
               </div>
-              {repoUrl && (
-                <a
-                  href={repoUrl}
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-full bg-brand-600 px-3.5 text-xs font-medium text-white transition-colors hover:bg-brand-500'
+              {(upgrade.error || upgrade.notice) && (
+                <p
+                  role={upgrade.error ? 'alert' : undefined}
+                  className={`mt-2 break-all text-xs leading-5 ${
+                    upgrade.error
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-gray-600 dark:text-gray-300'
+                  }`}
                 >
-                  前往更新
-                  <ArrowUpRight className='h-3 w-3' />
-                </a>
+                  {upgrade.error ?? upgrade.notice}
+                </p>
               )}
             </div>
           )}
@@ -390,6 +470,17 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
           )}
         </div>
       </div>
+      <ConfirmModal
+        isOpen={confirmRestart}
+        title='重启到新版本'
+        message='重启期间站点暂时无法访问，通常 1 分钟内恢复。'
+        confirmText='重启'
+        onClose={() => setConfirmRestart(false)}
+        onConfirm={async () => {
+          await upgrade.restart();
+          setConfirmRestart(false);
+        }}
+      />
     </ModalShell>
   );
 };

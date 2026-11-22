@@ -7,6 +7,11 @@ import React, {
 } from 'react';
 
 import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
+import {
+  EpisodeProgressMark,
+  getEpisodeProgressLabel,
+} from '@/features/play/components/EpisodeSelector/EpisodeProgressMark';
+import type { EpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
 import { EpisodeGroup, SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
@@ -29,6 +34,8 @@ interface EpisodesTabProps {
   currentId?: string;
   onSourceChange?: (source: string, id: string, title: string) => void;
   loading?: boolean;
+  /** 下标为集索引 */
+  episodeProgress?: (EpisodeProgressView | null)[];
 }
 
 function buildNumericPages(
@@ -86,6 +93,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   currentId,
   onSourceChange,
   loading = false,
+  episodeProgress,
 }) => {
   const pages = useMemo(() => {
     const groupTotal = (episodeGroups || []).reduce(
@@ -382,6 +390,10 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                 : 7.5),
             0,
           );
+          const progress = loading
+            ? null
+            : episodeProgress?.[episodeNumber - 1];
+          const progressLabel = getEpisodeProgressLabel(progress);
           const dynamicSpan = Math.max(
             1,
             Math.min(3, Math.ceil((estimatedPx + 24) / 56)),
@@ -399,7 +411,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                   ? { gridColumn: `span ${dynamicSpan} / span ${dynamicSpan}` }
                   : undefined
               }
-              className={`h-10 min-w-0 ${dynamicSpan > 1 ? 'px-2' : 'px-1'} flex items-center justify-center rounded-lg text-[13px] font-medium tabular-nums transition-colors
+              className={`relative h-10 min-w-0 overflow-hidden ${dynamicSpan > 1 ? 'px-2' : 'px-1'} flex items-center justify-center rounded-lg text-[13px] font-medium tabular-nums transition-colors
                 ${
                   loading
                     ? 'skeleton'
@@ -407,14 +419,23 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                       ? 'bg-brand-500 text-white'
                       : 'bg-gray-900/[0.04] text-gray-700 hover:bg-gray-900/[0.08] dark:bg-white/[0.05] dark:text-gray-300 dark:hover:bg-white/[0.1]'
                 }`.trim()}
-              title={
+              title={[
                 rawTitle ||
-                (totalEpisodes === 1 ? '正片' : `第 ${episodeNumber} 集`)
-              }
+                  (totalEpisodes === 1 ? '正片' : `第 ${episodeNumber} 集`),
+                progressLabel,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             >
-              <span className={`truncate ${loading ? 'invisible' : ''}`}>
+              <EpisodeProgressMark progress={progress} active={isActive} />
+              <span
+                className={`relative truncate ${loading ? 'invisible' : ''}`}
+              >
                 {displayTitle}
               </span>
+              {progressLabel && (
+                <span className='sr-only'>{progressLabel}</span>
+              )}
             </button>
           );
         })}

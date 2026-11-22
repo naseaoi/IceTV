@@ -210,10 +210,12 @@ function resolveDivergentAssetFlags(
   return flags;
 }
 
-function parseDiscontinuitySegments(
-  m3u8Content: string,
-): ParsedDiscontinuitySegment[] {
+const GLOBAL_HLS_TAG_RE =
+  /^#(?:EXTM3U$|EXT-X-(?:(?:INDEPENDENT-SEGMENTS|I-FRAMES-ONLY)$|(?:VERSION|TARGETDURATION|MEDIA-SEQUENCE|DISCONTINUITY-SEQUENCE|PLAYLIST-TYPE|ALLOW-CACHE|START|DEFINE|SERVER-CONTROL|PART-INF|SKIP):))/;
+
+function parseDiscontinuitySegments(m3u8Content: string) {
   const lines = m3u8Content.split('\n');
+  const headers: string[] = [];
   const segments: ParsedDiscontinuitySegment[] = [];
   let current: ParsedDiscontinuitySegment = {
     lines: [],
@@ -228,6 +230,11 @@ function parseDiscontinuitySegments(
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
+
+    if (GLOBAL_HLS_TAG_RE.test(line)) {
+      headers.push(rawLine);
+      continue;
+    }
 
     // DISCONTINUITY 本身只用来划分区间，不应写回原区间内容。
     if (line === '#EXT-X-DISCONTINUITY') {
@@ -284,7 +291,7 @@ function parseDiscontinuitySegments(
     segments.push(current);
   }
 
-  return segments;
+  return { headers, segments };
 }
 
 function isNearInteger(value: number): boolean {
@@ -499,7 +506,7 @@ export function filterAdsFromM3U8(m3u8Content: string): string {
   if (!m3u8Content.includes('#EXT-X-DISCONTINUITY')) return m3u8Content;
 
   const lines = m3u8Content.split('\n');
-  const segments = parseDiscontinuitySegments(m3u8Content);
+  const { headers, segments } = parseDiscontinuitySegments(m3u8Content);
 
   // 只有 0 或 1 个区间，没有广告可删
   if (segments.length <= 1) return m3u8Content;
@@ -518,11 +525,17 @@ export function filterAdsFromM3U8(m3u8Content: string): string {
   }
 
   // --- 第三步：重组 M3U8，只保留非广告区间 ---
-  const contentLines: string[] = [];
+  const contentLines = [...headers];
+  const pendingState: string[] = [];
   let isFirst = true;
 
   for (let i = 0; i < segments.length; i++) {
-    if (adFlags[i]) continue;
+    if (adFlags[i]) {
+      for (const line of segments[i].lines) {
+        if (/^#EXT-X-(KEY|MAP):/.test(line.trim())) pendingState.push(line);
+      }
+      continue;
+    }
 
     if (isFirst) {
       isFirst = false;
@@ -530,6 +543,9 @@ export function filterAdsFromM3U8(m3u8Content: string): string {
       // 非广告区间之间保留 DISCONTINUITY（正片本身可能有合法的不连续点）
       contentLines.push('#EXT-X-DISCONTINUITY');
     }
+    // MAP 使用声明时的 KEY；按原顺序恢复跨块生效的状态。
+    for (const line of pendingState) contentLines.push(line);
+    pendingState.length = 0;
     for (const l of segments[i].lines) {
       contentLines.push(l);
     }

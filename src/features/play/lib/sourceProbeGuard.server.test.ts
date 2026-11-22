@@ -114,6 +114,7 @@ describe('source probe route budget', () => {
       expect.any(Function),
       {
         kind: 'probe',
+        trackUpstreamCooldown: false,
         identity: 'user:viewer',
         signal: request.signal,
       },

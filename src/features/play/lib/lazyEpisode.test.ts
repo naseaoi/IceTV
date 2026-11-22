@@ -51,6 +51,52 @@ describe('resolveLazyEpisodeUrl', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('强刷跳过浏览器缓存，并让后续解析使用新地址', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    const lazyUrl = 'icetv-lazy://giri/playGV111-1-1/';
+    const freshUrl = 'https://cdn.example/fresh.m3u8';
+    fetchMock
+      .mockResolvedValueOnce(
+        createJsonResponse({ url: 'https://cdn.example/rejected.m3u8' }),
+      )
+      .mockResolvedValueOnce(createJsonResponse({ url: freshUrl }));
+    await resolveLazyEpisodeUrl('giri', lazyUrl);
+
+    const refresh = () =>
+      resolveLazyEpisodeUrl('giri', lazyUrl, { forceRefresh: true });
+    await expect(Promise.all([refresh(), refresh()])).resolves.toEqual([
+      freshUrl,
+      freshUrl,
+    ]);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/episode-url?source=giri&url=${encodeURIComponent(lazyUrl)}&refresh=1`,
+      { signal: expect.any(AbortSignal) },
+    );
+    await expect(resolveLazyEpisodeUrl('giri', lazyUrl)).resolves.toBe(
+      freshUrl,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('浏览器缓存不返回已过期的签名地址', async () => {
+    const now = 1794960000000;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    const lazyUrl = 'icetv-lazy://giri/playGV99-1-1/';
+    const signed = 'https://cdn.example/ep99.m3u8?expires=1794960030';
+    (global.fetch as jest.Mock).mockResolvedValue(
+      createJsonResponse({ url: signed }),
+    );
+    try {
+      await resolveLazyEpisodeUrl('giri', lazyUrl);
+      clock.mockReturnValue(now + 29_999);
+      expect(peekResolvedLazyEpisodeUrl('giri', lazyUrl)).toBe(signed);
+      clock.mockReturnValue(now + 30_000);
+      expect(peekResolvedLazyEpisodeUrl('giri', lazyUrl)).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('并发解析同一地址只发一次请求', async () => {
     const fetchMock = global.fetch as jest.Mock;
     fetchMock.mockResolvedValue(

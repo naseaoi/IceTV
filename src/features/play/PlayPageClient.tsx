@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -23,6 +24,7 @@ import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
 import { useDanmakuPreference } from '@/features/play/hooks/useDanmakuPreference';
 import { useDanmakuWarmup } from '@/features/play/hooks/useDanmakuWarmup';
+import { useEpisodeProgress } from '@/features/play/hooks/useEpisodeProgress';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -38,6 +40,7 @@ import {
   preloadDanmakuPluginIfEnabled,
   reloadDanmaku,
 } from '@/features/play/lib/danmaku/attach';
+import { getEpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import { fragmentMemoryCache } from '@/features/play/lib/fragmentMemoryCache';
 import {
   peekResolvedLazyEpisodeUrl,
@@ -51,14 +54,17 @@ import {
   releaseBackgroundSourceProbes,
   writePlayerInfo,
 } from '@/features/play/lib/sourceProbeStore';
+import { shouldFinalizeSourceSwitchCleanup } from '@/features/play/lib/sourceSwitchCleanup';
 import { getVodRuntimeSourceUrl } from '@/features/play/lib/vodHlsRuntime';
 import {
+  type VodPlaybackIntent,
   getVodSourceAttempt,
   reportVodPlaybackOutcome,
 } from '@/features/play/lib/vodPlaybackIntent';
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
+import { deduplicatePlayRecords, generateStorageKey } from '@/lib/db.client';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import {
@@ -112,6 +118,7 @@ function AuthenticatedPlayPageClient({
     setDetail,
     favorited,
     setFavorited,
+    skipConfig,
     setSkipConfig,
     skipConfigRef,
     lastSkipCheckRef,
@@ -318,6 +325,19 @@ function AuthenticatedPlayPageClient({
   }, []);
 
   const {
+    episodeEntries,
+    getEpisodeEntry,
+    mergeEpisodeProgress: mergeLocalEpisodeProgress,
+    acceptPlayRecord: acceptEpisodeProgressRecord,
+    ensureLoaded: ensureEpisodeProgressLoaded,
+  } = useEpisodeProgress({ currentSource, currentId, videoTitle, detail });
+  const episodeProgress = useMemo(
+    () =>
+      episodeEntries.map((entry) => getEpisodeProgressView(entry, skipConfig)),
+    [episodeEntries, skipConfig],
+  );
+
+  const {
     saveCurrentPlayProgress: doSaveCurrentProgress,
     savePlaybackCheckpoint: doSaveCheckpoint,
     requestWakeLock,
@@ -346,6 +366,7 @@ function AuthenticatedPlayPageClient({
     detail,
     setCurrentEpisodeIndex,
     onRestoreEpisodeChange: handleRestoreEpisodeChange,
+    onPlayRecordLoaded: acceptEpisodeProgressRecord,
     cleanupPlayer,
   });
 
@@ -375,6 +396,8 @@ function AuthenticatedPlayPageClient({
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
       doSaveCurrentProgress,
+      getEpisodeEntry,
+      skipConfigRef,
       setError,
       setIsVideoLoading,
       setVideoLoadingStage,
@@ -408,14 +431,16 @@ function AuthenticatedPlayPageClient({
     const key = `${source}+${id}`;
     if (completionCheckedRef.current.has(key)) return;
     completionCheckedRef.current.add(key);
+    setCompletionTarget({ source, id, doubanId: videoDoubanId });
+  }, [currentIdRef, currentSourceRef, detailRef, videoDoubanId]);
+  const prepareCompletionCard = useCallback(() => {
     const player = artPlayerRef.current;
     if (player) {
       // 卡片挂在 body 上，全屏时会被播放器盖住
       player.fullscreen = false;
       player.fullscreenWeb = false;
     }
-    setCompletionTarget({ source, id, doubanId: videoDoubanId });
-  }, [artPlayerRef, currentIdRef, currentSourceRef, detailRef, videoDoubanId]);
+  }, [artPlayerRef]);
   const closeCompletion = useCallback(() => setCompletionTarget(null), []);
 
   const [openSourcesRequest, setOpenSourcesRequest] = useState(0);
@@ -466,8 +491,10 @@ function AuthenticatedPlayPageClient({
   }, []);
   useEffect(() => {
     window.addEventListener(PLAYER_EXIT_EVENT, cancelEpisodeResolve);
-    return () =>
+    return () => {
       window.removeEventListener(PLAYER_EXIT_EVENT, cancelEpisodeResolve);
+      cancelEpisodeResolve();
+    };
   }, [cancelEpisodeResolve]);
 
   const {
@@ -523,13 +550,50 @@ function AuthenticatedPlayPageClient({
     onPlaybackStartFailed: handlePlaybackStartFailed,
   });
 
+  const deduplicatedPlayRecordKeysRef = useRef(new Set<string>());
   useEffect(() => {
     const saveState = playProgressSaveStateRef.current;
-    saveState.onSaved = finalizePendingSourceSwitchCleanup;
+    const onSaved = (source: string, id: string) => {
+      const isCurrent = () =>
+        saveState.onSaved === onSaved &&
+        source === currentSourceRef.current &&
+        id === currentIdRef.current;
+      if (!isCurrent()) return;
+      const task = pendingSourceSwitchCleanupRef.current;
+      const switched = shouldFinalizeSourceSwitchCleanup(task, source, id);
+      const keepKey = generateStorageKey(source, id);
+      const deduplicatedKeys = deduplicatedPlayRecordKeysRef.current;
+      if (switched || !deduplicatedKeys.has(keepKey)) {
+        deduplicatedKeys.add(keepKey);
+        const preserveKey =
+          switched && task.keepPreviousPlayRecord
+            ? generateStorageKey(task.previousSource, task.previousId)
+            : undefined;
+        // 旧源记录仅由服务端去重事务合并并删除，失败时保留原记录。
+        void deduplicatePlayRecords(keepKey, preserveKey, isCurrent)
+          .then((merged) => {
+            if (merged && isCurrent()) mergeLocalEpisodeProgress(merged);
+          })
+          .catch((error) => {
+            console.error('播放记录去重失败', error);
+          });
+      }
+      return finalizePendingSourceSwitchCleanup(source, id);
+    };
+    saveState.onSaved = onSaved;
+    saveState.onEpisodeProgress = (entry) => mergeLocalEpisodeProgress([entry]);
     return () => {
       saveState.onSaved = undefined;
+      saveState.onEpisodeProgress = undefined;
     };
-  }, [finalizePendingSourceSwitchCleanup, playProgressSaveStateRef]);
+  }, [
+    currentIdRef,
+    currentSourceRef,
+    finalizePendingSourceSwitchCleanup,
+    mergeLocalEpisodeProgress,
+    pendingSourceSwitchCleanupRef,
+    playProgressSaveStateRef,
+  ]);
 
   const resetAutoSourceSwitch = useCallback(() => {
     holdBackgroundSourceProbes();
@@ -586,9 +650,13 @@ function AuthenticatedPlayPageClient({
   });
 
   const lastResolvedLazyEpisodeRef = useRef<{
+    source: string;
     lazyUrl: string;
     url: string;
   } | null>(null);
+  const lazyRefreshAttemptsRef = useRef(
+    new WeakMap<VodPlaybackIntent, Set<string>>(),
+  );
 
   useEffect(() => {
     // 起播放行前不派生地址：历史恢复可能还要改集，提前派生会让播放器和逐集解析先按当前集白跑一遍
@@ -611,7 +679,8 @@ function AuthenticatedPlayPageClient({
     const lastResolved = lastResolvedLazyEpisodeRef.current;
     if (
       currentVideoUrl &&
-      lastResolved?.lazyUrl === targetUrl &&
+      lastResolved?.source === source &&
+      lastResolved.lazyUrl === targetUrl &&
       lastResolved.url === currentVideoUrl
     ) {
       return;
@@ -620,6 +689,7 @@ function AuthenticatedPlayPageClient({
     const cachedUrl = peekResolvedLazyEpisodeUrl(source, targetUrl);
     if (cachedUrl) {
       lastResolvedLazyEpisodeRef.current = {
+        source,
         lazyUrl: targetUrl,
         url: cachedUrl,
       };
@@ -652,6 +722,7 @@ function AuthenticatedPlayPageClient({
       .then((resolvedUrl) => {
         if (isStale()) return;
         lastResolvedLazyEpisodeRef.current = {
+          source,
           lazyUrl: targetUrl,
           url: resolvedUrl,
         };
@@ -682,6 +753,75 @@ function AuthenticatedPlayPageClient({
     sourceChangeRequestIdRef,
     stopActiveHlsLoading,
   ]);
+
+  const handlePlaybackUrlForbidden = useCallback(
+    (url: string, runtimeSignal: AbortSignal) => {
+      const resolved = lastResolvedLazyEpisodeRef.current;
+      const currentDetail = detailRef.current;
+      const intent = playbackIntentRef?.current;
+      if (
+        !resolved ||
+        !intent ||
+        resolved.url !== url ||
+        videoUrlRef.current !== url ||
+        currentDetail?.source !== resolved.source ||
+        currentDetail.episodes[currentEpisodeIndexRef.current] !==
+          resolved.lazyUrl
+      )
+        return;
+
+      const attempts =
+        lazyRefreshAttemptsRef.current.get(intent) ?? new Set<string>();
+      const key = JSON.stringify([resolved.source, resolved.lazyUrl]);
+      if (attempts.has(key)) return;
+      attempts.add(key);
+      lazyRefreshAttemptsRef.current.set(intent, attempts);
+
+      const requestId = sourceChangeRequestIdRef.current;
+      const controller = new AbortController();
+      episodeResolveControllerRef.current = controller;
+      const abort = () => controller.abort();
+      runtimeSignal.addEventListener('abort', abort, { once: true });
+      const isStale = () =>
+        controller.signal.aborted ||
+        playbackIntentRef.current !== intent ||
+        sourceChangeRequestIdRef.current !== requestId ||
+        videoUrlRef.current !== url ||
+        detailRef.current?.source !== resolved.source ||
+        detailRef.current?.id !== currentDetail.id ||
+        detailRef.current?.episodes[currentEpisodeIndexRef.current] !==
+          resolved.lazyUrl;
+
+      return resolveLazyEpisodeUrl(resolved.source, resolved.lazyUrl, {
+        forceRefresh: true,
+        signal: controller.signal,
+      })
+        .then(
+          (freshUrl) => {
+            if (isStale()) return true;
+            lastResolvedLazyEpisodeRef.current = { ...resolved, url: freshUrl };
+            // 源站可能返回同一个地址；重试代次仍须推进，才能重新加载清单。
+            setVideoUrl(freshUrl);
+            restartCurrentPlayback();
+            return true;
+          },
+          () => isStale(),
+        )
+        .finally(() => {
+          runtimeSignal.removeEventListener('abort', abort);
+          if (episodeResolveControllerRef.current === controller)
+            episodeResolveControllerRef.current = null;
+        });
+    },
+    [
+      currentEpisodeIndexRef,
+      detailRef,
+      playbackIntentRef,
+      restartCurrentPlayback,
+      setVideoUrl,
+      sourceChangeRequestIdRef,
+    ],
+  );
 
   const handleSourceDetailFetched = useCallback(
     (updated: SearchResult) => {
@@ -810,8 +950,10 @@ function AuthenticatedPlayPageClient({
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),
     onPlaybackRecoveryExhausted: handlePlaybackRecoveryExhausted,
+    onPlaybackUrlForbidden: handlePlaybackUrlForbidden,
     onLastEpisodeEnded: handleLastEpisodeEnded,
     onPlaybackStarted: useCallback(() => {
+      ensureEpisodeProgressLoaded();
       const activeSource = currentSourceRef.current;
       const activeId = currentIdRef.current;
       if (!activeSource || !activeId) {
@@ -849,6 +991,7 @@ function AuthenticatedPlayPageClient({
         artPlayerRef.current.notice.show = unavailableNotice;
       }
     }, [
+      ensureEpisodeProgressLoaded,
       recordPlaybackStarted,
       playbackIntentRef,
       showPendingPlaybackNotice,
@@ -918,6 +1061,7 @@ function AuthenticatedPlayPageClient({
         detail={detail}
         detailLoading={loading && !detail}
         currentEpisodeIndex={currentEpisodeIndex}
+        episodeProgress={episodeProgress}
         isEpisodeSelectorCollapsed={isEpisodeSelectorCollapsed}
         setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}
         artRef={artRef}
@@ -960,6 +1104,7 @@ function AuthenticatedPlayPageClient({
         target={completionTarget}
         favorited={favorited}
         onAddFavorite={handleToggleFavorite}
+        onBeforeOpen={prepareCompletionCard}
         onClose={closeCompletion}
       />
     </>
