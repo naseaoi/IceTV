@@ -798,7 +798,9 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     gate.playRecords = new Promise((resolve) => {
       resolveRecords = resolve;
     });
-    const { refs } = renderHistoryRestore(gate, 8);
+    const { refs, result } = renderHistoryRestore(gate, 8);
+    const showResumePrompt = jest.fn();
+    result.current.startStateRef.current.showResumePrompt = showResumePrompt;
     await act(async () => jest.advanceTimersByTime(1_000));
     const player = attachPlayingPlayer(refs, 30);
 
@@ -806,6 +808,8 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     await flushMicrotasks();
     expect(player.currentTime).toBe(600);
     expect(refs.resumeTimeRef.current).toBeNull();
+    expect(showResumePrompt).toHaveBeenCalledTimes(1);
+    expect(player.notice.show).toBe('');
   });
 
   it('记录迟到前用户拖动过进度，按用户选择继续播放并恢复保存', async () => {

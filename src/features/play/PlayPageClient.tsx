@@ -427,19 +427,39 @@ function AuthenticatedPlayPageClient({
 
   const [completionTarget, setCompletionTarget] =
     useState<CompletionTarget | null>(null);
-  // 同一次打开播放页内，同一个源只尝试弹一次；跨会话由服务端记录
+  // 自动弹出在同源页面内只检查一次；主动打开也占用自动弹出的资格。
   const completionCheckedRef = useRef(new Set<string>());
-  const handleLastEpisodeEnded = useCallback(() => {
-    const source = currentSourceRef.current;
-    const id = currentIdRef.current;
-    if (!source || !id) return;
-    // 连载中看完最新一集只是追平，不算完结；与收藏库「看过」判定一致，状态未知时照常弹出
-    if (detailRef.current?.series_status === 'ongoing') return;
-    const key = `${source}+${id}`;
-    if (completionCheckedRef.current.has(key)) return;
-    completionCheckedRef.current.add(key);
-    setCompletionTarget({ source, id, doubanId: videoDoubanId });
-  }, [currentIdRef, currentSourceRef, detailRef, videoDoubanId]);
+  const completionPromptedRef = useRef(new Set<string>());
+  const getPendingCompletionTarget = useCallback(
+    (manual = false) => {
+      const source = currentSourceRef.current;
+      const id = currentIdRef.current;
+      if (!source || !id) return;
+      // 连载中看完最新一集只是追平，不算完结；与收藏库「看过」判定一致，状态未知时照常弹出
+      if (detailRef.current?.series_status === 'ongoing') return;
+      const key = `${source}+${id}`;
+      if (!manual && completionCheckedRef.current.has(key)) return;
+      return { source, id, doubanId: videoDoubanId, manual };
+    },
+    [currentIdRef, currentSourceRef, detailRef, videoDoubanId],
+  );
+  const handleLastEpisodeNearEnd = useCallback(() => {
+    const target = getPendingCompletionTarget();
+    if (!target) return false;
+    const key = `${target.source}+${target.id}`;
+    if (completionPromptedRef.current.has(key)) return false;
+    completionPromptedRef.current.add(key);
+    return true;
+  }, [getPendingCompletionTarget]);
+  const handleLastEpisodeEnded = useCallback(
+    (manual = false) => {
+      const target = getPendingCompletionTarget(manual);
+      if (!target) return;
+      completionCheckedRef.current.add(`${target.source}+${target.id}`);
+      setCompletionTarget(target);
+    },
+    [getPendingCompletionTarget],
+  );
   const prepareCompletionCard = useCallback(() => {
     const player = artPlayerRef.current;
     if (player) {
@@ -971,6 +991,7 @@ function AuthenticatedPlayPageClient({
     }, [setVideoLoadingAttempt]),
     onPlaybackRecoveryExhausted: handlePlaybackRecoveryExhausted,
     onPlaybackUrlForbidden: handlePlaybackUrlForbidden,
+    onLastEpisodeNearEnd: handleLastEpisodeNearEnd,
     onLastEpisodeEnded: handleLastEpisodeEnded,
     onPlaybackStarted: useCallback(() => {
       ensureEpisodeProgressLoaded();

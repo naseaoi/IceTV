@@ -149,6 +149,20 @@ export function isFinishedWhenLeavingForNext(
   );
 }
 
+// 轻提示以片尾点（未启用跳过时为媒体结尾）计算剩余时间，不改变看完与起播决策。
+export function isNearPlaybackCompletion(
+  time: number,
+  duration: number,
+  skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
+): boolean {
+  if (!Number.isFinite(time) || !hasUsableDuration(duration)) return false;
+  const end =
+    skipConfig?.enable && skipConfig.outro_time < 0
+      ? duration + skipConfig.outro_time
+      : duration;
+  return hasUsableDuration(end) && isFinishedWhenLeavingForNext(time, end);
+}
+
 /** 切到某集时的续播点：看到一半从上次位置继续，看完或没有记录从头播 */
 export function resolveEpisodeProgressResumeTime(
   entry: EpisodeProgressEntry | undefined,

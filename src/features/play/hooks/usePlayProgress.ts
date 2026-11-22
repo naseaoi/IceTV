@@ -796,7 +796,7 @@ export function usePlayProgress({
             allowAutoResumeRef.current = false;
             resumeTimeRef.current = null;
             resumeModeRef.current = null;
-            player.notice.show = '已回到上次看到的位置';
+            startStateRef.current.showResumePrompt?.();
           }
         }
         startStateRef.current.refreshPrompt?.();

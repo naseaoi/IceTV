@@ -6,6 +6,7 @@ import { syncNextEpisodeControl } from '@/features/play/lib/artPlayerSettings';
 import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
 import { setDanmakuLoadNoticeVisibility } from '@/features/play/lib/danmaku/load-notice';
 import { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
+import type { PlayerPrompt } from '@/features/play/lib/playerPrompt';
 import { getVodRuntimeSourceUrl } from '@/features/play/lib/vodHlsRuntime';
 import type { SourcePlaybackRoute } from '@/lib/proxy-modes';
 
@@ -35,6 +36,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
   const sessionEpisodeIndexRef = useRef<number | null>(null);
   const playbackRouteRef = useRef<SourcePlaybackRoute | null>(null);
   const resumePromptHandledRef = useRef(false);
+  const endPromptsRef = useRef<Pick<PlayerPrompt, 'hide'> | null>(null);
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
@@ -112,7 +114,10 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         onDanmakuEnable: () => paramsRef.current.onDanmakuEnable?.(),
         onDanmakuEnabledChange: (enabled) =>
           paramsRef.current.onDanmakuEnabledChange?.(enabled),
-        onLastEpisodeEnded: () => paramsRef.current.onLastEpisodeEnded?.(),
+        onLastEpisodeNearEnd: () =>
+          paramsRef.current.onLastEpisodeNearEnd?.() ?? false,
+        onLastEpisodeEnded: (manual) =>
+          paramsRef.current.onLastEpisodeEnded?.(manual),
       },
       {
         loadingSessionRef,
@@ -122,6 +127,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         sessionEpisodeIndexRef,
         playbackRouteRef,
         resumePromptHandledRef,
+        endPromptsRef,
         isCancelled: () =>
           cancelled ||
           paramsRef.current.loading ||
@@ -133,8 +139,11 @@ export function useArtPlayer(params: UseArtPlayerParams) {
       },
     );
 
+    // 提示实例由异步初始化创建，清理时读取当前实例，也覆盖播放器复用。
+    const hideCompletionPrompt = () => endPromptsRef.current?.hide();
     return () => {
       cancelled = true;
+      hideCompletionPrompt();
       paramsRef.current.handlePlaybackStatsEvent?.('stop');
     };
   }, [

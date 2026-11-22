@@ -5,6 +5,7 @@ export interface PlaybackStartState {
   parked: boolean;
   pendingDuration: PlaybackStartTarget | null;
   refreshPrompt?: () => void;
+  showResumePrompt?: () => void;
 }
 
 export function clearPlaybackStartState(state: PlaybackStartState): void {
