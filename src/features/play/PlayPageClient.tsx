@@ -645,7 +645,7 @@ function AuthenticatedPlayPageClient({
     artPlayerRef,
     videoTitle,
     episodeLabel:
-      totalEpisodes > 1
+      !loading && totalEpisodes > 1
         ? detail?.episodes_titles?.[currentEpisodeIndex] ||
           `第 ${currentEpisodeIndex + 1} 集`
         : null,
@@ -1079,7 +1079,7 @@ function AuthenticatedPlayPageClient({
         totalEpisodes={totalEpisodes}
         detail={detail}
         detailLoading={loading && !detail}
-        currentEpisodeIndex={currentEpisodeIndex}
+        currentEpisodeIndex={loading ? -1 : currentEpisodeIndex}
         episodeProgress={episodeProgress}
         isEpisodeSelectorCollapsed={isEpisodeSelectorCollapsed}
         setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}

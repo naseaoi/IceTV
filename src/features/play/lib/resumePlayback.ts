@@ -78,20 +78,6 @@ export function resolveResumeTimeTarget(
     : targetTime;
 }
 
-/** 起播看完阈值；播放或停在结尾由 playbackStartPolicy 决定。 */
-export function isFinishedResumeTarget(
-  targetTime: number | null | undefined,
-  duration?: number,
-): boolean {
-  return (
-    hasUsableDuration(duration) &&
-    Number.isFinite(targetTime) &&
-    (targetTime as number) > 0 &&
-    (targetTime as number) >=
-      (duration as number) - PLAYBACK_FINISHED_REMAINING_SECONDS
-  );
-}
-
 /**
  * 播放器时长未知时不能下达 seek：Artplayer 的 setter 会把目标 clamp 到
  * [0, duration]，duration 为 0 时任何进度都会被压成 0。

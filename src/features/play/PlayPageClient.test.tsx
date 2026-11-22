@@ -313,6 +313,20 @@ describe('PlayPageClient', () => {
     sessionStorage.clear();
   });
 
+  it('决策等待期间标题只显示作品名且选集没有当前集高亮', () => {
+    render(<PlayPageClient />);
+    act(() => latestPlayInit().setDetail(LAZY_DETAIL));
+    expect(document.title).toContain('测试剧');
+    expect(document.title).not.toContain('第1集');
+    expect(lastArg(mockPlayMainContent).currentEpisodeIndex).toBe(-1);
+    act(() => {
+      latestPlayInit().setCurrentEpisodeIndex(2);
+      latestPlayInit().setLoading(false);
+    });
+    expect(document.title).toContain('第3集');
+    expect(lastArg(mockPlayMainContent).currentEpisodeIndex).toBe(2);
+  });
+
   it('首播和换集暂缓测速，当前源起播、失败或错误后放行', async () => {
     renderLoadedPage();
     expect(holdBackgroundSourceProbes).toHaveBeenCalledTimes(1);

@@ -77,7 +77,7 @@ function signIn() {
 
 function installFetch(
   detailResponse: Promise<SearchResult>,
-  records: Record<string, PlayRecord>,
+  records: Record<string, PlayRecord> | Promise<Record<string, PlayRecord>>,
 ) {
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = new URL(String(input), window.location.origin);
@@ -91,7 +91,7 @@ function installFetch(
       return Promise.resolve(respond({ results: [] }));
     }
     if (url.pathname === '/api/playrecords') {
-      return Promise.resolve(respond(records));
+      return Promise.resolve(records).then(respond);
     }
     return Promise.reject(new Error(`unexpected request: ${url.pathname}`));
   }) as unknown as typeof fetch;
@@ -209,6 +209,72 @@ function usePlayPageHarness(autoNext = true) {
     setCurrentEpisodeIndex,
   };
 }
+
+describe('晚到历史记录决策', () => {
+  for (const autoNext of [false, true]) {
+    for (const finished of [false, true]) {
+      for (const sameEpisode of [false, true]) {
+        it(`连播 ${autoNext} / 看完 ${finished} / 同集 ${sameEpisode}`, async () => {
+          let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+          installFetch(
+            Promise.resolve(createDetail([4])),
+            new Promise((resolve) => {
+              resolveRecords = resolve;
+            }),
+          );
+          const { result } = renderHook(() => usePlayPageHarness(autoNext));
+          await waitFor(() => expect(result.current.loading).toBe(false), {
+            timeout: 3000,
+          });
+          const player = {
+            currentTime: 3,
+            duration: 1440,
+            pause: jest.fn(),
+            notice: { show: '' },
+          };
+          result.current.artPlayerRef.current = player as unknown as Artplayer;
+          const targetIndex = sameEpisode ? 0 : 1;
+          const time = finished ? 1438 : 600;
+          await act(async () => {
+            resolveRecords({
+              [generateStorageKey(SOURCE, VIDEO_ID)]: createRecord({
+                index: targetIndex + 1,
+                total_episodes: 4,
+                play_time: time,
+                episode_progress: [
+                  {
+                    k: `n:${targetIndex + 2}`,
+                    t: 300,
+                    d: 1440,
+                    at: Date.now(),
+                  },
+                ],
+              }),
+            });
+          });
+          const advance = finished && autoNext;
+          expect(result.current.currentEpisodeIndex).toBe(
+            targetIndex + (advance ? 1 : 0),
+          );
+          expect(result.current.progress.startStateRef.current.parked).toBe(
+            finished && !autoNext,
+          );
+          if (sameEpisode && !advance) {
+            expect(player.currentTime).toBe(time);
+            expect(player.pause).toHaveBeenCalledTimes(finished ? 1 : 0);
+          } else {
+            expect(result.current.resumeTimeRef.current).toBe(
+              advance ? 300 : time,
+            );
+            expect(result.current.clearTargetEpisodeProgressRef.current).toBe(
+              true,
+            );
+          }
+        });
+      }
+    }
+  }
+});
 
 const originalFetch = global.fetch;
 

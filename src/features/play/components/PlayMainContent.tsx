@@ -410,7 +410,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
       }
       artRef={artRef}
       titleSuffix={
-        totalEpisodes > 1
+        currentEpisodeIndex >= 0 && totalEpisodes > 1
           ? detail?.episodes_titles?.[currentEpisodeIndex] ||
             `第 ${currentEpisodeIndex + 1} 集`
           : null

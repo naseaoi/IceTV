@@ -41,10 +41,7 @@ import {
   WakeLockSentinel,
 } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import {
-  applyResumeTime,
-  isFinishedResumeTarget,
-} from '@/features/play/lib/resumePlayback';
+import { applyResumeTime } from '@/features/play/lib/resumePlayback';
 import { createScreenWakeLockController } from '@/features/play/lib/screenWakeLock';
 import {
   generateStorageKey,
@@ -674,12 +671,19 @@ export function usePlayProgress({
         let activeDetail = snapshot;
         let resolvedTarget = target;
         const refresh = historyRestoreGate.detailRefresh;
+        const player = artPlayerRef.current;
+        const activeEpisodeIndex = currentEpisodeIndexRef.current;
         const options = () => ({
           target: resolvedTarget,
           detail: activeDetail,
+          skipConfig: skipConfigRef?.current,
+          actualDuration:
+            player && target.episodeIndex === activeEpisodeIndex
+              ? player.duration
+              : undefined,
           autoPlayNext:
             autoPlayNextEnabledRef?.current ?? readAutoPlayNextEnabled(),
-          refreshing: refresh?.key === restoreKey,
+          refreshing: !player && refresh?.key === restoreKey,
         });
         let decision = decidePlaybackStart(options());
         if (decision.kind === 'wait') {
@@ -781,6 +785,19 @@ export function usePlayProgress({
               record,
             );
           };
+        }
+        if (decision.kind === 'park') player?.pause();
+        if (player && decision.episodeIndex === activeEpisodeIndex) {
+          if (decision.resumeTime === 0) player.currentTime = 0;
+          const applied =
+            decision.resumeTime === 0 ||
+            applyResumeTime(player, decision.resumeTime);
+          if (applied && decision.kind === 'play' && decision.resumeTime > 0) {
+            allowAutoResumeRef.current = false;
+            resumeTimeRef.current = null;
+            resumeModeRef.current = null;
+            player.notice.show = '已回到上次看到的位置';
+          }
         }
         startStateRef.current.refreshPrompt?.();
       };
@@ -905,7 +922,6 @@ export function usePlayProgress({
         }
 
         const player = artPlayerRef.current;
-        if (historyOnly && startStateRef.current.parked) return;
         // 记录晚于起播到达时，默认集的自然播放不代表用户选择，只有用户拖动进度才放弃恢复
         if (player && hasExplicitPlaybackSeek(stableCurrentTimeRef)) return;
 
@@ -926,44 +942,19 @@ export function usePlayProgress({
           return;
         }
 
-        const activeEpisodeIndex = currentEpisodeIndexRef.current;
-        if (player && targetTime > 0 && targetIndex === activeEpisodeIndex) {
-          // 记录停在已看完的结尾，已从头起播的这集照常播放
-          if (isFinishedResumeTarget(targetTime, player.duration)) return;
-          try {
-            if (applyResumeTime(player, targetTime)) {
-              allowAutoResumeRef.current = false;
-              resumeTimeRef.current = null;
-              resumeModeRef.current = null;
-              player.notice.show = '已回到上次看到的位置';
-              return;
-            }
-          } catch (err) {
-            console.warn('延迟恢复播放进度失败:', err);
-          }
-        }
-
-        if (!player && !historyOnly) {
-          await commitStartPolicy(
-            {
-              episodeIndex: targetIndex,
-              resumeTime: targetTime,
-              resumeMode: targetMode,
-              recordDuration:
-                targetSource === 'history' || record?.index === targetIndex + 1
-                  ? record?.total_time
-                  : undefined,
-              knownEpisodeCount: record?.group_total ?? record?.total_episodes,
-            },
-            record,
-          );
-        } else {
-          applyRestoreState({
+        await commitStartPolicy(
+          {
             episodeIndex: targetIndex,
             resumeTime: targetTime,
             resumeMode: targetMode,
-          });
-        }
+            recordDuration:
+              targetSource === 'history' || record?.index === targetIndex + 1
+                ? record?.total_time
+                : undefined,
+            knownEpisodeCount: record?.group_total ?? record?.total_episodes,
+          },
+          record,
+        );
       };
 
       recordsPending = true;

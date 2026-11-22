@@ -11,9 +11,9 @@ import type {
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
 import { shouldInheritCrossGroupProgress } from '@/features/play/lib/episodeGroups';
-import { resolveEpisodeProgressResumeTime } from '@/features/play/lib/episodeProgress';
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
+import { resolveEpisodeSwitchResumeTime } from '@/features/play/lib/playbackStartPolicy';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type { EpisodeProgressEntry } from '@/lib/episode-progress';
 import type { SearchResult, SkipConfig } from '@/lib/types';
@@ -106,13 +106,11 @@ export function useEpisodeSwitch({
         !crossGroup &&
           targetEpisodeIndex === currentEpisodeIndexRef.current + 1,
       );
-      const inheritedResumeTime =
-        crossGroupResumeTime > 1
-          ? crossGroupResumeTime
-          : resolveEpisodeProgressResumeTime(
-              getEpisodeEntry(targetEpisodeIndex),
-              skipConfigRef.current,
-            );
+      const inheritedResumeTime = resolveEpisodeSwitchResumeTime({
+        crossGroupResumeTime,
+        entry: getEpisodeEntry(targetEpisodeIndex),
+        skipConfig: skipConfigRef.current,
+      });
       sourceSwitchEpisodeAnchorRef.current = null;
       playbackRequestModeRef.current = 'episode';
       clearTargetEpisodeProgressRef.current = true;

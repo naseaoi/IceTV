@@ -1,8 +1,10 @@
 import type { SearchResult } from '@/lib/types';
 
+import { isPlaybackFinished } from './episodeProgress';
 import {
   decidePlaybackStart,
   getNextPlaybackEpisode,
+  resolveEpisodeSwitchResumeTime,
 } from './playbackStartPolicy';
 
 function detail(count: number, grouped = false): SearchResult {
@@ -25,6 +27,55 @@ function detail(count: number, grouped = false): SearchResult {
       : {}),
   };
 }
+
+describe('统一看完与位置规则', () => {
+  const skipConfig = { enable: true, intro_time: 60, outro_time: -90 };
+  it.each([
+    [1194, 1200, false, false],
+    [1195, 1200, false, true],
+    [1110, 1200, true, true],
+    [1109, 1200, true, false],
+    [1110, 1200, false, false],
+    [1110, 0, true, false],
+  ])('位置 %s / 时长 %s / 片尾 %s', (time, duration, enable, finished) => {
+    expect(isPlaybackFinished(time, duration, { ...skipConfig, enable })).toBe(
+      finished,
+    );
+  });
+
+  it.each([false, true])('片尾点参与起播决策，连播 %s', (autoPlayNext) => {
+    expect(
+      decidePlaybackStart({
+        target: { episodeIndex: 0, resumeTime: 1110, recordDuration: 1200 },
+        detail: detail(2),
+        autoPlayNext,
+        skipConfig,
+      }),
+    ).toMatchObject(
+      autoPlayNext
+        ? { kind: 'play', episodeIndex: 1, resumeTime: 0 }
+        : { kind: 'park', episodeIndex: 0, resumeTime: 1110 },
+    );
+  });
+
+  it.each([
+    [0, undefined, 0],
+    [0, 600, 600],
+    [0, 1110, 0],
+    [456, 1110, 456],
+  ])('切集继承 %s / 记录 %s → %s', (crossGroupResumeTime, time, expected) => {
+    expect(
+      resolveEpisodeSwitchResumeTime({
+        crossGroupResumeTime,
+        entry:
+          time === undefined
+            ? undefined
+            : { k: 'n:1', t: time, d: 1200, at: 1 },
+        skipConfig,
+      }),
+    ).toBe(expected);
+  });
+});
 
 describe('起播决策矩阵', () => {
   for (const autoPlayNext of [false, true]) {

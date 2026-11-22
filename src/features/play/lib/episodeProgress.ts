@@ -8,7 +8,27 @@ import {
 } from '@/lib/episode-progress';
 import type { SearchResult, SkipConfig } from '@/lib/types';
 
-import { PLAYBACK_FINISHED_REMAINING_SECONDS } from './resumePlayback';
+import {
+  hasUsableDuration,
+  PLAYBACK_FINISHED_REMAINING_SECONDS,
+} from './resumePlayback';
+
+export function isPlaybackFinished(
+  time: number | null | undefined,
+  duration?: number,
+  skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
+): boolean {
+  if (!hasUsableDuration(duration) || !Number.isFinite(time) || !(time! > 0)) {
+    return false;
+  }
+  const outroAt =
+    skipConfig?.enable && skipConfig.outro_time < 0
+      ? duration! + skipConfig.outro_time
+      : Infinity;
+  return (
+    time! >= duration! - PLAYBACK_FINISHED_REMAINING_SECONDS || time! >= outroAt
+  );
+}
 
 // 点开就切走的集不算看过：不写入每集进度，也不覆盖已有的看完记录
 export const MIN_WATCHED_SECONDS = 10;
@@ -107,13 +127,7 @@ export function getEpisodeProgressView(
   skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
 ): EpisodeProgressView | null {
   if (!entry || entry.d <= 0 || entry.t < MIN_WATCHED_SECONDS) return null;
-  const outroAt =
-    skipConfig?.enable && skipConfig.outro_time < 0
-      ? entry.d + skipConfig.outro_time
-      : Infinity;
-  const finished =
-    entry.t >= entry.d - PLAYBACK_FINISHED_REMAINING_SECONDS ||
-    entry.t >= outroAt;
+  const finished = isPlaybackFinished(entry.t, entry.d, skipConfig);
   return { finished, ratio: finished ? 1 : Math.min(1, entry.t / entry.d) };
 }
 

@@ -1,9 +1,26 @@
 import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
+import { hasUsableDuration } from '@/features/play/lib/resumePlayback';
+import type { EpisodeProgressEntry } from '@/lib/episode-progress';
+import type { SearchResult, SkipConfig } from '@/lib/types';
+
 import {
-  hasUsableDuration,
-  isFinishedResumeTarget,
-} from '@/features/play/lib/resumePlayback';
-import type { SearchResult } from '@/lib/types';
+  isPlaybackFinished,
+  resolveEpisodeProgressResumeTime,
+} from './episodeProgress';
+
+export function resolveEpisodeSwitchResumeTime({
+  crossGroupResumeTime,
+  entry,
+  skipConfig,
+}: {
+  crossGroupResumeTime: number;
+  entry: EpisodeProgressEntry | undefined;
+  skipConfig: SkipConfig;
+}): number {
+  return crossGroupResumeTime > 1
+    ? crossGroupResumeTime
+    : resolveEpisodeProgressResumeTime(entry, skipConfig);
+}
 
 export const START_DETAIL_WAIT_MS = 5000;
 
@@ -39,7 +56,7 @@ export function getNextPlaybackEpisode(
     : null;
 }
 
-/** 仅供首次起播恢复使用；换源、重试与主动切集沿用各自的位置策略。 */
+/** 首次与晚到历史恢复共用；主动切集和换源使用独立的位置策略。 */
 export function decidePlaybackStart({
   target,
   detail,
@@ -48,6 +65,7 @@ export function decidePlaybackStart({
   waitExpired = false,
   actualDuration,
   nextResumeTime = 0,
+  skipConfig,
 }: {
   target: PlaybackStartTarget;
   detail: SearchResult;
@@ -56,11 +74,12 @@ export function decidePlaybackStart({
   waitExpired?: boolean;
   actualDuration?: number;
   nextResumeTime?: number;
+  skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null;
 }): PlaybackStartDecision {
   const duration = hasUsableDuration(target.recordDuration)
     ? target.recordDuration
     : actualDuration;
-  if (!isFinishedResumeTarget(target.resumeTime, duration)) {
+  if (!isPlaybackFinished(target.resumeTime, duration, skipConfig)) {
     return {
       kind: 'play',
       episodeIndex: target.episodeIndex,
