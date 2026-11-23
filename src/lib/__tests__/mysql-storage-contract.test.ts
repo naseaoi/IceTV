@@ -445,6 +445,21 @@ function createFakePool() {
       );
       return [{ affectedRows: 1 }, []];
     }
+    if (
+      normalized.startsWith(
+        'UPDATE user_notice_events SET created_at = ? WHERE recipient_username = ?',
+      )
+    ) {
+      const rows = (currentState.social.user_notice_events ?? []).filter(
+        (row) =>
+          row.recipient_username === params[1] &&
+          row.kind === 'account-change' &&
+          row.action === 'permissions-changed' &&
+          Number(row.created_at) > Number(params[2]),
+      );
+      for (const row of rows) row.created_at = params[0];
+      return [{ affectedRows: rows.length }, []];
+    }
     if (normalized.startsWith('DELETE FROM user_notice_events')) {
       const rows = currentState.social.user_notice_events ?? [];
       currentState.social.user_notice_events = rows.filter(

@@ -127,6 +127,9 @@ import {
   type NoticeMutation,
   noticeInsert,
   NoticeModeration,
+  pendingPermissionNotices,
+  pendingPermissionNoticesQuery,
+  permissionNoticeWrite,
   userNoticeSchema,
   UserNoticeStorage,
 } from '@/lib/user-notice-storage';
@@ -3884,7 +3887,8 @@ export class LocalSqliteStorage implements IStorage {
                 .all() as { username: string }[]
             ).flatMap((row) => {
               const user = noticeAccess.get(row.username);
-              return user
+              // 站长与管理员可在后台直接看到源配置，配置改动不再通知他们
+              return user?.role === 'user'
                 ? [{ user, permissions: accessPermissions(user, current) }]
                 : [];
             })
@@ -3893,6 +3897,15 @@ export class LocalSqliteStorage implements IStorage {
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
         for (const source of removed.sources) access.removeSource(source);
+        const now = Date.now();
+        const pendingQuery = pendingPermissionNoticesQuery(now);
+        const pending = noticeUsers.length
+          ? pendingPermissionNotices(
+              this.db
+                .prepare(pendingQuery.sql)
+                .all(...pendingQuery.params) as Record<string, unknown>[],
+            )
+          : new Map();
         for (const { user, permissions } of noticeUsers) {
           const next = noticeAccess.get(user.username);
           const payload = next
@@ -3901,17 +3914,16 @@ export class LocalSqliteStorage implements IStorage {
                 accessPermissions(next, config),
               )
             : null;
-          if (payload) {
-            const event = noticeInsert(
-              'sqlite',
-              user.username,
-              `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
-              'account-change',
-              'permissions-changed',
-              payload,
-            );
-            this.db.prepare(event.sql).run(...event.params);
-          }
+          const write = payload
+            ? permissionNoticeWrite(
+                'sqlite',
+                user.username,
+                payload,
+                pending.get(user.username),
+                now,
+              )
+            : null;
+          if (write) this.db.prepare(write.sql).run(...write.params);
         }
         stateStore.prune(current, config);
         for (const [key, count] of Object.entries(state?.liveCounts || {})) {

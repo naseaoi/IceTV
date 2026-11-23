@@ -22,7 +22,10 @@ import {
   accessPermissionChanges,
   accessPermissions,
 } from '@/lib/user-notice';
-import { noticeInsert } from '@/lib/user-notice-storage';
+import {
+  noticeInsert,
+  settlePendingPermissionNotices,
+} from '@/lib/user-notice-storage';
 import { normalizeUsername } from '@/lib/username';
 import type { AdminConfig } from '@/types/admin';
 
@@ -90,6 +93,9 @@ export class MysqlUserAccessStore {
       const action =
         change === 'permissions-changed' && !payload ? null : change;
       if (action) {
+        const now = Date.now();
+        const settle = settlePendingPermissionNotices(username, now);
+        await this.db.execute(settle.sql, settle.params);
         const event = noticeInsert(
           'mysql',
           username,
@@ -97,6 +103,7 @@ export class MysqlUserAccessStore {
           'account-change',
           action,
           action === 'permissions-changed' ? payload! : {},
+          now,
         );
         await this.db.execute(event.sql, event.params);
       }

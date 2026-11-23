@@ -3,12 +3,22 @@ import { messageSortKey } from '@/lib/message-cursor.server';
 import type { IStorage } from '@/lib/types';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import { type UserNoticeMessage, userNoticeText } from '@/lib/user-notice';
+import { PERMISSION_NOTICE_QUIET_MS } from '@/lib/user-notice-storage';
 import type { AdminConfig } from '@/types/admin';
 
 export function userNoticeContract(createStorage: () => IStorage) {
   let storage: IStorage;
   const messages = (user: string) =>
     storage.getUserNoticeMessages(user, 0, [], Date.now(), { limit: 100 });
+  let clockSpy: jest.SpyInstance | undefined;
+  const fakeClock = () => {
+    let now = Date.now();
+    clockSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    return (ms: number) => {
+      now += ms;
+    };
+  };
+  afterEach(() => clockSpy?.mockRestore());
   beforeEach(async () => {
     storage = createStorage();
     for (const user of ['notice-author', 'notice-replier', 'notice-reporter'])
@@ -202,9 +212,12 @@ export function userNoticeContract(createStorage: () => IStorage) {
       }
       seen = new Set(all.map((item) => item.id));
     };
+    const advance = fakeClock();
+    // 配置改动的通知在静默期后才可见，这里每次保存后越过静默期，逐次断言
     const save = async (next: AdminConfig) => {
       expect(await storage.compareAndSetAdminConfig(config, next)).toBe(true);
       config = next;
+      advance(PERMISSION_NOTICE_QUIET_MS + 1);
     };
     await storage.updateUserAccess([user], { tags: ['group'] });
     await expectChange(
@@ -373,6 +386,103 @@ export function userNoticeContract(createStorage: () => IStorage) {
     );
     await storage.updateUserAccess([user], { enabledApis: [] });
     await expectChange();
+  });
+  it('静默期内的连续配置改动合并为一条净变化通知，管理员不收', async () => {
+    const user = 'notice-author';
+    const admin = 'notice-replier';
+    const advance = fakeClock();
+    await storage.updateUserAccess([admin], { role: 'admin' });
+    const visible = () => messages(user);
+    let config = {
+      SourceConfig: ['one', 'two', 'three'].map((key) => ({ key })),
+    } as AdminConfig;
+    await storage.setAdminConfig(config);
+    const save = async (next: AdminConfig) => {
+      expect(await storage.compareAndSetAdminConfig(config, next)).toBe(true);
+      config = next;
+      advance(10000);
+    };
+    const toggle = (keys: string[], disabled: boolean) => ({
+      ...config,
+      SourceConfig: config.SourceConfig.map((source) =>
+        keys.includes(source.key) ? { ...source, disabled } : source,
+      ),
+    });
+    await save(toggle(['one', 'two'], true));
+    await save(toggle(['one'], false));
+    await save({
+      ...config,
+      SourceConfig: [
+        ...config.SourceConfig,
+        { key: 'four' } as AdminConfig['SourceConfig'][number],
+      ],
+    });
+    expect(await visible()).toHaveLength(0);
+    advance(PERMISSION_NOTICE_QUIET_MS);
+    const [notice, ...rest] = await visible();
+    expect(rest).toHaveLength(0);
+    expect(notice.payload).toEqual({ sourcesAdded: 1, sourcesRemoved: 1 });
+    expect(userNoticeText(notice)).toBe(
+      '你的可用视频源已调整：新增 1 个，移除 1 个',
+    );
+
+    advance(1);
+    await save(toggle(['three'], true));
+    await save(toggle(['three'], false));
+    advance(PERMISSION_NOTICE_QUIET_MS);
+    expect(await visible()).toHaveLength(1);
+    expect((await messages(admin)).map((item) => item.action)).toEqual([
+      'set-admin',
+    ]);
+  });
+  it('待发期间的个人权限变更先结算待发通知，临近可见的待发通知不再合并', async () => {
+    const user = 'notice-author';
+    const advance = fakeClock();
+    let config = {
+      SourceConfig: [{ key: 'one' }],
+      SiteConfig: { EnableLiveEntry: true, LiveAccess: 'all' },
+      UserConfig: { Tags: [{ name: 'live', allowLive: true }] },
+    } as unknown as AdminConfig;
+    await storage.setAdminConfig(config);
+    const save = async (next: AdminConfig) => {
+      expect(await storage.compareAndSetAdminConfig(config, next)).toBe(true);
+      config = next;
+    };
+    const texts = async () =>
+      (await messages(user)).map((item) => userNoticeText(item)).reverse();
+
+    await save({
+      ...config,
+      SiteConfig: { ...config.SiteConfig, LiveAccess: 'groups' },
+    });
+    advance(1000);
+    await storage.updateUserAccess([user], { tags: ['live'] });
+    advance(1000);
+    await save({
+      ...config,
+      SiteConfig: { ...config.SiteConfig, EnableLiveEntry: false },
+    });
+    expect(await texts()).toEqual([
+      '你的直播访问权限已关闭',
+      '你现在可以观看直播了',
+    ]);
+    advance(PERMISSION_NOTICE_QUIET_MS);
+    expect((await texts()).at(-1)).toBe('你的直播访问权限已关闭');
+    expect(await texts()).toHaveLength(3);
+
+    advance(1);
+    const disable = (disabled: boolean) => ({
+      ...config,
+      SourceConfig: [{ ...config.SourceConfig[0], disabled }],
+    });
+    await save(disable(true));
+    advance(PERMISSION_NOTICE_QUIET_MS - 10000);
+    await save(disable(false));
+    advance(PERMISSION_NOTICE_QUIET_MS);
+    expect((await texts()).slice(3)).toEqual([
+      '你的可用视频源减少了 1 个',
+      '你的可用视频源增加了 1 个',
+    ]);
   });
   it('同毫秒游标分页、单条已读、压缩和保留期两后端一致', async () => {
     const user = 'notice-author';

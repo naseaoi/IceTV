@@ -47,23 +47,60 @@ export function accessPermissions(
   return { sources: new Set(sources), live };
 }
 
+function permissionChangePayload(
+  added: string[],
+  removed: string[],
+  liveAllowed: boolean | undefined,
+): UserNoticePayload | null {
+  if (!added.length && !removed.length && liveAllowed === undefined)
+    return null;
+  return {
+    sourcesAdded: added.length,
+    sourcesRemoved: removed.length,
+    sourceKeysAdded: added,
+    sourceKeysRemoved: removed,
+    ...(liveAllowed !== undefined ? { liveAllowed } : {}),
+  };
+}
+
 export function accessPermissionChanges(
   previous: ReturnType<typeof accessPermissions>,
   next: ReturnType<typeof accessPermissions>,
 ): UserNoticePayload | null {
-  const sourcesAdded = [...next.sources].filter(
-    (key) => !previous.sources.has(key),
-  ).length;
-  const sourcesRemoved = [...previous.sources].filter(
-    (key) => !next.sources.has(key),
-  ).length;
-  if (!sourcesAdded && !sourcesRemoved && previous.live === next.live)
-    return null;
-  return {
-    sourcesAdded,
-    sourcesRemoved,
-    ...(previous.live !== next.live ? { liveAllowed: next.live } : {}),
-  };
+  return permissionChangePayload(
+    [...next.sources].filter((key) => !previous.sources.has(key)),
+    [...previous.sources].filter((key) => !next.sources.has(key)),
+    previous.live !== next.live ? next.live : undefined,
+  );
+}
+
+// 两次相继变化合并为相对最初状态的净变化：先禁用再启用同一个源互相抵消
+export function mergeAccessPermissionChanges(
+  earlier: UserNoticePayload,
+  later: UserNoticePayload,
+): UserNoticePayload | null {
+  const added = new Set(earlier.sourceKeysAdded ?? []);
+  const removed = new Set(earlier.sourceKeysRemoved ?? []);
+  for (const key of later.sourceKeysAdded ?? [])
+    if (!removed.delete(key)) added.add(key);
+  for (const key of later.sourceKeysRemoved ?? [])
+    if (!added.delete(key)) removed.add(key);
+  const live =
+    later.liveAllowed === undefined
+      ? earlier.liveAllowed
+      : earlier.liveAllowed === undefined
+        ? later.liveAllowed
+        : undefined;
+  return permissionChangePayload([...added], [...removed], live);
+}
+
+// 源 key 只用于合并计算，不下发给客户端
+export function publicNoticePayload({
+  sourceKeysAdded: _added,
+  sourceKeysRemoved: _removed,
+  ...payload
+}: UserNoticePayload): UserNoticePayload {
+  return payload;
 }
 
 export type UserNoticeKind =
@@ -77,6 +114,8 @@ export interface UserNoticePayload {
   count?: number;
   sourcesAdded?: number;
   sourcesRemoved?: number;
+  sourceKeysAdded?: string[];
+  sourceKeysRemoved?: string[];
   liveAllowed?: boolean;
 }
 export interface UserNoticeMessage {
