@@ -1,3 +1,7 @@
+import {
+  buildCmsSearchUrl,
+  parseCmsSearchPayload,
+} from '@/lib/cms-search.server';
 import { type ApiSite, API_CONFIG } from '@/lib/config';
 import {
   isGirigiriSource,
@@ -43,10 +47,7 @@ async function validateSourceSearchQuery(
       : 'no_results';
   }
 
-  const url = new URL(site.api);
-  url.searchParams.set('ac', 'videolist');
-  url.searchParams.set('wd', query);
-  const response = await fetchWithUrlGuard(url.toString(), {
+  const response = await fetchWithUrlGuard(buildCmsSearchUrl(site.api, query), {
     headers: API_CONFIG.search.headers,
     signal,
   });
@@ -54,18 +55,10 @@ async function validateSourceSearchQuery(
     await response.body?.cancel().catch(() => {});
     throw new Error(`源搜索请求失败 (${response.status})`);
   }
-  const data = await readJsonLimited<{
-    code?: unknown;
-    success?: unknown;
-    list?: unknown;
-  } | null>(response, UPSTREAM_METADATA_MAX_BYTES);
-  if (
-    !data ||
-    (data.code !== undefined && ![1, 200].includes(Number(data.code))) ||
-    data.success === false ||
-    !Array.isArray(data.list) ||
-    data.list.some((item) => !item || typeof item.vod_name !== 'string')
-  ) {
+  const data = parseCmsSearchPayload(
+    await readJsonLimited<unknown>(response, UPSTREAM_METADATA_MAX_BYTES),
+  );
+  if (!data) {
     throw new Error('源搜索响应无效或未开放搜索');
   }
   return data.list.some((item) =>

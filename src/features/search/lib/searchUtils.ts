@@ -1,4 +1,4 @@
-import { filterSourcesForPlayback, SearchType } from '@/lib/source-match';
+import type { filterSourcesForPlayback, SearchType } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
 /**
@@ -49,6 +49,7 @@ export const compareYear = (
 /** 计算聚合组统计信息（集数、来源列表、豆瓣 ID） */
 export const computeGroupStats = (
   group: SearchResult[],
+  filterPlayableSources: typeof filterSourcesForPlayback,
 ): {
   episodes: number;
   source_names: string[];
@@ -73,7 +74,7 @@ export const computeGroupStats = (
   const inferredType: SearchType = episodes === 1 ? 'movie' : 'tv';
   const representative = group[0];
   const playableSources = representative
-    ? filterSourcesForPlayback(group, {
+    ? filterPlayableSources(group, {
         title: representative.title || '',
         year: representative.year || '',
         searchType: inferredType,

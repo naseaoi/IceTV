@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 
 import {
   FilterState,
@@ -28,7 +28,7 @@ function createResult(partial: Partial<SearchResult>): SearchResult {
 }
 
 describe('useSearchAggregation', () => {
-  it('updates aggregated results when streaming search appends results', () => {
+  it('updates aggregated results when streaming search appends results', async () => {
     const { result, rerender } = renderHook(
       ({ searchResults }: { searchResults: SearchResult[] }) =>
         useSearchAggregation({
@@ -43,6 +43,7 @@ describe('useSearchAggregation', () => {
     );
 
     expect(result.current.filteredAggResults).toHaveLength(0);
+    expect(result.current.isMatchingLoading).toBe(false);
 
     rerender({
       searchResults: [
@@ -56,7 +57,10 @@ describe('useSearchAggregation', () => {
       ],
     });
 
-    expect(result.current.filteredAggResults).toHaveLength(1);
+    expect(result.current.isMatchingLoading).toBe(true);
+    await waitFor(() =>
+      expect(result.current.filteredAggResults).toHaveLength(1),
+    );
     expect(result.current.filteredAggResults[0].title).toBe(
       'Re：从零开始的异世界生活',
     );
@@ -68,7 +72,7 @@ describe('useSearchAggregation', () => {
     });
   });
 
-  it('keeps only the selected source in aggregated playback group', () => {
+  it('keeps only the selected source in aggregated playback group', async () => {
     const { result } = renderHook(() =>
       useSearchAggregation({
         searchResults: [
@@ -96,7 +100,9 @@ describe('useSearchAggregation', () => {
       }),
     );
 
-    expect(result.current.filteredAggResults).toHaveLength(1);
+    await waitFor(() =>
+      expect(result.current.filteredAggResults).toHaveLength(1),
+    );
     expect(result.current.filteredAggResults[0].group).toEqual([
       expect.objectContaining({
         source: 'lzi',
@@ -108,7 +114,7 @@ describe('useSearchAggregation', () => {
     ]);
   });
 
-  it('keeps selected source card stats while streaming appends other sources', () => {
+  it('keeps selected source card stats while streaming appends other sources', async () => {
     const lziResult = createResult({
       id: 'b',
       title: 'Re：从零开始的异世界生活',
@@ -140,6 +146,7 @@ describe('useSearchAggregation', () => {
       },
     );
 
+    await waitFor(() => expect(result.current.isMatchingLoading).toBe(false));
     const item = result.current.filteredAggResults[0];
     const cardHandle = {
       setDoubanId: jest.fn(),
@@ -153,7 +160,9 @@ describe('useSearchAggregation', () => {
       searchResults: [lziResult, ffzyResult],
     });
 
-    expect(result.current.filteredAggResults).toHaveLength(1);
+    await waitFor(() =>
+      expect(result.current.filteredAggResults).toHaveLength(1),
+    );
     expect(result.current.filteredAggResults[0].group).toEqual([
       expect.objectContaining({
         source: 'lzi',

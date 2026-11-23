@@ -154,3 +154,35 @@ it('解析选择同一备用线路，拒绝上游自动回落到主线的地址'
   ).rejects.toThrow('无效的稀饭集数地址');
   expect(fetchMock).toHaveBeenCalledTimes(count);
 });
+
+it.each([
+  null,
+  { ...anime, id: 0 },
+  { ...anime, id: { toString: 1 } },
+  { ...anime, id: '9007199254740992' },
+  { ...anime, title: '  ' },
+])('搜索跳过脏条目 %j，全脏结果与详情保持失败', async (invalid) => {
+  const fetchMock = global.fetch as jest.Mock;
+  fetchMock.mockResolvedValueOnce(response([invalid, anime]));
+  expect(await searchFromXifan(site, '葬送')).toEqual([
+    expect.objectContaining({ id: '26', title: anime.title }),
+  ]);
+  fetchMock.mockResolvedValueOnce(response([invalid]));
+  await expect(searchFromXifan(site, '葬送')).rejects.toThrow('搜索响应无效');
+  fetchMock.mockResolvedValueOnce(response({ anime: invalid, sources: [] }));
+  await expect(getDetailFromApi(site, '26')).rejects.toThrow('详情响应无效');
+});
+
+it.each([
+  '/anime/0/episode/329/source/2',
+  '/anime/26/episode/329/source/02',
+  '/anime/9007199254740992/episode/329/source/2',
+  '/anime/26/episode/9007199254740992/source/2',
+  '/anime/26/episode/329/source/9007199254740992',
+  '/anime/26/episode/329/source/2/../5',
+])('无效路径 %s 在请求前被拒绝', async (path) => {
+  await expect(resolveXifanEpisodeUrlByPath(site, path)).rejects.toThrow(
+    '无效的稀饭集数地址',
+  );
+  expect(global.fetch).not.toHaveBeenCalled();
+});

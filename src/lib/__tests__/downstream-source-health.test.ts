@@ -22,7 +22,7 @@ import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
 jest.mock('@/lib/config', () => ({
   API_CONFIG: {
-    search: { headers: {}, path: '?wd=', pagePath: '?wd={query}&pg={page}' },
+    search: { headers: {} },
   },
   getConfigForRead: jest
     .fn()
@@ -233,7 +233,7 @@ it.each([
     expect(dedupeSearchLoad).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.com/api?wd=space%20movie',
+      'https://example.com/api?ac=videolist&wd=space%20movie',
       expect.any(Object),
     );
     expect(recordSourceSearchOutcome).toHaveBeenCalledTimes(1);

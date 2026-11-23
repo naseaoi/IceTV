@@ -306,6 +306,33 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+describe('按需加载简繁匹配', () => {
+  it.each(['aggregate', 'search'])(
+    '%s 候选保留简繁兼容与原标题',
+    async (entry) => {
+      const source = { ...createSource('traditional'), title: '海賊王' };
+      installFetch(
+        {},
+        {},
+        {
+          '/api/search': Promise.resolve({ results: [source] }),
+          '/api/detail': Promise.resolve(source),
+        },
+      );
+      const params = setupHook(entry === 'aggregate' ? [source] : null, {
+        videoTitle: '海贼王',
+        searchTitle: '海贼王',
+        videoTitleRef: { current: '海贼王' },
+        optimizationEnabled: false,
+      });
+      await waitFor(() =>
+        expect(params.setDetail).toHaveBeenCalledWith(source),
+      );
+      expect(params.setError).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe('首次搜索截止时间', () => {
   it.each(['headers', 'body'])(
     'quick %s 悬挂后中止并回退完整搜索',

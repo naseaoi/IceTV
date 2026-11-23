@@ -258,7 +258,12 @@ async function searchQuickSite({
 }): Promise<{ detail: SearchResult | null; sources: SearchResult[] }> {
   if (signal.aborted) return { detail: null, sources: [] };
 
-  const searchResults = await searchFirstPageFromApi(site, query, { signal });
+  const searchResults = await searchFirstPageFromApi(site, query, {
+    signal,
+    isMatch: (result) =>
+      filterSourcesForPlayback([result], { title: query, year, searchType })
+        .length > 0,
+  });
   if (signal.aborted) return { detail: null, sources: [] };
 
   const matchedSources = filterSourcesForPlayback(

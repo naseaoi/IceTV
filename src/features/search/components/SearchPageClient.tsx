@@ -149,7 +149,7 @@ function AuthenticatedSearchPageClient() {
   const {
     error,
     retry,
-    isLoading,
+    isLoading: isSearchLoading,
     setIsLoading,
     showResults,
     setShowResults,
@@ -167,13 +167,20 @@ function AuthenticatedSearchPageClient() {
     filterAllYearOrder: filterAll.yearOrder,
   });
 
-  const { filterOptions, filteredAllResults, filteredAggResults, getGroupRef } =
-    useSearchAggregation({
-      searchResults,
-      filterAll,
-      filterAgg,
-      searchQuery: activeSearchQuery,
-    });
+  const {
+    filterOptions,
+    filteredAllResults,
+    filteredAggResults,
+    getGroupRef,
+    isMatchingLoading,
+  } = useSearchAggregation({
+    searchResults,
+    filterAll,
+    filterAgg,
+    searchQuery: activeSearchQuery,
+  });
+  const isLoading =
+    isSearchLoading || (viewMode === 'agg' && isMatchingLoading);
 
   useEffect(() => {
     // 宽屏下页面输入框隐藏，聚焦由顶栏输入框的 autoFocus 负责

@@ -71,7 +71,6 @@ import {
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
-import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
   isTrustedSourcePlaybackStat,
   readSourcePlaybackStats,
@@ -866,6 +865,9 @@ export function usePlayInit({
         }
         sourceSearchFailed = false;
 
+        const { filterSourcesForPlayback } =
+          await import('@/lib/playback-source-match');
+        if (signal.aborted) return [];
         const results = filterSourcesForPlayback(data.results, {
           title: videoTitleRef.current,
           year: videoYearRef.current,
@@ -1005,24 +1007,31 @@ export function usePlayInit({
       }
     };
 
-    const loadAggregateGroup = (): SearchResult[] | null => {
+    const loadAggregateGroup = (): Promise<SearchResult[] | null> | null => {
       try {
         const raw = sessionStorage.getItem('aggregate_group');
         if (raw) {
           const parsed = JSON.parse(raw) as SearchResult[];
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const playableGroup = filterSourcesForPlayback(parsed, {
-              title: videoTitleRef.current,
-              year: videoYearRef.current,
-              searchType:
-                searchType === 'tv' || searchType === 'movie' ? searchType : '',
-            });
-            if (playableGroup.length === 0) {
-              clearInvalidAggregateGroup(raw);
-              return null;
-            }
-            aggregateGroupRawToClear = raw;
-            return parsed;
+            return import('@/lib/playback-source-match')
+              .then(({ filterSourcesForPlayback }) => {
+                if (signal.aborted) return null;
+                const playableGroup = filterSourcesForPlayback(parsed, {
+                  title: videoTitleRef.current,
+                  year: videoYearRef.current,
+                  searchType:
+                    searchType === 'tv' || searchType === 'movie'
+                      ? searchType
+                      : '',
+                });
+                if (playableGroup.length === 0) {
+                  clearInvalidAggregateGroup(raw);
+                  return null;
+                }
+                aggregateGroupRawToClear = raw;
+                return parsed;
+              })
+              .catch(() => null);
           }
         }
       } catch {
@@ -1113,7 +1122,9 @@ export function usePlayInit({
       signal.addEventListener('abort', () => quickController.abort(), {
         once: true,
       });
-      const cachedGroup = loadAggregateGroup();
+      const cachedGroupTask = loadAggregateGroup();
+      const cachedGroup = cachedGroupTask ? await cachedGroupTask : null;
+      if (signal.aborted) return;
       const titleEntry = !currentSource && !currentId;
       const quickPromise =
         titleEntry && !cachedGroup && optimizationEnabled && quickQuery
@@ -1228,6 +1239,9 @@ export function usePlayInit({
 
       let sourcesInfo: SearchResult[];
       if (cachedGroup) {
+        const { filterSourcesForPlayback } =
+          await import('@/lib/playback-source-match');
+        if (signal.aborted) return;
         sourcesInfo = filterSourcesForPlayback(cachedGroup, {
           title: videoTitleRef.current,
           year: videoYearRef.current,

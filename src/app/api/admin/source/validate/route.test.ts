@@ -86,7 +86,9 @@ it('失败源取消正文，成功源输出结果和完成事件', async () => {
   mockFetch.mockResolvedValueOnce({ ok: false, status: 503, body: { cancel } });
   mockFetch.mockImplementation(
     async () =>
-      new Response(JSON.stringify({ list: [{ vod_name: 'test movie' }] })),
+      new Response(
+        JSON.stringify({ list: [{ vod_id: 1, vod_name: 'test movie' }] }),
+      ),
   );
   const text = await (await GET(request())).text();
   expect(cancel).toHaveBeenCalledTimes(1);
@@ -132,9 +134,15 @@ it('空源列表正常结束 SSE', async () => {
 });
 
 it.each([
-  ['有效结果', { list: [{ vod_name: 'test movie' }] }, 'ok'],
+  ['有效结果', { list: [{ vod_id: 1, vod_name: 'test movie' }] }, 'ok'],
   ['空结果', { list: [] }, 'empty'],
-  ['无匹配标题', { list: [{ vod_name: 'other' }] }, 'empty'],
+  ['无匹配标题', { list: [{ vod_id: 1, vod_name: 'other' }] }, 'empty'],
+  [
+    '混合脏条目',
+    { list: [null, { vod_name: 'test' }, { vod_id: 1, vod_name: 'test' }] },
+    'ok',
+  ],
+  ['全部脏条目', { list: [null, { vod_name: 'test' }] }, 'error'],
   ['无效结构', { list: null }, 'error'],
   ['搜索未开放', { code: 1002, list: [] }, 'error'],
 ])('%s 写入对应健康样本', async (_label, data, outcome) => {

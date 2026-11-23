@@ -28,6 +28,7 @@
 
 ## 加载反馈与骨架
 
+- 简繁匹配的 OpenCC 字典经 `playback-source-match.ts` 动态加载，转换器首次匹配时才创建；作品身份仍按原规则归一化，不做简繁转换。仅用身份函数的模块从 `source-match.ts` 的轻量重导出取值；客户端播放筛选在异步流程里导入匹配模块，搜索聚合收到结果后再加载，期间沿用搜索骨架。同步渲染工具只接收已加载的筛选函数，避免静态依赖把字典重新带回各页面首屏分块。
 - 骨架块用 `globals.css` 的 `skeleton` 类（自带底色与扫光，只加在叶子块上，父子叠加会出现两层动画），转圈用 `src/components/Spinner.tsx`（ArtPlayer 缓冲图标复用其 `SPINNER_MARKUP`），整页加载 / 错误用 `LoadingStatePanel`，播放器内遮罩用 `PlayerStateOverlay`。不要再手写 `animate-pulse` 灰块或 `animate-spin` 图标。
 - 客户端导航能否立即切页取决于目标路由的 `loading.tsx`：动态路由的预取只取到最近的 loading 边界，没有边界时点击后旧页面停留到服务端渲染完成（线上至少一次往返，个人主页这类多查询页面达数秒）。页面在渲染前 await 服务端数据（会话、计数、资料）的路由必须配 `loading.tsx`；loading 自身的 await 在预取未命中时同样推迟切页，骨架条数优先取本标签页已知计数（如 `getKnownPublicReviewCount()`、`peekListSummary()`），未知时内容区只转圈。从顶部导航直达、冷启动时标签页内必然没有计数的页面（如片单广场），把条数写入计数 cookie（`plaza_count`），loading 改为服务端组件经 `peekListCountCookie()` 读取（只读 cookie、不查库，缺失时仍转圈），否则冷启动先出现只有转圈的整屏深色空页。父级 loading 会成为所有子路由的外层边界，只想覆盖本页时把 page 与 loading 放进路由组（如 `/u/[profileId]/(profile)`、`/lists/(plaza)`）。
 - 目标路由的预取仍在途中时点击导航，Next 16.2 原版把该页段渲染为空内容：旧页面已卸载、loading 也不出现，表现为首次切页整页（含顶栏）闪黑，loading 引用的客户端分块越慢窗口越长。`patches/next@16.2.10.patch` 让 `layout-router` 在这种预取 Promise 解析为 `null` 时改用最终数据，从而挂起到 loading 边界。升级 Next 时先确认上游 `InnerLayoutRouter` 是否已处理该情况，未处理则把补丁迁到新版本；改补丁后删除 `.next/cache/webpack` 再本地构建，复现方法是悬停顶部导航约 0.5 秒后点击、并给本地服务加 300ms 响应延迟。

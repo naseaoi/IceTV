@@ -4,7 +4,7 @@ import { createSwrCache } from '@/lib/server-cache';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
 import { SearchResult } from '@/lib/types';
 
-export type CachedPageStatus = 'ok' | 'timeout' | 'forbidden';
+export type CachedPageStatus = 'ok' | 'timeout' | 'forbidden' | 'invalid';
 
 export interface CachedPageEntry {
   status: CachedPageStatus;
@@ -244,7 +244,7 @@ export function setCachedSearchPage(
     data,
     pageCount,
   };
-  if (status === 'ok' && data.length === 0) {
+  if (status === 'invalid' || (status === 'ok' && data.length === 0)) {
     SEARCH_CACHE.invalidate(key);
     SEARCH_EMPTY_CACHE.set(key, entry);
   } else {

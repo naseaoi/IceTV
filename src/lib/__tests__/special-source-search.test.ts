@@ -185,7 +185,7 @@ it('uses a successful xgcartoon fallback without reporting failure', async () =>
   }
 });
 
-it('简繁搜索在正常搜索与后台检测共用匹配，无结果补查一次且失败不补查', async () => {
+it('简繁搜索在正常搜索与后台检测共用匹配，繁体无结果补查简体一次且失败不补查', async () => {
   const site = sources[1];
   const title = '海賊王';
   const html = `<a href="/detail/onepiece" class="topic-list-item"><div class="h3">${title}</div></a>`;
@@ -217,35 +217,33 @@ it('简繁搜索在正常搜索与后台检测共用匹配，无结果补查一�
       ).toHaveLength(1);
     }
     expect(normalizeWorkTitle(title)).toBe('海賊王');
-    for (const query of ['海贼王', '海賊王']) {
-      reset();
-      fetchMock.mockImplementation(
-        async (url: string) =>
-          new Response(
-            new URL(url).searchParams.get('q') === query ? site.empty : html,
-          ),
-      );
-      expect(await searchFirstPageFromApi(site, query)).toHaveLength(1);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('q')).toBe(
-        query === '海贼王' ? '海賊王' : '海贼王',
-      );
-      fetchMock.mockClear();
-      expect(
-        await validateSourceSearch(site, query, new AbortController().signal),
-      ).toBe('valid');
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    }
+    // 繁体输入无结果时补查简体；简体输入不补查繁体。
+    reset();
+    fetchMock.mockImplementation(
+      async (url: string) =>
+        new Response(
+          new URL(url).searchParams.get('q') === '海賊王' ? site.empty : html,
+        ),
+    );
+    expect(await searchFirstPageFromApi(site, '海賊王')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('q')).toBe(
+      '海贼王',
+    );
+    fetchMock.mockClear();
+    expect(
+      await validateSourceSearch(site, '海賊王', new AbortController().signal),
+    ).toBe('valid');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     reset();
     fetchMock.mockImplementation(async () => new Response(site.empty));
+    expect(await searchFirstPageFromApi(site, '海贼王')).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockClear();
     expect(
-      await validateSourceSearch(
-        site,
-        '不存在的海贼王',
-        new AbortController().signal,
-      ),
+      await validateSourceSearch(site, '海贼王', new AbortController().signal),
     ).toBe('no_results');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     reset();
     fetchMock.mockImplementation(
       async () => new Response('<html>Invalid page</html>'),

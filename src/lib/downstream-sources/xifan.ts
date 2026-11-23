@@ -1,5 +1,5 @@
 import type { ApiSite } from '@/lib/config';
-import { buildLazyEpisodeUrl, parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   readJsonLimited,
   UPSTREAM_METADATA_MAX_BYTES,
@@ -29,11 +29,15 @@ function text(value: unknown): string {
   return typeof value === 'string' ? normalizeInlineText(value) : '';
 }
 
+function parsePositiveId(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const id = String(value);
+  return /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)) ? id : null;
+}
+
 function positiveId(value: unknown): string {
-  const id = String(value ?? '');
-  if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) {
-    throw new Error('稀饭返回的编号无效');
-  }
+  const id = parsePositiveId(value);
+  if (!id) throw new Error('稀饭返回的编号无效');
   return id;
 }
 
@@ -72,13 +76,15 @@ async function requestXifan(
   }
 }
 
-function toSearchResult(apiSite: ApiSite, value: unknown): SearchResult {
-  const anime = object(value);
+function toSearchResult(apiSite: ApiSite, value: unknown): SearchResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const anime = value as JsonObject;
   const title = text(anime.title);
-  if (!title) throw new Error('稀饭返回的作品标题为空');
+  const id = parsePositiveId(anime.id);
+  if (!title || !id) return null;
   const year = String(anime.release_year ?? '');
   return {
-    id: positiveId(anime.id),
+    id,
     title,
     poster: text(anime.cover_url),
     episodes: [],
@@ -116,7 +122,12 @@ export async function searchFromXifan(
     signal,
   );
   if (!Array.isArray(data)) throw new Error('稀饭搜索响应无效');
-  return data.map((anime) => toSearchResult(apiSite, anime));
+  const results = data
+    .map((anime) => toSearchResult(apiSite, anime))
+    .filter((item): item is SearchResult => item !== null);
+  if (data.length > 0 && results.length === 0)
+    throw new Error('稀饭搜索响应无效');
+  return results;
 }
 
 export async function getDetailFromXifan(
@@ -130,7 +141,7 @@ export async function getDetailFromXifan(
     }),
   );
   const result = toSearchResult(apiSite, data.anime);
-  if (result.id !== animeId || !Array.isArray(data.sources)) {
+  if (!result || result.id !== animeId || !Array.isArray(data.sources)) {
     throw new Error('稀饭详情响应无效');
   }
   // 仅接入已验证可直连的备用线路，避免自动换回不通的主线。
@@ -168,13 +179,15 @@ export async function resolveXifanEpisodeUrlByPath(
   _apiSite: ApiSite,
   path: string,
 ): Promise<string> {
-  if (!parseLazyEpisodeUrl(buildLazyEpisodeUrl('xifan', path))) {
+  const match =
+    /^\/anime\/([1-9]\d*)\/episode\/([1-9]\d*)\/source\/([1-9]\d*)$/.exec(path);
+  if (
+    !match ||
+    !match.slice(1).every((id) => Number.isSafeInteger(Number(id)))
+  ) {
     throw new Error('无效的稀饭集数地址');
   }
-  const [, , animeId, , episodeId, , sourceId] = path.split('/');
-  positiveId(animeId);
-  positiveId(episodeId);
-  positiveId(sourceId);
+  const [, , episodeId, sourceId] = match;
   const data = object(
     await requestXifan('/functions/v1/issue-web-playback', {
       action: 'fallback',

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { SearchFilterCategory } from '@/components/SearchResultFilter';
 import { VideoCardHandle } from '@/components/VideoCard';
@@ -192,14 +192,17 @@ function materializeAggregatedResults(index: SearchAggregationIndex) {
   return groupedResults;
 }
 
+type PlaybackMatcher = typeof import('@/lib/playback-source-match');
+
 function createAggregatedResultItem(
   mapKey: string,
   group: SearchResult[],
+  matcher: PlaybackMatcher,
 ): AggregatedResultItem {
   const title = group[0]?.title || '';
   const poster = group.find((item) => item.poster)?.poster || '';
   const year = group[0]?.year || 'unknown';
-  const stats = computeGroupStats(group);
+  const stats = computeGroupStats(group, matcher.filterSourcesForPlayback);
 
   return {
     mapKey,
@@ -218,6 +221,27 @@ export function useSearchAggregation({
   filterAgg,
   searchQuery,
 }: UseSearchAggregationParams) {
+  const [matcher, setMatcher] = useState<PlaybackMatcher | null>(null);
+  const [matcherError, setMatcherError] = useState<Error | null>(null);
+  const hasResults = searchResults.length > 0;
+
+  useEffect(() => {
+    if (!hasResults || matcher) return;
+    let active = true;
+    // 渲染与排序只使用轻量工具；收到结果后才加载简繁字典。
+    void import('@/lib/playback-source-match').then(
+      (loaded) => {
+        if (active) setMatcher(loaded);
+      },
+      (error: Error) => {
+        if (active) setMatcherError(error);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [hasResults, matcher]);
+
   // 聚合卡片 refs 与统计缓存
   const groupRefs = useRef<
     Map<string, React.RefObject<VideoCardHandle | null>>
@@ -247,10 +271,11 @@ export function useSearchAggregation({
   );
 
   const aggregatedResultItems = useMemo<AggregatedResultItem[]>(() => {
+    if (!matcher) return [];
     return aggregatedResults.map(([mapKey, group]) =>
-      createAggregatedResultItem(mapKey, group),
+      createAggregatedResultItem(mapKey, group, matcher),
     );
-  }, [aggregatedResults]);
+  }, [aggregatedResults, matcher]);
 
   const filterOptions = useMemo(() => {
     const { sources, titles, years } = searchIndexState.index;
@@ -336,6 +361,7 @@ export function useSearchAggregation({
 
   // 聚合筛选+排序
   const filteredAggResults = useMemo(() => {
+    if (!matcher) return [];
     const { source, title, year, yearOrder } = filterAgg;
 
     if (
@@ -357,7 +383,7 @@ export function useSearchAggregation({
       const filteredItem =
         source === 'all'
           ? item
-          : createAggregatedResultItem(item.mapKey, group);
+          : createAggregatedResultItem(item.mapKey, group, matcher);
       if (title !== 'all' && filteredItem.title !== title) return [];
       if (year !== 'all' && filteredItem.year !== year) return [];
       return [filteredItem];
@@ -384,7 +410,7 @@ export function useSearchAggregation({
         ? aTitle.localeCompare(bTitle)
         : bTitle.localeCompare(aTitle);
     });
-  }, [aggregatedResultItems, filterAgg, trimmedSearchQuery]);
+  }, [aggregatedResultItems, filterAgg, trimmedSearchQuery, matcher]);
 
   // 聚合增量更新
   useEffect(() => {
@@ -426,7 +452,10 @@ export function useSearchAggregation({
     });
   }, [filteredAggResults]);
 
+  if (matcherError) throw matcherError;
+
   return {
+    isMatchingLoading: hasResults && !matcher,
     filterOptions,
     filteredAllResults,
     filteredAggResults,

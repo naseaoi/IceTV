@@ -1,3 +1,7 @@
+import {
+  buildCmsSearchUrl,
+  parseCmsSearchPayload,
+} from '@/lib/cms-search.server';
 import { waitForSharedLoad } from '@/lib/concurrency';
 import { API_CONFIG, ApiSite, getConfigForRead } from '@/lib/config';
 import {
@@ -51,24 +55,9 @@ import { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
-interface ApiSearchItem {
-  vod_id: string;
-  vod_name: string;
-  vod_pic: string;
-  vod_remarks?: string;
-  vod_isend?: number | string;
-  vod_serial?: number | string;
-  vod_total?: number | string;
-  vod_play_url?: string;
-  vod_class?: string;
-  vod_year?: string;
-  vod_content?: string;
-  vod_douban_id?: number;
-  type_name?: string;
-}
-
 interface SearchFromApiOptions {
   maxSearchPages?: number;
+  isMatch?: (result: SearchResult) => boolean;
   signal?: AbortSignal;
   // 第 1 页失败时抛 SearchSourceUnavailableError，而不是返回空结果
   reportFailure?: boolean;
@@ -204,25 +193,23 @@ async function fetchAndCacheSearchPage(
       return { results: [], failed: true };
     }
 
-    const data = await readJsonLimited<any>(
-      response,
-      UPSTREAM_METADATA_MAX_BYTES,
+    const data = parseCmsSearchPayload(
+      await readJsonLimited<unknown>(response, UPSTREAM_METADATA_MAX_BYTES),
     );
     latencyMs = Date.now() - startedAt;
-    if (
-      !data ||
-      (data.code !== undefined && ![1, 200].includes(Number(data.code))) ||
-      data.success === false ||
-      !Array.isArray(data.list) ||
-      data.list.some(
-        (item: ApiSearchItem) => !item || typeof item.vod_name !== 'string',
-      )
-    ) {
+    if (!data) {
+      setCachedSearchPage(
+        getSourceCacheKey(apiSite),
+        query,
+        page,
+        'invalid',
+        [],
+      );
       return { results: [], failed: true };
     }
     outcome = data.list.length > 0 ? 'ok' : 'empty';
     if (data.list.length === 0) {
-      const pageCount = page === 1 ? data?.pagecount || 1 : undefined;
+      const pageCount = page === 1 ? data.pageCount : undefined;
       setCachedSearchPage(
         getSourceCacheKey(apiSite),
         query,
@@ -234,7 +221,7 @@ async function fetchAndCacheSearchPage(
       return { results: [], pageCount };
     }
 
-    const allResults = data.list.map((item: ApiSearchItem) => {
+    const allResults = data.list.map((item) => {
       const { episodes, titles } = item.vod_play_url
         ? parseVodPlayUrl(item.vod_play_url)
         : { episodes: [], titles: [] };
@@ -265,7 +252,7 @@ async function fetchAndCacheSearchPage(
       (result: SearchResult) => result.episodes.length > 0,
     );
 
-    const pageCount = page === 1 ? data.pagecount || 1 : undefined;
+    const pageCount = page === 1 ? data.pageCount : undefined;
     setCachedSearchPage(
       getSourceCacheKey(apiSite),
       query,
@@ -322,7 +309,7 @@ export async function probeSourceSearch(
       apiSite,
       query,
       1,
-      apiSite.api + API_CONFIG.search.path + encodeURIComponent(query),
+      buildCmsSearchUrl(apiSite.api, query),
       runtimeParams.SearchRequestTimeoutSeconds * 1000,
       signal,
     );
@@ -393,9 +380,7 @@ async function searchFromApiQuery(
   try {
     const runtimeParams = await readSearchRuntimeParams();
     const searchTimeoutMs = runtimeParams.SearchRequestTimeoutSeconds * 1000;
-    const apiBaseUrl = apiSite.api;
-    const apiUrl =
-      apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
+    const apiUrl = buildCmsSearchUrl(apiSite.api, query);
 
     const firstPageResult = options.refreshFirstPage
       ? await fetchAndCacheSearchPage(
@@ -435,11 +420,7 @@ async function searchFromApiQuery(
       const additionalPageTasks = [];
 
       for (let page = 2; page <= pagesToFetch + 1; page++) {
-        const pageUrl =
-          apiBaseUrl +
-          API_CONFIG.search.pagePath
-            .replace('{query}', encodeURIComponent(query))
-            .replace('{page}', page.toString());
+        const pageUrl = buildCmsSearchUrl(apiSite.api, query, page);
 
         additionalPageTasks.push(async () => {
           if (options.signal?.aborted) {
@@ -492,13 +473,17 @@ export async function searchFromApi(
   try {
     return await searchWithScriptFallback(
       query,
-      (keyword) =>
+      (keyword, isFallback) =>
         searchFromApiQuery(apiSite, keyword, {
           ...options,
+          maxSearchPages: isFallback ? 1 : options.maxSearchPages,
           reportFailure: true,
         }),
       (results) =>
-        results.some((item) => isTitleMatchedSearchQuery(item.title, query)),
+        results.some(
+          options.isMatch ??
+            ((item) => isTitleMatchedSearchQuery(item.title, query)),
+        ),
       options.signal,
     );
   } catch (error) {
@@ -512,7 +497,7 @@ export async function searchFromApi(
 export async function searchFirstPageFromApi(
   apiSite: ApiSite,
   query: string,
-  options: { signal?: AbortSignal } = {},
+  options: Pick<SearchFromApiOptions, 'signal' | 'isMatch'> = {},
 ): Promise<SearchResult[]> {
   return searchFromApi(apiSite, query, { ...options, maxSearchPages: 1 });
 }

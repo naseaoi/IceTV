@@ -49,10 +49,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const results = await searchFromApi(targetSite, query, { maxSearchPages });
-    let result = results.filter(
-      (r) => simplifySearchText(r.title) === simplifySearchText(query),
-    );
+    const normalizedQuery = simplifySearchText(query);
+    const isMatch = (result: { title: string }) =>
+      simplifySearchText(result.title) === normalizedQuery;
+    const results = await searchFromApi(targetSite, query, {
+      maxSearchPages,
+      isMatch,
+    });
+    let result = results.filter(isMatch);
     if (!config.SiteConfig.DisableYellowFilter) {
       result = result.filter((item) => {
         const typeName = item.type_name || '';

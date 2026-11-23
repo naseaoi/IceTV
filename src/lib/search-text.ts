@@ -1,8 +1,9 @@
 import { Converter } from 'opencc-js/t2cn';
 
-const toSimplified = Converter({ from: 'tw', to: 'cn' });
+let toSimplified: ReturnType<typeof Converter> | undefined;
 
 export function simplifySearchText(text: string): string {
+  toSimplified ??= Converter({ from: 'tw', to: 'cn' });
   return toSimplified(text);
 }
 

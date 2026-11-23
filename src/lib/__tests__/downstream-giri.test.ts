@@ -5,10 +5,7 @@ import { resolveGirigiriEpisodePlayUrlByPath } from '@/lib/downstream-sources/gi
 
 jest.mock('@/lib/config', () => ({
   API_CONFIG: {
-    search: {
-      path: '/api.php/provide/vod/?ac=detail&wd=',
-      pagePath: '/api.php/provide/vod/?ac=detail&wd={query}&pg={page}',
-    },
+    search: {},
     detail: {
       path: '/api.php/provide/vod/?ac=detail&ids=',
       headers: {},
