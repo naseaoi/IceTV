@@ -1,4 +1,4 @@
-import type { OAuthProvider } from '@/lib/oauth-identity';
+import { type OAuthProvider, OAUTH_PROVIDERS } from '@/lib/oauth-identity';
 import type { AdminConfig } from '@/types/admin';
 
 export const ADMIN_USER_PAGE_SIZE = 50;
@@ -8,11 +8,34 @@ export const ADMIN_USER_SORTS = [
   'activeDesc',
   'activeAsc',
 ] as const;
+export type AdminUserFilterValue =
+  | 'all'
+  | 'owner'
+  | 'admin'
+  | 'user'
+  | 'banned'
+  | `provider:${OAuthProvider}`;
+const ADMIN_USER_FILTERS: readonly string[] = [
+  'all',
+  'owner',
+  'admin',
+  'user',
+  'banned',
+  ...OAUTH_PROVIDERS.map((provider) => `provider:${provider}`),
+];
 export type AdminUserFilter = {
   q?: string;
-  filter?: 'all' | 'owner' | 'admin' | 'user' | 'banned';
+  filter?: AdminUserFilterValue;
   group?: string;
 };
+
+export function adminUserFilterProvider(
+  filter: AdminUserFilter['filter'],
+): OAuthProvider | null {
+  return filter?.startsWith('provider:')
+    ? (filter.slice('provider:'.length) as OAuthProvider)
+    : null;
+}
 export type AdminUserQuery = AdminUserFilter & {
   sort?: (typeof ADMIN_USER_SORTS)[number];
   cursor?: string;
@@ -51,7 +74,7 @@ export function parseAdminUserQuery(
     q.length > 200 ||
     typeof group !== 'string' ||
     group.length > 200 ||
-    !['all', 'owner', 'admin', 'user', 'banned'].includes(filter as string) ||
+    !ADMIN_USER_FILTERS.includes(filter as string) ||
     !ADMIN_USER_SORTS.includes(sort as (typeof ADMIN_USER_SORTS)[number]) ||
     (cursor !== undefined &&
       (typeof cursor !== 'string' || cursor.length > 2048)) ||

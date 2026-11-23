@@ -21,7 +21,10 @@ import {
   UserGroupFormDialog,
 } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
-import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
+import {
+  LOGIN_PROVIDER_BADGES,
+  UserTable,
+} from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
 import { useAdminUsers } from '@/features/admin/hooks/useAdminUsers';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -39,6 +42,7 @@ import {
 import { useModalState } from '@/hooks/useModalState';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { OAUTH_PROVIDERS } from '@/lib/oauth-identity';
 import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
@@ -704,6 +708,10 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                 { value: 'admin', label: '管理员' },
                 { value: 'user', label: '普通用户' },
                 { value: 'banned', label: '已封禁' },
+                ...OAUTH_PROVIDERS.map((provider) => ({
+                  value: `provider:${provider}`,
+                  label: `已绑定 ${LOGIN_PROVIDER_BADGES[provider].label}`,
+                })),
               ]}
             />
             {(userGroups.length > 0 || userGroupFilter) && (

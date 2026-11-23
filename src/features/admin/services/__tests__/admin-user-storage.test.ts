@@ -177,6 +177,12 @@ for (const backend of ['sqlite', 'mysql'] as const) {
             username: name,
             loginProviders: ['linuxdo'],
           });
+          const byProvider = await storage.getAdminUserPage({
+            ...query,
+            filter: 'provider:linuxdo',
+          });
+          expect(byProvider.items.map((item) => item.username)).toEqual([name]);
+          expect(byProvider.total).toBe(1);
         } finally {
           await storage.deleteUser(name);
         }

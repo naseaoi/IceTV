@@ -36,6 +36,7 @@ let mockRows: Array<{
   banned?: boolean;
   tags?: string[];
   nickname?: string;
+  loginProviders?: string[];
 }> = [];
 let mockNextCursor: string | null = null;
 jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
@@ -47,7 +48,11 @@ jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
           row.username.toLowerCase().includes(q) ||
           row.nickname?.toLowerCase().includes(q)) &&
         (query.filter === 'all' ||
-          (query.filter === 'banned' ? row.banned : row.role === query.filter)),
+          (query.filter === 'banned'
+            ? row.banned
+            : query.filter.startsWith('provider:')
+              ? row.loginProviders?.includes(query.filter.slice(9))
+              : row.role === query.filter)),
     );
     return {
       items,
@@ -333,7 +338,12 @@ describe('UserConfigTab user search and selection', () => {
     { username: 'owner', role: 'owner' },
     { username: 'manager', role: 'admin' },
     { username: 'Alice', role: 'user', tags: ['VIP'] },
-    { username: 'Bob', role: 'user', tags: ['Standard'] },
+    {
+      username: 'Bob',
+      role: 'user',
+      tags: ['Standard'],
+      loginProviders: ['linuxdo'],
+    },
     { username: 'Blocked', role: 'user', banned: true, tags: ['VIP'] },
   ];
   const config = {
@@ -404,6 +414,7 @@ describe('UserConfigTab user search and selection', () => {
     ['管理员', ['manager']],
     ['普通用户', ['Alice', 'Bob', 'Blocked']],
     ['已封禁', ['Blocked']],
+    ['已绑定 LinuxDo', ['Bob']],
   ])('filters by %s', (label, usernames) => {
     setup();
     filterUsers(label as string);

@@ -76,7 +76,7 @@
 - OAuth 凭证保存在 `UserConfig.LinuxDo`；后台配置响应复制后将 `ClientSecret` 置空，共享冻结配置保持原值。数据库备份包含凭证，备份文件按密钥管理。部署与注册通道语义见[LinuxDo 登录](deployment.md#linuxdo-登录)。
 
 - `oauth_identities` 是外部身份归属的唯一真相源；主键 `(provider, provider_user_id)`，唯一键 `(provider, username)`，用户名按本站规则归一化。LinuxDo 用户名仅用于显示，登录归属按不可变 ID 查询，同名本站账号始终独立。
-- 后台用户列表的登录渠道标记由 `oauth_identities` 按用户名聚合，只保留 `OAUTH_PROVIDERS`（`src/lib/oauth-identity.ts`）中的取值；新增渠道须先加入该列表，`UserTable` 的图标映射随类型强制补齐，否则该渠道的账号不显示标记。
+- 后台用户列表的登录渠道标记由 `oauth_identities` 按用户名聚合，只保留 `OAUTH_PROVIDERS`（`src/lib/oauth-identity.ts`）中的取值；按渠道筛选同样以 `OAUTH_PROVIDERS` 生成选项与校验参数（`provider:<渠道>`），服务端按 `oauth_identities` 过滤。新增渠道须先加入该列表，`UserTable` 的图标与名称映射随类型强制补齐，否则该渠道的账号不显示标记，筛选项也缺少名称。
 - `registerUser()` 的身份参数与账号、权限、资料和活跃记录同事务写入；身份冲突时整笔回滚。自动建号写随机密码哈希并记录 `auto_created`，存储条件删除也拒绝解绑。
 - 是否设过可用密码是账号级状态 `users.password_set`，与绑定了几个、哪种外部身份无关；密码登录始终使用本站用户名。第三方自动建号写为未设置，普通注册写为已设置。未设置时首次设密免旧密码，之后修改校验旧密码；密码与状态同事务更新，管理员重置同样标记已设置。加列迁移时，存在 `auto_created` 身份的存量账号一次性标为未设置（只有随机密码，无法提供旧密码）。
 - 删除用户及不活跃清理同事务清理身份；SQLite 大小写合并保留已有规范用户名的绑定，冲突旧绑定移除，其余迁移到规范用户名。两后端共享身份契约，MySQL 同时执行 fake pool 与真实数据库用例。

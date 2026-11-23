@@ -1,9 +1,10 @@
 import { createHash } from 'crypto';
 
-import type {
-  AdminUserItem,
-  AdminUserPage,
-  AdminUserQuery,
+import {
+  type AdminUserItem,
+  type AdminUserPage,
+  type AdminUserQuery,
+  adminUserFilterProvider,
 } from '@/features/admin/lib/user-query';
 import { OAUTH_PROVIDERS } from '@/lib/oauth-identity';
 import { normalizeUsername } from '@/lib/username';
@@ -84,8 +85,14 @@ export function adminUserStatements(
     );
     params.push(query.q, query.q, query.q);
   }
+  const provider = adminUserFilterProvider(query.filter);
   if (query.filter === 'banned') where.push('banned = 1');
-  else if (query.filter && query.filter !== 'all') {
+  else if (provider) {
+    where.push(
+      'EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.username = ranked.username AND oi.provider = ?)',
+    );
+    params.push(provider);
+  } else if (query.filter && query.filter !== 'all') {
     where.push('role = ?');
     params.push(query.filter);
   }
