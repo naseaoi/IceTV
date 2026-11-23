@@ -67,6 +67,25 @@ describe('ModalShell', () => {
     expect(closeOuter).not.toHaveBeenCalled();
   });
 
+  it('只有按下和点击都在遮罩上才关闭，面板内拖出松开不关闭', () => {
+    const onClose = jest.fn();
+    render(
+      <ModalShell isOpen onClose={onClose}>
+        <input aria-label='名称' />
+      </ModalShell>,
+    );
+    const overlay = screen.getByRole('presentation');
+
+    // 框选文字拖出面板：按下在面板内，click 落在共同外层容器上
+    fireEvent.pointerDown(screen.getByLabelText('名称'));
+    fireEvent.click(overlay);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(backdrop()!);
+    fireEvent.click(backdrop()!);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('延迟关闭在退场结束后才通知父组件', () => {
     const onClose = jest.fn();
     render(<DeferredPanel onClose={onClose} />);
