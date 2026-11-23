@@ -1,3 +1,4 @@
+import type { OAuthProvider } from '@/lib/oauth-identity';
 import type { AdminConfig } from '@/types/admin';
 
 export const ADMIN_USER_PAGE_SIZE = 50;
@@ -23,6 +24,7 @@ export type AdminUserItem = NonNullable<
   nickname: string | null;
   lastActiveAt: number | null;
   inviteCode: string | null;
+  loginProviders: OAuthProvider[];
 };
 export type AdminUserPage = {
   items: AdminUserItem[];

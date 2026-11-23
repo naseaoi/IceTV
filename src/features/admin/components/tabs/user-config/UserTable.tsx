@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { type ComponentType, useMemo } from 'react';
 
+import { LinuxDoIcon } from '@/components/LinuxDoIcon';
 import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import {
   buttonStyles,
@@ -18,7 +19,15 @@ import {
   formatLastActive,
   formatLastActiveTooltip,
 } from '@/features/admin/lib/userActivity';
+import type { OAuthProvider } from '@/lib/oauth-identity';
 import { resolveSourceAccessRule } from '@/lib/source-access';
+
+const LOGIN_PROVIDER_BADGES: Record<
+  OAuthProvider,
+  { label: string; Icon: ComponentType<{ className?: string }> }
+> = {
+  linuxdo: { label: 'LinuxDo', Icon: LinuxDoIcon },
+};
 
 interface User {
   username: string;
@@ -28,6 +37,7 @@ interface User {
   enabledApis?: string[];
   tags?: string[];
   inviteCode?: string | null;
+  loginProviders?: OAuthProvider[];
 }
 
 interface UserTableSource {
@@ -248,6 +258,20 @@ export function UserTable({
                         </span>
                       )}
                     </span>
+                    {user.loginProviders?.map((provider) => {
+                      const { label, Icon } = LOGIN_PROVIDER_BADGES[provider];
+                      return (
+                        <span
+                          key={provider}
+                          role='img'
+                          aria-label={`已绑定 ${label}`}
+                          title={`已绑定 ${label}`}
+                          className='shrink-0'
+                        >
+                          <Icon className='h-4 w-4' />
+                        </span>
+                      );
+                    })}
                     <span
                       className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
                         user.role === 'owner'

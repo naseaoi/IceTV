@@ -5,6 +5,7 @@ import type {
   AdminUserPage,
   AdminUserQuery,
 } from '@/features/admin/lib/user-query';
+import { OAUTH_PROVIDERS } from '@/lib/oauth-identity';
 import { normalizeUsername } from '@/lib/username';
 
 export type AdminUserStorageQuery = AdminUserQuery & {
@@ -23,6 +24,7 @@ export type AdminUserRow = {
   nickname: string | null;
   lastActiveAt: number | string | null;
   inviteCode: string | null;
+  loginProviders: string | string[] | null;
   sort_key: number | string;
 };
 
@@ -38,6 +40,10 @@ export function adminUserStatements(
   const tags = mysql
     ? `(SELECT JSON_ARRAYAGG(g.group_name) OVER (ORDER BY g.position, g.group_name ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) FROM user_group_members g WHERE g.username = n.username LIMIT 1)`
     : `(SELECT json_group_array(group_name) FROM (SELECT group_name FROM user_group_members g WHERE g.username = n.username ORDER BY position))`;
+  // 先按用户名聚合再连接，避免逐行子查询扫描身份表（唯一键以 provider 开头）
+  const loginProviders = mysql
+    ? 'SELECT username, JSON_ARRAYAGG(provider) AS providers FROM oauth_identities GROUP BY username'
+    : 'SELECT username, json_group_array(provider) AS providers FROM oauth_identities GROUP BY username';
   const accessFilter =
     query.filter === 'banned'
       ? 'banned = 1'
@@ -56,11 +62,12 @@ export function adminUserStatements(
       CASE WHEN n.username = ? THEN 0 ELSE COALESCE(m.banned, 0) END AS banned,
       ${tags} AS tags, m.enabled_apis AS enabledApis,
       p.nickname, p.nickname_norm, a.last_login_at AS lastActiveAt,
-      i.code AS inviteCode
+      i.code AS inviteCode, o.providers AS loginProviders
     FROM names n LEFT JOIN user_access m ON m.username = n.username
     LEFT JOIN user_profiles p ON p.username = n.username
     LEFT JOIN user_login_activity a ON a.username = n.username
     LEFT JOIN invite_code_redemptions i ON i.username = n.username
+    LEFT JOIN (${loginProviders}) o ON o.username = n.username
   ), ranked AS (
     SELECT base.*, ${query.sort === 'username' ? '0' : query.sort === 'activeAsc' || query.sort === 'activeDesc' ? 'COALESCE(lastActiveAt, 0)' : "CASE WHEN username = ? THEN 0 WHEN role = 'owner' THEN 1 WHEN role = 'admin' THEN 2 ELSE 3 END"} AS sort_key FROM base
   )`;
@@ -163,6 +170,11 @@ function stringList(value: AdminUserRow['tags']): string[] | undefined {
     : undefined;
 }
 
+function loginProviderList(value: AdminUserRow['loginProviders']) {
+  const providers = new Set(stringList(value));
+  return OAUTH_PROVIDERS.filter((provider) => providers.has(provider));
+}
+
 export function adminUserPage(
   rows: AdminUserRow[],
   total: number,
@@ -181,6 +193,7 @@ export function adminUserPage(
       nickname: row.nickname,
       lastActiveAt: row.lastActiveAt === null ? null : Number(row.lastActiveAt),
       inviteCode: row.inviteCode ?? null,
+      loginProviders: loginProviderList(row.loginProviders),
     })),
     total,
     nextCursor:

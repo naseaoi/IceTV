@@ -154,6 +154,33 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           await storage.deleteUser(name);
         }
       });
+      it('lists the external login providers bound to each user', async () => {
+        const name = 'page-frank';
+        await storage.deleteUser(name);
+        try {
+          await storage.registerUser(name, 'password');
+          const before = await storage.getAdminUserPage({ ...query, q: name });
+          expect(before.items[0]).toMatchObject({ loginProviders: [] });
+
+          await expect(
+            storage.bindOAuthIdentity({
+              provider: 'linuxdo',
+              providerUserId: 'page-frank-ld',
+              username: name,
+              providerUsername: 'frank',
+              autoCreated: false,
+              createdAt: 1000,
+            }),
+          ).resolves.toBe('bound');
+          const after = await storage.getAdminUserPage({ ...query, q: name });
+          expect(after.items[0]).toMatchObject({
+            username: name,
+            loginProviders: ['linuxdo'],
+          });
+        } finally {
+          await storage.deleteUser(name);
+        }
+      });
       it('binds cursors to filters', async () => {
         const page = await storage.getAdminUserPage(query);
         await expect(
