@@ -87,13 +87,13 @@ export function LoginPageClient() {
     let cancelled = false;
 
     const loadRuntimeConfig = async () => {
-      const { openRegister, requireInviteCode, linuxDoLogin } =
+      const { passwordRegister, requireInviteCode, linuxDoLogin } =
         await getClientAuthRuntimeConfig();
       if (cancelled) {
         return;
       }
 
-      setRegisterEnabled(openRegister);
+      setRegisterEnabled(passwordRegister);
       setInviteCodeRequired(requireInviteCode);
       setLinuxDoLogin(linuxDoLogin);
     };

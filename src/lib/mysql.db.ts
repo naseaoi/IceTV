@@ -3147,7 +3147,8 @@ export class MySqlStorage implements IStorage {
     return this.invites.create(items);
   }
   async createInviteCode(item: InviteCode) {
-    return this.createInviteCodes([item]);
+    const result = await this.createInviteCodes([item]);
+    return typeof result === 'string' ? result : ('created' as const);
   }
   async deleteInviteCode(code: string) {
     await this.ensureInitialized();

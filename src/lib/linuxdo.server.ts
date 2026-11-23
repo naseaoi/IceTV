@@ -32,6 +32,7 @@ import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { validateNickname } from '@/lib/user-profile';
 import { isValidUsername, normalizeUsername } from '@/lib/username';
+import type { LinuxDoLoginSettings } from '@/types/admin';
 
 export const LINUXDO_SCOPE = 'openid profile';
 export const LINUXDO_STATE_COOKIE = 'linuxdo_state';
@@ -110,9 +111,12 @@ function publicOrigin(request: NextRequest): string {
   const proto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
   return fromHost(host, `${proto}:`) ?? origin;
 }
-function callbackUri(request: NextRequest): string {
+function callbackUri(
+  request: NextRequest,
+  settings: LinuxDoLoginSettings,
+): string {
   const uri =
-    process.env.LINUXDO_REDIRECT_URI?.trim() ||
+    settings.RedirectUri ||
     `${publicOrigin(request)}/api/auth/linuxdo/callback`;
   const url = new URL(uri);
   if (
@@ -248,12 +252,13 @@ export async function startLinuxDo(request: NextRequest) {
         throw new LinuxDoError('linuxdo_owner_forbidden');
       state.username = normalizeUsername(guard.username);
     }
-    if (!isLinuxDoLoginEnabled(await getConfigForRead()))
+    const config = await getConfigForRead();
+    if (!isLinuxDoLoginEnabled(config))
       throw new LinuxDoError('linuxdo_unavailable');
-    state.redirectUri = callbackUri(request);
+    state.redirectUri = callbackUri(request, config.UserConfig.LinuxDo!);
     const url = new URL(AUTHORIZE_URL);
     url.search = new URLSearchParams({
-      client_id: process.env.LINUXDO_CLIENT_ID!.trim(),
+      client_id: config.UserConfig.LinuxDo!.ClientId,
       redirect_uri: state.redirectUri,
       response_type: 'code',
       scope: LINUXDO_SCOPE,
@@ -276,6 +281,7 @@ export async function startLinuxDo(request: NextRequest) {
 async function fetchProfile(
   code: string,
   state: OAuthState,
+  settings: LinuxDoLoginSettings,
 ): Promise<PendingRegistration> {
   let token: unknown;
   try {
@@ -286,7 +292,7 @@ async function fetchProfile(
       signal: AbortSignal.timeout(15_000),
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${Buffer.from(`${process.env.LINUXDO_CLIENT_ID!.trim()}:${process.env.LINUXDO_CLIENT_SECRET!.trim()}`).toString('base64')}`,
+        Authorization: `Basic ${Buffer.from(`${settings.ClientId}:${settings.ClientSecret}`).toString('base64')}`,
       },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
@@ -406,7 +412,10 @@ async function createAccount(
     throw new LinuxDoError('linuxdo_unavailable', 403);
   if (profile.trustLevel < (config.UserConfig.LinuxDo?.MinTrustLevel ?? 1))
     throw new LinuxDoError('linuxdo_trust_level', 403);
-  if (!config.UserConfig.OpenRegister)
+  if (
+    !config.UserConfig.OpenRegister ||
+    config.UserConfig.RegisterChannels?.LinuxDo === false
+  )
     throw new LinuxDoError('linuxdo_not_bound', 403);
   if (await db.getOAuthIdentity(profile.providerUserId))
     throw new LinuxDoError('linuxdo_identity_taken', 409);
@@ -499,7 +508,7 @@ export async function callbackLinuxDo(request: NextRequest) {
     const code = request.nextUrl.searchParams.get('code');
     if (!code || code.length > 4096)
       throw new LinuxDoError('linuxdo_token_failed');
-    const profile = await fetchProfile(code, state);
+    const profile = await fetchProfile(code, state, config.UserConfig.LinuxDo!);
     if (profile.trustLevel < (config.UserConfig.LinuxDo?.MinTrustLevel ?? 1))
       throw new LinuxDoError('linuxdo_trust_level', 403);
     if (state.mode === 'bind') {
@@ -526,7 +535,10 @@ export async function callbackLinuxDo(request: NextRequest) {
           profile.providerUsername,
         );
       } else {
-        if (!config.UserConfig.OpenRegister)
+        if (
+          !config.UserConfig.OpenRegister ||
+          config.UserConfig.RegisterChannels?.LinuxDo === false
+        )
           throw new LinuxDoError('linuxdo_not_bound', 403);
         if (config.UserConfig.RequireInviteCode) {
           response = redirectResponse(request, '/login?linuxdo=invite');

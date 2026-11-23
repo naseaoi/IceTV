@@ -11,7 +11,6 @@ import {
   generateInviteCode,
   INVITE_MAX_USES_RULE_MESSAGE,
   isValidCustomInviteCode,
-  MAX_INVITE_BATCH_SIZE,
   MAX_INVITE_CODES,
   MAX_INVITE_VALID_DAYS,
   MIN_INVITE_VALID_DAYS,
@@ -48,6 +47,8 @@ const ACTIONS = [
   'updateUserGroups',
   'batchUpdateUserGroups',
   'setLinuxDo',
+  'setLinuxDoCredentials',
+  'setRegisterChannels',
   'setOpenRegister',
   'previewInactiveUsers',
   'deleteInactiveUsers',
@@ -62,6 +63,8 @@ const TARGETLESS_ACTIONS = [
   'userGroup',
   'batchUpdateUserGroups',
   'setLinuxDo',
+  'setLinuxDoCredentials',
+  'setRegisterChannels',
   'setOpenRegister',
   'previewInactiveUsers',
   'deleteInactiveUsers',
@@ -613,11 +616,90 @@ async function runAdminUserAction(
           linuxDo.MinTrustLevel > 4
         )
           return actionResponse({ error: 'LinuxDo 设置参数错误' }, 400);
-        if (linuxDo.Enabled && !isLinuxDoConfigured())
-          return actionResponse({ error: 'LinuxDo 环境变量尚未配置完整' }, 400);
+        if (linuxDo.Enabled && !isLinuxDoConfigured(adminConfig))
+          return actionResponse(
+            { error: '请先保存 LinuxDo Client ID 与 Client Secret' },
+            400,
+          );
         adminConfig.UserConfig.LinuxDo = {
+          ClientId: '',
+          ClientSecret: '',
+          RedirectUri: '',
+          ...adminConfig.UserConfig.LinuxDo,
           Enabled: linuxDo.Enabled,
           MinTrustLevel: linuxDo.MinTrustLevel as 0 | 1 | 2 | 3 | 4,
+        };
+        break;
+      }
+      case 'setLinuxDoCredentials': {
+        const { clientId, clientSecret, redirectUri } = body as {
+          clientId?: unknown;
+          clientSecret?: unknown;
+          redirectUri?: unknown;
+        };
+        if (
+          typeof clientId !== 'string' ||
+          !clientId.trim() ||
+          clientId.trim().length > 256 ||
+          /[\s\u0000-\u001f\u007f-\u009f]/.test(clientId.trim())
+        )
+          return actionResponse({ error: 'Client ID 格式错误' }, 400);
+        if (
+          typeof clientSecret !== 'string' ||
+          clientSecret.trim().length > 512 ||
+          /[\u0000-\u001f\u007f-\u009f]/.test(clientSecret.trim())
+        )
+          return actionResponse({ error: 'Client Secret 格式错误' }, 400);
+        const secret =
+          clientSecret.trim() || adminConfig.UserConfig.LinuxDo?.ClientSecret;
+        if (!secret)
+          return actionResponse({ error: '请填写 Client Secret' }, 400);
+        let normalizedRedirectUri = '';
+        try {
+          if (typeof redirectUri !== 'string') throw new Error('type');
+          if (redirectUri.trim()) {
+            const url = new URL(redirectUri.trim());
+            if (
+              !['http:', 'https:'].includes(url.protocol) ||
+              url.username ||
+              url.password ||
+              url.hash ||
+              url.pathname !== '/api/auth/linuxdo/callback'
+            )
+              throw new Error('url');
+            normalizedRedirectUri = url.toString();
+          }
+        } catch {
+          return actionResponse(
+            { error: '回调地址需为本站的 /api/auth/linuxdo/callback' },
+            400,
+          );
+        }
+        adminConfig.UserConfig.LinuxDo = {
+          Enabled: false,
+          MinTrustLevel: 1,
+          ...adminConfig.UserConfig.LinuxDo,
+          ClientId: clientId.trim(),
+          ClientSecret: secret,
+          RedirectUri: normalizedRedirectUri,
+        };
+        break;
+      }
+      case 'setRegisterChannels': {
+        const { channels } = body as {
+          channels?: { Password?: unknown; LinuxDo?: unknown };
+        };
+        if (
+          !channels ||
+          typeof channels.Password !== 'boolean' ||
+          typeof channels.LinuxDo !== 'boolean'
+        )
+          return actionResponse({ error: '注册通道参数错误' }, 400);
+        if (!channels.Password && !channels.LinuxDo)
+          return actionResponse({ error: '至少保留一个注册通道' }, 400);
+        adminConfig.UserConfig.RegisterChannels = {
+          Password: channels.Password,
+          LinuxDo: channels.LinuxDo,
         };
         break;
       }
@@ -664,10 +746,10 @@ async function runAdminUserAction(
           typeof count !== 'number' ||
           !Number.isInteger(count) ||
           count < 1 ||
-          count > MAX_INVITE_BATCH_SIZE
+          count > MAX_INVITE_CODES
         ) {
           return actionResponse(
-            { error: `生成数量需在 1-${MAX_INVITE_BATCH_SIZE} 之间` },
+            { error: `生成数量需在 1-${MAX_INVITE_CODES} 之间` },
             400,
           );
         }
@@ -724,9 +806,9 @@ async function runAdminUserAction(
               }),
             ),
           );
-          if (result === 'created')
+          if (typeof result !== 'string')
             return actionResponse(
-              { ok: true, code: codes[0], codes },
+              { ok: true, code: result.codes[0], codes: result.codes },
               undefined,
               {
                 'Cache-Control': 'no-store',
@@ -818,6 +900,8 @@ async function runAdminUserAction(
         'batchUpdateUserGroups',
         'userGroup',
         'setLinuxDo',
+        'setLinuxDoCredentials',
+        'setRegisterChannels',
         'setOpenRegister',
         'setRequireInviteCode',
       ];

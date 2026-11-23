@@ -1,4 +1,8 @@
 /** @jest-environment node */
+import {
+  type InviteCode,
+  MAX_INVITE_CODES,
+} from '@/features/admin/services/inviteCodes';
 import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
 import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
@@ -3495,6 +3499,36 @@ describe('mysql storage contract', () => {
       LiveConfig: [],
     });
     expect(await storage.getLiveSourceChannelCounts()).toEqual({});
+  });
+
+  it('批量创建返回实际写入的码，容量不足时截断、满额时拒绝', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    const makeCodes = (prefix: string, count: number): InviteCode[] =>
+      Array.from({ length: count }, (_, index) => ({
+        code: `${prefix}-${index}`,
+        createdAt: 1,
+        expiresAt: Date.now() + 86400000,
+        createdBy: 'owner',
+      }));
+    const initial = makeCodes('INITIAL', MAX_INVITE_CODES - 3);
+    expect(await storage.createInviteCodes(initial)).toEqual({
+      codes: initial.map((item) => item.code),
+    });
+    const batches = [makeCodes('LEFT', 2), makeCodes('RIGHT', 2)];
+    const results = await Promise.all(
+      batches.map((items) => storage.createInviteCodes(items)),
+    );
+    expect(results).toEqual([
+      { codes: ['LEFT-0', 'LEFT-1'] },
+      { codes: ['RIGHT-0'] },
+    ]);
+    expect(await storage.countActiveInviteCodes()).toBe(MAX_INVITE_CODES);
+    expect(await storage.createInviteCodes(makeCodes('FULL', 1))).toBe('limit');
+    const codes = (await storage.getAllInviteCodes()).map((item) => item.code);
+    expect(codes).toContain('RIGHT-0');
+    expect(codes).not.toContain('RIGHT-1');
+    expect(codes).not.toContain('FULL-0');
   });
 
   it('原子占用邀请码名额，超出上限即失败', async () => {

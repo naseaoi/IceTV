@@ -53,7 +53,10 @@ export async function GET(request: NextRequest) {
     }
 
     const config = await getConfigForRead();
-    if (!config.UserConfig.OpenRegister) {
+    if (
+      !config.UserConfig.OpenRegister ||
+      config.UserConfig.RegisterChannels?.Password === false
+    ) {
       return jsonResponse({ error: '当前未开放注册' }, 403);
     }
 

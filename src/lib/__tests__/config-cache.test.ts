@@ -111,6 +111,80 @@ describe('config cache persistence', () => {
     jest.restoreAllMocks();
   });
 
+  it('旧配置默认保留两个注册通道并将无效凭证规范为空串', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    expect(configSelfCheck(config).UserConfig.RegisterChannels).toEqual({
+      Password: true,
+      LinuxDo: true,
+    });
+    expect(config.UserConfig.LinuxDo).toEqual({
+      Enabled: false,
+      MinTrustLevel: 1,
+      ClientId: '',
+      ClientSecret: '',
+      RedirectUri: '',
+    });
+    Object.assign(config.UserConfig, {
+      RegisterChannels: { Password: false, LinuxDo: 'invalid' },
+      LinuxDo: {
+        Enabled: true,
+        MinTrustLevel: 2,
+        ClientId: 42,
+        ClientSecret: null,
+        RedirectUri: [],
+      },
+    });
+    configSelfCheck(config);
+    expect(config.UserConfig.RegisterChannels).toEqual({
+      Password: false,
+      LinuxDo: true,
+    });
+    expect(config.UserConfig.LinuxDo).toMatchObject({
+      ClientId: '',
+      ClientSecret: '',
+      RedirectUri: '',
+    });
+    Object.assign(config.UserConfig.LinuxDo!, {
+      ClientId: ' client ',
+      ClientSecret: ' secret ',
+      RedirectUri: ' https://example.com/api/auth/linuxdo/callback ',
+    });
+    configSelfCheck(config);
+    expect(config.UserConfig.LinuxDo).toMatchObject({
+      ClientId: 'client',
+      ClientSecret: 'secret',
+      RedirectUri: 'https://example.com/api/auth/linuxdo/callback',
+    });
+  });
+
+  it.each([
+    [true, true, true],
+    [true, false, false],
+    [false, true, false],
+  ])(
+    '公共配置只暴露密码注册可用状态 %s/%s',
+    async (OpenRegister, Password, expected) => {
+      const config = cloneBaseConfig();
+      config.UserConfig.OpenRegister = OpenRegister;
+      config.UserConfig.RegisterChannels = { Password, LinuxDo: true };
+      config.UserConfig.LinuxDo = {
+        Enabled: true,
+        MinTrustLevel: 1,
+        ClientId: 'client',
+        ClientSecret: 'secret',
+        RedirectUri: '',
+      };
+      const { getPublicConfig } = await loadConfigModule(jest.fn(), {
+        adminConfig: config,
+      });
+      const publicConfig = await getPublicConfig();
+      expect(publicConfig.PasswordRegister).toBe(expected);
+      expect(publicConfig.LinuxDoLogin).toBe(true);
+      expect(JSON.stringify(publicConfig)).not.toContain('secret');
+    },
+  );
+
   it('preserves user danmaku through self-check and public config', async () => {
     const config = cloneBaseConfig();
     config.SiteConfig.EnableUserDanmaku = true;

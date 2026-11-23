@@ -35,7 +35,7 @@ function createPublicConfig() {
     SiteName: 'IceTV',
     SiteIcon: '',
     Announcement: '',
-    OpenRegister: false,
+    PasswordRegister: false,
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,

@@ -6,7 +6,8 @@ export const LINUXDO_ERROR_MESSAGES = {
   linuxdo_profile_failed: '获取 LinuxDo 账号信息失败，请重试',
   linuxdo_inactive: 'LinuxDo 账号尚未激活',
   linuxdo_trust_level: 'LinuxDo 账号信任等级不足',
-  linuxdo_not_bound: '当前未开放注册，请先登录已有账号并在设置中绑定 LinuxDo',
+  linuxdo_not_bound:
+    '当前未开放 LinuxDo 注册，请先登录已有账号并在设置中绑定 LinuxDo',
   linuxdo_identity_taken: '该 LinuxDo 账号已绑定其他账号',
   linuxdo_user_bound: '当前账号已绑定其他 LinuxDo 账号',
   linuxdo_owner_forbidden: '站长账号使用账号密码登录，不支持绑定 LinuxDo',

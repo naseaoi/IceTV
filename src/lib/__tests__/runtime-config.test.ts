@@ -11,6 +11,21 @@ describe('runtime config', () => {
     delete window.__runtimeConfigReady;
   });
 
+  it('账号注册入口独立读取 PasswordRegister，缺省关闭', async () => {
+    expect(DEFAULT_RUNTIME_CONFIG.PASSWORD_REGISTER).toBe(false);
+    applyClientServerConfig({ PasswordRegister: true, LinuxDoLogin: false });
+    expect(await getClientAuthRuntimeConfig()).toMatchObject({
+      passwordRegister: true,
+      linuxDoLogin: false,
+    });
+    applyClientServerConfig({ PasswordRegister: false, LinuxDoLogin: true });
+    expect(await getClientAuthRuntimeConfig()).toMatchObject({
+      passwordRegister: false,
+      linuxDoLogin: true,
+    });
+    expect(applyClientServerConfig({}).PASSWORD_REGISTER).toBe(false);
+  });
+
   it('LinuxDo 开关默认关闭并通过运行时配置读取，无首屏请求', async () => {
     expect(DEFAULT_RUNTIME_CONFIG.LINUXDO_LOGIN).toBe(false);
     applyClientServerConfig({ LinuxDoLogin: true });

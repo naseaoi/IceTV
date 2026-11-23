@@ -1007,7 +1007,7 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   countActiveInviteCodes(): Promise<number>;
   createInviteCodes(
     items: import('@/features/admin/services/inviteCodes').InviteCode[],
-  ): Promise<import('@/lib/invite-code-storage').InviteCodeCreateResult>;
+  ): Promise<import('@/lib/invite-code-storage').InviteCodeBatchCreateResult>;
   createInviteCode(
     item: import('@/features/admin/services/inviteCodes').InviteCode,
   ): Promise<import('@/lib/invite-code-storage').InviteCodeCreateResult>;

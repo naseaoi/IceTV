@@ -10,8 +10,15 @@ installStreamPolyfills();
 
 const mockConfig = {
   UserConfig: {
-    LinuxDo: { Enabled: true, MinTrustLevel: 1 },
+    LinuxDo: {
+      Enabled: true,
+      MinTrustLevel: 1,
+      ClientId: 'test-client',
+      ClientSecret: 'test-secret',
+      RedirectUri: '',
+    },
     OpenRegister: true,
+    RegisterChannels: { Password: true, LinuxDo: true },
     RequireInviteCode: false,
     DefaultUserGroup: 'members',
   },
@@ -127,12 +134,16 @@ describe('LinuxDo 路由', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     process.env.AUTH_SECRET = secret;
-    process.env.LINUXDO_CLIENT_ID = 'test-client';
-    process.env.LINUXDO_CLIENT_SECRET = 'test-secret';
-    delete process.env.LINUXDO_REDIRECT_URI;
     delete process.env.TRUSTED_PROXY_COUNT;
-    mockConfig.UserConfig.LinuxDo = { Enabled: true, MinTrustLevel: 1 };
+    mockConfig.UserConfig.LinuxDo = {
+      Enabled: true,
+      MinTrustLevel: 1,
+      ClientId: 'test-client',
+      ClientSecret: 'test-secret',
+      RedirectUri: '',
+    };
     mockConfig.UserConfig.OpenRegister = true;
+    mockConfig.UserConfig.RegisterChannels = { Password: true, LinuxDo: true };
     mockConfig.UserConfig.RequireInviteCode = false;
     mockDb.getOAuthIdentity.mockResolvedValue(null);
     mockDb.getUserOAuthIdentity.mockResolvedValue(null);
@@ -156,12 +167,52 @@ describe('LinuxDo 路由', () => {
       'linuxdo_unavailable',
     );
   });
-  it('环境变量不全时拒绝发起', async () => {
-    delete process.env.LINUXDO_CLIENT_SECRET;
+  it('凭证不全时拒绝发起', async () => {
+    mockConfig.UserConfig.LinuxDo.ClientSecret = '';
     expectError(
       await start.GET(req('/api/auth/linuxdo')),
       'linuxdo_unavailable',
     );
+  });
+  it('配置回调地址优先于请求推导，令牌请求使用保存的凭证', async () => {
+    mockConfig.UserConfig.LinuxDo.RedirectUri =
+      'https://auth.example/api/auth/linuxdo/callback';
+    const response = await start.GET(req('/api/auth/linuxdo'));
+    const url = new URL(response.headers.get('location')!);
+    expect(url.searchParams.get('client_id')).toBe('test-client');
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      mockConfig.UserConfig.LinuxDo.RedirectUri,
+    );
+    mockDb.getOAuthIdentity.mockResolvedValue({ username: 'localuser' });
+    await finish();
+    expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe(
+      `Basic ${Buffer.from('test-client:test-secret').toString('base64')}`,
+    );
+    expect(
+      new URLSearchParams(mockFetch.mock.calls[0][1].body).get('redirect_uri'),
+    ).toBe(mockConfig.UserConfig.LinuxDo.RedirectUri);
+  });
+  it('关闭 LinuxDo 注册通道仍允许已绑定登录与绑定，拒绝新建号', async () => {
+    mockConfig.UserConfig.RegisterChannels.LinuxDo = false;
+    expectError(await finish(), 'linuxdo_not_bound');
+    expect(mockDb.registerUser).not.toHaveBeenCalled();
+    const registration = await register.POST(
+      req(
+        '/api/auth/linuxdo/register',
+        { linuxdo_pending: pending() },
+        { inviteCode: 'test' },
+      ),
+    );
+    expect(registration.status).toBe(403);
+    expect(await registration.json()).toMatchObject({
+      code: 'linuxdo_not_bound',
+    });
+    mockDb.getOAuthIdentity.mockResolvedValue({ username: 'localuser' });
+    expect((await finish()).cookies.get('auth')).toBeDefined();
+    expect((await finish('?mode=bind')).headers.get('location')).toBe(
+      'http://localhost/?linuxdo_bind=ok',
+    );
+    expect(mockDb.registerUser).not.toHaveBeenCalled();
   });
   it('state 和 PKCE cookie 安全属性完整', async () => {
     const response = await start.GET(req('/api/auth/linuxdo'));
@@ -402,6 +453,7 @@ describe('LinuxDo 路由', () => {
     mockConfig.UserConfig.OpenRegister = false;
     expect((await register.POST(request())).status).toBe(403);
     mockConfig.UserConfig.OpenRegister = true;
+    mockConfig.UserConfig.RegisterChannels = { Password: true, LinuxDo: true };
     mockConfig.UserConfig.LinuxDo.MinTrustLevel = 4;
     expect((await register.POST(request())).status).toBe(403);
     mockRate.mockReturnValue({ allowed: false });

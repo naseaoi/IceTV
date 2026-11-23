@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 
 import { adminPost } from '@/features/admin/lib/api';
-import type { LinuxDoLoginSettings } from '@/types/admin';
+import type { LinuxDoLoginSettings, RegisterChannels } from '@/types/admin';
 
 type UserAction =
   | 'add'
@@ -20,6 +20,13 @@ export interface InviteCodeDraft {
   validDays: number;
   maxUses?: number;
   customCode?: string;
+}
+
+// clientSecret 为空表示保留已保存的值
+export interface LinuxDoCredentialsDraft {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
 }
 
 interface UseAdminUserActionsOptions {
@@ -156,10 +163,32 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   );
 
   const setLinuxDo = useCallback(
-    async (linuxDo: LinuxDoLoginSettings) => {
+    async (
+      linuxDo: Pick<LinuxDoLoginSettings, 'Enabled' | 'MinTrustLevel'>,
+    ) => {
       await runUserMutation(
         { action: 'setLinuxDo', linuxDo },
         '设置 LinuxDo 登录失败',
+      );
+    },
+    [runUserMutation],
+  );
+
+  const setLinuxDoCredentials = useCallback(
+    async (credentials: LinuxDoCredentialsDraft) => {
+      await runUserMutation(
+        { action: 'setLinuxDoCredentials', ...credentials },
+        '保存 LinuxDo 凭证失败',
+      );
+    },
+    [runUserMutation],
+  );
+
+  const setRegisterChannels = useCallback(
+    async (channels: RegisterChannels) => {
+      await runUserMutation(
+        { action: 'setRegisterChannels', channels },
+        '设置注册通道失败',
       );
     },
     [runUserMutation],
@@ -216,6 +245,8 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     purgeInactiveInviteCodes,
     setRequireInviteCode,
     setLinuxDo,
+    setLinuxDoCredentials,
+    setRegisterChannels,
     setDefaultUserGroup,
     updateUserApis,
     userAction,

@@ -90,7 +90,7 @@ export default async function RootLayout({
   const initialFooterText = publicConfig.FooterText || footerText;
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
-    OPEN_REGISTER: publicConfig.OpenRegister,
+    PASSWORD_REGISTER: publicConfig.PasswordRegister,
     LINUXDO_LOGIN: publicConfig.LinuxDoLogin,
     REQUIRE_INVITE_CODE: publicConfig.RequireInviteCode,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',

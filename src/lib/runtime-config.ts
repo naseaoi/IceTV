@@ -7,7 +7,7 @@ import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 export interface RuntimeConfig {
   STORAGE_TYPE: string;
-  OPEN_REGISTER: boolean;
+  PASSWORD_REGISTER: boolean;
   LINUXDO_LOGIN: boolean;
   REQUIRE_INVITE_CODE: boolean;
   UPDATE_REPOS: string;
@@ -37,7 +37,7 @@ export interface RuntimeConfig {
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   STORAGE_TYPE:
     process.env.NEXT_PUBLIC_STORAGE_TYPE === 'mysql' ? 'mysql' : 'localdb',
-  OPEN_REGISTER: false,
+  PASSWORD_REGISTER: false,
   LINUXDO_LOGIN: false,
   REQUIRE_INVITE_CODE: false,
   UPDATE_REPOS: 'naseaoi/IceTV',
@@ -78,7 +78,7 @@ export type ServerConfigPayload = {
   Announcement?: string;
   FooterText?: string;
   StorageType?: string;
-  OpenRegister?: boolean;
+  PasswordRegister?: boolean;
   LinuxDoLogin?: boolean;
   RequireInviteCode?: boolean;
   UpdateRepos?: string;
@@ -125,10 +125,10 @@ function runtimeConfigFromServerConfig(
   return {
     STORAGE_TYPE: data.StorageType || DEFAULT_RUNTIME_CONFIG.STORAGE_TYPE,
     LINUXDO_LOGIN: data.LinuxDoLogin ?? false,
-    OPEN_REGISTER:
-      data.OpenRegister === undefined
-        ? DEFAULT_RUNTIME_CONFIG.OPEN_REGISTER
-        : data.OpenRegister,
+    PASSWORD_REGISTER:
+      data.PasswordRegister === undefined
+        ? DEFAULT_RUNTIME_CONFIG.PASSWORD_REGISTER
+        : data.PasswordRegister,
     REQUIRE_INVITE_CODE:
       data.RequireInviteCode === undefined
         ? DEFAULT_RUNTIME_CONFIG.REQUIRE_INVITE_CODE
@@ -259,13 +259,13 @@ async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
 }
 
 export async function getClientAuthRuntimeConfig(): Promise<{
-  openRegister: boolean;
+  passwordRegister: boolean;
   linuxDoLogin: boolean;
   requireInviteCode: boolean;
 }> {
   const runtimeConfig = await ensureClientRuntimeConfig();
   return {
-    openRegister: runtimeConfig.OPEN_REGISTER,
+    passwordRegister: runtimeConfig.PASSWORD_REGISTER,
     linuxDoLogin: runtimeConfig.LINUXDO_LOGIN,
     requireInviteCode: runtimeConfig.REQUIRE_INVITE_CODE,
   };
