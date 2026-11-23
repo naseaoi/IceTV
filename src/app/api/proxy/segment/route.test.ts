@@ -116,6 +116,85 @@ describe('segment shared resource integration', () => {
     (storage as unknown as { db: Database.Database }).db.close();
   });
 
+  it.each([
+    ['bytes=0-', 'bytes=0-268435455'],
+    ['bytes=100-999999999', 'bytes=100-268435555'],
+    ['bytes=100-115', 'bytes=100-115'],
+    ['bytes=-999999999', 'bytes=-268435456'],
+    ['bytes=-16', 'bytes=-16'],
+  ])(
+    'bounds a single range %s to %s and preserves the upstream partial response',
+    async (range, expected) => {
+      const mediaRequest = request();
+      mediaRequest.headers.set('Range', range);
+      const start = range.startsWith('bytes=-')
+        ? 630156908
+        : Number(range.match(/\d+/)![0]);
+      const contentRange = `bytes ${start}-${start + 15}/630156924`;
+      mockOrigin.mockResolvedValueOnce(
+        new Response(new Uint8Array(16), {
+          status: 206,
+          headers: {
+            'Content-Type': 'video/mp4',
+            'Content-Length': '16',
+            'Content-Range': contentRange,
+            'Accept-Ranges': 'bytes',
+          },
+        }),
+      );
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(206);
+      expect(response.headers.get('Content-Range')).toBe(contentRange);
+      expect(response.headers.get('Accept-Ranges')).toBe('bytes');
+      expect((await response.arrayBuffer()).byteLength).toBe(16);
+      expect(mockFetchOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({ Range: expected }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    'bytes=0-1,4-5',
+    'bytes=2-1',
+    'bytes=-0',
+    'bytes=-',
+    'bytes=9007199254740992-',
+    'items=0-2',
+  ])(
+    'rejects unsupported or invalid range %s before upstream access',
+    async (range) => {
+      const mediaRequest = request();
+      mediaRequest.headers.set('Range', range);
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(416);
+      expect(mockOrigin).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([200, 206])(
+    'retains the response limit when upstream ignores the bounded range (status %s)',
+    async (status) => {
+      const mediaRequest = request();
+      mediaRequest.headers.set('Range', 'bytes=0-');
+      mockOrigin.mockResolvedValueOnce(
+        new Response(new Uint8Array(16), {
+          status,
+          headers: {
+            'Content-Type': 'video/mp4',
+            'Content-Length': '630156924',
+          },
+        }),
+      );
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual(
+        expect.objectContaining({ code: 'RESPONSE_TOO_LARGE' }),
+      );
+    },
+  );
+
   it.each(['gzip', 'br'])(
     'uses identity and drops decoded %s wire headers',
     async (encoding) => {

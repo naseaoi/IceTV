@@ -28,6 +28,18 @@ const nextConfig = {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },
 
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          // 视频上游可能拒绝 Referer；同源代理仍靠它识别反代前的 HTTPS 协议。
+          { key: 'Referrer-Policy', value: 'same-origin' },
+        ],
+      },
+    ];
+  },
+
   images: {
     unoptimized: false,
     formats: ['image/avif', 'image/webp'],

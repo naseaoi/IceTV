@@ -44,6 +44,29 @@ export const runtime = 'nodejs';
 
 const MAX_SEGMENT_BYTES = 256 * 1024 * 1024;
 
+function boundSegmentRange(range: string): string | null {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+  const start = match[1] ? Number(match[1]) : null;
+  const end = match[2] ? Number(match[2]) : null;
+  if (
+    (start !== null && !Number.isSafeInteger(start)) ||
+    (end !== null && !Number.isSafeInteger(end))
+  )
+    return null;
+  if (start === null) {
+    return end && end > 0 ? `bytes=-${Math.min(end, MAX_SEGMENT_BYTES)}` : null;
+  }
+  if (end !== null && end < start) return null;
+  // 原生 MP4 会请求 bytes=0-；截成合法的部分响应，浏览器会继续请求后续范围。
+  const boundedEnd = Math.min(
+    end ?? Number.MAX_SAFE_INTEGER,
+    start + MAX_SEGMENT_BYTES - 1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  return `bytes=${start}-${boundedEnd}`;
+}
+
 export async function GET(request: NextRequest) {
   return withSourceProbeBudget(request, handleGet);
 }
@@ -103,6 +126,14 @@ async function handleGet(request: NextRequest) {
     return NextResponse.json(toProxyFailurePayload(diagnostic), {
       status: diagnostic.status,
     });
+  }
+
+  const upstreamRange = range === null ? null : boundSegmentRange(range);
+  if (range !== null && upstreamRange === null) {
+    return NextResponse.json(
+      { error: '仅支持有效的单段字节范围' },
+      { status: 416 },
+    );
   }
 
   const config = await getConfigForRead();
@@ -177,8 +208,8 @@ async function handleGet(request: NextRequest) {
       'User-Agent': ua,
       'Accept-Encoding': 'identity',
     };
-    if (range) {
-      headers.Range = range;
+    if (upstreamRange) {
+      headers.Range = upstreamRange;
     }
 
     if (isLiveStream) {

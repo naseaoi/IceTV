@@ -10,6 +10,7 @@ export default async function PlayTargetPage({
   params: Promise<{ source: string; id: string }>;
 }) {
   const { source, id } = await params;
-  if (!parsePlayPagePath(`/play/${source}/${id}`)) notFound();
-  return PlayPage();
+  const target = parsePlayPagePath(`/play/${source}/${id}`);
+  if (!target) notFound();
+  return PlayPage({ searchParams: Promise.resolve({ source: target.source }) });
 }

@@ -1,7 +1,14 @@
+import PlayTargetPage from '@/app/play/[source]/[id]/page';
 import { getInitialDanmakuEnabled } from '@/features/play/lib/danmaku/preference.server';
 import { getConfigForRead } from '@/lib/config';
 
 import PlayPage from './page';
+
+jest.mock('next/navigation', () => ({
+  notFound: () => {
+    throw new Error('NOT_FOUND');
+  },
+}));
 
 jest.mock('next/server', () => ({
   connection: jest.fn().mockResolvedValue(undefined),
@@ -18,6 +25,27 @@ jest.mock('@/features/play/components/PlayStateViews', () => ({
 }));
 
 beforeEach(() => jest.clearAllMocks());
+
+test.each([false, true])(
+  '播放路径与查询入口遵守成人源开关 (%s)',
+  async (allowed) => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      SourceConfig: [{ key: 'adult', nsfw: true }],
+      SiteConfig: { EnableDanmaku: false, DisableYellowFilter: allowed },
+    });
+    const requests = [
+      () => PlayPage({ searchParams: Promise.resolve({ source: 'adult' }) }),
+      () =>
+        PlayTargetPage({
+          params: Promise.resolve({ source: 'adult', id: '1' }),
+        }),
+    ];
+    for (const request of requests) {
+      if (allowed) await expect(request()).resolves.toBeDefined();
+      else await expect(request()).rejects.toThrow('NOT_FOUND');
+    }
+  },
+);
 
 test('站点关闭弹幕时跳过账号偏好读取', async () => {
   (getConfigForRead as jest.Mock).mockResolvedValue({

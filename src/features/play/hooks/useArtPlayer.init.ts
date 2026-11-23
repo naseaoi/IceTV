@@ -424,7 +424,11 @@ export async function initializeArtPlayer(
         setting: true,
         playbackRate: true,
         aspectRatio: true,
-        screenshot: true,
+        // 原生跨域 MP4 使用 no-cors 播放，避免上游拒绝 Origin；其 canvas 截图会被污染。
+        screenshot: mediaKind === 'hls',
+        moreVideoAttr: {
+          crossOrigin: mediaKind === 'hls' ? 'anonymous' : null,
+        },
         fastForward: false,
       }),
       ...(isStartHeld() ? { autoplay: false } : {}),
@@ -1484,6 +1488,10 @@ export async function initializeArtPlayer(
     });
 
     let nativeOfflineErrorPending = false;
+    let nativeMetadataLoaded = false;
+    player.on('video:loadedmetadata', () => {
+      nativeMetadataLoaded = true;
+    });
     const failNativePlayback = (reason: string) => {
       if (onPlaybackRecoveryExhausted?.(reason)) return;
       runManagedVideoCleanup(player.video as HTMLVideoElement);
@@ -1507,7 +1515,13 @@ export async function initializeArtPlayer(
         return;
       }
       nativeOfflineErrorPending = false;
-      if (activeVideo?.error?.code !== 2) {
+      // Chrome 在元数据前的跨域/网络失败也可能报 code 4；只给 auto 一次换路机会。
+      const startupSourceError =
+        playbackRoute.allowAutoFallback &&
+        activeVideo?.error?.code === 4 &&
+        !nativeMetadataLoaded &&
+        !loadingSessionRef.current.playbackStartNotified;
+      if (activeVideo?.error?.code !== 2 && !startupSourceError) {
         failNativePlayback('native-media-error');
         return;
       }

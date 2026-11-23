@@ -76,6 +76,8 @@ class MockHls {
 type MockArtplayerOption = {
   url: string;
   autoplay?: boolean;
+  screenshot?: boolean;
+  moreVideoAttr?: { crossOrigin?: string | null };
   customType: { m3u8: (video: HTMLVideoElement, url: string) => void };
 };
 
@@ -109,6 +111,11 @@ class MockArtplayer {
   constructor(public option: MockArtplayerOption) {
     // 与真实 Artplayer 一致：MSE 播放时 url 读到的是 blob 地址而非清单地址
     this.url = 'blob:http://localhost/mock-media-source';
+    Object.assign(this.video, option.moreVideoAttr);
+    // jsdom 把 nullable crossOrigin 的 null 错转为字符串，浏览器实际会移除属性。
+    if (option.moreVideoAttr?.crossOrigin === null) {
+      this.video.removeAttribute('crossorigin');
+    }
     MockArtplayer.instances.push(this);
   }
 
@@ -330,6 +337,58 @@ describe('initializeArtPlayer 拉流控制', () => {
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
+
+  it('HLS 与 MP4 切换时重建播放器并同步截图与 crossorigin', async () => {
+    const params = createParams();
+    for (const [url, screenshot, crossOrigin] of [
+      [EPISODE_1, true, 'anonymous'],
+      ['https://cdn.example/movie.mp4', false, null],
+      [EPISODE_2, true, 'anonymous'],
+    ] as const) {
+      const previous = params.artPlayerRef.current;
+      params.videoUrl = url;
+      const { player, video } = await setupPlayer(params);
+      expect(player).not.toBe(previous);
+      expect(player.option.screenshot).toBe(screenshot);
+      expect(player.option.moreVideoAttr?.crossOrigin).toBe(crossOrigin);
+      expect(video.getAttribute('crossorigin')).toBe(crossOrigin);
+      expect(video.hasAttribute('crossorigin')).toBe(crossOrigin !== null);
+    }
+  });
+
+  it.each([
+    [4, false, false, true, true],
+    [4, true, false, true, false],
+    [4, false, true, true, false],
+    [4, false, false, false, false],
+    [3, false, false, true, false],
+  ])(
+    '原生错误 %s 的 metadata=%s/playing=%s/auto=%s 回落=%s',
+    async (code, metadata, playing, auto, fallback) => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: auto,
+      });
+      const params = createParams();
+      params.videoUrl = 'https://cdn.example/movie.mp4';
+      params.onPlaybackRecoveryExhausted = jest.fn(() => false);
+      const { player, video } = await setupPlayer(params);
+      player.switchUrl.mockImplementation(() => Promise.resolve());
+      video.play = jest.fn().mockResolvedValue(undefined);
+      if (metadata) player.emit('video:loadedmetadata');
+      if (playing) player.emit('video:playing');
+      Object.defineProperty(video, 'error', { value: { code } });
+      player.emit('video:error', new Error('failed'));
+      expect(player.switchUrl).toHaveBeenCalledTimes(fallback ? 1 : 0);
+      if (fallback) {
+        expect(params.setError).not.toHaveBeenCalledWith('当前源加载失败');
+        player.emit('video:error', new Error('failed again'));
+        expect(player.switchUrl).toHaveBeenCalledTimes(1);
+      }
+      expect(params.setError).toHaveBeenCalledWith('当前源加载失败');
+    },
+  );
 
   it.each([2, 3])(
     '原生播放中错误 %s 交给换源，未接手时展示失败',

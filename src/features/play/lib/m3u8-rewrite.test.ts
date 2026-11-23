@@ -109,6 +109,35 @@ describe('m3u8 rewrite', () => {
     },
   );
 
+  it.each(['http', 'https'])(
+    'preserves the public %s protocol from the same-origin Referer behind a proxy',
+    async (protocol) => {
+      const request = createRequest();
+      request.headers.set('host', 'video.example');
+      request.headers.set('referer', `${protocol}://video.example/play/demo/1`);
+      const finalUrl = `https://stream.example.com/referrer-${protocol}/index.m3u8`;
+      const result = await getRewrittenM3U8Content(
+        { content: mediaPlaylist, finalUrl, loadedAt: 1 },
+        finalUrl,
+        request,
+        false,
+        true,
+        'demo',
+        false,
+        true,
+      );
+      const urls = [
+        result.split('\n').at(-1)!,
+        ...Array.from(result.matchAll(/URI="([^"]+)"/g), (match) => match[1]),
+      ];
+      expect(urls).toHaveLength(3);
+      for (const url of urls) {
+        expect(new URL(url).origin).toBe(`${protocol}://video.example`);
+        expect(new URL(url).pathname).toMatch(/^\/api\/proxy\//);
+      }
+    },
+  );
+
   function rewriteSingle(key: string) {
     const url = `https://stream.example.com/${key}/index.m3u8`;
     return getRewrittenM3U8Content(

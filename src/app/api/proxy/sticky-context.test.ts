@@ -17,7 +17,11 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/lib/config', () => ({
   getConfigForRead: async () => ({
-    SiteConfig: { UpstreamProxyPoolSegments: mockSegmentsEnabled },
+    SourceConfig: [],
+    SiteConfig: {
+      UpstreamProxyPoolSegments: mockSegmentsEnabled,
+      DisableYellowFilter: false,
+    },
   }),
 }));
 jest.mock('@/lib/host-traffic.server', () => ({

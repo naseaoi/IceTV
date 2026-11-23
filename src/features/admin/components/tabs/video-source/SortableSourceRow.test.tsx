@@ -30,6 +30,7 @@ describe('SortableSourceRow', () => {
     onValidate = jest.fn(),
     onDelete = jest.fn(),
     onToggleAdminOnly = jest.fn(),
+    onToggleNsfw = jest.fn(),
     proxyMode = source.proxyMode as 'auto' | 'browser' | 'server',
     sourceRouteStats = null as SourceRouteStatsView | null,
   } = {}) {
@@ -45,6 +46,8 @@ describe('SortableSourceRow', () => {
           isProxyModeLoading={false}
           isToggleLoading={false}
           isAdminOnlyLoading={false}
+          isNsfwLoading={false}
+          onToggleNsfw={onToggleNsfw}
           isDeleteLoading={false}
           isValidationLoading={false}
           onSelectSource={jest.fn()}
@@ -64,6 +67,7 @@ describe('SortableSourceRow', () => {
       onValidate,
       onDelete,
       onToggleAdminOnly,
+      onToggleNsfw,
     };
   }
 
@@ -93,6 +97,13 @@ describe('SortableSourceRow', () => {
     expect(screen.getByTitle('7天成功率 · 直连 — · 代理 —')).toHaveTextContent(
       '直连 — · 代理 —',
     );
+  });
+
+  it('marks adult content from the row menu', () => {
+    const { onToggleNsfw } = renderRow();
+    fireEvent.click(screen.getByRole('button', { name: '测试源 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '标记为成人内容' }));
+    expect(onToggleNsfw).toHaveBeenCalledWith(source.key);
   });
 
   it('selects a proxy mode directly', () => {

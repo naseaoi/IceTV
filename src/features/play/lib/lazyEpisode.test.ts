@@ -82,7 +82,7 @@ describe('resolveLazyEpisodeUrl', () => {
     const now = 1794960000000;
     const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
     const lazyUrl = 'icetv-lazy://giri/playGV99-1-1/';
-    const signed = 'https://cdn.example/ep99.m3u8?expires=1794960030';
+    const signed = 'https://cdn.example/ep99.m3u8?expires=1794960060';
     (global.fetch as jest.Mock).mockResolvedValue(
       createJsonResponse({ url: signed }),
     );

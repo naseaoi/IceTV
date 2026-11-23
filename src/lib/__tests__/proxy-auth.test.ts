@@ -3,6 +3,7 @@
 import type { NextRequest, NextResponse } from 'next/server';
 
 import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
+import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 
 import { generateSignature } from '../auth.server';
 import {
@@ -13,8 +14,14 @@ import {
 
 const AUTH_SECRET = 'auth-secret-with-at-least-32-chars';
 const mockRequireActiveUser = jest.fn();
+const mockGetConfigForRead = jest.fn();
 
 installCryptoPolyfill();
+installWebPolyfills();
+
+jest.mock('@/lib/config', () => ({
+  getConfigForRead: () => mockGetConfigForRead(),
+}));
 
 jest.mock('../env.server', () => ({
   getOwnerPassword: () => 'owner-secret',
@@ -40,6 +47,34 @@ describe('proxy auth signatures', () => {
       process.env.AUTH_SECRET = originalAuthSecret;
     }
   });
+
+  it.each(['m3u8', 'key', 'segment'] as const)(
+    'adult source %s is blocked even with an existing signature',
+    async (purpose) => {
+      const target = 'https://example.com/video';
+      const params = new URLSearchParams({
+        url: target,
+        'icetv-source': 'adult',
+      });
+      await appendProxySignature(params, purpose, target);
+      const request = {
+        url: `http://localhost/api/proxy/${purpose}?${params}`,
+      } as NextRequest;
+      for (const allowed of [false, true]) {
+        mockGetConfigForRead.mockResolvedValue({
+          SourceConfig: [{ key: 'adult', nsfw: true }],
+          SiteConfig: { DisableYellowFilter: allowed },
+        });
+        const result = await resolveProxyAuthorization(
+          request,
+          purpose,
+          target,
+        );
+        expect(result.authorized).toBe(allowed);
+        if (!result.authorized) expect(result.response.status).toBe(403);
+      }
+    },
+  );
 
   it('accepts a valid signature for the same purpose and target', async () => {
     const targetUrl = 'https://example.com/live/segment.ts';

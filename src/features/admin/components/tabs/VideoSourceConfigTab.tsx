@@ -322,6 +322,14 @@ const VideoSourceConfig = ({
     ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
+  const handleToggleNsfw = (key: string) => {
+    const target = sources.find((s) => s.key === key);
+    if (!target) return;
+    withLoading(`nsfw_${key}`, () =>
+      callSourceApi({ action: 'set_nsfw', key, nsfw: !target.nsfw }),
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
+  };
+
   const handleToggleAdminOnly = (key: string) => {
     const target = sources.find((s) => s.key === key);
     if (!target) return;
@@ -686,6 +694,8 @@ const VideoSourceConfig = ({
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                   isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                   isAdminOnlyLoading={isLoading(`adminOnly_${source.key}`)}
+                  isNsfwLoading={isLoading(`nsfw_${source.key}`)}
+                  onToggleNsfw={handleToggleNsfw}
                   isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
                   isValidationLoading={isValidating}
                   onSelectSource={handleSelectSource}

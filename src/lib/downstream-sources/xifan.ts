@@ -4,6 +4,10 @@ import {
   readJsonLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
+import {
+  getSignedUrlFreshMs,
+  hasSignedUrlParams,
+} from '@/lib/signed-url-params';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
@@ -14,7 +18,12 @@ import { createTimedAbortController } from './shared';
 const API_ORIGIN = 'https://api.xifanacg.com';
 // 源站网页公开的 publishable key，仅用于游客 API，不是用户凭证。
 const PUBLIC_API_KEY = 'sb_publishable_OBIVAWACIX6lPXrO98_z24_HcsmalkA';
-const BACKUP_SOURCE_CODE = 'CS';
+// 上游线路编号是全站固定值；懒地址保存编号，解析时同时核对编号与代码。
+const PLAYBACK_SOURCES = [
+  { id: '2', code: 'CS' },
+  { id: '5', code: 'xfy2' },
+  { id: '4', code: 'xfxf1' },
+] as const;
 
 type JsonObject = Record<string, unknown>;
 
@@ -144,12 +153,19 @@ export async function getDetailFromXifan(
   if (!result || result.id !== animeId || !Array.isArray(data.sources)) {
     throw new Error('稀饭详情响应无效');
   }
-  // 仅接入已验证可直连的备用线路，避免自动换回不通的主线。
-  const source = data.sources
-    .map(object)
-    .find((item) => item.code === BACKUP_SOURCE_CODE);
-  if (!source || !Array.isArray(source.episodes) || !source.episodes.length) {
-    throw new Error('稀饭备用线路暂无剧集');
+  const sources = data.sources.map(object);
+  // 优先 CS，其次旧番主线，最后新番主线；始终只选择一条有剧集的线路。
+  const source = PLAYBACK_SOURCES.map((supported) =>
+    sources.find(
+      (item) =>
+        item.code === supported.code &&
+        String(item.id) === supported.id &&
+        Array.isArray(item.episodes) &&
+        item.episodes.length > 0,
+    ),
+  ).find((item) => item !== undefined);
+  if (!source || !Array.isArray(source.episodes)) {
+    throw new Error('稀饭暂无可用线路的剧集');
   }
   const sourceId = positiveId(source.id);
   const episodes = source.episodes.map(object);
@@ -188,6 +204,8 @@ export async function resolveXifanEpisodeUrlByPath(
     throw new Error('无效的稀饭集数地址');
   }
   const [, , episodeId, sourceId] = match;
+  const selectedSource = PLAYBACK_SOURCES.find((item) => item.id === sourceId);
+  if (!selectedSource) throw new Error('无效的稀饭播放线路');
   const data = object(
     await requestXifan('/functions/v1/issue-web-playback', {
       action: 'fallback',
@@ -201,16 +219,19 @@ export async function resolveXifanEpisodeUrlByPath(
           .map(object)
           .find(
             (item) =>
-              item.source_code === BACKUP_SOURCE_CODE &&
+              item.source_code === selectedSource.code &&
               String(item.source_id) === sourceId,
           )
       : undefined;
   if (!candidate || typeof candidate.url !== 'string') {
-    throw new Error('稀饭备用播放地址不可用');
+    throw new Error('稀饭所选线路的播放地址不可用');
   }
   const url = new URL(candidate.url);
   if (!/^https?:$/.test(url.protocol) || !/\.(m3u8|mp4)$/i.test(url.pathname)) {
     throw new Error('稀饭返回的播放地址无效');
+  }
+  if (hasSignedUrlParams(url.href) && getSignedUrlFreshMs(url.href) <= 0) {
+    throw new Error('稀饭播放地址即将过期，请重试');
   }
   const validation = await validateProxyUrlForRequest(url.href);
   if (!validation.ok) throw new Error('稀饭播放地址不可用');

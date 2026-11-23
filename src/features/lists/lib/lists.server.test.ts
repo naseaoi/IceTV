@@ -5,6 +5,7 @@ import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { getOptionalActiveUser, requireActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
+import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
@@ -13,6 +14,7 @@ jest.mock('@/lib/api-auth', () => ({
   getOptionalActiveUser: jest.fn(),
   isGuardFailure: (value: { response?: unknown }) => !!value.response,
 }));
+jest.mock('@/lib/config', () => ({ getConfigForRead: jest.fn() }));
 jest.mock('@/lib/client-ip', () => ({ getClientIp: jest.fn() }));
 jest.mock('@/lib/db', () => ({ db: {} }));
 installCryptoPolyfill();
@@ -33,6 +35,10 @@ const context = (id: string, itemId?: string) => ({
   params: Promise.resolve({ id, itemId }),
 });
 beforeEach(async () => {
+  (getConfigForRead as jest.Mock).mockResolvedValue({
+    SourceConfig: [],
+    SiteConfig: { DisableYellowFilter: false },
+  });
   storage = new LocalSqliteStorage(':memory:');
   jest.mocked(getClientIp).mockReturnValue('203.0.113.1');
   for (const method of [
@@ -68,6 +74,50 @@ afterEach(() => {
   (storage as unknown as { db: { close(): void } }).db.close();
   jest.clearAllMocks();
 });
+it.each([false, true])(
+  '片单详情、摘要封面和计数遵守成人源开关 (%s)',
+  async (allowed) => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      SourceConfig: [{ key: 'adult', nsfw: true }],
+      SiteConfig: { DisableYellowFilter: allowed },
+    });
+    const list = await storage.createList('alice', {
+      name: '测试',
+      visibility: 'everyone',
+    });
+    await storage.addListItem('alice', list.id, {
+      title: '成人源作品',
+      year: '2026',
+      cover: 'https://adult.example/cover.jpg',
+      source: 'adult',
+      id: '1',
+    });
+    await storage.addListItem('alice', list.id, {
+      title: '普通作品',
+      year: '2026',
+      cover: 'https://normal.example/cover.jpg',
+      source: 'normal',
+      id: '2',
+    });
+    const detail = await (
+      await handleLists(req(), 'detail', context(list.id))
+    ).json();
+    expect(detail.items.map((item: { source: string }) => item.source)).toEqual(
+      allowed ? ['adult', 'normal'] : ['normal'],
+    );
+    expect(detail.list.itemCount).toBe(allowed ? 2 : 1);
+    const summaries = await (await handleLists(req(), 'collection')).json();
+    expect(summaries.lists[0].covers).toEqual(
+      allowed
+        ? [
+            'https://adult.example/cover.jpg',
+            'https://normal.example/cover.jpg',
+          ]
+        : ['https://normal.example/cover.jpg'],
+    );
+  },
+);
+
 it('除片单详情读取外，每个路由动作先鉴权', async () => {
   guard.mockResolvedValue({
     response: NextResponse.json({ error: '请先登录' }, { status: 401 }),

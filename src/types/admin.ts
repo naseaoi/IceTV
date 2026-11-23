@@ -89,6 +89,7 @@ export interface AdminConfig {
     proxyMode?: 'server' | 'browser' | 'auto';
     // 仅站长与管理员可见，普通用户的搜索、详情与播放都不提供该源
     adminOnly?: boolean;
+    nsfw?: boolean;
   }[];
   CustomCategories: {
     name?: string;

@@ -5,6 +5,11 @@ import { cookies } from 'next/headers';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { db } from '@/lib/db';
 
+import {
+  getBlockedListSources,
+  visibleListItems,
+} from './list-content-policy.server';
+
 // 骨架条数只是首屏体验优化，任何失败都退回 null，由客户端按未知处理
 async function viewerOrUnknown(): Promise<string | null | undefined> {
   const cookieStore = await cookies();
@@ -30,6 +35,11 @@ export async function getListDetailSkeletonCount(
   try {
     const viewer = await viewerOrUnknown();
     if (viewer === undefined) return null;
+    const blocked = await getBlockedListSources();
+    if (blocked.size > 0) {
+      return visibleListItems((await db.getList(id, viewer)).items, blocked)
+        .length;
+    }
     return await db.getListItemCount(id, viewer);
   } catch (error) {
     console.error('读取片单条目计数失败', error);

@@ -137,11 +137,11 @@ describe('episode URL sharing', () => {
   });
 
   it.each([
-    ['?sign=abc&expires=1794960030', 30_000],
+    ['?sign=abc&expires=1794960060', 30_000],
     ['?token=abc', 5 * 60_000],
-    ['?signature=abc&oss_expires=1794960030000', 30_000],
+    ['?signature=abc&oss_expires=1794960060000', 30_000],
     [
-      '?X-Amz-Signature=abc&X-Amz-Date=20261118T000000Z&X-Amz-Expires=30',
+      '?X-Amz-Signature=abc&X-Amz-Date=20261118T000000Z&X-Amz-Expires=60',
       30_000,
     ],
   ])('never serves a stale signed address (%s)', async (query, lifetime) => {

@@ -45,6 +45,7 @@ export interface DataSource {
   from: 'config' | 'custom';
   proxyMode?: 'server' | 'browser' | 'auto';
   adminOnly?: boolean;
+  nsfw?: boolean;
 }
 
 // 直播源数据类型
