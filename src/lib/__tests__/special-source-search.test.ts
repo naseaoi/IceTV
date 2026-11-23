@@ -1,4 +1,5 @@
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import { validateSourceSearch } from '@/features/admin/lib/source-search-validation.server';
 import { searchFirstPageFromApi, searchFromApi } from '@/lib/downstream';
 import {
   clearSearchSourceFailureCooldownsForTests,
@@ -6,6 +7,10 @@ import {
 } from '@/lib/search-aggregate';
 import { clearSearchCachesForTests } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
+import {
+  filterSourcesForPlayback,
+  normalizeWorkTitle,
+} from '@/lib/source-match';
 import { extractXgcartoonSearchResults } from '@/lib/xgcartoon';
 
 jest.mock('@/lib/xgcartoon', () => {
@@ -39,7 +44,7 @@ const sources = [
     key: 'xgcartoon',
     name: 'Xgcartoon',
     api: 'https://www.xgcartoon.com',
-    empty: '<html><body></body></html>',
+    empty: '<html><body>共 0 条搜索结果</body></html>',
     full: '<a href="/detail/anime" class="topic-list-item"><div class="h3 mb12">Anime</div></a>',
   },
 ];
@@ -177,5 +182,93 @@ it('uses a successful xgcartoon fallback without reporting failure', async () =>
     expect(global.fetch).toHaveBeenCalledTimes(2);
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+it('简繁搜索在正常搜索与后台检测共用匹配，无结果补查一次且失败不补查', async () => {
+  const site = sources[1];
+  const title = '海賊王';
+  const html = `<a href="/detail/onepiece" class="topic-list-item"><div class="h3">${title}</div></a>`;
+  const fetchMock = jest.fn();
+  global.fetch = fetchMock;
+  const reset = () => {
+    clearSearchCachesForTests();
+    fetchMock.mockReset();
+  };
+  try {
+    for (const query of ['海贼王', '海賊王']) {
+      reset();
+      fetchMock.mockImplementation(async () => new Response(html));
+      const result = await collectSearchAggregation({
+        apiSites: [site],
+        query,
+        maxSearchPages: 1,
+        disableYellowFilter: true,
+        sourceConcurrency: 1,
+      });
+      expect(result.results.map((item) => item.title)).toEqual([title]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(
+        filterSourcesForPlayback(result.results, {
+          title: query,
+          year: '',
+          searchType: '',
+        }),
+      ).toHaveLength(1);
+    }
+    expect(normalizeWorkTitle(title)).toBe('海賊王');
+    for (const query of ['海贼王', '海賊王']) {
+      reset();
+      fetchMock.mockImplementation(
+        async (url: string) =>
+          new Response(
+            new URL(url).searchParams.get('q') === query ? site.empty : html,
+          ),
+      );
+      expect(await searchFirstPageFromApi(site, query)).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('q')).toBe(
+        query === '海贼王' ? '海賊王' : '海贼王',
+      );
+      fetchMock.mockClear();
+      expect(
+        await validateSourceSearch(site, query, new AbortController().signal),
+      ).toBe('valid');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+    reset();
+    fetchMock.mockImplementation(async () => new Response(site.empty));
+    expect(
+      await validateSourceSearch(
+        site,
+        '不存在的海贼王',
+        new AbortController().signal,
+      ),
+    ).toBe('no_results');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    reset();
+    fetchMock.mockImplementation(
+      async () => new Response('<html>Invalid page</html>'),
+    );
+    await expect(
+      validateSourceSearch(site, '海贼王', new AbortController().signal),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    reset();
+    fetchMock.mockImplementation(
+      async () => new Response('<html>Invalid page</html>'),
+    );
+    await expect(
+      searchFromApi(site, '海贼王', { reportFailure: true }),
+    ).rejects.toThrow();
+    // 页面异常只调用原关键词；域名回退属于源适配器自身行为。
+    expect(
+      fetchMock.mock.calls.every(
+        ([url]) => new URL(url).searchParams.get('q') === '海贼王',
+      ),
+    ).toBe(true);
+  } finally {
+    global.fetch = originalFetch;
+    clearSearchCachesForTests();
   }
 });

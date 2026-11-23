@@ -120,7 +120,8 @@ import {
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import {
-  accessPermissionsKey,
+  accessPermissionChanges,
+  accessPermissions,
   configPermissionsChanged,
 } from '@/lib/user-notice';
 import {
@@ -3311,22 +3312,31 @@ export class MySqlStorage implements IStorage {
       for (const row of noticeRows) {
         const user = await noticeAccess.get(String(row.username));
         if (user && current)
-          noticeUsers.push({ user, key: accessPermissionsKey(user, current) });
+          noticeUsers.push({
+            user,
+            permissions: accessPermissions(user, current),
+          });
       }
       const removed = removedAccessReferences(current, config);
       const access = new MysqlUserAccessStore(connection, true);
       for (const group of removed.groups) await access.removeGroup(group);
       for (const source of removed.sources) await access.removeSource(source);
-      for (const { user, key } of noticeUsers) {
+      for (const { user, permissions } of noticeUsers) {
         const next = await noticeAccess.get(user.username);
-        if (next && key !== accessPermissionsKey(next, config)) {
+        const payload = next
+          ? accessPermissionChanges(
+              permissions,
+              accessPermissions(next, config),
+            )
+          : null;
+        if (payload) {
           const event = noticeInsert(
             'mysql',
             user.username,
             `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
             'account-change',
             'permissions-changed',
-            {},
+            payload,
           );
           await connection.execute(event.sql, event.params);
         }

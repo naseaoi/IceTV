@@ -5,6 +5,7 @@ import {
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
+import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -31,28 +32,6 @@ const XGCARTOON_FALLBACK_ORIGINS = [
   'https://cn.xgcartoon.com',
   'https://www.xgcartoon.com',
 ];
-
-function normalizeXgcartoonSearchText(text: string): string {
-  return text
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[《》「」『』【】()[\]（）]/g, '')
-    .replace(/[\s\u00a0\u3000·•・.。:：,，!！?？'"`~～_\-—]/g, '');
-}
-
-function isRelevantXgcartoonSearchResult(
-  query: string,
-  title: string,
-): boolean {
-  const normalizedQuery = normalizeXgcartoonSearchText(query);
-  const normalizedTitle = normalizeXgcartoonSearchText(title);
-
-  if (!normalizedQuery || !normalizedTitle) {
-    return false;
-  }
-
-  return normalizedTitle.includes(normalizedQuery);
-}
 
 export function isXgcartoonSource(apiSite: ApiSite): boolean {
   return /xgcartoon\.com/i.test(apiSite.api);
@@ -149,8 +128,15 @@ export async function searchFromXgcartoon(
       throw new SearchSourceUnavailableError(apiSite.name);
     }
 
-    const results = extractXgcartoonSearchResults(result.html).filter((item) =>
-      isRelevantXgcartoonSearchResult(query, item.title),
+    const parsedResults = extractXgcartoonSearchResults(result.html);
+    if (
+      !parsedResults.length &&
+      !/共\s*0\s*[条條]\s*搜索[结結]果/.test(result.html)
+    ) {
+      throw new SearchSourceUnavailableError(apiSite.name);
+    }
+    const results = parsedResults.filter((item) =>
+      isTitleMatchedSearchQuery(item.title, query),
     );
 
     return results.map((item) => ({

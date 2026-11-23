@@ -16,6 +16,11 @@ import {
   searchFromXgcartoon,
 } from '@/lib/downstream-sources/xgcartoon';
 import {
+  getDetailFromXifan,
+  isXifanSource,
+  searchFromXifan,
+} from '@/lib/downstream-sources/xifan';
+import {
   readJsonLimited,
   readTextLimited,
   UPSTREAM_METADATA_MAX_BYTES,
@@ -32,7 +37,9 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { searchWithScriptFallback } from '@/lib/search-script-fallback';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
+import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { parseSeriesStatus } from '@/lib/series-status';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
@@ -202,15 +209,19 @@ async function fetchAndCacheSearchPage(
       UPSTREAM_METADATA_MAX_BYTES,
     );
     latencyMs = Date.now() - startedAt;
-    if (Array.isArray(data?.list)) {
-      outcome = data.list.length > 0 ? 'ok' : 'empty';
-    }
     if (
       !data ||
-      !data.list ||
+      (data.code !== undefined && ![1, 200].includes(Number(data.code))) ||
+      data.success === false ||
       !Array.isArray(data.list) ||
-      data.list.length === 0
+      data.list.some(
+        (item: ApiSearchItem) => !item || typeof item.vod_name !== 'string',
+      )
     ) {
+      return { results: [], failed: true };
+    }
+    outcome = data.list.length > 0 ? 'ok' : 'empty';
+    if (data.list.length === 0) {
       const pageCount = page === 1 ? data?.pagecount || 1 : undefined;
       setCachedSearchPage(
         getSourceCacheKey(apiSite),
@@ -298,7 +309,8 @@ export async function probeSourceSearch(
   if (
     signal?.aborted ||
     isGirigiriSource(apiSite) ||
-    isXgcartoonSource(apiSite)
+    isXgcartoonSource(apiSite) ||
+    isXifanSource(apiSite)
   ) {
     return;
   }
@@ -328,7 +340,9 @@ async function searchSpecialSource(
   const { signal, reportFailure } = options;
   const search = isGirigiriSource(apiSite)
     ? searchFromGirigiri
-    : searchFromXgcartoon;
+    : isXifanSource(apiSite)
+      ? searchFromXifan
+      : searchFromXgcartoon;
   try {
     return await waitForSharedLoad(
       () =>
@@ -357,7 +371,7 @@ function uniqueSearchResults(results: SearchResult[]): SearchResult[] {
   return unique.length === results.length ? results : unique;
 }
 
-export async function searchFromApi(
+async function searchFromApiQuery(
   apiSite: ApiSite,
   query: string,
   options: SearchFromApiOptions = {},
@@ -366,7 +380,11 @@ export async function searchFromApi(
     return [];
   }
 
-  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
+  if (
+    isGirigiriSource(apiSite) ||
+    isXgcartoonSource(apiSite) ||
+    isXifanSource(apiSite)
+  ) {
     return uniqueSearchResults(
       await searchSpecialSource(apiSite, query, options),
     );
@@ -403,7 +421,7 @@ export async function searchFromApi(
     ) {
       throw new SearchSourceUnavailableError(apiSite.name);
     }
-    const results = [...firstPageResult.results];
+    let results = firstPageResult.results;
     const pageCountFromFirst = firstPageResult.pageCount;
 
     const MAX_SEARCH_PAGES =
@@ -413,6 +431,7 @@ export async function searchFromApi(
     const pagesToFetch = Math.min(pageCount - 1, MAX_SEARCH_PAGES - 1);
 
     if (pagesToFetch > 0) {
+      results = [...results];
       const additionalPageTasks = [];
 
       for (let page = 2; page <= pagesToFetch + 1; page++) {
@@ -464,34 +483,38 @@ export async function searchFromApi(
   }
 }
 
+export async function searchFromApi(
+  apiSite: ApiSite,
+  query: string,
+  options: SearchFromApiOptions = {},
+): Promise<SearchResult[]> {
+  if (options.signal?.aborted) return [];
+  try {
+    return await searchWithScriptFallback(
+      query,
+      (keyword) =>
+        searchFromApiQuery(apiSite, keyword, {
+          ...options,
+          reportFailure: true,
+        }),
+      (results) =>
+        results.some((item) => isTitleMatchedSearchQuery(item.title, query)),
+      options.signal,
+    );
+  } catch (error) {
+    if (options.signal?.aborted) return [];
+    if (error instanceof ResourceLimitError || options.reportFailure)
+      throw error;
+    return [];
+  }
+}
+
 export async function searchFirstPageFromApi(
   apiSite: ApiSite,
   query: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<SearchResult[]> {
-  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
-    return uniqueSearchResults(
-      await searchSpecialSource(apiSite, query, options),
-    );
-  }
-
-  try {
-    const runtimeParams = await readSearchRuntimeParams();
-    const apiUrl =
-      apiSite.api + API_CONFIG.search.path + encodeURIComponent(query);
-    const firstPageResult = await searchWithCache(
-      apiSite,
-      query,
-      1,
-      apiUrl,
-      runtimeParams.SearchRequestTimeoutSeconds * 1000,
-      options.signal,
-    );
-    return uniqueSearchResults(firstPageResult.results);
-  } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
-    return [];
-  }
+  return searchFromApi(apiSite, query, { ...options, maxSearchPages: 1 });
 }
 
 const PLAYBACK_URL_PATTERN =
@@ -507,6 +530,10 @@ export async function getDetailFromApi(
 
   if (isXgcartoonSource(apiSite)) {
     return getDetailFromXgcartoon(apiSite, id);
+  }
+
+  if (isXifanSource(apiSite)) {
+    return getDetailFromXifan(apiSite, id);
   }
 
   if (apiSite.detail) {

@@ -24,28 +24,46 @@ export function configPermissionsChanged(
   return previous !== null && key(previous) !== key(next);
 }
 
-export function accessPermissionsKey(
+export function accessPermissions(
   user: UserAccess,
-  config: AdminConfig,
-): string {
-  const rule = resolveSourceAccessRule(user, config.UserConfig?.Tags);
-  const sources = (config.SourceConfig ?? [])
+  config: AdminConfig | null,
+): { sources: ReadonlySet<string>; live: boolean } {
+  const rule = resolveSourceAccessRule(user, config?.UserConfig?.Tags);
+  const sources = (config?.SourceConfig ?? [])
     .filter(
       (source) =>
         !source.disabled &&
         (!source.adminOnly || user.role !== 'user') &&
         (!rule || rule.keys.has(source.key)),
     )
-    .map((source) => source.key)
-    .sort();
+    .map((source) => source.key);
   const live =
-    config.SiteConfig?.EnableLiveEntry === true &&
+    config?.SiteConfig?.EnableLiveEntry === true &&
     (config.SiteConfig.LiveAccess !== 'groups' ||
       user.role !== 'user' ||
       (config.UserConfig?.Tags ?? []).some(
         (group) => group.allowLive && user.tags?.includes(group.name),
       ));
-  return JSON.stringify([sources, live]);
+  return { sources: new Set(sources), live };
+}
+
+export function accessPermissionChanges(
+  previous: ReturnType<typeof accessPermissions>,
+  next: ReturnType<typeof accessPermissions>,
+): UserNoticePayload | null {
+  const sourcesAdded = [...next.sources].filter(
+    (key) => !previous.sources.has(key),
+  ).length;
+  const sourcesRemoved = [...previous.sources].filter(
+    (key) => !next.sources.has(key),
+  ).length;
+  if (!sourcesAdded && !sourcesRemoved && previous.live === next.live)
+    return null;
+  return {
+    sourcesAdded,
+    sourcesRemoved,
+    ...(previous.live !== next.live ? { liveAllowed: next.live } : {}),
+  };
 }
 
 export type UserNoticeKind =
@@ -57,6 +75,9 @@ export interface UserNoticePayload {
   year?: string;
   contentType?: 'review' | 'reply' | 'danmaku';
   count?: number;
+  sourcesAdded?: number;
+  sourcesRemoved?: number;
+  liveAllowed?: boolean;
 }
 export interface UserNoticeMessage {
   id: string;
@@ -85,7 +106,25 @@ export function userNoticeText(
   message: Pick<UserNoticeMessage, 'type' | 'action' | 'payload'>,
 ): string {
   const { type, action, payload } = message;
-  if (type === 'account-change')
+  if (type === 'account-change') {
+    if (action === 'permissions-changed') {
+      const added = payload.sourcesAdded ?? 0;
+      const removed = payload.sourcesRemoved ?? 0;
+      const changes: string[] = [];
+      if (added > 0 && removed > 0)
+        changes.push(
+          `你的可用视频源已调整：新增 ${added} 个，移除 ${removed} 个`,
+        );
+      else if (added > 0) changes.push(`你的可用视频源增加了 ${added} 个`);
+      else if (removed > 0) changes.push(`你的可用视频源减少了 ${removed} 个`);
+      if (typeof payload.liveAllowed === 'boolean')
+        changes.push(
+          payload.liveAllowed
+            ? '你现在可以观看直播了'
+            : '你的直播访问权限已关闭',
+        );
+      if (changes.length) return changes.join('；');
+    }
     return (
       (
         {
@@ -97,6 +136,7 @@ export function userNoticeText(
         } as Record<string, string>
       )[action] ?? '你的账号信息已更新'
     );
+  }
   const work = payload.title ? `《${payload.title}》` : '';
   if (type === 'report-result') {
     const result =

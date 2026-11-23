@@ -16,6 +16,10 @@ import {
   isXgcartoonSource,
   resolveXgcartoonEpisodeUrlByPath,
 } from '@/lib/downstream-sources/xgcartoon';
+import {
+  isXifanSource,
+  resolveXifanEpisodeUrlByPath,
+} from '@/lib/downstream-sources/xifan';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
@@ -26,6 +30,7 @@ const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 function matchesLazyKind(kind: string, apiSite: ApiSite): boolean {
   if (kind === 'giri') return isGirigiriSource(apiSite);
   if (kind === 'xgcartoon') return isXgcartoonSource(apiSite);
+  if (kind === 'xifan') return isXifanSource(apiSite);
   return false;
 }
 
@@ -37,7 +42,9 @@ async function resolveEpisodeUrl(
   const resolved =
     kind === 'giri'
       ? await resolveGirigiriEpisodePlayUrlByPath(apiSite, path)
-      : await resolveXgcartoonEpisodeUrlByPath(apiSite, path);
+      : kind === 'xifan'
+        ? await resolveXifanEpisodeUrlByPath(apiSite, path)
+        : await resolveXgcartoonEpisodeUrlByPath(apiSite, path);
   if (!resolved) {
     throw new Error('播放地址解析失败');
   }

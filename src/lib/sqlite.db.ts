@@ -119,7 +119,8 @@ import {
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import {
-  accessPermissionsKey,
+  accessPermissionChanges,
+  accessPermissions,
   configPermissionsChanged,
 } from '@/lib/user-notice';
 import {
@@ -3884,7 +3885,7 @@ export class LocalSqliteStorage implements IStorage {
             ).flatMap((row) => {
               const user = noticeAccess.get(row.username);
               return user
-                ? [{ user, key: accessPermissionsKey(user, current) }]
+                ? [{ user, permissions: accessPermissions(user, current) }]
                 : [];
             })
           : [];
@@ -3892,16 +3893,22 @@ export class LocalSqliteStorage implements IStorage {
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
         for (const source of removed.sources) access.removeSource(source);
-        for (const { user, key } of noticeUsers) {
+        for (const { user, permissions } of noticeUsers) {
           const next = noticeAccess.get(user.username);
-          if (next && key !== accessPermissionsKey(next, config)) {
+          const payload = next
+            ? accessPermissionChanges(
+                permissions,
+                accessPermissions(next, config),
+              )
+            : null;
+          if (payload) {
             const event = noticeInsert(
               'sqlite',
               user.username,
               `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
               'account-change',
               'permissions-changed',
-              {},
+              payload,
             );
             this.db.prepare(event.sql).run(...event.params);
           }

@@ -4,6 +4,7 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { simplifySearchText } from '@/lib/search-text';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { yellowWords } from '@/lib/yellow';
 
@@ -49,7 +50,9 @@ export async function GET(request: NextRequest) {
     }
 
     const results = await searchFromApi(targetSite, query, { maxSearchPages });
-    let result = results.filter((r) => r.title === query);
+    let result = results.filter(
+      (r) => simplifySearchText(r.title) === simplifySearchText(query),
+    );
     if (!config.SiteConfig.DisableYellowFilter) {
       result = result.filter((item) => {
         const typeName = item.type_name || '';

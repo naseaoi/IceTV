@@ -1,4 +1,4 @@
-export type LazyEpisodeKind = 'giri' | 'xgcartoon';
+export type LazyEpisodeKind = 'giri' | 'xgcartoon' | 'xifan';
 
 export interface LazyEpisodeTarget {
   kind: LazyEpisodeKind;
@@ -10,6 +10,7 @@ const LAZY_EPISODE_SCHEME = 'icetv-lazy://';
 const LAZY_PATH_PATTERNS: Record<LazyEpisodeKind, RegExp> = {
   giri: /^\/playGV\d+-\d+-\d+\/$/,
   xgcartoon: /^\/video\/[\w-]+\/[\w-]+\.html$/,
+  xifan: /^\/anime\/[1-9]\d*\/episode\/[1-9]\d*\/source\/[1-9]\d*$/,
 };
 
 export function buildLazyEpisodeUrl(

@@ -1,3 +1,4 @@
+import { simplifySearchText } from '@/lib/search-text';
 import { SearchResult } from '@/lib/types';
 
 export type SearchType = 'tv' | 'movie' | '';
@@ -56,13 +57,15 @@ export const filterSourcesForPlayback = (
     searchType: SearchType;
   },
 ): SearchResult[] => {
-  const normalizedTitle = normalizeWorkTitle(options.title);
+  const normalizedTitle = normalizeWorkTitle(simplifySearchText(options.title));
   if (!normalizedTitle) {
     return [];
   }
 
   return results.filter((result) => {
-    const normalizedResultTitle = normalizeWorkTitle(result.title);
+    const normalizedResultTitle = normalizeWorkTitle(
+      simplifySearchText(result.title),
+    );
     const isTitleMatched =
       normalizedResultTitle.length > 0 &&
       normalizedResultTitle === normalizedTitle;

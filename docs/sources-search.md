@@ -4,10 +4,13 @@
 
 ## 搜索
 
+- 源适配器只提供解析能力。用户侧搜索、详情和逐集解析须先经 `getAvailableApiSites()`，仅使用后台已配置、已启用且账号有权访问的源；未配置与禁用源均不开放。后台可单独检测禁用源，供管理员判断能否重新启用。
+- 后台检测、搜索聚合、西瓜标题过滤与搜索建议共用 `search-text.ts` 的简繁归一化匹配，保留上游原标题；快速起播和换源只在候选比较时转换，持久化作品身份 `normalizeWorkTitle()` 保持原规则。
+- 每源先请求原关键词，成功但没有匹配标题时才用转换后的关键词补查一次；简体转繁体、繁体或混合输入先转简体，相同字形不补查。两次查询共用消费者取消与外层时间预算，异常和接口拒绝搜索直接按失败处理；分页与缓存分别使用实际请求词，避免不同关键词的页混用。上游独有译名、别名不属于简繁转换范围。
 - 聚合执行 `runSearchAggregation()`，聚合缓存 `src/lib/search-cache.ts`，失败源冷却 `src/lib/search-aggregate.ts`。不要在页面层重新实现聚合、缓存或失败冷却。
 - `/api/search` 命中新鲜缓存直接返回；命中过期缓存先返回旧结果再后台刷新。
 - 单源异常（含回源额度申请失败）不让整体搜索失败，接口仍可 200；判断源是否可用看健康数据，不看搜索接口状态码。
-- 失败源与空结果分开上报：`searchFromApi()` 默认把第 1 页失败（超时、非 2xx、网络或 JSON 异常，含页缓存里的 `timeout` / `forbidden`）当空结果返回；聚合传 `reportFailure` 让它抛 `SearchSourceUnavailableError`，经 `collectSearchAggregation()` 记入 `failedSources`。这类失败只靠页缓存短期记住，不进整源失败冷却。普通源上游返回 `list` 不是数组时健康样本记 error，但搜索仍按空结果处理。giri / xgcartoon 回源失败或解析异常同样在聚合中上报 `SearchSourceUnavailableError`，记入 `failedSources` 且不进整源失败冷却；真正无结果返回空数组。默认搜索与仅取第一页的搜索入口保持失败返回空数组，供 quick、搜索建议和详情回退使用。
+- 失败源与空结果分开上报：`searchFromApi()` 默认把第 1 页失败（超时、非 2xx、网络或 JSON 异常，含页缓存里的 `timeout` / `forbidden`）当空结果返回；聚合传 `reportFailure` 让它抛 `SearchSourceUnavailableError`，经 `collectSearchAggregation()` 记入 `failedSources`。这类失败只靠页缓存短期记住，不进整源失败冷却。普通源上游返回失败码或无效 `list` 结构时按搜索失败处理，健康样本记 error。giri / xgcartoon 回源失败或解析异常同样在聚合中上报 `SearchSourceUnavailableError`，记入 `failedSources` 且不进整源失败冷却；真正无结果返回空数组。默认搜索与仅取第一页的搜索入口保持失败返回空数组，供 quick、搜索建议和详情回退使用。
 - 聚合缓存条目同时保存 `failedSources`：`/api/search` 返回 `totalSources` 与 `failedSources`，流式搜索命中缓存时为它们重放 `source_error`。客户端重试只经 `/api/search/ws?retry=<源 key,…>` 重搜失败源：跳过失败冷却与第 1 页缓存，结果经 `mergeRetriedSearchAggregate()` 替换本实例缓存中这些源的部分；缓存不存在时不凭局部结果新建。
 - `/api/search/quick` 保留用户可用源、作品/年份/类别过滤、健康等级排序、最多 10 源与 4 槽竞速；同等或更好健康等级的直连源保留 1500ms 优先窗口。普通源搜索结果具有源/id、标题、封面、四位年份、源名称、非空 HTTP(S) m3u8/mp4 剧集及逐集标题，且不带分组、关联版本或版本标签时，直接参与竞速；特殊源、懒地址与字段不完整的候选仍先取详情，保留详情字段覆盖与失败后的搜索结果回退。
 - quick 胜者的搜索快照不作为完整详情写缓存；胜出后非阻塞调用共享详情加载，保留详情缓存填充。客户端 quick 分支保存快照并起播；当前的快照后台校验仅在按源/id 读取快照的入口执行，quick 首次起播本身不保证收到新详情。
@@ -29,6 +32,8 @@
 
 ## 探测
 
+- 后台手动检测按源类型调用真实搜索入口，特殊源走各自适配器，普通 CMS 校验成功码与 `list` 结构。成功响应有匹配项显示「有效」，成功但没有匹配项显示「无搜索结果」；接口拒绝搜索、格式异常、超时或连接失败显示「无法搜索」。西瓜卡通页面无法解析且没有明确的零结果标记时算失败，拦截页不当作空结果。
+
 详情与逐集解析的 HTTP 入口经 `withAuthenticatedSourceProbeBudget()` 鉴权后，将可信 `ActiveUserInfo` 作为函数参数传给未导出的内部 handler；测速包装复用这次鉴权，不从请求头读取权限上下文。测速额外的资源租约与普通回源预算同时生效，内部请求携带包装层的取消信号；共享加载只取消当前消费者等待。
 
 由 cron `metadata`、`all`、`source-health` 执行（调度见 [部署](deployment.md#定时维护与源站探测)）。只请求启用普通源的搜索第一页，跳过搜索缓存读取，沿用真实搜索的样本分类与回源资源额度，结束后刷新样本缓冲；giri、xgcartoon 跳过，关键词按 UTC 日期轮换。
@@ -42,6 +47,8 @@
 3. `src/app/api/episode-url/route.ts`：在 `matchesLazyKind` 和 `resolveEpisodeUrl` 接上新 kind
 
 不要在详情阶段全量抓播放页，不要绕过 `/api/episode-url` 在客户端直接解析源站地址。
+
+- 稀饭动漫的源地址填写 `https://next.xifanacg.com`，游客 API 使用源站网页公开的 publishable key。仅接入 `CS` 备用线路，详情从该线路生成剧集，逐集解析只接受同线路返回的候选，避免上游 fallback 自动选回主线。播放路由独立配置，支持浏览器直连；无需把视频流量交给取址服务器。该源与其他特殊源一样复用共享搜索缓存、跳过普通 CMS 健康探测，后台手动检测调用其游客搜索 API。
 
 解析结果与特殊源搜索跨实例共享，均按源配置（`getSourceCacheKey()`）分区：
 

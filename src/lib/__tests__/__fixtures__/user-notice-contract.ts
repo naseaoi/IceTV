@@ -2,7 +2,8 @@ import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract'
 import { messageSortKey } from '@/lib/message-cursor.server';
 import type { IStorage } from '@/lib/types';
 import { mergeUserMessageState } from '@/lib/user-message-state';
-import type { UserNoticeMessage } from '@/lib/user-notice';
+import { type UserNoticeMessage, userNoticeText } from '@/lib/user-notice';
+import type { AdminConfig } from '@/types/admin';
 
 export function userNoticeContract(createStorage: () => IStorage) {
   let storage: IStorage;
@@ -119,6 +120,9 @@ export function userNoticeContract(createStorage: () => IStorage) {
   });
   it('账号变更仅实际修改通知，管理员改密幂等且不保存密码', async () => {
     const user = 'notice-author';
+    await storage.setAdminConfig({
+      SourceConfig: [{ key: 'one' }, { key: 'two' }],
+    } as AdminConfig);
     await storage.updateUserAccess([user], { role: 'admin' });
     await storage.updateUserAccess([user], { role: 'admin' });
     await storage.updateUserAccess([user], { role: 'user' });
@@ -139,49 +143,236 @@ export function userNoticeContract(createStorage: () => IStorage) {
         'password-changed',
       ].sort(),
     );
+    for (const [action, text] of [
+      ['set-admin', '你已被设为管理员'],
+      ['cancel-admin', '你的管理员身份已取消'],
+      ['unban', '你的账号已解除封禁'],
+      ['password-changed', '管理员已修改你的登录密码'],
+    ]) {
+      expect(
+        userNoticeText(notices.find((item) => item.action === action)!),
+      ).toBe(text);
+    }
+    expect(
+      userNoticeText({
+        type: 'account-change',
+        action: 'permissions-changed',
+        payload: {},
+      }),
+    ).toBe('你的访问权限已更新');
     expect(JSON.stringify(notices)).not.toMatch(
       /new-secret-password|password\$/,
     );
     await storage.deleteUser(user);
     expect(await messages(user)).toHaveLength(0);
   });
-  it('用户组权限实际变化通知受影响成员，配置重复保存与等效组不通知', async () => {
-    const config = {
+  it('源与直播权限差异在事务中合并，等效组和配置不通知', async () => {
+    const user = 'notice-author';
+    let config = {
       SourceConfig: [
-        { key: 'one', disabled: false },
-        { key: 'two', disabled: false },
+        ...['one', 'two', 'three', 'four', 'five'].map((key) => ({ key })),
+        { key: 'disabled', disabled: true },
+        { key: 'hidden', adminOnly: true },
       ],
       SiteConfig: { EnableLiveEntry: true, LiveAccess: 'groups' },
       UserConfig: {
         Tags: [
-          { name: 'group', enabledApis: ['one'] },
-          { name: 'same', enabledApis: ['one'] },
+          { name: 'group', enabledApis: ['one', 'two'] },
+          { name: 'same', enabledApis: ['one', 'two'] },
+          { name: 'live', enabledApis: ['five'], allowLive: true },
         ],
       },
-    } as unknown as import('@/types/admin').AdminConfig;
+    } as AdminConfig;
     await storage.setAdminConfig(config);
-    await storage.updateUserAccess(['notice-author'], { tags: ['group'] });
-    const baseline = (await messages('notice-author')).length;
-    await storage.updateUserAccess(['notice-author'], { tags: ['same'] });
-    expect(await messages('notice-author')).toHaveLength(baseline);
-    const next = {
+    let seen = new Set((await messages(user)).map((item) => item.id));
+    const expectChange = async (
+      payload?: UserNoticeMessage['payload'],
+      text?: string,
+    ) => {
+      const all = await messages(user);
+      const added = all.filter((item) => !seen.has(item.id));
+      expect(added).toHaveLength(payload ? 1 : 0);
+      if (payload) {
+        expect(added[0]).toMatchObject({
+          type: 'account-change',
+          action: 'permissions-changed',
+          payload,
+        });
+        expect(userNoticeText(added[0])).toBe(text);
+      }
+      seen = new Set(all.map((item) => item.id));
+    };
+    const save = async (next: AdminConfig) => {
+      expect(await storage.compareAndSetAdminConfig(config, next)).toBe(true);
+      config = next;
+    };
+    await storage.updateUserAccess([user], { tags: ['group'] });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 3 },
+      '你的可用视频源减少了 3 个',
+    );
+    await storage.updateUserAccess([user], { tags: ['same', 'group'] });
+    await expectChange();
+    await storage.updateUserAccess([user], { tags: ['same'] });
+    await expectChange();
+
+    const previous = config;
+    await save({
       ...config,
       UserConfig: {
         ...config.UserConfig,
-        Tags: [
-          { name: 'group', enabledApis: ['one'] },
-          { name: 'same', enabledApis: ['two'] },
-        ],
+        Tags: config.UserConfig.Tags!.map((group) =>
+          group.name === 'same'
+            ? {
+                ...group,
+                enabledApis: ['three', 'four', 'five', 'disabled', 'hidden'],
+                allowLive: true,
+              }
+            : group,
+        ),
       },
-    };
-    expect(await storage.compareAndSetAdminConfig(config, next)).toBe(true);
-    expect(await messages('notice-author')).toHaveLength(baseline + 1);
-    expect(await storage.compareAndSetAdminConfig(next, next)).toBe(true);
-    expect(await messages('notice-author')).toHaveLength(baseline + 1);
-    await storage.updateUserAccess(['notice-author'], { enabledApis: ['one'] });
-    const overridden = (await messages('notice-author')).length;
-    expect(await storage.compareAndSetAdminConfig(next, config)).toBe(true);
-    expect(await messages('notice-author')).toHaveLength(overridden);
+    });
+    await expectChange(
+      { sourcesAdded: 3, sourcesRemoved: 2, liveAllowed: true },
+      '你的可用视频源已调整：新增 3 个，移除 2 个；你现在可以观看直播了',
+    );
+    expect(await storage.compareAndSetAdminConfig(previous, previous)).toBe(
+      false,
+    );
+    await save(config);
+    await expectChange();
+
+    await storage.updateUserAccess([user], {
+      enabledApis: ['three', 'disabled', 'hidden'],
+    });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 2 },
+      '你的可用视频源减少了 2 个',
+    );
+    await storage.updateUserAccess([user], { enabledApis: ['three'] });
+    await expectChange();
+    await storage.updateUserAccess([user], { tags: ['group'] });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 0, liveAllowed: false },
+      '你的直播访问权限已关闭',
+    );
+    await storage.updateUserAccess([user], { tags: ['live'] });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 0, liveAllowed: true },
+      '你现在可以观看直播了',
+    );
+    await storage.updateUserAccess([user], { tags: ['same'] });
+    await expectChange();
+    await save({
+      ...config,
+      UserConfig: {
+        ...config.UserConfig,
+        Tags: config.UserConfig.Tags!.map((group) => ({
+          ...group,
+          enabledApis: ['one'],
+        })),
+      },
+    });
+    await expectChange();
+
+    // 删除最后一个个人授权源后，按原有规则回落到用户组。
+    await save({
+      ...config,
+      SourceConfig: config.SourceConfig.filter(
+        (source) => source.key !== 'three',
+      ),
+    });
+    expect((await storage.getUserAccess(user))?.enabledApis).toBeUndefined();
+    await expectChange(
+      { sourcesAdded: 1, sourcesRemoved: 1 },
+      '你的可用视频源已调整：新增 1 个，移除 1 个',
+    );
+    // 删除所处用户组后，按原有规则回落到全部启用的普通源。
+    await save({
+      ...config,
+      UserConfig: {
+        ...config.UserConfig,
+        Tags: config.UserConfig.Tags!.filter((group) => group.name !== 'same'),
+      },
+    });
+    await expectChange(
+      { sourcesAdded: 3, sourcesRemoved: 0, liveAllowed: false },
+      '你的可用视频源增加了 3 个；你的直播访问权限已关闭',
+    );
+    expect((await storage.getUserAccess(user))?.tags).toBeUndefined();
+
+    await save({
+      ...config,
+      SourceConfig: config.SourceConfig.map((source) =>
+        ['one', 'two', 'four'].includes(source.key)
+          ? { ...source, disabled: true }
+          : source,
+      ),
+    });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 3 },
+      '你的可用视频源减少了 3 个',
+    );
+    await save({
+      ...config,
+      SourceConfig: config.SourceConfig.map((source) =>
+        ['one', 'two', 'four'].includes(source.key)
+          ? { ...source, disabled: false }
+          : source,
+      ),
+    });
+    await expectChange(
+      { sourcesAdded: 3, sourcesRemoved: 0 },
+      '你的可用视频源增加了 3 个',
+    );
+    await save({
+      ...config,
+      SourceConfig: config.SourceConfig.map((source) =>
+        source.key === 'hidden' ? { ...source, adminOnly: false } : source,
+      ),
+    });
+    await expectChange(
+      { sourcesAdded: 1, sourcesRemoved: 0 },
+      '你的可用视频源增加了 1 个',
+    );
+    await save({
+      ...config,
+      SourceConfig: config.SourceConfig.map((source) =>
+        source.key === 'hidden' ? { ...source, adminOnly: true } : source,
+      ),
+    });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 1 },
+      '你的可用视频源减少了 1 个',
+    );
+    await save({
+      ...config,
+      SiteConfig: { ...config.SiteConfig, LiveAccess: 'all' },
+    });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 0, liveAllowed: true },
+      '你现在可以观看直播了',
+    );
+    await save({
+      ...config,
+      SiteConfig: { ...config.SiteConfig, EnableLiveEntry: false },
+    });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 0, liveAllowed: false },
+      '你的直播访问权限已关闭',
+    );
+    await save({
+      ...config,
+      SiteConfig: { ...config.SiteConfig, LiveAccess: 'groups' },
+    });
+    await expectChange();
+    await storage.updateUserAccess([user], { tags: ['live'] });
+    await expectChange(
+      { sourcesAdded: 0, sourcesRemoved: 3 },
+      '你的可用视频源减少了 3 个',
+    );
+    await storage.updateUserAccess([user], { enabledApis: [] });
+    await expectChange();
   });
   it('同毫秒游标分页、单条已读、压缩和保留期两后端一致', async () => {
     const user = 'notice-author';

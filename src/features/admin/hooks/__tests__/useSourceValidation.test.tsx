@@ -52,7 +52,7 @@ it.each(['parse', 'connection', 'timeout'])(
     });
     expect(result.current.isValidating).toBe(false);
     expect(result.current.getValidationStatus('a')?.text).toBe('有效');
-    expect(result.current.getValidationStatus('b')?.text).toBe('无效');
+    expect(result.current.getValidationStatus('b')?.text).toBe('无法搜索');
     expect(result.current.error).toBeTruthy();
     expect(FakeEventSource.latest.close).toHaveBeenCalledTimes(1);
   },
