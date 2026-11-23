@@ -113,6 +113,15 @@ const _readPlayRecordsForPlayback = createKeyedNetworkReader<PlayRecord>({
   getCached: () => cacheManager.getCachedPlayRecords(),
   setCached: (data) => cacheManager.cachePlayRecords(data),
   fetchApi: fetchPlayRecordsByKeys,
+  mergeConcurrentRead: (current, incoming) => {
+    const progress = mergeEpisodeProgress([
+      current.episode_progress,
+      incoming.episode_progress,
+    ]);
+    return progress.length
+      ? { ...current, episode_progress: progress }
+      : current;
+  },
   eventName: 'playRecordsUpdated',
 });
 
@@ -227,7 +236,15 @@ export function readPlayRecordsForPlayback(
   keys: string[],
   options?: { timeoutMs?: number },
 ): PlaybackRecordsRead {
-  return _readPlayRecordsForPlayback(keys, options);
+  const read = _readPlayRecordsForPlayback(keys, options);
+  // 列表缓存省略逐集进度，不能用它决定下一集从头播放；由定向结果确认。
+  if (
+    read.cached &&
+    Object.values(read.cached).some((record) => !record.episode_progress)
+  ) {
+    return { cached: null, fresh: read.fresh };
+  }
+  return read;
 }
 
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {

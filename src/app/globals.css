@@ -143,21 +143,15 @@ html:not(.light) body {
   pointer-events: none;
 }
 
-::view-transition-old(root) {
+/* 新快照叠在旧快照之上，由 ThemeToggle 的圆形裁剪揭开；live 层不裁剪，直接显示实时画面 */
+::view-transition-old(*),
+::view-transition-new(*) {
   animation: none;
   mix-blend-mode: normal;
-  z-index: 1;
   pointer-events: none;
 }
 
-::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
-  z-index: 2;
-  pointer-events: none;
-}
-
-::view-transition-group(root) {
+::view-transition-group(*) {
   animation: none;
   pointer-events: none;
 }

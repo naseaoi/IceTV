@@ -2,6 +2,7 @@ import {
   buildEpisodeProgressKeys,
   getEpisodeProgressView,
   isFinishedWhenLeavingForNext,
+  isNearPlaybackCompletion,
   parseStrictEpisodeNumber,
   resolveEpisodeProgressResumeTime,
 } from '@/features/play/lib/episodeProgress';
@@ -24,6 +25,48 @@ function detail(
     episode_groups: episodeGroups,
   } as SearchResult;
 }
+
+describe('isNearPlaybackCompletion', () => {
+  it.each([
+    [899, 1000, false],
+    [900, 1000, true],
+    [1000, 1000, true],
+    [6899, 7200, false],
+    [6900, 7200, true],
+    [9, 10, false],
+    [100, 0, false],
+    [100, -1, false],
+    [100, Infinity, false],
+    [100, NaN, false],
+    [NaN, 1000, false],
+    [Infinity, 1000, false],
+    [-1, 1000, false],
+  ])('时间 %s / %s 的提示资格为 %s', (time, duration, expected) => {
+    expect(isNearPlaybackCompletion(time, duration)).toBe(expected);
+  });
+
+  it('开启跳片尾时以片尾点计算，关闭或未设片尾时沿用媒体时长', () => {
+    const skip = { enable: true, outro_time: -100 };
+    expect(isNearPlaybackCompletion(809, 1000, skip)).toBe(false);
+    expect(isNearPlaybackCompletion(810, 1000, skip)).toBe(true);
+    expect(isNearPlaybackCompletion(900, 1000, skip)).toBe(true);
+    expect(
+      isNearPlaybackCompletion(810, 1000, { ...skip, enable: false }),
+    ).toBe(false);
+    expect(
+      isNearPlaybackCompletion(810, 1000, { ...skip, outro_time: 0 }),
+    ).toBe(false);
+    expect(
+      isNearPlaybackCompletion(810, 1000, { ...skip, outro_time: 100 }),
+    ).toBe(false);
+  });
+
+  it.each([-1000, -1100, -Infinity])('无效片尾点 %s 保持静默', (outro_time) => {
+    expect(
+      isNearPlaybackCompletion(900, 1000, { enable: true, outro_time }),
+    ).toBe(false);
+  });
+});
 
 describe('parseStrictEpisodeNumber', () => {
   it.each([

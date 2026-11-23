@@ -236,10 +236,19 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
 
 it('LinuxDo 设置自检保留合法值并恢复无效默认值', () => {
   const config = legacyConfig();
-  config.UserConfig.LinuxDo = { Enabled: true, MinTrustLevel: 4 };
+  config.UserConfig.LinuxDo = {
+    Enabled: true,
+    MinTrustLevel: 4,
+    ClientId: 'client',
+    ClientSecret: 'secret',
+    RedirectUri: '',
+  };
   expect(configSelfCheck(config).UserConfig.LinuxDo).toEqual({
     Enabled: true,
     MinTrustLevel: 4,
+    ClientId: 'client',
+    ClientSecret: 'secret',
+    RedirectUri: '',
   });
   config.UserConfig.LinuxDo = {
     Enabled: 'true',
@@ -249,6 +258,9 @@ it('LinuxDo 设置自检保留合法值并恢复无效默认值', () => {
   expect(configSelfCheck(config).UserConfig.LinuxDo).toEqual({
     Enabled: false,
     MinTrustLevel: 1,
+    ClientId: '',
+    ClientSecret: '',
+    RedirectUri: '',
   });
   expect(config.UserConfig.LinuxDoConfigured).toBeUndefined();
 });

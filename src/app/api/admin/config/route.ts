@@ -35,7 +35,10 @@ export async function GET(request: NextRequest) {
         })),
         UserConfig: {
           ...config.UserConfig,
-          LinuxDoConfigured: isLinuxDoConfigured(),
+          LinuxDo: config.UserConfig.LinuxDo
+            ? { ...config.UserConfig.LinuxDo, ClientSecret: '' }
+            : undefined,
+          LinuxDoConfigured: isLinuxDoConfigured(config),
           Users: [],
           TotalUsers: (
             await db.getAdminUserPage({

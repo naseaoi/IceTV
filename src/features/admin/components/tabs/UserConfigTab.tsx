@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -14,22 +15,20 @@ import { ConfigureUserApisDialog } from '@/features/admin/components/tabs/user-c
 import { ConfigureUserGroupDialog } from '@/features/admin/components/tabs/user-config/ConfigureUserGroupDialog';
 import { DeleteUserConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserConfirm';
 import { DeleteUserGroupConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm';
-import { RegistrationSettingsDialog } from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
-import { RegistrationSummaryCard } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
 import {
   type UserGroupDraft,
   EMPTY_USER_GROUP_DRAFT,
   UserGroupFormDialog,
 } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
-import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
-import { useAdminInviteCodes } from '@/features/admin/hooks/useAdminInviteCodes';
 import {
-  type InviteCodeDraft,
-  useAdminUserActions,
-} from '@/features/admin/hooks/useAdminUserActions';
+  LOGIN_PROVIDER_BADGES,
+  UserTable,
+} from '@/features/admin/components/tabs/user-config/UserTable';
+import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
 import { useAdminUsers } from '@/features/admin/hooks/useAdminUsers';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { ADMIN_USER_SEARCH_PARAM } from '@/features/admin/lib/admin-tabs';
 import { adminGet, adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
@@ -43,13 +42,9 @@ import {
 import { useModalState } from '@/hooks/useModalState';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import type { InviteCodeFilter } from '@/lib/invite-code-storage';
+import { OAUTH_PROVIDERS } from '@/lib/oauth-identity';
 import { getErrorMessage } from '@/lib/user-facing-error';
-import {
-  type LinuxDoLoginSettings,
-  type LinuxDoTrustLevel,
-  AdminConfig,
-} from '@/types/admin';
+import { AdminConfig } from '@/types/admin';
 
 interface UserConfigProps {
   config: AdminConfig | null;
@@ -75,7 +70,19 @@ const SELECTION_LINK_CLASS =
 const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [formError, setFormError] = useState('');
   const { isLoading, withLoading } = useLoadingState();
-  const [userSearch, setUserSearch] = useState('');
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const presetSearch = searchParams.get(ADMIN_USER_SEARCH_PARAM);
+  const [userSearch, setUserSearch] = useState(() => presetSearch ?? '');
+  // 从其他页面带搜索词跳来时预填，读取后移除地址参数
+  useEffect(() => {
+    if (presetSearch === null) return;
+    setUserSearch(presetSearch);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete(ADMIN_USER_SEARCH_PARAM);
+    router.replace(`${pathname}?${params}`, { scroll: false });
+  }, [presetSearch, searchParams, router, pathname]);
   const [userFilter, setUserFilter] =
     useState<AdminUserFilter['filter']>('all');
   const [userGroupFilter, setUserGroupFilter] = useState('');
@@ -109,12 +116,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     assignUserGroups,
     previewInactiveUsers,
     deleteInactiveUsers,
-    createInviteCodes,
-    deleteInviteCode,
-    purgeInactiveInviteCodes,
-    setRequireInviteCode,
-    setLinuxDo,
-    setDefaultUserGroup,
     updateUserApis,
     userAction,
   } = useAdminUserActions({
@@ -173,8 +174,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
   const [pendingSensitiveUserAction, setPendingSensitiveUserAction] =
     useState<PendingSensitiveUserAction | null>(null);
-  const [showOpenRegisterConfirm, setShowOpenRegisterConfirm] = useState(false);
-  const [showPurgeInviteConfirm, setShowPurgeInviteConfirm] = useState(false);
   const [showCleanupInactiveModal, setShowCleanupInactiveModal] =
     useModalState(false);
   const [inactiveDays, setInactiveDays] = useState(DEFAULT_INACTIVE_DAYS);
@@ -182,9 +181,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     count: number;
     confirmation: string;
   } | null>(null);
-  const [showRegistrationModal, setShowRegistrationModal] =
-    useModalState(false);
-  const [inviteFilter, setInviteFilter] = useState<InviteCodeFilter>('all');
 
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
   const permissionContext = useMemo(
@@ -217,12 +213,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       ),
     [visibleUsers, permissionContext, currentUsername],
   );
-
-  const inviteList = useAdminInviteCodes(inviteFilter, showRegistrationModal);
-  const activeInviteCodeCount = config?.UserConfig?.activeInviteCodeCount ?? 0;
-
-  const openRegister = !!config?.UserConfig?.OpenRegister;
-  const requireInviteCode = !!config?.UserConfig?.RequireInviteCode;
 
   const selectAllUsers =
     selectableVisibleUsers.length > 0 &&
@@ -334,20 +324,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       | 'setAdmin'
       | 'cancelAdmin'
       | 'changePassword'
-      | 'deleteUser'
-      | 'setOpenRegister',
+      | 'deleteUser',
     targetUsername: string,
     targetPassword?: string,
     userGroup?: string,
-    openRegister?: boolean,
   ) => {
-    await userAction(
-      action,
-      targetUsername,
-      targetPassword,
-      userGroup,
-      openRegister,
-    );
+    await userAction(action, targetUsername, targetPassword, userGroup);
   };
 
   const handleBanUser = (username: string) => {
@@ -365,116 +347,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     await withLoading(`unbanUser_${uname}`, () =>
       handleUserAction('unban', uname),
     ).catch((error) => showError(error, '解封失败'));
-  };
-
-  const updateOpenRegister = async (openRegister: boolean) => {
-    setFormError('');
-    await withLoading('setOpenRegister', async () => {
-      try {
-        await userAction(
-          'setOpenRegister',
-          undefined,
-          undefined,
-          undefined,
-          openRegister,
-        );
-      } catch (err) {
-        setFormError(getErrorMessage(err, '更新失败'));
-      }
-    });
-  };
-
-  const handleToggleOpenRegister = () => {
-    if (config?.UserConfig?.OpenRegister) {
-      void updateOpenRegister(false);
-      return;
-    }
-    setFormError('');
-    setShowOpenRegisterConfirm(true);
-  };
-
-  const handleToggleRequireInviteCode = async () => {
-    const next = !config?.UserConfig?.RequireInviteCode;
-    setFormError('');
-    await withLoading('setRequireInviteCode', async () => {
-      try {
-        await setRequireInviteCode(next);
-      } catch (error) {
-        setFormError(getErrorMessage(error, '操作失败'));
-      }
-    });
-  };
-
-  const linuxDo: LinuxDoLoginSettings = config?.UserConfig?.LinuxDo ?? {
-    Enabled: false,
-    MinTrustLevel: 1,
-  };
-
-  const updateLinuxDo = (next: LinuxDoLoginSettings) =>
-    withLoading('setLinuxDo', async () => {
-      setFormError('');
-      try {
-        await setLinuxDo(next);
-      } catch (error) {
-        setFormError(getErrorMessage(error, '操作失败'));
-      }
-    });
-
-  const handleToggleLinuxDo = () =>
-    updateLinuxDo({ ...linuxDo, Enabled: !linuxDo.Enabled });
-
-  const handleLinuxDoTrustLevelChange = (level: LinuxDoTrustLevel) =>
-    updateLinuxDo({ ...linuxDo, MinTrustLevel: level });
-
-  const handleDefaultUserGroupChange = (next: string) =>
-    withLoading('setDefaultUserGroup', async () => {
-      setFormError('');
-      try {
-        await setDefaultUserGroup(next);
-      } catch (error) {
-        setFormError(getErrorMessage(error, '操作失败'));
-      }
-    });
-
-  const handleCreateInviteCodes = (draft: InviteCodeDraft) =>
-    withLoading('createInviteCode', async () => {
-      setFormError('');
-      try {
-        const codes = await createInviteCodes(draft);
-        void inviteList.refresh();
-        return codes;
-      } catch (error) {
-        setFormError(getErrorMessage(error, '操作失败'));
-        return null;
-      }
-    });
-
-  const handleDeleteInviteCode = async (code: string) => {
-    setFormError('');
-    await withLoading(`deleteInviteCode_${code}`, async () => {
-      try {
-        await deleteInviteCode(code);
-      } catch (error) {
-        setFormError(getErrorMessage(error, '删除邀请码失败'));
-        // 邀请码可能已被其他管理员删除，拉一次最新摘要
-        await refreshConfig().catch(() => undefined);
-      }
-      void inviteList.refresh();
-    });
-  };
-
-  const handlePurgeInactiveInviteCodes = () => {
-    setShowPurgeInviteConfirm(false);
-    void withLoading('purgeInactiveInviteCodes', async () => {
-      setFormError('');
-      try {
-        const deleted = await purgeInactiveInviteCodes();
-        if (deleted === 0) showSuccess('已清理 0 个失效邀请码');
-      } catch (error) {
-        setFormError(getErrorMessage(error, '操作失败'));
-      }
-      void inviteList.refresh();
-    });
   };
 
   const handleSetAdmin = (username: string) => {
@@ -810,13 +682,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   return (
     <div className='space-y-6'>
-      <RegistrationSummaryCard
-        openRegister={openRegister}
-        requireInviteCode={requireInviteCode}
-        activeInviteCodeCount={activeInviteCodeCount}
-        onManage={() => setShowRegistrationModal(true)}
-      />
-
       <div>
         <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
           用户列表
@@ -843,6 +708,10 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                 { value: 'admin', label: '管理员' },
                 { value: 'user', label: '普通用户' },
                 { value: 'banned', label: '已封禁' },
+                ...OAUTH_PROVIDERS.map((provider) => ({
+                  value: `provider:${provider}`,
+                  label: `已绑定 ${LOGIN_PROVIDER_BADGES[provider].label}`,
+                })),
               ]}
             />
             {(userGroups.length > 0 || userGroupFilter) && (
@@ -1191,64 +1060,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onClose={closeCleanupInactiveModal}
       />
 
-      <RegistrationSettingsDialog
-        error={formError}
-        isOpen={showRegistrationModal}
-        openRegister={!!config.UserConfig.OpenRegister}
-        requireInviteCode={!!config.UserConfig.RequireInviteCode}
-        userGroupNames={userGroups.map((group) => group.name)}
-        defaultUserGroup={config.UserConfig.DefaultUserGroup || ''}
-        isSettingDefaultGroup={isLoading('setDefaultUserGroup')}
-        inviteFilter={inviteFilter}
-        inviteList={{
-          ...inviteList,
-          expectedCount:
-            inviteFilter === 'all'
-              ? config.UserConfig.inviteCodeCount
-              : inviteFilter === 'active'
-                ? activeInviteCodeCount
-                : inviteList.totals[inviteFilter],
-        }}
-        isTogglingRegister={isLoading('setOpenRegister')}
-        isTogglingInvite={isLoading('setRequireInviteCode')}
-        linuxDoConfigured={!!config.UserConfig.LinuxDoConfigured}
-        linuxDo={linuxDo}
-        isSettingLinuxDo={isLoading('setLinuxDo')}
-        onToggleLinuxDo={handleToggleLinuxDo}
-        onLinuxDoTrustLevelChange={handleLinuxDoTrustLevelChange}
-        isCreatingCode={isLoading('createInviteCode')}
-        deletingCode={
-          inviteList.items.find((item) =>
-            isLoading(`deleteInviteCode_${item.code}`),
-          )?.code || null
-        }
-        onToggleOpenRegister={handleToggleOpenRegister}
-        onToggleRequireInviteCode={handleToggleRequireInviteCode}
-        onDefaultUserGroupChange={handleDefaultUserGroupChange}
-        onInviteFilterChange={setInviteFilter}
-        onCreateCodes={handleCreateInviteCodes}
-        onDeleteCode={handleDeleteInviteCode}
-        onViewCodeUsers={(code) => {
-          setUserSearch(code);
-          setUserFilter('all');
-          setUserGroupFilter('');
-          setShowRegistrationModal(false);
-        }}
-        isPurgingCodes={isLoading('purgeInactiveInviteCodes')}
-        onPurgeInactiveCodes={() => setShowPurgeInviteConfirm(true)}
-        onClose={() => setShowRegistrationModal(false)}
-      />
-
-      <ConfirmModal
-        isOpen={showPurgeInviteConfirm}
-        title='清理失效邀请码'
-        message={`将删除 ${inviteList.inactiveCount} 个已过期或已用尽的邀请码，删除后无法恢复。`}
-        onClose={() => setShowPurgeInviteConfirm(false)}
-        onConfirm={handlePurgeInactiveInviteCodes}
-        confirmText='确认清理'
-        danger
-      />
-
       <ConfirmModal
         isOpen={pendingSensitiveUserAction !== null}
         title={pendingSensitiveUserAction?.title || '确认操作'}
@@ -1257,18 +1068,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onConfirm={() => void handleConfirmSensitiveUserAction()}
         confirmText={pendingSensitiveUserAction?.confirmText}
         danger={pendingSensitiveUserAction?.action === 'ban'}
-      />
-
-      <ConfirmModal
-        isOpen={showOpenRegisterConfirm}
-        title='确认开放注册'
-        message='开启后，未注册用户可以通过注册接口自行创建账号。'
-        onClose={() => setShowOpenRegisterConfirm(false)}
-        onConfirm={() => {
-          setShowOpenRegisterConfirm(false);
-          void updateOpenRegister(true);
-        }}
-        confirmText='确认开启'
       />
     </div>
   );

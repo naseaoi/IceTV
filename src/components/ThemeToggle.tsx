@@ -10,6 +10,30 @@ interface ThemeToggleProps {
   className?: string;
 }
 
+interface NamedTransitionElement {
+  element: HTMLElement;
+  name: string;
+  rect: DOMRect;
+}
+
+// 过渡期间圆圈外是整页静态快照：会持续变化且不随主题变化的区域（播放器、海报墙）
+// 标 live 单独成层实时绘制；叠在 live 区域上方的元素标 reveal 同步成层，保持原有层级
+function nameTransitionElements(
+  kind: 'live' | 'reveal',
+): NamedTransitionElement[] {
+  const named: NamedTransitionElement[] = [];
+  document
+    .querySelectorAll<HTMLElement>(`[data-theme-transition="${kind}"]`)
+    .forEach((element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const name = `theme-${kind}-${named.length}`;
+      element.style.setProperty('view-transition-name', name);
+      named.push({ element, name, rect });
+    });
+  return named;
+}
+
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
@@ -78,10 +102,21 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
     root.style.setProperty('--theme-transition-x', `${centerXPercent}%`);
     root.style.setProperty('--theme-transition-y', `${centerYPercent}%`);
     root.style.setProperty('--theme-transition-radius', `${radiusVmax}vmax`);
+    const liveElements = nameTransitionElements('live');
+    const revealElements = nameTransitionElements('reveal');
     const clearTransitionStyles = () => {
       root.style.removeProperty('--theme-transition-x');
       root.style.removeProperty('--theme-transition-y');
       root.style.removeProperty('--theme-transition-radius');
+      [...liveElements, ...revealElements].forEach(({ element }) =>
+        element.style.removeProperty('view-transition-name'),
+      );
+    };
+    const anchorX = rect.left + rect.width / 2;
+    const anchorY = rect.top + rect.height / 2;
+    const animationOptions = {
+      duration: 380,
+      easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
     };
 
     transitionInProgressRef.current = true;
@@ -100,20 +135,45 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
 
     void transition.ready
       .then(() => {
-        const animation = document.documentElement.animate(
-          {
-            clipPath: [
-              'circle(0px at var(--theme-transition-x) var(--theme-transition-y))',
-              'circle(var(--theme-transition-radius) at var(--theme-transition-x) var(--theme-transition-y))',
-            ],
-          },
-          {
-            duration: 380,
-            easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
-            pseudoElement: '::view-transition-new(root)',
-          },
+        const animations = [
+          root.animate(
+            {
+              clipPath: [
+                'circle(0px at var(--theme-transition-x) var(--theme-transition-y))',
+                'circle(var(--theme-transition-radius) at var(--theme-transition-x) var(--theme-transition-y))',
+              ],
+            },
+            {
+              ...animationOptions,
+              pseudoElement: '::view-transition-new(root)',
+            },
+          ),
+          // 各层按自身盒子换算圆心与半径，圆边与整页圆圈同步
+          ...revealElements.map(({ name, rect: box }) => {
+            const x = ((anchorX - box.left) / box.width) * 100;
+            const y = ((anchorY - box.top) / box.height) * 100;
+            const radius =
+              (maxRadius / (Math.hypot(box.width, box.height) / Math.SQRT2)) *
+              100;
+            return root.animate(
+              {
+                clipPath: [
+                  `circle(0% at ${x}% ${y}%)`,
+                  `circle(${radius}% at ${x}% ${y}%)`,
+                ],
+              },
+              {
+                ...animationOptions,
+                pseudoElement: `::view-transition-new(${name})`,
+              },
+            );
+          }),
+        ];
+        return Promise.all(
+          animations.map((animation) =>
+            animation.finished.catch(() => undefined),
+          ),
         );
-        return animation.finished.catch(() => undefined);
       })
       .catch(() => undefined);
 

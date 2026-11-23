@@ -21,6 +21,10 @@ export type InviteCodePage = {
   nextCursor: string | null;
 };
 export type InviteCodeCreateResult = 'created' | 'exists' | 'limit';
+export type InviteCodeBatchCreateResult =
+  | { codes: string[] }
+  | 'exists'
+  | 'limit';
 export type InviteCodeRow = {
   code: string;
   created_at: number | string;

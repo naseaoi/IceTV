@@ -14,6 +14,8 @@ interface PlayIntentPayload {
   groupLabel?: string;
   groupIndex?: number;
   groupTotal?: number;
+  recordDuration?: number;
+  knownEpisodeCount?: number;
 }
 
 interface SavePlayIntentOptions {
@@ -24,6 +26,8 @@ interface SavePlayIntentOptions {
   groupLabel?: string;
   groupIndex?: number;
   groupTotal?: number;
+  recordDuration?: number;
+  knownEpisodeCount?: number;
 }
 
 interface ConsumePlayIntentOptions {
@@ -37,6 +41,8 @@ interface PlayIntentRestoreState {
   episodeIndex: number;
   resumeTime: number;
   resumeMode: PlayIntentResumeMode;
+  recordDuration?: number;
+  knownEpisodeCount?: number;
 }
 
 function isValidPlayIntentPayload(
@@ -89,6 +95,8 @@ export function savePlayIntent({
   groupLabel,
   groupIndex,
   groupTotal,
+  recordDuration,
+  knownEpisodeCount,
 }: SavePlayIntentOptions): void {
   if (typeof window === 'undefined') return;
   if (!source || !id) return;
@@ -100,6 +108,12 @@ export function savePlayIntent({
     episodeIndex: Math.max(0, Math.floor(episodeIndex)),
     resumeTime: normalizedResumeTime,
     saveTime: Date.now(),
+    ...(Number.isFinite(recordDuration) && recordDuration! > 0
+      ? { recordDuration }
+      : {}),
+    ...(Number.isFinite(knownEpisodeCount) && knownEpisodeCount! > 0
+      ? { knownEpisodeCount }
+      : {}),
     ...(groupLabel ? { groupLabel } : {}),
     ...(Number.isFinite(groupIndex) ? { groupIndex: Number(groupIndex) } : {}),
     ...(Number.isFinite(groupTotal) ? { groupTotal: Number(groupTotal) } : {}),
@@ -144,6 +158,13 @@ export function consumeMatchingPlayIntent({
       ).episodeIndex,
       resumeTime,
       resumeMode: resumeTime > 0 ? 'forced' : null,
+      ...(Number.isFinite(payload.recordDuration) && payload.recordDuration! > 0
+        ? { recordDuration: payload.recordDuration }
+        : {}),
+      ...(Number.isFinite(payload.knownEpisodeCount) &&
+      payload.knownEpisodeCount! > 0
+        ? { knownEpisodeCount: payload.knownEpisodeCount }
+        : {}),
     };
 
     clearPlayIntentStorage();

@@ -19,6 +19,8 @@ const customJestConfig = {
   testPathIgnorePatterns: ['<rootDir>/node_modules/', '__fixtures__/'],
 
   moduleNameMapper: {
+    // Jest 27 不解析 OpenCC 的子路径 exports，使用对应的真实 CJS 构建。
+    '^opencc-js/t2cn$': '<rootDir>/node_modules/opencc-js/dist/umd/t2cn.js',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^~/(.*)$': '<rootDir>/public/$1',
   },

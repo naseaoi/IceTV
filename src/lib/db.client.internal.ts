@@ -467,6 +467,7 @@ export function createKeyedNetworkReader<T>(options: {
   getCached: () => Record<string, T> | null;
   setCached: (data: Record<string, T>) => void;
   fetchApi: (keys: string[], signal: AbortSignal) => Promise<Record<string, T>>;
+  mergeConcurrentRead?: (current: T, incoming: T) => T;
   eventName: CacheUpdateEvent;
 }): (
   keys: string[],
@@ -520,8 +521,21 @@ export function createKeyedNetworkReader<T>(options: {
           if (
             writeRevisions.get(eventName) !== revision ||
             JSON.stringify(select(current)) !== baseline
-          )
-            return select(current);
+          ) {
+            const selected = select(current);
+            // 并发写入后的主记录与删除结果优先；业务可单独保留网络补回的附属数据。
+            if (options.mergeConcurrentRead) {
+              for (const key of Object.keys(selected)) {
+                if (result[key] !== undefined) {
+                  selected[key] = options.mergeConcurrentRead(
+                    selected[key],
+                    result[key],
+                  );
+                }
+              }
+            }
+            return selected;
+          }
           if (current) {
             const merged = { ...current };
             for (const key of keys) {

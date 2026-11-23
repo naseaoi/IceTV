@@ -64,8 +64,6 @@ interface ConfigFileStruct {
 
 export const API_CONFIG = {
   search: {
-    path: '?ac=videolist&wd=',
-    pagePath: '?ac=videolist&wd={query}&pg={page}',
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -301,6 +299,14 @@ async function getInitConfig(
     },
     UserConfig: {
       OpenRegister: false,
+      RegisterChannels: { Password: true, LinuxDo: true },
+      LinuxDo: {
+        Enabled: false,
+        MinTrustLevel: 1,
+        ClientId: '',
+        ClientSecret: '',
+        RedirectUri: '',
+      },
     },
     SourceConfig: [],
     CustomCategories: [],
@@ -477,8 +483,24 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   ) {
     delete adminConfig.UserConfig.DefaultUserGroup;
   }
+  const channels = adminConfig.UserConfig.RegisterChannels;
+  adminConfig.UserConfig.RegisterChannels = {
+    Password:
+      typeof channels?.Password === 'boolean' ? channels.Password : true,
+    LinuxDo: typeof channels?.LinuxDo === 'boolean' ? channels.LinuxDo : true,
+  };
   const linuxDo = adminConfig.UserConfig.LinuxDo;
   adminConfig.UserConfig.LinuxDo = {
+    ClientId:
+      typeof linuxDo?.ClientId === 'string' ? linuxDo.ClientId.trim() : '',
+    ClientSecret:
+      typeof linuxDo?.ClientSecret === 'string'
+        ? linuxDo.ClientSecret.trim()
+        : '',
+    RedirectUri:
+      typeof linuxDo?.RedirectUri === 'string'
+        ? linuxDo.RedirectUri.trim()
+        : '',
     Enabled: linuxDo?.Enabled === true,
     MinTrustLevel:
       linuxDo &&
@@ -805,7 +827,9 @@ export async function getPublicConfig() {
     SiteIcon: config.SiteConfig.SiteIcon || '',
     Announcement: config.SiteConfig.Announcement,
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
-    OpenRegister: !!config.UserConfig.OpenRegister,
+    PasswordRegister:
+      !!config.UserConfig.OpenRegister &&
+      config.UserConfig.RegisterChannels?.Password !== false,
     LinuxDoLogin: isLinuxDoLoginEnabled(config),
     RequireInviteCode: !!config.UserConfig.RequireInviteCode,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,

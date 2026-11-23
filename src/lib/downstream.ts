@@ -1,3 +1,7 @@
+import {
+  buildCmsSearchUrl,
+  parseCmsSearchPayload,
+} from '@/lib/cms-search.server';
 import { waitForSharedLoad } from '@/lib/concurrency';
 import { API_CONFIG, ApiSite, getConfigForRead } from '@/lib/config';
 import {
@@ -16,6 +20,11 @@ import {
   searchFromXgcartoon,
 } from '@/lib/downstream-sources/xgcartoon';
 import {
+  getDetailFromXifan,
+  isXifanSource,
+  searchFromXifan,
+} from '@/lib/downstream-sources/xifan';
+import {
   readJsonLimited,
   readTextLimited,
   UPSTREAM_METADATA_MAX_BYTES,
@@ -32,7 +41,9 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { searchWithScriptFallback } from '@/lib/search-script-fallback';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
+import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { parseSeriesStatus } from '@/lib/series-status';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
@@ -44,24 +55,9 @@ import { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
-interface ApiSearchItem {
-  vod_id: string;
-  vod_name: string;
-  vod_pic: string;
-  vod_remarks?: string;
-  vod_isend?: number | string;
-  vod_serial?: number | string;
-  vod_total?: number | string;
-  vod_play_url?: string;
-  vod_class?: string;
-  vod_year?: string;
-  vod_content?: string;
-  vod_douban_id?: number;
-  type_name?: string;
-}
-
 interface SearchFromApiOptions {
   maxSearchPages?: number;
+  isMatch?: (result: SearchResult) => boolean;
   signal?: AbortSignal;
   // 第 1 页失败时抛 SearchSourceUnavailableError，而不是返回空结果
   reportFailure?: boolean;
@@ -197,21 +193,23 @@ async function fetchAndCacheSearchPage(
       return { results: [], failed: true };
     }
 
-    const data = await readJsonLimited<any>(
-      response,
-      UPSTREAM_METADATA_MAX_BYTES,
+    const data = parseCmsSearchPayload(
+      await readJsonLimited<unknown>(response, UPSTREAM_METADATA_MAX_BYTES),
     );
     latencyMs = Date.now() - startedAt;
-    if (Array.isArray(data?.list)) {
-      outcome = data.list.length > 0 ? 'ok' : 'empty';
+    if (!data) {
+      setCachedSearchPage(
+        getSourceCacheKey(apiSite),
+        query,
+        page,
+        'invalid',
+        [],
+      );
+      return { results: [], failed: true };
     }
-    if (
-      !data ||
-      !data.list ||
-      !Array.isArray(data.list) ||
-      data.list.length === 0
-    ) {
-      const pageCount = page === 1 ? data?.pagecount || 1 : undefined;
+    outcome = data.list.length > 0 ? 'ok' : 'empty';
+    if (data.list.length === 0) {
+      const pageCount = page === 1 ? data.pageCount : undefined;
       setCachedSearchPage(
         getSourceCacheKey(apiSite),
         query,
@@ -223,7 +221,7 @@ async function fetchAndCacheSearchPage(
       return { results: [], pageCount };
     }
 
-    const allResults = data.list.map((item: ApiSearchItem) => {
+    const allResults = data.list.map((item) => {
       const { episodes, titles } = item.vod_play_url
         ? parseVodPlayUrl(item.vod_play_url)
         : { episodes: [], titles: [] };
@@ -254,7 +252,7 @@ async function fetchAndCacheSearchPage(
       (result: SearchResult) => result.episodes.length > 0,
     );
 
-    const pageCount = page === 1 ? data.pagecount || 1 : undefined;
+    const pageCount = page === 1 ? data.pageCount : undefined;
     setCachedSearchPage(
       getSourceCacheKey(apiSite),
       query,
@@ -298,7 +296,8 @@ export async function probeSourceSearch(
   if (
     signal?.aborted ||
     isGirigiriSource(apiSite) ||
-    isXgcartoonSource(apiSite)
+    isXgcartoonSource(apiSite) ||
+    isXifanSource(apiSite)
   ) {
     return;
   }
@@ -310,7 +309,7 @@ export async function probeSourceSearch(
       apiSite,
       query,
       1,
-      apiSite.api + API_CONFIG.search.path + encodeURIComponent(query),
+      buildCmsSearchUrl(apiSite.api, query),
       runtimeParams.SearchRequestTimeoutSeconds * 1000,
       signal,
     );
@@ -328,7 +327,9 @@ async function searchSpecialSource(
   const { signal, reportFailure } = options;
   const search = isGirigiriSource(apiSite)
     ? searchFromGirigiri
-    : searchFromXgcartoon;
+    : isXifanSource(apiSite)
+      ? searchFromXifan
+      : searchFromXgcartoon;
   try {
     return await waitForSharedLoad(
       () =>
@@ -357,7 +358,7 @@ function uniqueSearchResults(results: SearchResult[]): SearchResult[] {
   return unique.length === results.length ? results : unique;
 }
 
-export async function searchFromApi(
+async function searchFromApiQuery(
   apiSite: ApiSite,
   query: string,
   options: SearchFromApiOptions = {},
@@ -366,7 +367,11 @@ export async function searchFromApi(
     return [];
   }
 
-  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
+  if (
+    isGirigiriSource(apiSite) ||
+    isXgcartoonSource(apiSite) ||
+    isXifanSource(apiSite)
+  ) {
     return uniqueSearchResults(
       await searchSpecialSource(apiSite, query, options),
     );
@@ -375,9 +380,7 @@ export async function searchFromApi(
   try {
     const runtimeParams = await readSearchRuntimeParams();
     const searchTimeoutMs = runtimeParams.SearchRequestTimeoutSeconds * 1000;
-    const apiBaseUrl = apiSite.api;
-    const apiUrl =
-      apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
+    const apiUrl = buildCmsSearchUrl(apiSite.api, query);
 
     const firstPageResult = options.refreshFirstPage
       ? await fetchAndCacheSearchPage(
@@ -403,7 +406,7 @@ export async function searchFromApi(
     ) {
       throw new SearchSourceUnavailableError(apiSite.name);
     }
-    const results = [...firstPageResult.results];
+    let results = firstPageResult.results;
     const pageCountFromFirst = firstPageResult.pageCount;
 
     const MAX_SEARCH_PAGES =
@@ -413,14 +416,11 @@ export async function searchFromApi(
     const pagesToFetch = Math.min(pageCount - 1, MAX_SEARCH_PAGES - 1);
 
     if (pagesToFetch > 0) {
+      results = [...results];
       const additionalPageTasks = [];
 
       for (let page = 2; page <= pagesToFetch + 1; page++) {
-        const pageUrl =
-          apiBaseUrl +
-          API_CONFIG.search.pagePath
-            .replace('{query}', encodeURIComponent(query))
-            .replace('{page}', page.toString());
+        const pageUrl = buildCmsSearchUrl(apiSite.api, query, page);
 
         additionalPageTasks.push(async () => {
           if (options.signal?.aborted) {
@@ -464,34 +464,42 @@ export async function searchFromApi(
   }
 }
 
+export async function searchFromApi(
+  apiSite: ApiSite,
+  query: string,
+  options: SearchFromApiOptions = {},
+): Promise<SearchResult[]> {
+  if (options.signal?.aborted) return [];
+  try {
+    return await searchWithScriptFallback(
+      query,
+      (keyword, isFallback) =>
+        searchFromApiQuery(apiSite, keyword, {
+          ...options,
+          maxSearchPages: isFallback ? 1 : options.maxSearchPages,
+          reportFailure: true,
+        }),
+      (results) =>
+        results.some(
+          options.isMatch ??
+            ((item) => isTitleMatchedSearchQuery(item.title, query)),
+        ),
+      options.signal,
+    );
+  } catch (error) {
+    if (options.signal?.aborted) return [];
+    if (error instanceof ResourceLimitError || options.reportFailure)
+      throw error;
+    return [];
+  }
+}
+
 export async function searchFirstPageFromApi(
   apiSite: ApiSite,
   query: string,
-  options: { signal?: AbortSignal } = {},
+  options: Pick<SearchFromApiOptions, 'signal' | 'isMatch'> = {},
 ): Promise<SearchResult[]> {
-  if (isGirigiriSource(apiSite) || isXgcartoonSource(apiSite)) {
-    return uniqueSearchResults(
-      await searchSpecialSource(apiSite, query, options),
-    );
-  }
-
-  try {
-    const runtimeParams = await readSearchRuntimeParams();
-    const apiUrl =
-      apiSite.api + API_CONFIG.search.path + encodeURIComponent(query);
-    const firstPageResult = await searchWithCache(
-      apiSite,
-      query,
-      1,
-      apiUrl,
-      runtimeParams.SearchRequestTimeoutSeconds * 1000,
-      options.signal,
-    );
-    return uniqueSearchResults(firstPageResult.results);
-  } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
-    return [];
-  }
+  return searchFromApi(apiSite, query, { ...options, maxSearchPages: 1 });
 }
 
 const PLAYBACK_URL_PATTERN =
@@ -507,6 +515,10 @@ export async function getDetailFromApi(
 
   if (isXgcartoonSource(apiSite)) {
     return getDetailFromXgcartoon(apiSite, id);
+  }
+
+  if (isXifanSource(apiSite)) {
+    return getDetailFromXifan(apiSite, id);
   }
 
   if (apiSite.detail) {

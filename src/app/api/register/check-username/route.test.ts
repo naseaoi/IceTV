@@ -51,6 +51,20 @@ describe('check-username route', () => {
     (db.checkUserExist as jest.Mock).mockResolvedValue(false);
   });
 
+  it('账号密码注册通道关闭时拒绝检测', async () => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      UserConfig: {
+        OpenRegister: true,
+        RegisterChannels: { Password: false, LinuxDo: true },
+      },
+    });
+    const { GET } = loadRoute();
+    const response = await GET(createRequest('demo-user'));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: '当前未开放注册' });
+    expect(db.checkUserExist).not.toHaveBeenCalled();
+  });
+
   it('reports an available username', async () => {
     const { GET } = loadRoute();
 

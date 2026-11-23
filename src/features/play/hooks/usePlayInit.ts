@@ -30,7 +30,10 @@ import {
   peekResolvedLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
-import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
+import {
+  isPlayPagePath,
+  replacePlayPageUrl,
+} from '@/features/play/lib/playPageUrl';
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
   SOURCE_PROBE_CONCURRENCY,
@@ -68,7 +71,6 @@ import {
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
-import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
   isTrustedSourcePlaybackStat,
   readSourcePlaybackStats,
@@ -759,7 +761,14 @@ export function usePlayInit({
       id: string,
       snapshot: SearchResult,
     ) => {
-      void fetchDetailData(source, id)
+      const promise = fetchDetailData(source, id);
+      historyRestoreGateRef.current.detailRefresh = {
+        key: `${source}+${id}`,
+        promise: promise
+          .then((fresh) => (fresh.episodes?.length ? fresh : null))
+          .catch(() => null),
+      };
+      void promise
         .then((fresh) => {
           if (signal.aborted) return;
           if (!fresh.episodes || fresh.episodes.length === 0) return;
@@ -856,6 +865,9 @@ export function usePlayInit({
         }
         sourceSearchFailed = false;
 
+        const { filterSourcesForPlayback } =
+          await import('@/lib/playback-source-match');
+        if (signal.aborted) return [];
         const results = filterSourcesForPlayback(data.results, {
           title: videoTitleRef.current,
           year: videoYearRef.current,
@@ -946,6 +958,30 @@ export function usePlayInit({
       );
     };
 
+    // 短地址只有源与 ID，原源详情不可用时按本人播放记录里的标题转搜其他源
+    const restoreEntryTitleFromRecord = async (source: string, id: string) => {
+      const key = generateStorageKey(source, id);
+      const records = await withAbortableTimeout(
+        () => {
+          if (startupPlayRecordsRequest) return startupPlayRecordsRequest;
+          const read = readPlayRecordsForPlayback([key]);
+          return read.cached ? Promise.resolve(read.cached) : read.fresh;
+        },
+        HISTORY_RESTORE_WAIT_TIMEOUT_MS,
+        'History lookup timeout',
+        signal,
+      ).catch(() => null);
+      const record = records?.[key];
+      if (!record?.title) return;
+      // ref 会被状态同步覆盖，两处一起写
+      videoTitleRef.current = record.title;
+      setVideoTitle(record.title);
+      if (!videoYearRef.current) {
+        videoYearRef.current = record.year;
+        setVideoYear(record.year);
+      }
+    };
+
     const clearAggregateGroup = () => {
       const rawToClear = aggregateGroupRawToClear;
       if (!rawToClear) return;
@@ -971,24 +1007,31 @@ export function usePlayInit({
       }
     };
 
-    const loadAggregateGroup = (): SearchResult[] | null => {
+    const loadAggregateGroup = (): Promise<SearchResult[] | null> | null => {
       try {
         const raw = sessionStorage.getItem('aggregate_group');
         if (raw) {
           const parsed = JSON.parse(raw) as SearchResult[];
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const playableGroup = filterSourcesForPlayback(parsed, {
-              title: videoTitleRef.current,
-              year: videoYearRef.current,
-              searchType:
-                searchType === 'tv' || searchType === 'movie' ? searchType : '',
-            });
-            if (playableGroup.length === 0) {
-              clearInvalidAggregateGroup(raw);
-              return null;
-            }
-            aggregateGroupRawToClear = raw;
-            return parsed;
+            return import('@/lib/playback-source-match')
+              .then(({ filterSourcesForPlayback }) => {
+                if (signal.aborted) return null;
+                const playableGroup = filterSourcesForPlayback(parsed, {
+                  title: videoTitleRef.current,
+                  year: videoYearRef.current,
+                  searchType:
+                    searchType === 'tv' || searchType === 'movie'
+                      ? searchType
+                      : '',
+                });
+                if (playableGroup.length === 0) {
+                  clearInvalidAggregateGroup(raw);
+                  return null;
+                }
+                aggregateGroupRawToClear = raw;
+                return parsed;
+              })
+              .catch(() => null);
           }
         }
       } catch {
@@ -998,7 +1041,7 @@ export function usePlayInit({
     };
 
     const finalizePlaybackDetail = async (detailData: SearchResult) => {
-      if (signal.aborted || window.location.pathname !== '/play') {
+      if (signal.aborted || !isPlayPagePath(window.location.pathname)) {
         return;
       }
 
@@ -1018,7 +1061,7 @@ export function usePlayInit({
         setCurrentEpisodeIndex(0);
       }
 
-      if (signal.aborted || !replacePlayPageUrl(detailData, resolvedYear)) {
+      if (signal.aborted || !replacePlayPageUrl(detailData)) {
         return;
       }
       clearAggregateGroup();
@@ -1079,7 +1122,9 @@ export function usePlayInit({
       signal.addEventListener('abort', () => quickController.abort(), {
         once: true,
       });
-      const cachedGroup = loadAggregateGroup();
+      const cachedGroupTask = loadAggregateGroup();
+      const cachedGroup = cachedGroupTask ? await cachedGroupTask : null;
+      if (signal.aborted) return;
       const titleEntry = !currentSource && !currentId;
       const quickPromise =
         titleEntry && !cachedGroup && optimizationEnabled && quickQuery
@@ -1118,6 +1163,8 @@ export function usePlayInit({
             id: target.id,
             episodeIndex: entry[1].index - 1,
             resumeTime: entry[1].play_time,
+            recordDuration: entry[1].total_time,
+            knownEpisodeCount: entry[1].group_total ?? entry[1].total_episodes,
             groupLabel: entry[1].group_label,
             groupIndex: entry[1].group_index,
             groupTotal: entry[1].group_total,
@@ -1142,7 +1189,14 @@ export function usePlayInit({
         if (signal.aborted) return;
         if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
           setAvailableSources(mergeSourceBundle([], fastDetail));
-          void fetchSourcesData(searchTitle || videoTitle);
+          // 短地址不带标题，候选源搜索与过滤改用详情里的标题和年份
+          if (!videoTitleRef.current) {
+            videoTitleRef.current = fastDetail.title;
+            if (!videoYearRef.current && fastDetail.year !== 'unknown') {
+              videoYearRef.current = fastDetail.year;
+            }
+          }
+          void fetchSourcesData(searchTitle || videoTitleRef.current);
           await finalizePlaybackDetail(fastDetail);
           return;
         }
@@ -1185,6 +1239,9 @@ export function usePlayInit({
 
       let sourcesInfo: SearchResult[];
       if (cachedGroup) {
+        const { filterSourcesForPlayback } =
+          await import('@/lib/playback-source-match');
+        if (signal.aborted) return;
         sourcesInfo = filterSourcesForPlayback(cachedGroup, {
           title: videoTitleRef.current,
           year: videoYearRef.current,
@@ -1194,7 +1251,17 @@ export function usePlayInit({
         setAvailableSources(sourcesInfo);
         setSourceSearchLoading(false);
       } else {
-        sourcesInfo = await fetchSourcesData(searchTitle || videoTitle);
+        if (
+          !searchTitle &&
+          !videoTitleRef.current &&
+          requestedSource &&
+          requestedId
+        ) {
+          await restoreEntryTitleFromRecord(requestedSource, requestedId);
+          if (signal.aborted) return;
+        }
+        const query = searchTitle || videoTitleRef.current;
+        sourcesInfo = query ? await fetchSourcesData(query) : [];
       }
       if (signal.aborted) return;
       if (requestedSource && requestedId) {

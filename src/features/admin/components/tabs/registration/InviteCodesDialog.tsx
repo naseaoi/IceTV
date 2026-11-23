@@ -23,8 +23,6 @@ import Select from '@/components/Select';
 import SkeletonText from '@/components/SkeletonText';
 import Spinner from '@/components/Spinner';
 import AdminDialog from '@/features/admin/components/AdminDialog';
-import { ADMIN_PANEL_CLASS } from '@/features/admin/components/AdminSettings';
-import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import type { InviteCodeDraft } from '@/features/admin/hooks/useAdminUserActions';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { formatDateTime } from '@/features/admin/lib/formatDateTime';
@@ -38,7 +36,6 @@ import {
   isInviteCodeExhausted,
   isInviteCodeExpired,
   isValidCustomInviteCode,
-  MAX_INVITE_BATCH_SIZE,
   MAX_INVITE_CODES,
   MAX_INVITE_MAX_USES,
   MAX_INVITE_VALID_DAYS,
@@ -50,7 +47,6 @@ import {
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
 import { DisplayableError } from '@/lib/user-facing-error';
-import type { LinuxDoLoginSettings, LinuxDoTrustLevel } from '@/types/admin';
 
 export interface InviteCodeListState {
   items: InviteCode[];
@@ -66,29 +62,13 @@ export interface InviteCodeListState {
   loadMore: () => void;
 }
 
-interface RegistrationSettingsDialogProps {
+interface InviteCodesDialogProps {
   isOpen: boolean;
-  error?: string;
-  openRegister: boolean;
-  requireInviteCode: boolean;
-  userGroupNames: string[];
-  defaultUserGroup: string;
-  isSettingDefaultGroup: boolean;
   inviteFilter: InviteCodeFilter;
   inviteList: InviteCodeListState;
-  isTogglingRegister: boolean;
-  isTogglingInvite: boolean;
-  linuxDoConfigured: boolean;
-  linuxDo: LinuxDoLoginSettings;
-  isSettingLinuxDo: boolean;
-  onToggleLinuxDo: () => void;
-  onLinuxDoTrustLevelChange: (level: LinuxDoTrustLevel) => void;
   isCreatingCode: boolean;
   deletingCode: string | null;
   isPurgingCodes: boolean;
-  onToggleOpenRegister: () => void;
-  onToggleRequireInviteCode: () => void;
-  onDefaultUserGroupChange: (next: string) => void;
   onInviteFilterChange: (next: InviteCodeFilter) => void;
   // 成功返回本次生成的邀请码，失败返回 null（错误由调用方提示）
   onCreateCodes: (draft: InviteCodeDraft) => Promise<string[] | null>;
@@ -97,14 +77,6 @@ interface RegistrationSettingsDialogProps {
   onPurgeInactiveCodes: () => void;
   onClose: () => void;
 }
-
-const LINUXDO_TRUST_LEVEL_OPTIONS = [
-  { value: '0', label: '0 级 · 新用户' },
-  { value: '1', label: '1 级 · 基本用户' },
-  { value: '2', label: '2 级 · 成员' },
-  { value: '3', label: '3 级 · 活跃用户' },
-  { value: '4', label: '4 级 · 领导者' },
-];
 
 const DEFAULT_VALID_DAYS = 7;
 const COPIED_FEEDBACK_MS = 1500;
@@ -150,37 +122,6 @@ function useCopyFeedback() {
   };
 
   return { copiedKey, copy };
-}
-
-function ToggleRow({
-  title,
-  addon,
-  checked,
-  disabled,
-  label,
-  onToggle,
-}: {
-  title: string;
-  addon?: ReactNode;
-  checked: boolean;
-  disabled: boolean;
-  label: string;
-  onToggle: () => void;
-}) {
-  return (
-    <div className='flex items-center justify-between gap-4 px-4 py-3'>
-      <p className='flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100'>
-        {title}
-        {addon}
-      </p>
-      <AdminStatusSwitch
-        enabled={checked}
-        isLoading={disabled}
-        ariaLabel={label}
-        onToggle={onToggle}
-      />
-    </div>
-  );
 }
 
 function NumberField({
@@ -337,12 +278,10 @@ function InviteCodeGenerator({
     codes: [],
   });
 
-  const maxCount = Math.min(
-    MAX_INVITE_BATCH_SIZE,
-    Math.max(0, MAX_INVITE_CODES - activeCount),
-  );
+  const remaining = Math.max(0, MAX_INVITE_CODES - activeCount);
   const parsedCount = Number(count);
-  const isBatch = Number.isFinite(parsedCount) && parsedCount > 1;
+  const actualCount = Math.min(parsedCount, remaining);
+  const isBatch = Number.isFinite(actualCount) && actualCount > 1;
 
   const update =
     (field: DraftField, setter: (next: string) => void) => (next: string) => {
@@ -354,14 +293,11 @@ function InviteCodeGenerator({
     if (
       !Number.isInteger(parsedCount) ||
       parsedCount < 1 ||
-      parsedCount > maxCount
+      parsedCount > MAX_INVITE_CODES
     ) {
       setError({
         field: 'count',
-        message:
-          maxCount === 1
-            ? '当前只能再生成 1 个'
-            : `数量需在 1-${maxCount} 之间`,
+        message: `数量需在 1-${MAX_INVITE_CODES} 之间`,
       });
       return null;
     }
@@ -390,7 +326,7 @@ function InviteCodeGenerator({
       return null;
     }
     return {
-      count: parsedCount,
+      count: actualCount,
       validDays: days,
       ...(uses ? { maxUses: uses } : {}),
       ...(code ? { customCode: code } : {}),
@@ -399,7 +335,7 @@ function InviteCodeGenerator({
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (isCreating) return;
+    if (isCreating || remaining === 0) return;
     const draft = validate();
     if (!draft) return;
     const codes = await onCreateCodes(draft);
@@ -422,7 +358,7 @@ function InviteCodeGenerator({
             suffix='个'
             value={count}
             min={1}
-            max={Math.max(1, maxCount)}
+            max={MAX_INVITE_CODES}
             invalid={error?.field === 'count'}
             onChange={update('count', setCount)}
           />
@@ -472,9 +408,9 @@ function InviteCodeGenerator({
           </div>
           <button
             type='submit'
-            disabled={isCreating || maxCount === 0}
+            disabled={isCreating || remaining === 0}
             title={
-              maxCount === 0
+              remaining === 0
                 ? `有效邀请码已达 ${MAX_INVITE_CODES} 个`
                 : undefined
             }
@@ -485,9 +421,7 @@ function InviteCodeGenerator({
             ) : (
               <Plus className='h-4 w-4' />
             )}
-            {isBatch && parsedCount <= maxCount
-              ? `生成 ${parsedCount} 个`
-              : '生成'}
+            {isBatch ? `生成 ${actualCount} 个` : '生成'}
           </button>
         </div>
         {error && (
@@ -642,7 +576,6 @@ function InviteCodeRowsSkeleton({ count }: { count: number }) {
     </div>
   );
 }
-
 function Section({
   id,
   title,
@@ -667,36 +600,20 @@ function Section({
   );
 }
 
-export function RegistrationSettingsDialog({
+export function InviteCodesDialog({
   isOpen,
-  error: mutationError,
-  openRegister,
-  requireInviteCode,
-  userGroupNames,
-  defaultUserGroup,
-  isSettingDefaultGroup,
   inviteFilter,
   inviteList,
-  isTogglingRegister,
-  isTogglingInvite,
-  linuxDoConfigured,
-  linuxDo,
-  isSettingLinuxDo,
-  onToggleLinuxDo,
-  onLinuxDoTrustLevelChange,
   isCreatingCode,
   deletingCode,
   isPurgingCodes,
-  onToggleOpenRegister,
-  onToggleRequireInviteCode,
-  onDefaultUserGroupChange,
   onInviteFilterChange,
   onCreateCodes,
   onDeleteCode,
   onViewCodeUsers,
   onPurgeInactiveCodes,
   onClose,
-}: RegistrationSettingsDialogProps) {
+}: InviteCodesDialogProps) {
   const {
     items,
     total,
@@ -713,91 +630,11 @@ export function RegistrationSettingsDialog({
   return (
     <AdminDialog
       isOpen={isOpen}
-      title='注册管理'
+      title='邀请码'
       onClose={onClose}
       panelClassName='max-w-2xl max-h-[85vh] overflow-y-auto'
     >
-      {mutationError && (
-        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
-          {mutationError}
-        </p>
-      )}
       <div className='space-y-6'>
-        <div
-          className={`${ADMIN_PANEL_CLASS} divide-y divide-gray-200 dark:divide-white/[0.06]`}
-        >
-          <ToggleRow
-            title='开放注册'
-            checked={openRegister}
-            disabled={isTogglingRegister}
-            label='切换开放注册'
-            onToggle={onToggleOpenRegister}
-          />
-          <ToggleRow
-            title='需要邀请码'
-            checked={requireInviteCode}
-            disabled={isTogglingInvite || !openRegister}
-            label='切换邀请码要求'
-            onToggle={onToggleRequireInviteCode}
-          />
-          {userGroupNames.length > 0 && (
-            <div className='flex items-center justify-between gap-4 py-2 pl-4 pr-2'>
-              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-                新用户默认用户组
-              </p>
-              <Select
-                value={defaultUserGroup}
-                onChange={onDefaultUserGroupChange}
-                ariaLabel='新用户默认用户组'
-                variant='pill'
-                align='end'
-                disabled={isSettingDefaultGroup}
-                options={[
-                  { value: '', label: '无' },
-                  ...userGroupNames.map((name) => ({
-                    value: name,
-                    label: name,
-                  })),
-                ]}
-              />
-            </div>
-          )}
-          <ToggleRow
-            title='LinuxDo 登录'
-            addon={
-              !linuxDoConfigured && (
-                <span className='text-xs font-normal text-gray-500 dark:text-gray-400'>
-                  环境变量未配置
-                </span>
-              )
-            }
-            checked={linuxDo.Enabled}
-            disabled={
-              isSettingLinuxDo || (!linuxDoConfigured && !linuxDo.Enabled)
-            }
-            label='切换 LinuxDo 登录'
-            onToggle={onToggleLinuxDo}
-          />
-          {linuxDo.Enabled && (
-            <div className='flex items-center justify-between gap-4 py-2 pl-4 pr-2'>
-              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-                LinuxDo 最低信任等级
-              </p>
-              <Select
-                value={String(linuxDo.MinTrustLevel)}
-                onChange={(value) =>
-                  onLinuxDoTrustLevelChange(Number(value) as LinuxDoTrustLevel)
-                }
-                ariaLabel='LinuxDo 最低信任等级'
-                variant='pill'
-                align='end'
-                disabled={isSettingLinuxDo}
-                options={LINUXDO_TRUST_LEVEL_OPTIONS}
-              />
-            </div>
-          )}
-        </div>
-
         <Section id='invite-generate-heading' title='生成邀请码'>
           <InviteCodeGenerator
             activeCount={activeCount}
@@ -808,7 +645,7 @@ export function RegistrationSettingsDialog({
 
         <Section
           id='invite-code-heading'
-          title='邀请码'
+          title='已有邀请码'
           addon={
             <div className='flex items-center gap-3'>
               {!error && !initialLoading && (

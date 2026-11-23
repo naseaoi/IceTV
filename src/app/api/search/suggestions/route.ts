@@ -11,6 +11,7 @@ import {
 } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
+import { normalizeSearchMatchText } from '@/lib/search-text';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 import { yellowWords } from '@/lib/yellow';
@@ -64,7 +65,7 @@ async function generateSuggestions(
     score: number;
   }>
 > {
-  const queryLower = query.toLowerCase();
+  const queryLower = normalizeSearchMatchText(query);
 
   const [availableSites, sourceHealthTiers] = await Promise.all([
     getAvailableApiSites(auth.username, config, auth.userAccess),
@@ -92,7 +93,8 @@ async function generateSuggestions(
           .filter(Boolean)
           .flatMap((title: string) => title.split(/[ -:：·、-]/))
           .filter(
-            (w: string) => w.length > 1 && w.toLowerCase().includes(queryLower),
+            (w: string) =>
+              w.length > 1 && normalizeSearchMatchText(w).includes(queryLower),
           ),
       ),
     ).slice(0, 8);
@@ -100,7 +102,7 @@ async function generateSuggestions(
 
   // 根据关键词与查询的匹配程度计算分数，并动态确定类型
   const realSuggestions = realKeywords.map((word) => {
-    const wordLower = word.toLowerCase();
+    const wordLower = normalizeSearchMatchText(word);
     const queryWords = queryLower.split(/[ -:：·、-]/);
 
     // 计算匹配分数：完全匹配得分更高

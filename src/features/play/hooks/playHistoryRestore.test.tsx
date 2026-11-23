@@ -1,4 +1,5 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import type Artplayer from 'artplayer';
 import { useEffect, useRef, useState } from 'react';
 
 import { usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -76,7 +77,7 @@ function signIn() {
 
 function installFetch(
   detailResponse: Promise<SearchResult>,
-  records: Record<string, PlayRecord>,
+  records: Record<string, PlayRecord> | Promise<Record<string, PlayRecord>>,
 ) {
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = new URL(String(input), window.location.origin);
@@ -90,19 +91,24 @@ function installFetch(
       return Promise.resolve(respond({ results: [] }));
     }
     if (url.pathname === '/api/playrecords') {
-      return Promise.resolve(respond(records));
+      return Promise.resolve(records).then(respond);
     }
     return Promise.reject(new Error(`unexpected request: ${url.pathname}`));
   }) as unknown as typeof fetch;
 }
 
 // 按 usePlayPageState 的方式持有状态并在提交后同步 ref，把初始化与历史恢复接在一起
-function usePlayPageHarness() {
+function usePlayPageHarness(autoNext = true) {
   const [currentSource, setCurrentSource] = useState(SOURCE);
   const [currentId, setCurrentId] = useState(VIDEO_ID);
   const [detail, setDetail] = useState<SearchResult | null>(null);
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const artPlayerRef = useRef<Artplayer | null>(null);
+  const stableCurrentTimeRef = useRef(0);
+  const resumeTimeRef = useRef<number | null>(null);
+  const playbackRequestModeRef = useRef('initial');
+  const clearTargetEpisodeProgressRef = useRef(false);
   const [noop] = useState(() => jest.fn());
 
   const currentSourceRef = useRef(currentSource);
@@ -159,18 +165,19 @@ function usePlayPageHarness() {
     setSourceRecommendation: noop,
   });
 
-  usePlayProgress({
-    artPlayerRef: useRef(null),
+  const progress = usePlayProgress({
+    autoPlayNextEnabledRef: useRef(autoNext),
+    artPlayerRef,
     currentSourceRef,
     currentIdRef,
     videoTitleRef,
     detailRef,
     currentEpisodeIndexRef,
-    resumeTimeRef: useRef<number | null>(null),
+    resumeTimeRef,
     resumeModeRef: useRef<ResumeMode>(null),
     allowAutoResumeRef: useRef(true),
-    stableCurrentTimeRef: useRef(0),
-    clearTargetEpisodeProgressRef: useRef(false),
+    stableCurrentTimeRef,
+    clearTargetEpisodeProgressRef,
     saveStateRef: useRef({
       inFlight: false,
       pending: new Map(),
@@ -189,8 +196,85 @@ function usePlayPageHarness() {
     cleanupPlayer: noop,
   });
 
-  return { detail, currentEpisodeIndex, loading };
+  return {
+    detail,
+    currentEpisodeIndex,
+    loading,
+    progress,
+    clearTargetEpisodeProgressRef,
+    artPlayerRef,
+    stableCurrentTimeRef,
+    resumeTimeRef,
+    playbackRequestModeRef,
+    setCurrentEpisodeIndex,
+  };
 }
+
+describe('晚到历史记录决策', () => {
+  for (const autoNext of [false, true]) {
+    for (const finished of [false, true]) {
+      for (const sameEpisode of [false, true]) {
+        it(`连播 ${autoNext} / 看完 ${finished} / 同集 ${sameEpisode}`, async () => {
+          let resolveRecords!: (records: Record<string, PlayRecord>) => void;
+          installFetch(
+            Promise.resolve(createDetail([4])),
+            new Promise((resolve) => {
+              resolveRecords = resolve;
+            }),
+          );
+          const { result } = renderHook(() => usePlayPageHarness(autoNext));
+          await waitFor(() => expect(result.current.loading).toBe(false), {
+            timeout: 3000,
+          });
+          const player = {
+            currentTime: 3,
+            duration: 1440,
+            pause: jest.fn(),
+            notice: { show: '' },
+          };
+          result.current.artPlayerRef.current = player as unknown as Artplayer;
+          const targetIndex = sameEpisode ? 0 : 1;
+          const time = finished ? 1438 : 600;
+          await act(async () => {
+            resolveRecords({
+              [generateStorageKey(SOURCE, VIDEO_ID)]: createRecord({
+                index: targetIndex + 1,
+                total_episodes: 4,
+                play_time: time,
+                episode_progress: [
+                  {
+                    k: `n:${targetIndex + 2}`,
+                    t: 300,
+                    d: 1440,
+                    at: Date.now(),
+                  },
+                ],
+              }),
+            });
+          });
+          const advance = finished && autoNext;
+          expect(result.current.currentEpisodeIndex).toBe(
+            targetIndex + (advance ? 1 : 0),
+          );
+          expect(result.current.progress.startStateRef.current.parked).toBe(
+            finished && !autoNext,
+          );
+          if (sameEpisode && !advance) {
+            expect(player.currentTime).toBe(time);
+            expect(player.pause).toHaveBeenCalledTimes(finished ? 1 : 0);
+          } else {
+            expect(result.current.resumeTimeRef.current).toBe(
+              advance ? 300 : time,
+            );
+            expect(result.current.clearTargetEpisodeProgressRef.current).toBe(
+              true,
+            );
+          }
+        });
+      }
+    }
+  }
+});
 
 const originalFetch = global.fetch;
 
@@ -209,6 +293,162 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   global.fetch = originalFetch;
+});
+
+describe('起播恢复决策', () => {
+  async function setup({
+    autoNext = true,
+    knownCount = 7,
+    count = 7,
+    index = 6,
+    duration = 1440,
+    nextTime = 0,
+    summaryCached = false,
+  }: {
+    autoNext?: boolean;
+    knownCount?: number;
+    count?: number;
+    index?: number;
+    duration?: number;
+    nextTime?: number;
+    summaryCached?: boolean;
+  } = {}) {
+    if (summaryCached) {
+      cacheManager.cachePlayRecords({
+        [generateStorageKey(SOURCE, VIDEO_ID)]: createRecord({
+          index: index + 1,
+          total_episodes: knownCount,
+          play_time: 1438,
+        }),
+      });
+    }
+    saveDetailSnapshot(SOURCE, VIDEO_ID, createDetail([count]));
+    savePlayIntent({
+      source: SOURCE,
+      id: VIDEO_ID,
+      episodeIndex: index,
+      resumeTime: 1438,
+      recordDuration: duration,
+      knownEpisodeCount: knownCount,
+    });
+    let resolveDetail!: (detail: SearchResult) => void;
+    installFetch(
+      new Promise((resolve) => {
+        resolveDetail = resolve;
+      }),
+      {
+        [generateStorageKey(SOURCE, VIDEO_ID)]: createRecord({
+          episode_progress: nextTime
+            ? [{ k: 'n:8', t: nextTime, d: 1440, at: Date.now() }]
+            : [],
+        }),
+      },
+    );
+    const hook = renderHook(() => usePlayPageHarness(autoNext));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    return {
+      ...hook,
+      refresh: async (count: number) => {
+        await act(async () => resolveDetail(createDetail([count])));
+      },
+    };
+  }
+
+  it('自动连播开启且已有下一集时，在媒体加载前决定下一集', async () => {
+    const { result } = await setup({ count: 8, knownCount: 8 });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.currentEpisodeIndex).toBe(7);
+    expect(result.current.resumeTimeRef.current).toBe(0);
+  });
+
+  it('详情过期时保持加载，刷新后再从下一集起播', async () => {
+    const { result, refresh } = await setup({ knownCount: 28 });
+    expect(result.current.loading).toBe(true);
+    await refresh(28);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.currentEpisodeIndex).toBe(7);
+  });
+
+  it.each([
+    [300, 300, false],
+    [1438, 0, false],
+    [300, 300, true],
+    [1438, 0, true],
+  ])(
+    '自动推进采用下一集进度 %s → %s（列表缓存 %s）',
+    async (nextTime, expected, summaryCached) => {
+      const { result } = await setup({
+        count: 8,
+        knownCount: 8,
+        nextTime,
+        summaryCached,
+      });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.currentEpisodeIndex).toBe(7);
+      expect(result.current.resumeTimeRef.current).toBe(expected);
+    },
+  );
+
+  it('记录缺时长时由实际时长兜底，仍经过同一起播决策', async () => {
+    const { result } = await setup({ autoNext: false, duration: 0 });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(
+      result.current.progress.startStateRef.current.pendingDuration,
+    ).not.toBeNull();
+    await act(async () => {
+      result.current.progress.resolveStartDuration(1440);
+    });
+    expect(result.current.progress.startStateRef.current.parked).toBe(true);
+    expect(result.current.resumeTimeRef.current).toBe(1438);
+  });
+
+  it('过期详情等待超时后停住，迟到详情不再自动跳集', async () => {
+    jest.useFakeTimers();
+    try {
+      const { result, refresh } = await setup({ knownCount: 28 });
+      await act(async () => {
+        jest.advanceTimersByTime(5100);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.progress.startStateRef.current.parked).toBe(true);
+      await refresh(28);
+      expect(result.current.currentEpisodeIndex).toBe(6);
+      expect(result.current.progress.startStateRef.current.parked).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('关闭连播时停在结尾，不写进度与 checkpoint；迟到详情只保留选择机会', async () => {
+    const { result, refresh } = await setup({
+      autoNext: false,
+      knownCount: 28,
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.progress.startStateRef.current.parked).toBe(true);
+    expect(result.current.resumeTimeRef.current).toBe(1438);
+    result.current.artPlayerRef.current = {
+      currentTime: 1438,
+      duration: 1440,
+    } as Artplayer;
+    result.current.stableCurrentTimeRef.current = 1438;
+    result.current.clearTargetEpisodeProgressRef.current = false;
+    const before = sessionStorage.length;
+    await act(async () => {
+      await result.current.progress.saveCurrentPlayProgress(true);
+      result.current.progress.savePlaybackCheckpoint();
+    });
+    expect(sessionStorage.length).toBe(before);
+    expect(
+      (global.fetch as jest.Mock).mock.calls.some(
+        ([, options]) => options?.method === 'POST',
+      ),
+    ).toBe(false);
+    await refresh(28);
+    expect(result.current.currentEpisodeIndex).toBe(6);
+    expect(result.current.progress.startStateRef.current.parked).toBe(true);
+    result.current.artPlayerRef.current = null;
+  });
 });
 
 // 源站从 10 集更新到 11 集：本地详情快照仍是旧集数，后台回源的新详情在历史恢复之后才到

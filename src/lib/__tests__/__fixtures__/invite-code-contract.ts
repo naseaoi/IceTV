@@ -1,6 +1,5 @@
 import {
   type InviteCode,
-  MAX_INVITE_BATCH_SIZE,
   MAX_INVITE_CODES,
 } from '@/features/admin/services/inviteCodes';
 import type { IStorage } from '@/lib/types';
@@ -32,13 +31,12 @@ export function inviteCodeBatchContract(
   });
 
   const fill = async (count: number) => {
-    for (let start = 0; start < count; start += MAX_INVITE_BATCH_SIZE) {
-      const items = Array.from(
-        { length: Math.min(MAX_INVITE_BATCH_SIZE, count - start) },
-        (_, index) => makeCode(`FILL-${start + index}`),
-      );
-      expect(await storage.createInviteCodes(items)).toBe('created');
-    }
+    const items = Array.from({ length: count }, (_, index) =>
+      makeCode(`FILL-${index}`),
+    );
+    expect(await storage.createInviteCodes(items)).toEqual({
+      codes: items.map((item) => item.code),
+    });
   };
 
   it('批量写入全部邀请码并重建失效同名记录', async () => {
@@ -51,7 +49,9 @@ export function inviteCodeBatchContract(
     const items = ['NEW', 'EXPIRED', 'EXHAUSTED'].map((code) =>
       makeCode(code, { maxUses: 3 }),
     );
-    expect(await storage.createInviteCodes(items)).toBe('created');
+    expect(await storage.createInviteCodes(items)).toEqual({
+      codes: items.map((item) => item.code),
+    });
     expect(await storage.countActiveInviteCodes()).toBe(3);
     expect(await storage.getAllInviteCodes()).toEqual(
       expect.arrayContaining(items.map((item) => ({ ...item, usedCount: 0 }))),
@@ -59,17 +59,25 @@ export function inviteCodeBatchContract(
     expect(await storage.getAllInviteCodes()).toHaveLength(3);
   });
 
-  it('整批超限一个不写且保留被替换的失效记录，恰好到上限时成功', async () => {
-    await fill(MAX_INVITE_CODES - 1);
-    await storage.createInviteCode(
-      makeCode('EXPIRED', { expiresAt: 1, usedCount: 4 }),
+  it('按余量截断批次且保留截断部分的失效同名记录，满额时拒绝写入', async () => {
+    await fill(MAX_INVITE_CODES - 5);
+    const expired = makeCode('EXPIRED', { expiresAt: 1, usedCount: 4 });
+    await storage.createInviteCode(expired);
+    const items = Array.from({ length: MAX_INVITE_CODES }, (_, index) =>
+      makeCode(index === 5 ? 'EXPIRED' : `NEW-${index}`),
     );
+    expect(await storage.createInviteCodes(items)).toEqual({
+      codes: items.slice(0, 5).map((item) => item.code),
+    });
+    expect(await storage.countActiveInviteCodes()).toBe(MAX_INVITE_CODES);
     const before = await storage.getAllInviteCodes();
-    expect(
-      await storage.createInviteCodes([makeCode('NEW'), makeCode('EXPIRED')]),
-    ).toBe('limit');
+    expect(before).toContainEqual(expired);
+    expect(await storage.createInviteCodes([makeCode('LAST')])).toBe('limit');
     expect(await storage.getAllInviteCodes()).toEqual(before);
-    expect(await storage.createInviteCodes([makeCode('LAST')])).toBe('created');
+  });
+
+  it('空库一次创建至有效码总上限', async () => {
+    await fill(MAX_INVITE_CODES);
     expect(await storage.countActiveInviteCodes()).toBe(MAX_INVITE_CODES);
   });
 
@@ -149,24 +157,40 @@ export function inviteCodeBatchContract(
     expect((await storage.queryInviteCodes({})).inactiveCount).toBe(0);
   });
 
-  it('并发批量创建保持总上限且失败批次没有部分写入', async () => {
-    await fill(MAX_INVITE_CODES - 2);
-    const batches = [
-      [makeCode('LEFT-A'), makeCode('LEFT-B')],
-      [makeCode('RIGHT-A'), makeCode('RIGHT-B')],
-    ];
-    const results = await Promise.all(
-      batches.map((items) => storage.createInviteCodes(items)),
-    );
-    expect(results.filter((result) => result === 'created')).toHaveLength(1);
-    expect(results.filter((result) => result === 'limit')).toHaveLength(1);
-    const codes = new Set(
-      (await storage.getAllInviteCodes()).map((item) => item.code),
-    );
-    batches.forEach((items, index) => {
-      for (const item of items)
-        expect(codes.has(item.code)).toBe(results[index] === 'created');
-    });
-    expect(await storage.countActiveInviteCodes()).toBe(MAX_INVITE_CODES);
-  });
+  it.each([2, 3])(
+    '并发批量创建按事务内的剩余 %i 个名额截断',
+    async (remaining) => {
+      await fill(MAX_INVITE_CODES - remaining);
+      const batches = [
+        [makeCode('LEFT-A'), makeCode('LEFT-B')],
+        [makeCode('RIGHT-A'), makeCode('RIGHT-B')],
+      ];
+      const results = await Promise.all(
+        batches.map((items) => storage.createInviteCodes(items)),
+      );
+      expect(results.filter((result) => result === 'limit')).toHaveLength(
+        remaining === 2 ? 1 : 0,
+      );
+      const created = results.flatMap((result) =>
+        typeof result === 'string' ? [] : result.codes,
+      );
+      expect(created).toHaveLength(remaining);
+      if (remaining === 3) {
+        expect(
+          results
+            .map((result) =>
+              typeof result === 'string' ? 0 : result.codes.length,
+            )
+            .sort(),
+        ).toEqual([1, 2]);
+      }
+      const codes = new Set(
+        (await storage.getAllInviteCodes()).map((item) => item.code),
+      );
+      batches.flat().forEach((item) => {
+        expect(codes.has(item.code)).toBe(created.includes(item.code));
+      });
+      expect(await storage.countActiveInviteCodes()).toBe(MAX_INVITE_CODES);
+    },
+  );
 }

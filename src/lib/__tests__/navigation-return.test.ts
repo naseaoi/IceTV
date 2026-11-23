@@ -1,10 +1,15 @@
 import {
+  forgetPlayReturnTo,
   getBackFallbackPath,
   normalizeInternalReturnPath,
+  readPlayReturnTo,
+  rememberPlayReturnTo,
   withReturnTo,
 } from '@/lib/navigation-return';
 
 describe('navigation return', () => {
+  beforeEach(() => sessionStorage.clear());
+
   it('保留站内路径的查询参数和锚点', () => {
     expect(normalizeInternalReturnPath('/search?q=凡人#results')).toBe(
       '/search?q=%E5%87%A1%E4%BA%BA#results',
@@ -51,5 +56,28 @@ describe('navigation return', () => {
     expect(getBackFallbackPath('/settings')).toBe('/me');
     expect(getBackFallbackPath('/u/abc')).toBe('/me');
     expect(getBackFallbackPath('/lists/abc')).toBe('/me/lists');
+  });
+
+  it('播放页的返回来源只归属记录它的播放页路径', () => {
+    rememberPlayReturnTo('/play/a/1', '/search?q=x');
+    expect(readPlayReturnTo('/play/a/1')).toBe('/search?q=x');
+    expect(readPlayReturnTo('/play/b/2')).toBeNull();
+
+    rememberPlayReturnTo('/play/a/1', '/play/b/2');
+    expect(readPlayReturnTo('/play/a/1')).toBe('/');
+  });
+
+  it('播放页返回来源按地址分别保留最近若干条，可单独清除', () => {
+    rememberPlayReturnTo('/play/a/1', '/search?q=a');
+    rememberPlayReturnTo('/play/b/2', '/search?q=b');
+    forgetPlayReturnTo('/play/a/1');
+    expect(readPlayReturnTo('/play/a/1')).toBeNull();
+    expect(readPlayReturnTo('/play/b/2')).toBe('/search?q=b');
+
+    for (let i = 0; i < 20; i += 1) {
+      rememberPlayReturnTo(`/play/c/${i}`, '/lists');
+    }
+    expect(readPlayReturnTo('/play/b/2')).toBeNull();
+    expect(readPlayReturnTo('/play/c/0')).toBe('/lists');
   });
 });

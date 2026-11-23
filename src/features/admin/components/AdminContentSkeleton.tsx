@@ -8,8 +8,11 @@ import {
   AdminSettingRow,
   AdminSettingsGroup,
 } from '@/features/admin/components/AdminSettings';
+import {
+  LOGIN_PROVIDER_ICON_CLASS,
+  LOGIN_PROVIDER_ROW_CLASS,
+} from '@/features/admin/components/tabs/registration/layout';
 import { TrafficTabSkeleton } from '@/features/admin/components/tabs/traffic/TrafficUsageCard';
-import { RegistrationSummaryCardSkeleton } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
 import type { AdminTabId } from '@/features/admin/lib/admin-tabs';
 import {
   ANNOUNCEMENT_ACTION_CLASS,
@@ -376,7 +379,6 @@ export default function AdminContentSkeleton({
     case 'user':
       content = (
         <div className='space-y-6'>
-          <RegistrationSummaryCardSkeleton />
           <div>
             <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
               用户列表
@@ -397,6 +399,50 @@ export default function AdminContentSkeleton({
               userGroup
             />
           </div>
+        </div>
+      );
+      break;
+    case 'registration':
+      content = (
+        <div className='space-y-8'>
+          <AdminSettingsGroup title='注册'>
+            <Field label='开放注册' inline />
+            {data?.UserConfig.OpenRegister && (
+              <AdminSettingRow label='注册通道' layout='inline'>
+                <div className='flex gap-1.5'>
+                  <Block className='h-8 w-12 rounded-full' />
+                  <Block className='h-8 w-[5.5rem] rounded-full' />
+                </div>
+              </AdminSettingRow>
+            )}
+            {!!data?.UserConfig.Tags?.length && (
+              <AdminSettingRow label='新用户默认用户组' layout='inline'>
+                <Block className='h-8 w-20 rounded-full' />
+              </AdminSettingRow>
+            )}
+          </AdminSettingsGroup>
+          <AdminSettingsGroup title='登录方式'>
+            <div className={LOGIN_PROVIDER_ROW_CLASS}>
+              <Block className={`${LOGIN_PROVIDER_ICON_CLASS} rounded-full`} />
+              <div className='min-w-0 flex-1'>
+                <div className='flex h-5 items-center'>
+                  <Block className='h-3.5 w-16' />
+                </div>
+                <div className='mt-0.5 flex h-4 items-center'>
+                  <Block className='h-3 w-28 max-w-full' />
+                </div>
+              </div>
+              <Block className='h-8 w-[4.5rem] shrink-0 rounded-lg' />
+              <Block className='h-6 w-11 shrink-0 rounded-full' />
+            </div>
+          </AdminSettingsGroup>
+          <AdminSettingsGroup title='邀请码'>
+            <Field label='注册需要邀请码' inline />
+            <AdminSettingRow label='有效邀请码' layout='inline'>
+              <Block className='h-4 w-12' />
+              <Block className='h-8 w-[4.5rem] rounded-lg' />
+            </AdminSettingRow>
+          </AdminSettingsGroup>
         </div>
       );
       break;

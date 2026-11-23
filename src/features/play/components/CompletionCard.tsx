@@ -36,6 +36,7 @@ export interface CompletionTarget {
   source: string;
   id: string;
   doubanId: number;
+  manual?: boolean;
 }
 
 // 播放统计在结束事件后才上报最后一段，稍等再读取汇总
@@ -52,7 +53,7 @@ type Loaded = {
   review: VideoReview | null;
 };
 
-// 每次最后一集播完时由播放页传入目标；已展示过的作品不再弹出
+// 自动弹出按作品去重，用户主动打开时始终展示。
 export function CompletionCard({
   target,
   favorited,
@@ -75,7 +76,7 @@ export function CompletionCard({
       fetchCompletion(target.source, target.id)
         .then(async (summary) => {
           if (!active) return;
-          if (summary.celebrated) {
+          if (summary.celebrated && !target.manual) {
             onClose();
             return;
           }

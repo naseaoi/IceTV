@@ -50,6 +50,10 @@ const UserConfig = dynamic(
     ),
   { loading: () => <AdminContentSkeleton /> },
 );
+const RegistrationTab = dynamic(
+  () => import('@/features/admin/components/tabs/RegistrationTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
 const AnnouncementsTab = dynamic(
   () => import('@/features/admin/components/tabs/AnnouncementsTab'),
   { loading: () => <AdminContentSkeleton /> },
@@ -133,6 +137,8 @@ const AdminTabBody = ({
       return (
         <UserConfig config={config} role={role} refreshConfig={refreshConfig} />
       );
+    case 'registration':
+      return <RegistrationTab config={config} refreshConfig={refreshConfig} />;
     case 'reviews':
       return <ReviewsTab />;
     case 'danmaku':

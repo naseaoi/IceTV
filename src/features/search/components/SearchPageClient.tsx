@@ -149,7 +149,7 @@ function AuthenticatedSearchPageClient() {
   const {
     error,
     retry,
-    isLoading,
+    isLoading: isSearchLoading,
     setIsLoading,
     showResults,
     setShowResults,
@@ -167,13 +167,20 @@ function AuthenticatedSearchPageClient() {
     filterAllYearOrder: filterAll.yearOrder,
   });
 
-  const { filterOptions, filteredAllResults, filteredAggResults, getGroupRef } =
-    useSearchAggregation({
-      searchResults,
-      filterAll,
-      filterAgg,
-      searchQuery: activeSearchQuery,
-    });
+  const {
+    filterOptions,
+    filteredAllResults,
+    filteredAggResults,
+    getGroupRef,
+    isMatchingLoading,
+  } = useSearchAggregation({
+    searchResults,
+    filterAll,
+    filterAgg,
+    searchQuery: activeSearchQuery,
+  });
+  const isLoading =
+    isSearchLoading || (viewMode === 'agg' && isMatchingLoading);
 
   useEffect(() => {
     // 宽屏下页面输入框隐藏，聚焦由顶栏输入框的 autoFocus 负责
@@ -319,19 +326,24 @@ function AuthenticatedSearchPageClient() {
                 onRetry={retryFailedSources}
               />
             )}
-            {searchResults.length === 0 ? (
+            {resultCount === 0 ? (
               isLoading || (allSourcesFailed && retryingFailed) ? (
                 <SearchResultsLoading />
-              ) : error ? null : allSourcesFailed ? (
+              ) : error &&
+                searchResults.length === 0 ? null : allSourcesFailed ? (
                 <LoadErrorState
                   message='搜索失败'
                   onRetry={retryFailedSources}
                 />
               ) : (
-                <SearchEmptyState text='未找到相关结果' />
+                <SearchEmptyState
+                  text={
+                    searchResults.length === 0
+                      ? '未找到相关结果'
+                      : '当前筛选无结果'
+                  }
+                />
               )
-            ) : resultCount === 0 ? (
-              <SearchEmptyState text='当前筛选无结果' />
             ) : aggregate ? (
               <VirtualizedSearchGrid
                 key='search-results-agg'

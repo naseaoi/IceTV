@@ -1,7 +1,13 @@
+import { act, renderHook } from '@testing-library/react';
+
+import { useEpisodeProgress } from '@/features/play/hooks/useEpisodeProgress';
+import { getEpisodeProgressView } from '@/features/play/lib/episodeProgress';
 import {
   deleteFavorite,
   getAllFavorites,
+  getAllPlayRecords,
   getFreshSkipConfig,
+  getPlayRecordPage,
   getSkipConfig,
   isFavorited,
   readPlayRecordsForPlayback,
@@ -116,10 +122,11 @@ describe('readPlayRecordsForPlayback', () => {
     },
   );
 
-  it('有缓存时立即提供快照，fresh 返回网络结果、合并缓存并广播', async () => {
+  it('有完整逐集缓存时立即提供快照，fresh 返回网络结果、合并缓存并广播', async () => {
+    const complete = { ...record, episode_progress: [] };
     cacheManager.cachePlayRecords({
-      's+1': record,
-      's+2': record,
+      's+1': complete,
+      's+2': complete,
       's+3': record,
     });
     const pending = deferred();
@@ -129,7 +136,7 @@ describe('readPlayRecordsForPlayback', () => {
     window.addEventListener('playRecordsUpdated', listener);
     try {
       const read = readPlayRecordsForPlayback(['s+1', 's+2']);
-      expect(read.cached).toEqual({ 's+1': record, 's+2': record });
+      expect(read.cached).toEqual({ 's+1': complete, 's+2': complete });
       pending.resolve({ 's+1': freshRecord });
       await expect(read.fresh).resolves.toEqual({ 's+1': freshRecord });
       expect(cacheManager.getCachedPlayRecords()).toEqual({
@@ -162,19 +169,57 @@ describe('readPlayRecordsForPlayback', () => {
     });
   });
 
-  it('有缓存时网络失败仍拒绝且保留快照', async () => {
+  it('只有列表缓存时网络失败仍拒绝，保留摘要供列表使用', async () => {
     cacheManager.cachePlayRecords({ 's+1': record });
     const error = new Error('offline');
     global.fetch = jest.fn().mockRejectedValue(error);
     const read = readPlayRecordsForPlayback(['s+1']);
-    expect(read.cached).toEqual({ 's+1': record });
+    expect(read.cached).toBeNull();
     await expect(read.fresh).rejects.toMatchObject({
       kind: 'network',
       cause: error,
     });
-    expect(cacheManager.getCachedPlayRecords()).toEqual(read.cached);
+    expect(cacheManager.getCachedPlayRecords()).toEqual({ 's+1': record });
     expect(showToast).not.toHaveBeenCalled();
   });
+
+  it.each(['all', 'page'])(
+    '%s 列表缓存不能冒充完整进度，播放定向读取补回其他集',
+    async (format) => {
+      const complete = {
+        ...record,
+        episode_progress: [{ k: 'n:2', t: 600, d: 1200, at: 1 }],
+      };
+      if (format === 'page') {
+        cacheManager.cachePlayRecords({ 's+1': complete });
+      }
+      const summary = { 's+1': record };
+      const pending = deferred();
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () =>
+            format === 'all'
+              ? summary
+              : { items: summary, total: 1, nextCursor: null },
+        })
+        .mockReturnValue(pending.response);
+      if (format === 'all') await getAllPlayRecords();
+      else await getPlayRecordPage();
+      expect(cacheManager.getCachedPlayRecords()).toEqual(summary);
+      const read = readPlayRecordsForPlayback(['s+1']);
+      expect(read.cached).toBeNull();
+      const url = new URL(
+        (global.fetch as jest.Mock).mock.calls[1][0],
+        'http://localhost',
+      );
+      expect(url.searchParams.getAll('keys')).toEqual(['s+1']);
+      pending.resolve({ 's+1': complete });
+      await expect(read.fresh).resolves.toEqual({ 's+1': complete });
+      expect(cacheManager.getCachedPlayRecords()).toEqual({ 's+1': complete });
+    },
+  );
 
   it('期间其他键写入改变修订号时返回当前缓存，不覆盖进度', async () => {
     cacheManager.cachePlayRecords({ 's+1': record });
@@ -191,6 +236,86 @@ describe('readPlayRecordsForPlayback', () => {
     pending.resolve({ 's+1': { ...record, play_time: 20 } });
     await expect(read.fresh).resolves.toEqual({ 's+1': record });
     expect(cacheManager.getCachedPlayRecords()?.['s+2']).toBeDefined();
+  });
+
+  it('起播补读期间保存本集时保留本地位置，并补齐网络返回的其他集进度', async () => {
+    const finished = { k: 'n:1', t: 1200, d: 1200, at: 1 };
+    const oldCurrent = { k: 'n:2', t: 100, d: 1200, at: 1 };
+    const localCurrent = { k: 'n:2', t: 200, d: 1200, at: 2 };
+    cacheManager.cachePlayRecords({ 's+1': record });
+    const pending = deferred();
+    global.fetch = jest
+      .fn()
+      .mockImplementation((_url, options) =>
+        options?.method === 'POST'
+          ? Promise.resolve({ ok: true })
+          : pending.response,
+      );
+    const hook = renderHook(() =>
+      useEpisodeProgress({
+        currentSource: 's',
+        currentId: '1',
+        videoTitle: '作品',
+        detail: {
+          source: 's',
+          id: '1',
+          title: '作品',
+          source_name: '',
+          poster: '',
+          year: '',
+          episodes: ['https://example.com/1', 'https://example.com/2'],
+          episodes_titles: ['第1集', '第2集'],
+        },
+      }),
+    );
+    act(() => hook.result.current.ensureLoaded());
+    const read = readPlayRecordsForPlayback(['s+1']);
+    await savePlayRecord('s', '1', {
+      ...record,
+      index: 2,
+      play_time: 200,
+      save_time: 2,
+      total_time: 1200,
+      episode_key: 'n:2',
+    });
+    const local = cacheManager.getCachedPlayRecords()?.['s+1'];
+    await act(async () => {
+      pending.resolve({
+        's+1': { ...record, episode_progress: [finished, oldCurrent] },
+      });
+      await read.fresh;
+    });
+    const result = (await read.fresh)['s+1'];
+    expect(
+      getEpisodeProgressView(hook.result.current.episodeEntries[0]),
+    ).toEqual({
+      finished: true,
+      ratio: 1,
+    });
+    expect(hook.result.current.getEpisodeEntry(1)).toEqual(localCurrent);
+    expect(result).toEqual({
+      ...local,
+      episode_progress: expect.arrayContaining([finished, localCurrent]),
+    });
+    expect(result.episode_progress).toHaveLength(2);
+    // 仅提供给当前读取者合并，保持并发写入后的共享缓存原值。
+    expect(cacheManager.getCachedPlayRecords()?.['s+1']).toEqual(local);
+  });
+
+  it('补读期间已删除的记录保持缺失，不由迟到的每集进度复活', async () => {
+    cacheManager.cachePlayRecords({ 's+1': record });
+    const pending = deferred();
+    global.fetch = jest.fn().mockReturnValue(pending.response);
+    const read = readPlayRecordsForPlayback(['s+1']);
+    cacheManager.cachePlayRecords({});
+    pending.resolve({
+      's+1': {
+        ...record,
+        episode_progress: [{ k: 'n:1', t: 1200, d: 1200, at: 1 }],
+      },
+    });
+    await expect(read.fresh).resolves.toEqual({});
+    expect(cacheManager.getCachedPlayRecords()).toEqual({});
   });
 
   it('缓存基线变化时返回当前缓存', async () => {
@@ -382,4 +507,143 @@ it('失败返回空结果并释放在途，后续读取可重试', async () => {
     .mockResolvedValueOnce({ ok: true, json: async () => favorite });
   expect(await isFavorited('s', '1')).toBe(false);
   expect(await isFavorited('s', '1')).toBe(true);
+});
+
+describe('起播后的每集进度补读', () => {
+  const finished = { k: 'n:1', t: 1200, d: 1200, at: 1 };
+  const records = { 's+1': { ...record, episode_progress: [finished] } };
+  const response = { ok: true, json: async () => records };
+  const initialProps = { source: 's', title: '作品' };
+  const renderProgress = () =>
+    renderHook(
+      ({ source, title }) =>
+        useEpisodeProgress({
+          currentSource: source,
+          currentId: '1',
+          videoTitle: title,
+          detail: {
+            source,
+            id: '1',
+            title,
+            source_name: '',
+            poster: '',
+            year: '',
+            episodes: ['https://example.com/1', 'https://example.com/2'],
+            episodes_titles: ['第1集', '第2集'],
+          },
+        }),
+      { initialProps },
+    );
+  const advance = async (ms: number) => {
+    await act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+  };
+
+  it.each(['network', 'timeout'])(
+    '%s 失败后自动重试，成功后停止且重复起播不重复读取',
+    async (kind) => {
+      jest.useFakeTimers();
+      global.fetch = jest
+        .fn()
+        .mockImplementationOnce(() =>
+          kind === 'timeout'
+            ? new Promise(() => {})
+            : Promise.reject(new Error('offline')),
+        )
+        .mockResolvedValue(response);
+      const hook = renderProgress();
+      await act(async () => {
+        hook.result.current.ensureLoaded();
+      });
+      if (kind === 'timeout') await advance(8000);
+      await advance(999);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      await advance(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(hook.result.current.getEpisodeEntry(0)).toEqual(finished);
+      act(() => hook.result.current.ensureLoaded());
+      await advance(60_000);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      hook.unmount();
+    },
+  );
+
+  it('连续失败指数退避且最长等待 30 秒', async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
+    const hook = renderProgress();
+    await act(async () => {
+      hook.result.current.ensureLoaded();
+    });
+    let count = 1;
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+      await advance(delay - 1);
+      expect(global.fetch).toHaveBeenCalledTimes(count);
+      await advance(1);
+      expect(global.fetch).toHaveBeenCalledTimes(++count);
+    }
+    hook.unmount();
+  });
+
+  it.each(['unmount', 'work', 'session'])(
+    '%s 时取消待重试定时器',
+    async (change) => {
+      jest.useFakeTimers();
+      global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
+      const hook = renderProgress();
+      await act(async () => {
+        hook.result.current.ensureLoaded();
+      });
+      const clearTimer = jest.spyOn(global, 'clearTimeout');
+      if (change === 'unmount') hook.unmount();
+      else if (change === 'work')
+        hook.rerender({ ...initialProps, title: '另一部作品' });
+      else act(() => window.dispatchEvent(new Event('auth:lost')));
+      expect(clearTimer).toHaveBeenCalledTimes(1);
+      await advance(60_000);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      hook.unmount();
+    },
+  );
+
+  it('未登录不发起补读，重试前失去登录也停止', async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
+    mockUsername = null;
+    const hook = renderProgress();
+    act(() => hook.result.current.ensureLoaded());
+    expect(global.fetch).not.toHaveBeenCalled();
+    mockUsername = 'tester';
+    await act(async () => {
+      hook.result.current.ensureLoaded();
+    });
+    mockUsername = null;
+    await advance(60_000);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    hook.unmount();
+  });
+
+  it.each(['source', 'work', 'return'])(
+    '%s 变化后只接收同作品代次的迟到结果',
+    async (change) => {
+      const pending = deferred();
+      global.fetch = jest.fn().mockReturnValue(pending.response);
+      const hook = renderProgress();
+      act(() => hook.result.current.ensureLoaded());
+      hook.rerender(
+        change === 'source'
+          ? { ...initialProps, source: 'other' }
+          : { ...initialProps, title: '另一部作品' },
+      );
+      if (change === 'return') hook.rerender(initialProps);
+      await act(async () => {
+        pending.resolve(records);
+      });
+      expect(hook.result.current.getEpisodeEntry(0)).toEqual(
+        change === 'source' ? finished : undefined,
+      );
+      hook.unmount();
+    },
+  );
 });

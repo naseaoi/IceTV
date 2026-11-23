@@ -623,10 +623,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         currentEpisodeIndexRef.current = targetIndex;
         setCurrentEpisodeIndex(targetIndex);
         // 刷新和分享要落到新源；init 只在挂载时读一次地址参数，替换地址不会重新搜索起播
-        replacePlayPageUrl(
-          { source: newDetail.source, id: newDetail.id, title: nextTitle },
-          nextYear,
-        );
+        replacePlayPageUrl(newDetail);
         setRealtimeLoadSpeed('正在加载新源...');
         // 换源等待期间页面超时被压下，新源从这里重新计时
         setVideoLoadingAttempt((prev) => prev + 1);

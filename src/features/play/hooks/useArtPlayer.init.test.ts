@@ -75,6 +75,7 @@ class MockHls {
 
 type MockArtplayerOption = {
   url: string;
+  autoplay?: boolean;
   customType: { m3u8: (video: HTMLVideoElement, url: string) => void };
 };
 
@@ -97,6 +98,7 @@ class MockArtplayer {
   fullscreenWeb = false;
   destroy = jest.fn();
   pause = jest.fn();
+  play = jest.fn(() => Promise.resolve());
   switchUrl = jest.fn((url: string) => {
     this.option.url = url;
     this.option.customType.m3u8(this.video, url);
@@ -264,6 +266,7 @@ async function setupPlayer(params = createParams()) {
     sessionEpisodeIndexRef: { current: null },
     playbackRouteRef: { current: null },
     resumePromptHandledRef: { current: false },
+    endPromptsRef: { current: null },
     isCancelled: () => false,
   });
   expect(params.setError).not.toHaveBeenCalledWith('播放器初始化失败');
@@ -458,6 +461,245 @@ describe('initializeArtPlayer 拉流控制', () => {
     },
   );
 
+  describe('完结轻提示', () => {
+    function completionParams() {
+      const params = createParams();
+      params.detailRef.current = { ...DETAIL, episodes: [EPISODE_1] };
+      params.detail = params.detailRef.current;
+      params.totalEpisodes = 1;
+      params.onLastEpisodeNearEnd = jest
+        .fn()
+        .mockReturnValueOnce(true)
+        .mockReturnValue(false);
+      params.onLastEpisodeEnded = jest.fn();
+      return params;
+    }
+
+    async function nearEnd(params = completionParams()) {
+      const result = await setupPlayer(params);
+      result.player.emit('video:playing');
+      result.player.duration = 1000;
+      result.player.currentTime = 900;
+      result.player.emit('video:timeupdate');
+      return result;
+    }
+
+    it('阈值内在播放器中显示提示，点击小结才请求完整卡片', async () => {
+      const { player, params } = await nearEnd();
+      expect(player.template.$player.textContent).toContain('本片即将看完');
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+      player.emit('video:timeupdate');
+      expect(params.onLastEpisodeNearEnd).toHaveBeenCalledTimes(1);
+      expect(findPromptButton(player, '观影小结')).toHaveClass(
+        'ice-player-prompt-action-primary',
+      );
+      findPromptButton(player, '观影小结').click();
+      expect(params.onLastEpisodeEnded).toHaveBeenCalledWith(true);
+      expect(params.onLastEpisodeEnded).toHaveBeenCalledTimes(1);
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+    });
+
+    it('关闭后不再提示，真实结束仍自动打开卡片', async () => {
+      const { player, params } = await nearEnd();
+      findPromptButton(player, '关闭').click();
+      player.emit('video:timeupdate');
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+      player.currentTime = 1000;
+      player.emit('video:ended');
+      expect(params.onLastEpisodeEnded).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['ended', 'outro'])(
+      '忽略轻提示，%s 时收起提示并打开卡片',
+      async (reason) => {
+        const params = completionParams();
+        if (reason === 'outro')
+          params.skipConfigRef.current = {
+            enable: true,
+            intro_time: 0,
+            outro_time: -100,
+          };
+        const { player } = await setupPlayer(params);
+        player.emit('video:playing');
+        player.duration = 1000;
+        player.currentTime = reason === 'outro' ? 810 : 900;
+        player.emit('video:timeupdate');
+        expect(player.template.$player.textContent).toContain('本片即将看完');
+        jest.advanceTimersByTime(2000);
+        player.currentTime = reason === 'outro' ? 901 : 1000;
+        player.emit(reason === 'outro' ? 'video:timeupdate' : 'video:ended');
+        expect(params.onLastEpisodeEnded).toHaveBeenCalledTimes(1);
+        expect(params.onLastEpisodeEnded).toHaveBeenLastCalledWith();
+        expect(player.template.$player.textContent).toContain('全片已播完');
+        expect(
+          player.template.$player.querySelectorAll('.ice-player-prompt-end'),
+        ).toHaveLength(1);
+        jest.advanceTimersByTime(30_000);
+        expect(player.template.$player.textContent).toContain('全片已播完');
+        findPromptButton(player, '观影小结').click();
+        expect(params.onLastEpisodeEnded).toHaveBeenLastCalledWith(true);
+        expect(player.template.$player.textContent).toContain('全片已播完');
+        expect(player.template.$player.textContent).not.toContain(
+          '本片即将看完',
+        );
+      },
+    );
+
+    it.each(['seek', 'replay', 'release', 'destroy'])(
+      '末集结束的常驻入口在 %s 时清理',
+      async (action) => {
+        const { player, params, video } = await nearEnd();
+        params.skipConfigRef.current = {
+          enable: true,
+          intro_time: 60,
+          outro_time: 0,
+        };
+        findPromptButton(player, '观影小结').click();
+        player.currentTime = 1000;
+        player.emit('video:ended');
+        expect(player.template.$player.textContent).toContain('全片已播完');
+        if (action === 'seek') {
+          player.currentTime = 950;
+          player.emit('video:seeking');
+        } else if (action === 'replay') {
+          findPromptButton(player, '重看').click();
+          expect(player.currentTime).toBe(60);
+          expect(player.play).toHaveBeenCalled();
+        } else if (action === 'release') {
+          runManagedVideoCleanup(video);
+        } else {
+          player.emit('destroy');
+        }
+        expect(
+          player.template.$player.querySelector('.ice-player-prompt-end'),
+        ).toBeNull();
+      },
+    );
+
+    it('连载末集真实结束保持静默', async () => {
+      const params = completionParams();
+      params.detailRef.current = {
+        ...params.detailRef.current!,
+        series_status: 'ongoing',
+      };
+      const { player } = await nearEnd(params);
+      player.currentTime = 1000;
+      player.emit('video:ended');
+      expect(
+        player.template.$player.querySelector('.ice-player-prompt-end'),
+      ).toBeNull();
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+    });
+
+    it('拖回阈值前立即隐藏，再进入也不重复出现', async () => {
+      const { player } = await nearEnd();
+      player.currentTime = 500;
+      player.emit('video:seeking');
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+      player.currentTime = 900;
+      player.emit('video:timeupdate');
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+    });
+
+    it.each([
+      'next',
+      'parked',
+      'pending',
+      'not-started',
+      'ineligible',
+      'released',
+    ])('%s 状态不提示', async (condition) => {
+      const params = completionParams();
+      if (condition === 'next') params.detailRef.current = DETAIL;
+      if (condition === 'parked')
+        params.startStateRef = {
+          current: { parked: true, pendingDuration: null },
+        };
+      if (condition === 'ineligible')
+        params.onLastEpisodeNearEnd = jest.fn().mockReturnValue(false);
+      const { player, video } = await setupPlayer(params);
+      if (condition !== 'not-started') player.emit('video:playing');
+      if (condition === 'pending')
+        params.clearTargetEpisodeProgressRef.current = true;
+      if (condition === 'released') runManagedVideoCleanup(video);
+      player.duration = 1000;
+      player.currentTime = 900;
+      player.emit('video:timeupdate');
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+    });
+
+    it('同组末集即使后面还有其他分组也可提示', async () => {
+      const params = completionParams();
+      params.detailRef.current = {
+        ...DETAIL,
+        episode_groups: [
+          { label: '原声', count: 1 },
+          { label: '配音', count: 1 },
+        ],
+      };
+      const { player } = await nearEnd(params);
+      expect(player.template.$player.textContent).toContain('本片即将看完');
+      player.emit('video:ended');
+      expect(params.onLastEpisodeEnded).toHaveBeenCalledTimes(1);
+    });
+
+    it('运行时释放立即隐藏，旧按钮无法打开新源的卡片', async () => {
+      const { player, params, video } = await nearEnd();
+      const oldButton = findPromptButton(player, '观影小结');
+      runManagedVideoCleanup(video);
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+      params.detailRef.current = { ...DETAIL, source: 'other' };
+      oldButton.click();
+      player.emit('video:timeupdate');
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+    });
+
+    it('hook 换集与换源等待期间同步隐藏提示，复用播放器读取最新回调', async () => {
+      const params = completionParams();
+      const { rerender, unmount } = renderHook((props) => useArtPlayer(props), {
+        initialProps: params,
+      });
+      await act(flushMicrotasks);
+      const player = MockArtplayer.instances.at(-1)!;
+      createdVideos.push(player.video);
+      player.video.pause = jest.fn();
+      player.option.customType.m3u8(player.video, player.option.url);
+      player.emit('video:playing');
+      player.duration = 1000;
+      player.currentTime = 900;
+      player.emit('video:timeupdate');
+      expect(player.template.$player.textContent).toContain('本片即将看完');
+      rerender({ ...params, videoUrl: '' });
+      expect(player.template.$player.textContent).not.toContain('本片即将看完');
+      const nextDetail = { ...DETAIL, source: 'other', episodes: [EPISODE_2] };
+      params.detailRef.current = nextDetail;
+      const onLastEpisodeNearEnd = jest
+        .fn()
+        .mockReturnValueOnce(true)
+        .mockReturnValue(false);
+      const onLastEpisodeEnded = jest.fn();
+      rerender({
+        ...params,
+        detail: nextDetail,
+        videoUrl: EPISODE_2,
+        onLastEpisodeNearEnd,
+        onLastEpisodeEnded,
+      });
+      await act(flushMicrotasks);
+      expect(MockArtplayer.instances).toHaveLength(1);
+      player.emit('video:playing');
+      player.currentTime = 900;
+      player.emit('video:timeupdate');
+      expect(onLastEpisodeNearEnd).toHaveBeenCalledTimes(1);
+      findPromptButton(player, '观影小结').click();
+      expect(onLastEpisodeEnded).toHaveBeenCalledTimes(1);
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+      unmount();
+    });
+  });
+
   it('自动跳过片头后，拖回片头重看不再被跳走', async () => {
     const params = createParams();
     params.skipConfigRef.current = {
@@ -531,26 +773,153 @@ describe('initializeArtPlayer 拉流控制', () => {
     expect(params.handleNextEpisode).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['起播时已知时长', true],
-    ['时长晚于首次定位才知道', false],
-  ])('续播点已在结尾时从头播：%s', async (_label, durationKnown) => {
-    const params = createParams();
-    params.resumeTimeRef.current = 1398;
-    params.resumeModeRef.current = 'forced';
-    const { player, video, loadingSessionRef } = await setupPlayer(params);
-    makeFirstFrameReady(video);
-    video.play = jest.fn().mockResolvedValue(undefined);
-    if (durationKnown) player.duration = 1400;
-    player.emit('video:loadeddata');
-    if (!durationKnown) {
-      expect(loadingSessionRef.current.pendingInitialResumeTarget).toBe(1398);
+  it.each(['video:progress', 'video:ended', 'video:timeupdate'])(
+    '停在结尾吸收 %s，不自动连播或展示完结卡片',
+    async (event) => {
+      const params = createParams();
+      params.resumeTimeRef.current = 1398;
+      params.resumeModeRef.current = 'forced';
+      params.startStateRef = {
+        current: { parked: true, pendingDuration: null },
+      };
+      params.autoPlayNextEnabledRef.current = true;
+      params.onLastEpisodeEnded = jest.fn();
+      const { player, video } = await setupPlayer(params);
+      makeFirstFrameReady(video);
+      video.play = jest.fn().mockResolvedValue(undefined);
+      player.duration = 1400;
+      player.emit(event);
+      expect(player.currentTime).toBe(1398);
+      expect(params.handleNextEpisode).not.toHaveBeenCalled();
+      expect(params.onLastEpisodeEnded).not.toHaveBeenCalled();
+      expect(video.play).not.toHaveBeenCalled();
+      expect(player.template.$player.textContent).toContain('本集已播完');
+      jest.advanceTimersByTime(10_000);
+      expect(player.template.$player.textContent).toContain('本集已播完');
+      findPromptButton(player, '下一集').click();
+      expect(params.handleNextEpisode).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['last', 'next', 'ongoing', 'group-last'])(
+    '停在结尾的 %s 集在右下提供对应操作',
+    async (kind) => {
+      const params = createParams();
+      params.startStateRef = {
+        current: { parked: true, pendingDuration: null },
+      };
+      params.resumeTimeRef.current = 1398;
+      params.detailRef.current = {
+        ...DETAIL,
+        episodes:
+          kind === 'next' || kind === 'group-last'
+            ? DETAIL.episodes
+            : [EPISODE_1],
+        series_status: kind === 'ongoing' ? 'ongoing' : 'ended',
+        ...(kind === 'group-last'
+          ? {
+              episode_groups: [
+                { label: '原声', count: 1 },
+                { label: '配音', count: 1 },
+              ],
+            }
+          : {}),
+      };
+      params.onLastEpisodeEnded = jest.fn();
+      const { player } = await setupPlayer(params);
       player.duration = 1400;
       player.emit('video:progress');
-    }
-    expect(player.currentTime).toBe(0);
-    expect(params.resumeTimeRef.current ?? 0).toBe(0);
-    expect(loadingSessionRef.current.pendingInitialResumeTarget).not.toBe(1398);
+      const prompt = player.template.$player.querySelector(
+        '.ice-player-prompt-end',
+      );
+      expect(prompt?.textContent).toContain('本集已播完');
+      expect(
+        player.template.$player.querySelectorAll('.ice-player-prompt-end'),
+      ).toHaveLength(1);
+      if (kind === 'last' || kind === 'group-last') {
+        findPromptButton(player, '观影小结').click();
+        expect(params.onLastEpisodeEnded).toHaveBeenCalledWith(true);
+        expect(params.startStateRef.current.parked).toBe(true);
+      } else {
+        expect(prompt?.textContent).not.toContain('观影小结');
+      }
+    },
+  );
+
+  it.each([5, 600, 1395])(
+    '迟到续播共用左下提示并检查位置 %s',
+    async (position) => {
+      const params = createParams();
+      params.startStateRef = {
+        current: { parked: false, pendingDuration: null },
+      };
+      params.skipConfigRef.current = {
+        enable: true,
+        intro_time: 60,
+        outro_time: 0,
+      };
+      const { player } = await setupPlayer(params);
+      player.duration = 1400;
+      player.currentTime = position;
+      params.startStateRef.current.showResumePrompt?.();
+      const prompt = player.template.$player.querySelector(
+        '.ice-player-prompt-start',
+      );
+      if (position === 600) {
+        expect(prompt?.textContent).toContain('已从 10:00 继续播放');
+        params.startStateRef.current.showResumePrompt?.();
+        expect(
+          player.template.$player.querySelectorAll('.ice-player-prompt-start'),
+        ).toHaveLength(1);
+        findPromptButton(player, '从头播放').click();
+        expect(player.currentTime).toBe(60);
+      } else {
+        expect(prompt).toBeNull();
+      }
+      player.emit('destroy');
+      expect(params.startStateRef.current.showResumePrompt).toBeUndefined();
+    },
+  );
+
+  it('停在结尾后重看遵守片头设置，播放按钮也执行重看', async () => {
+    const params = createParams();
+    params.resumeTimeRef.current = 1398;
+    params.startStateRef = { current: { parked: true, pendingDuration: null } };
+    params.skipConfigRef.current = {
+      enable: true,
+      intro_time: 90,
+      outro_time: 0,
+    };
+    const { player } = await setupPlayer(params);
+    player.duration = 1400;
+    player.emit('video:progress');
+    findPromptButton(player, '重看').click();
+    expect(params.startStateRef.current.parked).toBe(false);
+    expect(player.currentTime).toBe(90);
+    params.startStateRef.current.parked = true;
+    player.emit('play');
+    expect(params.startStateRef.current.parked).toBe(false);
+    expect(player.currentTime).toBe(90);
+  });
+
+  it('停在末集时迟到详情只补下一集按钮，用户拖动后退出停住状态', async () => {
+    const params = createParams();
+    params.detailRef.current = { ...DETAIL, episodes: [EPISODE_1] };
+    params.resumeTimeRef.current = 1398;
+    params.startStateRef = { current: { parked: true, pendingDuration: null } };
+    const { player } = await setupPlayer(params);
+    player.duration = 1400;
+    player.emit('video:progress');
+    expect(player.template.$player.textContent).not.toContain('下一集');
+    params.detailRef.current = DETAIL;
+    params.startStateRef.current.refreshPrompt?.();
+    expect(player.template.$player.textContent).toContain('下一集');
+    expect(params.handleNextEpisode).not.toHaveBeenCalled();
+    player.currentTime = 600;
+    player.emit('video:seeking');
+    expect(params.startStateRef.current.parked).toBe(false);
+    expect(params.resumeTimeRef.current).toBeNull();
+    expect(player.template.$player.textContent).not.toContain('本集已播完');
   });
 
   it('未开连播时自然播完补存进度', async () => {
@@ -927,6 +1296,22 @@ describe('initializeArtPlayer 拉流控制', () => {
         expect.objectContaining({ episodeIndex: 1 }),
         params.danmakuEnabledRef,
       );
+    });
+
+    it('restores autoplay when switching episodes after a parked start', async () => {
+      const params = createParams();
+      params.startStateRef = {
+        current: { parked: true, pendingDuration: null },
+      };
+      const { player, rerender } = await mountHook(params);
+      expect(player.option.autoplay).toBe(false);
+      player.video.autoplay = false;
+      params.startStateRef.current.parked = false;
+      params.currentEpisodeIndexRef.current = 1;
+      rerender({ ...params, videoUrl: EPISODE_2, currentEpisodeIndex: 1 });
+      await act(flushMicrotasks);
+      expect(player.switchUrl).toHaveBeenCalledWith(EPISODE_2);
+      expect(player.video.autoplay).toBe(true);
     });
 
     it.each(['source', 'id', 'retry', 'ad'] as const)(

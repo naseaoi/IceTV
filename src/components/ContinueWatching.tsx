@@ -298,6 +298,7 @@ export default function ContinueWatching({
                   hasUpdate={hasPlayRecordUpdate(record)}
                   trackingEnabled={isTrackingEnabled(record)}
                   availableEpisodes={episodeDisplay.totalEpisodes}
+                  recordDuration={record.total_time}
                   resumeTime={Math.max(0, Math.floor(record.play_time || 0))}
                   query={record.search_title}
                   onDelete={() =>

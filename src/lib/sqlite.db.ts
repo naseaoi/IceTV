@@ -119,13 +119,17 @@ import {
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import {
-  accessPermissionsKey,
+  accessPermissionChanges,
+  accessPermissions,
   configPermissionsChanged,
 } from '@/lib/user-notice';
 import {
   type NoticeMutation,
   noticeInsert,
   NoticeModeration,
+  pendingPermissionNotices,
+  pendingPermissionNoticesQuery,
+  permissionNoticeWrite,
   userNoticeSchema,
   UserNoticeStorage,
 } from '@/lib/user-notice-storage';
@@ -3750,7 +3754,8 @@ export class LocalSqliteStorage implements IStorage {
     return this.invites.create(items);
   }
   async createInviteCode(item: InviteCode) {
-    return this.createInviteCodes([item]);
+    const result = await this.createInviteCodes([item]);
+    return typeof result === 'string' ? result : ('created' as const);
   }
   async deleteInviteCode(code: string) {
     return this.invites.delete(code);
@@ -3882,8 +3887,9 @@ export class LocalSqliteStorage implements IStorage {
                 .all() as { username: string }[]
             ).flatMap((row) => {
               const user = noticeAccess.get(row.username);
-              return user
-                ? [{ user, key: accessPermissionsKey(user, current) }]
+              // 站长与管理员可在后台直接看到源配置，配置改动不再通知他们
+              return user?.role === 'user'
+                ? [{ user, permissions: accessPermissions(user, current) }]
                 : [];
             })
           : [];
@@ -3891,19 +3897,33 @@ export class LocalSqliteStorage implements IStorage {
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
         for (const source of removed.sources) access.removeSource(source);
-        for (const { user, key } of noticeUsers) {
+        const now = Date.now();
+        const pendingQuery = pendingPermissionNoticesQuery(now);
+        const pending = noticeUsers.length
+          ? pendingPermissionNotices(
+              this.db
+                .prepare(pendingQuery.sql)
+                .all(...pendingQuery.params) as Record<string, unknown>[],
+            )
+          : new Map();
+        for (const { user, permissions } of noticeUsers) {
           const next = noticeAccess.get(user.username);
-          if (next && key !== accessPermissionsKey(next, config)) {
-            const event = noticeInsert(
-              'sqlite',
-              user.username,
-              `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
-              'account-change',
-              'permissions-changed',
-              {},
-            );
-            this.db.prepare(event.sql).run(...event.params);
-          }
+          const payload = next
+            ? accessPermissionChanges(
+                permissions,
+                accessPermissions(next, config),
+              )
+            : null;
+          const write = payload
+            ? permissionNoticeWrite(
+                'sqlite',
+                user.username,
+                payload,
+                pending.get(user.username),
+                now,
+              )
+            : null;
+          if (write) this.db.prepare(write.sql).run(...write.params);
         }
         stateStore.prune(current, config);
         for (const [key, count] of Object.entries(state?.liveCounts || {})) {

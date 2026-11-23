@@ -4,7 +4,7 @@ import { createSwrCache } from '@/lib/server-cache';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
 import { SearchResult } from '@/lib/types';
 
-export type CachedPageStatus = 'ok' | 'timeout' | 'forbidden';
+export type CachedPageStatus = 'ok' | 'timeout' | 'forbidden' | 'invalid';
 
 export interface CachedPageEntry {
   status: CachedPageStatus;
@@ -50,7 +50,7 @@ const SEARCH_EMPTY_CACHE = createSwrCache<CachedPageEntry>({
 });
 const SEARCH_AGGREGATE_CACHE =
   createSharedServerCache<CachedSearchAggregateEntry>({
-    name: 'search-aggregates-v2',
+    name: 'search-aggregates-v3',
     ...getServerCacheBudget('search-aggregates'),
     freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
     staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,
@@ -66,7 +66,7 @@ const SHARED_SEARCH_PAGES = createSharedServerCache<SearchPageLoadResult>({
 });
 // 特殊源只共享非空搜索结果；失败由 loader 抛出，不写入缓存
 const SPECIAL_SOURCE_SEARCHES = createSharedServerCache<SearchResult[]>({
-  name: 'special-search-v1',
+  name: 'special-search-v2',
   ...getServerCacheBudget('search-pages'),
   freshMs: SEARCH_CACHE_TTL_MS,
   staleMs: SEARCH_CACHE_STALE_MS,
@@ -244,7 +244,7 @@ export function setCachedSearchPage(
     data,
     pageCount,
   };
-  if (status === 'ok' && data.length === 0) {
+  if (status === 'invalid' || (status === 'ok' && data.length === 0)) {
     SEARCH_CACHE.invalidate(key);
     SEARCH_EMPTY_CACHE.set(key, entry);
   } else {

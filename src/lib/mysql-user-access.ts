@@ -17,8 +17,15 @@ import {
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
-import { accessNoticeAction, accessPermissionsKey } from '@/lib/user-notice';
-import { noticeInsert } from '@/lib/user-notice-storage';
+import {
+  accessNoticeAction,
+  accessPermissionChanges,
+  accessPermissions,
+} from '@/lib/user-notice';
+import {
+  noticeInsert,
+  settlePendingPermissionNotices,
+} from '@/lib/user-notice-storage';
 import { normalizeUsername } from '@/lib/username';
 import type { AdminConfig } from '@/types/admin';
 
@@ -65,7 +72,7 @@ export class MysqlUserAccessStore {
     guard?: UserAccessGuard,
   ): Promise<number> {
     const [configRows] = await this.db.query<RowDataPacket[]>(
-      'SELECT config_json FROM admin_config WHERE id = 1',
+      'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE',
     );
     const config = configRows[0]
       ? (JSON.parse(String(configRows[0].config_json)) as AdminConfig)
@@ -79,21 +86,24 @@ export class MysqlUserAccessStore {
       const next = effectiveUserAccess({ ...user, ...patch });
       await this.put(next);
       const change = accessNoticeAction(user, next);
+      const payload = accessPermissionChanges(
+        accessPermissions(user, config),
+        accessPermissions(next, config),
+      );
       const action =
-        change === 'permissions-changed' &&
-        config &&
-        accessPermissionsKey(user, config) ===
-          accessPermissionsKey(next, config)
-          ? null
-          : change;
+        change === 'permissions-changed' && !payload ? null : change;
       if (action) {
+        const now = Date.now();
+        const settle = settlePendingPermissionNotices(username, now);
+        await this.db.execute(settle.sql, settle.params);
         const event = noticeInsert(
           'mysql',
           username,
           randomUUID(),
           'account-change',
           action,
-          {},
+          action === 'permissions-changed' ? payload! : {},
+          now,
         );
         await this.db.execute(event.sql, event.params);
       }

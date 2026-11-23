@@ -4,7 +4,7 @@ import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getListSkeletonCount } from '@/lib/list-count-cookies.server';
-import { normalizePlayRecordLimit } from '@/lib/play-records';
+import { normalizePlayRecordLimit, toPlayRecordList } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
 const MAX_CONTINUE_WATCHING_SKELETON_COUNT = 8;
@@ -108,7 +108,10 @@ export async function getContinueWatchingInitialData(): Promise<ContinueWatching
       db.getPlayRecordPage(session.username, limit),
       db.getUnreadTrackingPlayRecordPage(session.username, 1),
     ]);
-    return { records: page.items, updateCount: trackingPage.total };
+    return {
+      records: toPlayRecordList(page.items),
+      updateCount: trackingPage.total,
+    };
   } catch (error) {
     console.error('获取继续观看首屏数据失败:', error);
     return { records: null, updateCount: 0 };

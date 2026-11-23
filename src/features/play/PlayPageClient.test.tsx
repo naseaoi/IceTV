@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type Artplayer from 'artplayer';
 import type { ComponentProps, ReactNode } from 'react';
 
@@ -51,6 +51,9 @@ const mockUpdateVideoUrl = jest.fn<void, Parameters<typeof updateVideoUrl>>();
 const mockUseArtPlayer = jest.fn<void, [ArtPlayerParams]>();
 const mockPlayMainContent = jest.fn<null, [MainContentProps]>(() => null);
 const mockPlayProgress = {
+  startStateRef: { current: { parked: false, pendingDuration: null } },
+  resolveStartDuration: jest.fn(),
+  cancelPlaybackStart: jest.fn(),
   saveCurrentPlayProgress: jest.fn(),
   savePlaybackCheckpoint: jest.fn(),
   requestWakeLock: jest.fn(),
@@ -98,6 +101,7 @@ const mockGetVodRuntimeSourceUrl = jest.fn<string | null, [HTMLVideoElement]>(
 );
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/play',
   useSearchParams: () => mockSearchParams,
 }));
 
@@ -308,6 +312,20 @@ describe('PlayPageClient', () => {
     mockPeekResolvedLazyEpisodeUrl.mockImplementation(() => null);
     mockGetVodRuntimeSourceUrl.mockImplementation(() => null);
     sessionStorage.clear();
+  });
+
+  it('决策等待期间标题只显示作品名且选集没有当前集高亮', () => {
+    render(<PlayPageClient />);
+    act(() => latestPlayInit().setDetail(LAZY_DETAIL));
+    expect(document.title).toContain('测试剧');
+    expect(document.title).not.toContain('第1集');
+    expect(lastArg(mockPlayMainContent).currentEpisodeIndex).toBe(-1);
+    act(() => {
+      latestPlayInit().setCurrentEpisodeIndex(2);
+      latestPlayInit().setLoading(false);
+    });
+    expect(document.title).toContain('第3集');
+    expect(lastArg(mockPlayMainContent).currentEpisodeIndex).toBe(2);
   });
 
   it('首播和换集暂缓测速，当前源起播、失败或错误后放行', async () => {
@@ -659,16 +677,52 @@ describe('PlayPageClient', () => {
     expect(mockClearFragmentMemoryCache).toHaveBeenCalledTimes(1);
   });
 
-  it.each([true, false])(
-    '完结汇总确认已展示=%s 后才决定是否退出全屏',
-    async (celebrated) => {
+  it('轻提示按源与编号仅出现一次，提示本身不读取汇总', () => {
+    renderLoadedPage();
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(true);
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(false);
+    expect(fetchCompletion).not.toHaveBeenCalled();
+    act(() => latestPlayInit().setCurrentId('another-id'));
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(true);
+    act(() => latestPlayInit().setCurrentSource('another-source'));
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(true);
+    act(() => {
+      latestPlayInit().setCurrentSource(LAZY_DETAIL.source);
+      latestPlayInit().setCurrentId(LAZY_DETAIL.id);
+    });
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(false);
+    expect(fetchCompletion).not.toHaveBeenCalled();
+  });
+
+  it('连载中既不提示也不打开卡片，详情变为完结后仍可提示', () => {
+    renderLoadedPage();
+    act(() =>
+      latestPlayInit().setDetail({ ...LAZY_DETAIL, series_status: 'ongoing' }),
+    );
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(false);
+    act(() => lastArg(mockUseArtPlayer).onLastEpisodeEnded?.());
+    expect(fetchCompletion).not.toHaveBeenCalled();
+    act(() =>
+      latestPlayInit().setDetail({ ...LAZY_DETAIL, series_status: 'ended' }),
+    );
+    expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(true);
+  });
+
+  it.each([
+    { celebrated: true, manual: false },
+    { celebrated: false, manual: false },
+    { celebrated: true, manual: true },
+    { celebrated: false, manual: true },
+  ])(
+    '已庆祝=$celebrated、主动打开=$manual 时按打开方式处理卡片',
+    async ({ celebrated, manual }) => {
       jest.useFakeTimers();
       try {
         renderLoadedPage();
         const { artPlayerRef, onLastEpisodeEnded } = lastArg(mockUseArtPlayer);
         const player = { fullscreen: true, fullscreenWeb: true };
         artPlayerRef.current = player as unknown as Artplayer;
-        jest.mocked(fetchCompletion).mockResolvedValueOnce({
+        jest.mocked(fetchCompletion).mockResolvedValue({
           title: LAZY_DETAIL.title,
           year: LAZY_DETAIL.year!,
           cover: '',
@@ -678,17 +732,40 @@ describe('PlayPageClient', () => {
           completedAt: Date.now(),
           celebrated,
         });
-        act(() => onLastEpisodeEnded?.());
+        expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(true);
+        expect(fetchCompletion).not.toHaveBeenCalled();
+        act(() => onLastEpisodeEnded?.(manual));
         const fullscreenBeforeSummary = player.fullscreen;
         const webFullscreenBeforeSummary = player.fullscreenWeb;
         await act(async () => jest.advanceTimersByTime(1200));
-        expect(player.fullscreen).toBe(celebrated);
-        expect(player.fullscreenWeb).toBe(celebrated);
+        const suppressed = celebrated && !manual;
+        expect(player.fullscreen).toBe(suppressed);
+        expect(player.fullscreenWeb).toBe(suppressed);
         expect(fullscreenBeforeSummary).toBe(true);
         expect(webFullscreenBeforeSummary).toBe(true);
-        if (celebrated)
+        if (suppressed)
           expect(screen.queryByText('看完了')).not.toBeInTheDocument();
         else expect(screen.getByText('看完了')).toBeInTheDocument();
+        expect(lastArg(mockUseArtPlayer).onLastEpisodeNearEnd?.()).toBe(false);
+        act(() => lastArg(mockUseArtPlayer).onLastEpisodeEnded?.());
+        await act(async () => jest.advanceTimersByTime(1200));
+        expect(fetchCompletion).toHaveBeenCalledTimes(1);
+        if (!suppressed) {
+          fireEvent.click(screen.getByRole('button', { name: '完成' }));
+          await act(async () => jest.advanceTimersByTime(300));
+        }
+        // 已被页面检查过的作品仍可主动反复打开，服务端已庆祝也一样。
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          act(() => lastArg(mockUseArtPlayer).onLastEpisodeEnded?.(true));
+          await act(async () => jest.advanceTimersByTime(1200));
+          expect(screen.getByText('看完了')).toBeInTheDocument();
+          expect(fetchCompletion).toHaveBeenCalledTimes(attempt + 2);
+          fireEvent.click(screen.getByRole('button', { name: '完成' }));
+          await act(async () => jest.advanceTimersByTime(300));
+          act(() => lastArg(mockUseArtPlayer).onLastEpisodeEnded?.());
+          await act(async () => jest.advanceTimersByTime(1200));
+          expect(fetchCompletion).toHaveBeenCalledTimes(attempt + 2);
+        }
       } finally {
         jest.useRealTimers();
       }

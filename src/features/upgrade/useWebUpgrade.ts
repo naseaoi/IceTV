@@ -19,6 +19,7 @@ const ACTIVE_PHASES: readonly UpdaterPhase[] = [
 ];
 
 export type WebUpgradeView =
+  | { kind: 'checking' }
   | { kind: 'unavailable' }
   | { kind: 'upgrade' }
   | { kind: 'pulling' }
@@ -45,6 +46,7 @@ function isUpgradeResponse(value: unknown): value is UpgradeResponse {
 
 export function useWebUpgrade(enabled: boolean): WebUpgradeState {
   const [response, setResponse] = useState<UpgradeResponse | null>(null);
+  const [statusChecked, setStatusChecked] = useState(false);
   const [restartStartedAt, setRestartStartedAt] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -67,6 +69,8 @@ export function useWebUpgrade(enabled: boolean): WebUpgradeState {
       setResponse(data);
     } catch {
       // 重启期间服务不可达属预期；其余情况保持原状，界面回落到「前往更新」
+    } finally {
+      if (!signal?.aborted) setStatusChecked(true);
     }
   }, []);
 
@@ -148,7 +152,8 @@ export function useWebUpgrade(enabled: boolean): WebUpgradeState {
   const pull = useCallback(() => submit('pull'), [submit]);
   const restart = useCallback(() => submit('restart'), [submit]);
 
-  let view: WebUpgradeView = { kind: 'unavailable' };
+  let view: WebUpgradeView =
+    enabled && !statusChecked ? { kind: 'checking' } : { kind: 'unavailable' };
   let notice: string | null = null;
   let jobError: string | null = null;
   if (awaitingRestart) {

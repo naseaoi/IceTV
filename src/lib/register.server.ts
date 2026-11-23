@@ -90,7 +90,10 @@ export async function handleRegister(request: NextRequest) {
     }
 
     const config = await getConfigForRead();
-    if (!config.UserConfig.OpenRegister) {
+    if (
+      !config.UserConfig.OpenRegister ||
+      config.UserConfig.RegisterChannels?.Password === false
+    ) {
       return NextResponse.json({ error: '当前未开放注册' }, { status: 403 });
     }
 

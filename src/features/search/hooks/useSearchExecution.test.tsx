@@ -207,6 +207,58 @@ describe('搜索失败反馈', () => {
     jest.mocked(readFluidSearch).mockReturnValue(true);
     clearSearchSnapshotCache();
   });
+  it.each([
+    ['complete', 1],
+    ['complete', 2],
+    ['error', 1],
+    ['error', 2],
+  ] as const)(
+    '%s 与 %i 批结果连续到达时，每次渲染都先保留加载态或展示结果',
+    async (ending, batchCount) => {
+      const stream = { close: jest.fn() } as unknown as EventSource;
+      global.EventSource = jest.fn(
+        () => stream,
+      ) as unknown as typeof EventSource;
+      const renders: ReturnType<typeof useExecution>[] = [];
+      const { result } = renderHook(() => {
+        const state = useExecution('replay');
+        renders.push(state);
+        return state;
+      });
+      const send = (payload: object) =>
+        stream.onmessage?.(
+          new MessageEvent('message', { data: JSON.stringify(payload) }),
+        );
+
+      await act(async () => {
+        send({ type: 'start', totalSources: batchCount });
+        for (let index = 0; index < batchCount; index += 1) {
+          send({
+            type: 'source_result',
+            results: createSnapshot(`item-${index}`).results,
+          });
+        }
+        if (ending === 'complete') {
+          send({ type: 'complete', completedSources: batchCount });
+        } else {
+          stream.onerror?.(new Event('error'));
+        }
+      });
+
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.searchResults).toHaveLength(batchCount);
+      expect(result.current.error).toBe(
+        ending === 'error' ? '搜索未完成' : null,
+      );
+      expect(
+        renders.some(
+          (state) => !state.isLoading && state.searchResults.length === 0,
+        ),
+      ).toBe(false);
+      expect(stream.close).toHaveBeenCalled();
+    },
+  );
+
   it('普通请求失败不会写为空结果快照，重试可恢复', async () => {
     jest.mocked(readFluidSearch).mockReturnValue(false);
     global.fetch = jest

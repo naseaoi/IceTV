@@ -12,8 +12,15 @@ import {
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
-import { accessNoticeAction, accessPermissionsKey } from '@/lib/user-notice';
-import { noticeInsert } from '@/lib/user-notice-storage';
+import {
+  accessNoticeAction,
+  accessPermissionChanges,
+  accessPermissions,
+} from '@/lib/user-notice';
+import {
+  noticeInsert,
+  settlePendingPermissionNotices,
+} from '@/lib/user-notice-storage';
 import { normalizeUsername } from '@/lib/username';
 import type { AdminConfig } from '@/types/admin';
 
@@ -78,21 +85,24 @@ export class SqliteUserAccessStore {
           const next = effectiveUserAccess({ ...user, ...patch });
           this.put(next);
           const change = accessNoticeAction(user, next);
+          const payload = accessPermissionChanges(
+            accessPermissions(user, config),
+            accessPermissions(next, config),
+          );
           const action =
-            change === 'permissions-changed' &&
-            config &&
-            accessPermissionsKey(user, config) ===
-              accessPermissionsKey(next, config)
-              ? null
-              : change;
+            change === 'permissions-changed' && !payload ? null : change;
           if (action) {
+            const now = Date.now();
+            const settle = settlePendingPermissionNotices(username, now);
+            this.db.prepare(settle.sql).run(...settle.params);
             const event = noticeInsert(
               'sqlite',
               username,
               randomUUID(),
               'account-change',
               action,
-              {},
+              action === 'permissions-changed' ? payload! : {},
+              now,
             );
             this.db.prepare(event.sql).run(...event.params);
           }

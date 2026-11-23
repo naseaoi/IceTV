@@ -37,10 +37,12 @@ jest.mock('@/lib/db.client', () => ({
 }));
 jest.mock('@/lib/toast', () => ({ showToast: jest.fn() }));
 
+const CARD_HREF = '/play?x=1';
+
 function Card({ target }: { target: MediaCardMenuTarget }) {
-  const menuProps = useMediaCardMenu({ target, href: '/play?x=1' });
+  const menuProps = useMediaCardMenu({ target, href: CARD_HREF });
   return (
-    <a href='/play?x=1' {...menuProps}>
+    <a href={CARD_HREF} {...menuProps}>
       {target.title}
     </a>
   );

@@ -120,13 +120,17 @@ import {
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import {
-  accessPermissionsKey,
+  accessPermissionChanges,
+  accessPermissions,
   configPermissionsChanged,
 } from '@/lib/user-notice';
 import {
   type NoticeMutation,
   noticeInsert,
   NoticeModeration,
+  pendingPermissionNotices,
+  pendingPermissionNoticesQuery,
+  permissionNoticeWrite,
   userNoticeSchema,
   UserNoticeStorage,
 } from '@/lib/user-notice-storage';
@@ -3147,7 +3151,8 @@ export class MySqlStorage implements IStorage {
     return this.invites.create(items);
   }
   async createInviteCode(item: InviteCode) {
-    return this.createInviteCodes([item]);
+    const result = await this.createInviteCodes([item]);
+    return typeof result === 'string' ? result : ('created' as const);
   }
   async deleteInviteCode(code: string) {
     await this.ensureInitialized();
@@ -3309,26 +3314,48 @@ export class MySqlStorage implements IStorage {
       const noticeUsers = [];
       for (const row of noticeRows) {
         const user = await noticeAccess.get(String(row.username));
-        if (user && current)
-          noticeUsers.push({ user, key: accessPermissionsKey(user, current) });
+        // 站长与管理员可在后台直接看到源配置，配置改动不再通知他们
+        if (user?.role === 'user' && current)
+          noticeUsers.push({
+            user,
+            permissions: accessPermissions(user, current),
+          });
       }
       const removed = removedAccessReferences(current, config);
       const access = new MysqlUserAccessStore(connection, true);
       for (const group of removed.groups) await access.removeGroup(group);
       for (const source of removed.sources) await access.removeSource(source);
-      for (const { user, key } of noticeUsers) {
+      const now = Date.now();
+      // 待发权限通知只在这里写入，配置写事务已由 admin_config 行锁串行，无需再锁通知表
+      const pendingQuery = pendingPermissionNoticesQuery(now);
+      const pending = noticeUsers.length
+        ? pendingPermissionNotices(
+            (
+              await connection.query<RowDataPacket[]>(
+                pendingQuery.sql,
+                pendingQuery.params,
+              )
+            )[0],
+          )
+        : new Map();
+      for (const { user, permissions } of noticeUsers) {
         const next = await noticeAccess.get(user.username);
-        if (next && key !== accessPermissionsKey(next, config)) {
-          const event = noticeInsert(
-            'mysql',
-            user.username,
-            `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
-            'account-change',
-            'permissions-changed',
-            {},
-          );
-          await connection.execute(event.sql, event.params);
-        }
+        const payload = next
+          ? accessPermissionChanges(
+              permissions,
+              accessPermissions(next, config),
+            )
+          : null;
+        const write = payload
+          ? permissionNoticeWrite(
+              'mysql',
+              user.username,
+              payload,
+              pending.get(user.username),
+              now,
+            )
+          : null;
+        if (write) await connection.execute(write.sql, write.params);
       }
       await stateStore.prune(current, config);
       for (const [key, count] of Object.entries(state?.liveCounts || {})) {

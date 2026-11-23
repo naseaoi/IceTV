@@ -26,4 +26,13 @@ describe('usePlayPageState 地址参数', () => {
     expect(result.current.currentId).toBe('a-id');
     expect(result.current.videoTitle).toBe('测试');
   });
+
+  it('短地址的源与编号从路径解析，不依赖地址参数', () => {
+    const { result } = renderHook(() =>
+      usePlayPageState(params(''), '/play/a%2Fb/%E7%BC%96%E5%8F%B7'),
+    );
+
+    expect(result.current.currentSource).toBe('a/b');
+    expect(result.current.currentId).toBe('编号');
+  });
 });

@@ -3,7 +3,11 @@
 import { cookies } from 'next/headers';
 
 import { getServerAuthSession } from '@/lib/auth-session.server';
-import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
+import {
+  getContinueWatchingInitialData,
+  getContinueWatchingSkeletonCount,
+} from '@/lib/continue-watching.server';
+import type { PlayRecord } from '@/lib/types';
 
 jest.mock('next/headers', () => ({
   cookies: jest.fn(),
@@ -11,6 +15,17 @@ jest.mock('next/headers', () => ({
 
 jest.mock('@/lib/auth-session.server', () => ({
   getServerAuthSession: jest.fn(),
+}));
+
+const mockGetPlayRecordPage = jest.fn();
+jest.mock('@/lib/config', () => ({
+  getPublicConfig: async () => ({ ContinueWatchingLimit: 20 }),
+}));
+jest.mock('@/lib/db', () => ({
+  db: {
+    getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
+    getUnreadTrackingPlayRecordPage: async () => ({ total: 2 }),
+  },
 }));
 
 const mockCookies = cookies as jest.Mock;
@@ -79,4 +94,48 @@ describe('getContinueWatchingSkeletonCount', () => {
 
     await expect(getContinueWatchingSkeletonCount()).resolves.toBe(8);
   });
+});
+
+it('首页 SSR 只传列表摘要，保留主进度和更新计数', async () => {
+  mockCookieStore({ auth: 'valid' });
+  mockGetServerAuthSession.mockResolvedValue({
+    status: 'authenticated',
+    username: 'tester',
+  });
+  const summary: PlayRecord = {
+    title: '作品',
+    source_name: '源站',
+    cover: '',
+    year: '2026',
+    index: 2,
+    total_episodes: 50,
+    play_time: 120,
+    total_time: 1800,
+    save_time: 300,
+  };
+  const episodeProgress = Array.from({ length: 50 }, (_, index) => ({
+    k: `n:${index + 1}`,
+    t: 120,
+    d: 1800,
+    at: 300,
+  }));
+  const full = Object.freeze({ ...summary, episode_progress: episodeProgress });
+  const items = Object.fromEntries(
+    Array.from({ length: 20 }, (_, index) => [`s+${index}`, full]),
+  );
+  mockGetPlayRecordPage.mockResolvedValue({
+    items,
+    total: 20,
+    nextCursor: null,
+  });
+  const result = await getContinueWatchingInitialData();
+  expect(mockGetPlayRecordPage).toHaveBeenCalledWith('tester', 20);
+  expect(result.updateCount).toBe(2);
+  expect(result.records).toEqual(
+    Object.fromEntries(Object.keys(items).map((key) => [key, summary])),
+  );
+  expect(full.episode_progress).toBe(episodeProgress);
+  expect(Buffer.byteLength(JSON.stringify(result.records))).toBeLessThan(
+    Buffer.byteLength(JSON.stringify(items)),
+  );
 });

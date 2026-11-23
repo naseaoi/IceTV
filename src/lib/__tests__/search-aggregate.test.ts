@@ -52,6 +52,7 @@ describe('runSearchAggregation', () => {
   it('按连续标题短语过滤搜索结果', async () => {
     (searchFromApi as jest.Mock).mockResolvedValue([
       createResult({ title: '从零开始' }),
+      createResult({ title: '從零開始的異世界生活' }),
       createResult({ title: 'Re：从零开始的异世界生活' }),
       createResult({ title: '八零神豪：从伪装海归开始' }),
     ]);
@@ -72,6 +73,7 @@ describe('runSearchAggregation', () => {
 
     expect(results.map((item) => item.title)).toEqual([
       '从零开始',
+      '從零開始的異世界生活',
       'Re：从零开始的异世界生活',
     ]);
   });

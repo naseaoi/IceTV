@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  isSpecialSearchSource,
+  validateSourceSearch,
+} from '@/features/admin/lib/source-search-validation.server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { runWithConcurrency } from '@/lib/concurrency';
-import { API_CONFIG, getConfigForRead } from '@/lib/config';
-import { isGirigiriSource } from '@/lib/downstream-sources/giri';
+import { getConfigForRead } from '@/lib/config';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { isXgcartoonSource } from '@/lib/downstream-sources/xgcartoon';
-import {
-  readJsonLimited,
-  UPSTREAM_METADATA_MAX_BYTES,
-} from '@/lib/proxy-response-limits';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import {
   type SourceSearchOutcome,
   flushSourceHealthSearch,
   recordSourceSearchOutcome,
 } from '@/lib/source-health.server';
-import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +22,7 @@ export async function GET(request: NextRequest) {
   if (isGuardFailure(guardResult)) return guardResult.response;
 
   const { searchParams } = new URL(request.url);
-  const searchKeyword = searchParams.get('q');
+  const searchKeyword = searchParams.get('q')?.trim();
   const sourceKey = searchParams.get('source')?.trim();
   const sourceKeys = (searchParams.get('sources') || '')
     .split(',')
@@ -114,54 +111,12 @@ export async function GET(request: NextRequest) {
         let outcome: SourceSearchOutcome = 'error';
         let resourceLimited = false;
         try {
-          // 构建搜索URL，只获取第一页
-          const searchUrl = `${site.api}?ac=videolist&wd=${encodeURIComponent(
+          const status = await validateSourceSearch(
+            site,
             searchKeyword,
-          )}`;
-
-          const response = await fetchWithUrlGuard(searchUrl, {
-            headers: API_CONFIG.search.headers,
-            signal: abortState.signal,
-          });
-
-          if (!response.ok) {
-            await response.body?.cancel().catch(() => {});
-            throw new Error(`HTTP ${response.status}`);
-          }
-
-          const data = await readJsonLimited<any>(
-            response,
-            UPSTREAM_METADATA_MAX_BYTES,
+            abortState.signal,
           );
-
-          // 检查结果是否有效
-          let status: 'valid' | 'no_results' | 'invalid';
-          if (
-            data &&
-            data.list &&
-            Array.isArray(data.list) &&
-            data.list.length > 0
-          ) {
-            // 检查是否有标题包含搜索词的结果
-            const validResults = data.list.filter((item: any) => {
-              const title = item.vod_name || '';
-              return title.toLowerCase().includes(searchKeyword.toLowerCase());
-            });
-
-            if (validResults.length > 0) {
-              status = 'valid';
-            } else {
-              status = 'no_results';
-            }
-          } else {
-            status = 'no_results';
-          }
-
-          outcome = Array.isArray(data?.list)
-            ? status === 'valid'
-              ? 'ok'
-              : 'empty'
-            : 'error';
+          outcome = status === 'valid' ? 'ok' : 'empty';
 
           // 发送该源的验证结果
           completedSources++;
@@ -204,8 +159,7 @@ export async function GET(request: NextRequest) {
           if (
             !resourceLimited &&
             !abortedByParent &&
-            !isGirigiriSource(site) &&
-            !isXgcartoonSource(site)
+            !isSpecialSearchSource(site)
           ) {
             recordSourceSearchOutcome(
               site.key,

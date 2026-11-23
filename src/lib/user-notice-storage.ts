@@ -6,7 +6,9 @@ import {
   type UserNoticeKind,
   type UserNoticeMessage,
   type UserNoticePayload,
+  mergeAccessPermissionChanges,
   parseUserNoticeId,
+  publicNoticePayload,
 } from '@/lib/user-notice';
 import { normalizeUsername } from '@/lib/username';
 
@@ -44,6 +46,65 @@ export function noticeInsert(
     ],
   };
 }
+// 配置改动引起的权限通知先以未来时间写入，静默期内的后续改动合并进同一条并顺延，管理员连续调整视频源时用户只收到一条
+export const PERMISSION_NOTICE_QUIET_MS = 2 * 60000;
+// 读取方不持有配置锁，临近可见的待发通知不再合并，避免事务提交前越过可见时间、改写用户已看到的通知
+const PERMISSION_NOTICE_MERGE_MARGIN_MS = 30000;
+const PENDING_PERMISSION_NOTICE_WHERE =
+  "kind = 'account-change' AND action = 'permissions-changed' AND created_at > ?";
+export function pendingPermissionNoticesQuery(now: number) {
+  return {
+    sql: `SELECT id, recipient_username, payload_json FROM user_notice_events WHERE ${PENDING_PERMISSION_NOTICE_WHERE} ORDER BY created_at`,
+    params: [now + PERMISSION_NOTICE_MERGE_MARGIN_MS],
+  };
+}
+// 个人权限、组成员或角色变化会改变合并基准，先让待发通知立即可见以结束这一批；早 1 毫秒保证排在随后写入的即时通知之前
+export function settlePendingPermissionNotices(recipient: string, now: number) {
+  return {
+    sql: `UPDATE user_notice_events SET created_at = ? WHERE recipient_username = ? AND ${PENDING_PERMISSION_NOTICE_WHERE}`,
+    params: [now - 1, normalizeUsername(recipient), now],
+  };
+}
+export function pendingPermissionNotices(rows: Record<string, unknown>[]) {
+  return new Map(
+    rows.map((row) => [
+      normalizeUsername(String(row.recipient_username)),
+      {
+        id: String(row.id),
+        payload: JSON.parse(String(row.payload_json)) as UserNoticePayload,
+      },
+    ]),
+  );
+}
+export function permissionNoticeWrite(
+  dialect: 'sqlite' | 'mysql',
+  recipient: string,
+  change: UserNoticePayload,
+  pending: { id: string; payload: UserNoticePayload } | undefined,
+  now: number,
+): { sql: string; params: (string | number)[] } {
+  const visibleAt = now + PERMISSION_NOTICE_QUIET_MS;
+  if (!pending)
+    return noticeInsert(
+      dialect,
+      recipient,
+      randomUUID(),
+      'account-change',
+      'permissions-changed',
+      change,
+      visibleAt,
+    );
+  const merged = mergeAccessPermissionChanges(pending.payload, change);
+  return merged
+    ? {
+        sql: 'UPDATE user_notice_events SET payload_json = ?, created_at = ? WHERE id = ?',
+        params: [JSON.stringify(merged), visibleAt, pending.id],
+      }
+    : {
+        sql: 'DELETE FROM user_notice_events WHERE id = ?',
+        params: [pending.id],
+      };
+}
 export interface UserNoticeQuery {
   limit: number;
   before?: MessageCursor | null;
@@ -58,10 +119,15 @@ export class UserNoticeStorage {
     now: number,
     query?: UserNoticeQuery,
   ) {
-    const parts = ['recipient_username = ?', 'created_at > ?'];
+    const parts = [
+      'recipient_username = ?',
+      'created_at > ?',
+      'created_at <= ?',
+    ];
     const params: unknown[] = [
       normalizeUsername(username),
       Math.max(readAt, now - USER_NOTICE_WINDOW_MS),
+      now,
     ];
     const ids = readIds.flatMap((id) => {
       const parsed = parseUserNoticeId(id);
@@ -113,7 +179,7 @@ export class UserNoticeStorage {
       id: `user-notice:${row.created_at}:${row.id}`,
       type: row.kind,
       action: row.action,
-      payload: JSON.parse(row.payload_json),
+      payload: publicNoticePayload(JSON.parse(row.payload_json)),
       createdAt: Number(row.created_at),
     }));
   }

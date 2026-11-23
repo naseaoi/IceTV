@@ -12,6 +12,13 @@ import { showToast } from '@/lib/toast';
 import { DisplayableError } from '@/lib/user-facing-error';
 
 const mockBatchPost = jest.fn();
+const mockReplace = jest.fn();
+let mockSearchParams = new URLSearchParams();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mockReplace }),
+  usePathname: () => '/admin',
+  useSearchParams: () => mockSearchParams,
+}));
 jest.mock('@/lib/toast', () => ({
   showToast: jest.fn(),
   dismissToast: jest.fn(),
@@ -29,6 +36,7 @@ let mockRows: Array<{
   banned?: boolean;
   tags?: string[];
   nickname?: string;
+  loginProviders?: string[];
 }> = [];
 let mockNextCursor: string | null = null;
 jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
@@ -40,7 +48,11 @@ jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
           row.username.toLowerCase().includes(q) ||
           row.nickname?.toLowerCase().includes(q)) &&
         (query.filter === 'all' ||
-          (query.filter === 'banned' ? row.banned : row.role === query.filter)),
+          (query.filter === 'banned'
+            ? row.banned
+            : query.filter.startsWith('provider:')
+              ? row.loginProviders?.includes(query.filter.slice(9))
+              : row.role === query.filter)),
     );
     return {
       items,
@@ -316,35 +328,7 @@ describe('UserConfigTab sensitive actions', () => {
         'demo',
         undefined,
         undefined,
-        undefined,
       );
-    });
-  });
-
-  it('confirms before enabling open registration', async () => {
-    render(
-      <UserConfigTab config={config} role='owner' refreshConfig={jest.fn()} />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '管理' }));
-    const registerSwitch = screen.getByRole('switch', { name: '切换开放注册' });
-    expect(registerSwitch).not.toBeChecked();
-    expect(
-      screen.getByRole('switch', { name: '切换邀请码要求' }),
-    ).toBeDisabled();
-    fireEvent.click(registerSwitch);
-    expect(mockUserAction).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '确认开启' }));
-
-    await waitFor(() => {
-      expect(mockUserAction).toHaveBeenCalledWith(
-        'setOpenRegister',
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
-      expect(showToast).not.toHaveBeenCalled();
     });
   });
 });
@@ -354,7 +338,12 @@ describe('UserConfigTab user search and selection', () => {
     { username: 'owner', role: 'owner' },
     { username: 'manager', role: 'admin' },
     { username: 'Alice', role: 'user', tags: ['VIP'] },
-    { username: 'Bob', role: 'user', tags: ['Standard'] },
+    {
+      username: 'Bob',
+      role: 'user',
+      tags: ['Standard'],
+      loginProviders: ['linuxdo'],
+    },
     { username: 'Blocked', role: 'user', banned: true, tags: ['VIP'] },
   ];
   const config = {
@@ -364,6 +353,7 @@ describe('UserConfigTab user search and selection', () => {
 
   beforeEach(() => {
     mockNextCursor = null;
+    mockSearchParams = new URLSearchParams();
   });
 
   function setup(role: 'owner' | 'admin' = 'owner') {
@@ -394,11 +384,16 @@ describe('UserConfigTab user search and selection', () => {
     });
   }
 
-  it('shows the closed registration mode without an invite count', () => {
+  it('prefills the search from the URL and removes the parameter', () => {
+    mockSearchParams = new URLSearchParams('tab=user&q=ALICE');
     setup();
-    const summary = screen.getByRole('region', { name: '用户注册' });
-    expect(summary).toHaveTextContent('已关闭');
-    expect(summary).not.toHaveTextContent('有效邀请码');
+    expect(
+      screen.getByRole('searchbox', { name: '搜索用户名、昵称或邀请码' }),
+    ).toHaveValue('ALICE');
+    expectVisibleUsers(['Alice']);
+    expect(mockReplace).toHaveBeenCalledWith('/admin?tab=user', {
+      scroll: false,
+    });
   });
 
   it('searches usernames and groups case-insensitively after trimming', () => {
@@ -419,6 +414,7 @@ describe('UserConfigTab user search and selection', () => {
     ['管理员', ['manager']],
     ['普通用户', ['Alice', 'Bob', 'Blocked']],
     ['已封禁', ['Blocked']],
+    ['已绑定 LinuxDo', ['Bob']],
   ])('filters by %s', (label, usernames) => {
     setup();
     filterUsers(label as string);

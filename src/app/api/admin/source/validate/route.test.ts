@@ -25,6 +25,9 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/url-guard', () => ({
   fetchWithUrlGuard: (...args: unknown[]) => mockFetch(...args),
 }));
+jest.mock('@/lib/upstream-fetch.server', () => ({
+  fetchUpstream: (...args: unknown[]) => mockFetch(...args),
+}));
 const { GET } = require('./route') as typeof import('./route');
 
 function request(signal = new AbortController().signal) {
@@ -83,7 +86,9 @@ it('失败源取消正文，成功源输出结果和完成事件', async () => {
   mockFetch.mockResolvedValueOnce({ ok: false, status: 503, body: { cancel } });
   mockFetch.mockImplementation(
     async () =>
-      new Response(JSON.stringify({ list: [{ vod_name: 'test movie' }] })),
+      new Response(
+        JSON.stringify({ list: [{ vod_id: 1, vod_name: 'test movie' }] }),
+      ),
   );
   const text = await (await GET(request())).text();
   expect(cancel).toHaveBeenCalledTimes(1);
@@ -129,16 +134,26 @@ it('空源列表正常结束 SSE', async () => {
 });
 
 it.each([
-  ['有效结果', { list: [{ vod_name: 'test movie' }] }, 'ok'],
+  ['有效结果', { list: [{ vod_id: 1, vod_name: 'test movie' }] }, 'ok'],
   ['空结果', { list: [] }, 'empty'],
-  ['无匹配标题', { list: [{ vod_name: 'other' }] }, 'empty'],
+  ['无匹配标题', { list: [{ vod_id: 1, vod_name: 'other' }] }, 'empty'],
+  [
+    '混合脏条目',
+    { list: [null, { vod_name: 'test' }, { vod_id: 1, vod_name: 'test' }] },
+    'ok',
+  ],
+  ['全部脏条目', { list: [null, { vod_name: 'test' }] }, 'error'],
   ['无效结构', { list: null }, 'error'],
+  ['搜索未开放', { code: 1002, list: [] }, 'error'],
 ])('%s 写入对应健康样本', async (_label, data, outcome) => {
   mockConfig.mockResolvedValue({
     SourceConfig: [{ key: 'one', api: 'https://example.com' }],
   });
   mockFetch.mockResolvedValue(new Response(JSON.stringify(data)));
-  await (await GET(request())).text();
+  const body = await (await GET(request())).text();
+  expect(body).toContain(
+    `"status":"${outcome === 'error' ? 'invalid' : outcome === 'empty' ? 'no_results' : 'valid'}"`,
+  );
   expect(mockRecord).toHaveBeenCalledWith('one', outcome, expect.any(Number));
   expect(mockFlushHealth).toHaveBeenCalledTimes(1);
 });
@@ -177,3 +192,28 @@ it.each(['https://girigirilove.com', 'https://xgcartoon.com'])(
     expect(mockRecord).not.toHaveBeenCalled();
   },
 );
+
+it('西瓜卡通按网页搜索检测，区分有效、无匹配与页面异常', async () => {
+  mockConfig.mockResolvedValue({
+    SourceConfig: [
+      { key: 'xigua', name: '西瓜卡通', api: 'https://www.xgcartoon.com' },
+    ],
+  });
+  const html =
+    '<a href="/detail/test" class="topic-list-item"><div class="h3">test anime</div></a>';
+  for (const [body, status] of [
+    [html, 'valid'],
+    ['共 0 条搜索结果', 'no_results'],
+    ['<html>Just a moment...</html>', 'invalid'],
+  ]) {
+    mockFetch.mockResolvedValue(new Response(body));
+    const result = await (await GET(request())).text();
+    expect(result).toContain(`"status":"${status}"`);
+  }
+  expect(
+    mockFetch.mock.calls.every(
+      ([url]) => url === 'https://www.xgcartoon.com/search?q=test',
+    ),
+  ).toBe(true);
+  expect(mockRecord).not.toHaveBeenCalled();
+});

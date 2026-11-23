@@ -8,6 +8,8 @@ jest.mock('next/navigation', () => ({
   useRouter: () => ({ back: mockBack, replace: mockReplace }),
 }));
 
+import { rememberPlayReturnTo } from '@/lib/navigation-return';
+
 import { useBackNavigation } from './useBackNavigation';
 
 function setNavigation(entries: string[] | null) {
@@ -67,6 +69,18 @@ describe('useBackNavigation', () => {
     const { result } = renderHook(() => useBackNavigation('/'));
     result.current();
 
+    expect(mockReplace).toHaveBeenCalledWith('/favorites');
+  });
+
+  it('播放页短地址读取本页记下的来源', () => {
+    rememberPlayReturnTo('/play/a/1', '/favorites');
+    window.history.replaceState(null, '', '/play/a/1');
+    setNavigation(['/search?q=a', '/play/a/1']);
+
+    const { result } = renderHook(() => useBackNavigation('/'));
+    result.current();
+
+    expect(mockBack).not.toHaveBeenCalled();
     expect(mockReplace).toHaveBeenCalledWith('/favorites');
   });
 });

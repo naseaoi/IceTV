@@ -37,6 +37,7 @@ const mockSourceSwitch = {
 };
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/play',
   useSearchParams: () => mockSearchParams,
 }));
 

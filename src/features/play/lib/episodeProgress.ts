@@ -8,10 +8,35 @@ import {
 } from '@/lib/episode-progress';
 import type { SearchResult, SkipConfig } from '@/lib/types';
 
-import { PLAYBACK_FINISHED_REMAINING_SECONDS } from './resumePlayback';
+import {
+  hasUsableDuration,
+  PLAYBACK_FINISHED_REMAINING_SECONDS,
+} from './resumePlayback';
+
+export function isPlaybackFinished(
+  time: number | null | undefined,
+  duration?: number,
+  skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
+): boolean {
+  if (!hasUsableDuration(duration) || !Number.isFinite(time) || !(time! > 0)) {
+    return false;
+  }
+  const outroAt =
+    skipConfig?.enable && skipConfig.outro_time < 0
+      ? duration! + skipConfig.outro_time
+      : Infinity;
+  return (
+    time! >= duration! - PLAYBACK_FINISHED_REMAINING_SECONDS || time! >= outroAt
+  );
+}
 
 // 点开就切走的集不算看过：不写入每集进度，也不覆盖已有的看完记录
 export const MIN_WATCHED_SECONDS = 10;
+
+export function getPlaybackRecordsRetryDelay(attempt: number): number {
+  return Math.min(1000 * 2 ** attempt, 30_000);
+}
+
 const SPECIAL_EPISODE_PATTERN =
   /^(?:sp|ova|oad|special|pv|cm)(?![a-z])|特别篇|特別篇|总集篇|總集篇|预告|預告|先行|番外/;
 const EPISODE_NUMBER_PATTERNS = [
@@ -102,13 +127,7 @@ export function getEpisodeProgressView(
   skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
 ): EpisodeProgressView | null {
   if (!entry || entry.d <= 0 || entry.t < MIN_WATCHED_SECONDS) return null;
-  const outroAt =
-    skipConfig?.enable && skipConfig.outro_time < 0
-      ? entry.d + skipConfig.outro_time
-      : Infinity;
-  const finished =
-    entry.t >= entry.d - PLAYBACK_FINISHED_REMAINING_SECONDS ||
-    entry.t >= outroAt;
+  const finished = isPlaybackFinished(entry.t, entry.d, skipConfig);
   return { finished, ratio: finished ? 1 : Math.min(1, entry.t / entry.d) };
 }
 
@@ -128,6 +147,20 @@ export function isFinishedWhenLeavingForNext(
       LEAVE_FOR_NEXT_FINISHED_MAX_SECONDS,
     )
   );
+}
+
+// 轻提示以片尾点（未启用跳过时为媒体结尾）计算剩余时间，不改变看完与起播决策。
+export function isNearPlaybackCompletion(
+  time: number,
+  duration: number,
+  skipConfig?: Pick<SkipConfig, 'enable' | 'outro_time'> | null,
+): boolean {
+  if (!Number.isFinite(time) || !hasUsableDuration(duration)) return false;
+  const end =
+    skipConfig?.enable && skipConfig.outro_time < 0
+      ? duration + skipConfig.outro_time
+      : duration;
+  return hasUsableDuration(end) && isFinishedWhenLeavingForNext(time, end);
 }
 
 /** 切到某集时的续播点：看到一半从上次位置继续，看完或没有记录从头播 */

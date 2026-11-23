@@ -68,6 +68,10 @@ export interface UseArtPlayerParams {
   danmakuEnabledRef: MutableRefObject<boolean>;
   onDanmakuEnabledChange?: (enabled: boolean) => void;
   onPlaybackStarted?: () => void;
+  startStateRef?: MutableRefObject<
+    import('@/features/play/lib/playbackStartState').PlaybackStartState
+  >;
+  resolveStartDuration?: (duration: number) => boolean;
   onDanmakuEnable?: () => void;
   playbackIntentRef?: MutableRefObject<VodPlaybackIntent>;
   onSourceProxyFallbackStarted?: () => void;
@@ -81,6 +85,8 @@ export interface UseArtPlayerParams {
     info: CurrentSourceVideoInfo,
     context: CurrentSourceVideoInfoContext,
   ) => void;
-  // 最后一集真正播完（含跳片尾停在结尾）时调用，不自动连播的情形才会触发
-  onLastEpisodeEnded?: () => void;
+  // 接近末集结尾时申请轻提示；页面负责连载判断与一次性展示资格。
+  onLastEpisodeNearEnd?: () => boolean;
+  // 最后一集真正播完（含跳片尾停在结尾）或用户主动打开观影小结时调用
+  onLastEpisodeEnded?: (manual?: boolean) => void;
 }

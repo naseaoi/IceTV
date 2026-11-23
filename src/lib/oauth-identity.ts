@@ -1,5 +1,8 @@
+export const OAUTH_PROVIDERS = ['linuxdo'] as const;
+export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
+
 export type OAuthIdentity = {
-  provider: 'linuxdo';
+  provider: OAuthProvider;
   providerUserId: string;
   username: string;
   providerUsername: string;

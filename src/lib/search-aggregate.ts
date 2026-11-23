@@ -5,6 +5,7 @@ import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import type { CachedSearchAggregateEntry } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
+import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import {
   type SourceHealthTier,
   SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
@@ -245,23 +246,4 @@ function filterSearchResults(
 
     return isTitleMatchedSearchQuery(result.title || '', query);
   });
-}
-
-function normalizeSearchMatchText(text: string): string {
-  return text
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[《》「」『』【】()[\]（）]/g, '')
-    .replace(/[\s\u00a0\u3000·•・.。:：,，!！?？'"`~～_\-—]/g, '');
-}
-
-function isTitleMatchedSearchQuery(title: string, query: string): boolean {
-  const normalizedTitle = normalizeSearchMatchText(title);
-  const normalizedQuery = normalizeSearchMatchText(query);
-
-  if (!normalizedQuery) {
-    return true;
-  }
-
-  return normalizedTitle.includes(normalizedQuery);
 }

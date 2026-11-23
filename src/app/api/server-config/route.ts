@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     FooterText: publicConfig.FooterText,
     StorageType: getStorageType(),
     Version: CURRENT_VERSION,
-    OpenRegister: publicConfig.OpenRegister,
+    PasswordRegister: publicConfig.PasswordRegister,
     LinuxDoLogin: publicConfig.LinuxDoLogin,
     RequireInviteCode: publicConfig.RequireInviteCode,
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',

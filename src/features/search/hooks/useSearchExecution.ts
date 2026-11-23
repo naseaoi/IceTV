@@ -218,19 +218,19 @@ export function useSearchExecution({
                 break;
               case 'complete':
                 setCompletedSources(payload.completedSources || 0);
-                // 完成前写入缓冲
-                if (pendingResultsRef.current.length > 0) {
-                  const toAppend = pendingResultsRef.current;
-                  pendingResultsRef.current = [];
-                  if (flushTimerRef.current) {
-                    clearTimeout(flushTimerRef.current);
-                    flushTimerRef.current = null;
-                  }
-                  startTransition(() => {
+                // 结束标记与最后一批结果共用 transition，避免先提交空结果的完成态。
+                startTransition(() => {
+                  if (pendingResultsRef.current.length > 0) {
+                    const toAppend = pendingResultsRef.current;
+                    pendingResultsRef.current = [];
+                    if (flushTimerRef.current) {
+                      clearTimeout(flushTimerRef.current);
+                      flushTimerRef.current = null;
+                    }
                     setSearchResults((prev) => prev.concat(toAppend));
-                  });
-                }
-                setIsLoading(false);
+                  }
+                  setIsLoading(false);
+                });
                 try {
                   es.close();
                 } catch {}
@@ -246,19 +246,19 @@ export function useSearchExecution({
 
         es.onerror = () => {
           if (!active) return;
-          setError('搜索未完成');
-          setIsLoading(false);
-          if (pendingResultsRef.current.length > 0) {
-            const toAppend = pendingResultsRef.current;
-            pendingResultsRef.current = [];
-            if (flushTimerRef.current) {
-              clearTimeout(flushTimerRef.current);
-              flushTimerRef.current = null;
-            }
-            startTransition(() => {
+          startTransition(() => {
+            if (pendingResultsRef.current.length > 0) {
+              const toAppend = pendingResultsRef.current;
+              pendingResultsRef.current = [];
+              if (flushTimerRef.current) {
+                clearTimeout(flushTimerRef.current);
+                flushTimerRef.current = null;
+              }
               setSearchResults((prev) => prev.concat(toAppend));
-            });
-          }
+            }
+            setError('搜索未完成');
+            setIsLoading(false);
+          });
           try {
             es.close();
           } catch {}

@@ -143,8 +143,8 @@ export function useSourceValidation({
                   data.status === 'valid'
                     ? '搜索正常'
                     : data.status === 'no_results'
-                      ? '无法搜索到结果'
-                      : '连接失败';
+                      ? '无搜索结果'
+                      : '搜索请求失败、响应无效或接口未开放搜索';
                 const next: ValidationResult = {
                   key: data.source,
                   name:
@@ -204,7 +204,7 @@ export function useSourceValidation({
         };
       case 'no_results':
         return {
-          text: '无法搜索',
+          text: '无搜索结果',
           className:
             'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300',
           icon: '⚠',
@@ -212,7 +212,7 @@ export function useSourceValidation({
         };
       case 'invalid':
         return {
-          text: '无效',
+          text: '无法搜索',
           className:
             'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300',
           icon: '✗',

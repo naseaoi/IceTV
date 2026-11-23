@@ -104,6 +104,22 @@ describe('register route', () => {
     return config;
   }
 
+  it('账号密码注册通道关闭时拒绝注册', async () => {
+    const { POST } = require('./route');
+    const config = createConfig();
+    Object.assign(config.UserConfig, {
+      RegisterChannels: { Password: false, LinuxDo: true },
+    });
+    (getConfigForRead as jest.Mock).mockResolvedValue(config);
+    const response = await POST(
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: '当前未开放注册' });
+    expect(db.registerUser).not.toHaveBeenCalled();
+    expect(reserveInviteCode).not.toHaveBeenCalled();
+  });
+
   it('registers a user successfully', async () => {
     const { POST } = require('./route');
 

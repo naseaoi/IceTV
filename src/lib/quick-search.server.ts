@@ -9,6 +9,7 @@ import { searchFirstPageFromApi } from '@/lib/downstream';
 import { isGirigiriSource } from '@/lib/downstream-sources/giri';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { isXgcartoonSource } from '@/lib/downstream-sources/xgcartoon';
+import { isXifanSource } from '@/lib/downstream-sources/xifan';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
@@ -257,7 +258,12 @@ async function searchQuickSite({
 }): Promise<{ detail: SearchResult | null; sources: SearchResult[] }> {
   if (signal.aborted) return { detail: null, sources: [] };
 
-  const searchResults = await searchFirstPageFromApi(site, query, { signal });
+  const searchResults = await searchFirstPageFromApi(site, query, {
+    signal,
+    isMatch: (result) =>
+      filterSourcesForPlayback([result], { title: query, year, searchType })
+        .length > 0,
+  });
   if (signal.aborted) return { detail: null, sources: [] };
 
   const matchedSources = filterSourcesForPlayback(
@@ -311,6 +317,7 @@ function canStartFromSearch(site: ApiSite, source: SearchResult): boolean {
   if (
     isGirigiriSource(site) ||
     isXgcartoonSource(site) ||
+    isXifanSource(site) ||
     !source.id ||
     source.source !== site.key ||
     !source.title?.trim() ||

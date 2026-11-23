@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 
 import type { InviteCode } from '@/features/admin/services/inviteCodes';
 import {
-  type InviteCodeCreateResult,
+  type InviteCodeBatchCreateResult,
   type InviteCodePurge,
   type InviteCodeQuery,
   type InviteCodeRow,
@@ -105,27 +105,29 @@ export class SqliteInviteCodeStore {
     })();
   }
 
-  create(items: InviteCode[]): InviteCodeCreateResult {
+  create(items: InviteCode[]): InviteCodeBatchCreateResult {
     if (new Set(items.map((item) => item.code)).size !== items.length)
       return 'exists';
     return this.db
-      .transaction((): InviteCodeCreateResult => {
+      .transaction((): InviteCodeBatchCreateResult => {
         const now = Date.now();
+        const remaining = MAX_INVITE_CODES - this.countActive(now);
+        if (remaining <= 0) return 'limit';
+        const selected = items.slice(0, remaining);
         const existing = this.db.prepare(
           `SELECT 1 FROM invite_codes WHERE code = ? AND ${INVITE_ACTIVE_SQL}`,
         );
-        if (items.some((item) => existing.get(item.code, now))) return 'exists';
-        if (this.countActive(now) + items.length > MAX_INVITE_CODES)
-          return 'limit';
+        if (selected.some((item) => existing.get(item.code, now)))
+          return 'exists';
         const remove = this.db.prepare(
           'DELETE FROM invite_codes WHERE code = ?',
         );
         const insert = this.db.prepare(INVITE_INSERT_SQL);
-        for (const item of items) {
+        for (const item of selected) {
           remove.run(item.code);
           insert.run(...inviteValues(item));
         }
-        return 'created';
+        return { codes: selected.map((item) => item.code) };
       })
       .immediate();
   }

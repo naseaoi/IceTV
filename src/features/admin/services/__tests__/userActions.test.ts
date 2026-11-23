@@ -4,7 +4,6 @@ import { randomBytes } from 'crypto';
 
 import {
   type InviteCode,
-  MAX_INVITE_BATCH_SIZE,
   MAX_INVITE_CODES,
 } from '@/features/admin/services/inviteCodes';
 import type { AdminConfig } from '@/types/admin';
@@ -228,7 +227,9 @@ describe('邀请码后台数据库写入', () => {
       });
     (db.createInviteCodes as jest.Mock)
       .mockReset()
-      .mockResolvedValue('created');
+      .mockImplementation(async (items: InviteCode[]) => ({
+        codes: items.map((item) => item.code),
+      }));
     (db.deleteInviteCode as jest.Mock).mockResolvedValue(true);
   });
 
@@ -263,7 +264,7 @@ describe('邀请码后台数据库写入', () => {
     0,
     -1,
     1.5,
-    MAX_INVITE_BATCH_SIZE + 1,
+    MAX_INVITE_CODES + 1,
     '2',
     null,
     false,
@@ -279,7 +280,7 @@ describe('邀请码后台数据库写入', () => {
     });
     expect(result.status).toBe(400);
     expect(result.body).toEqual({
-      error: `生成数量需在 1-${MAX_INVITE_BATCH_SIZE} 之间`,
+      error: `生成数量需在 1-${MAX_INVITE_CODES} 之间`,
     });
     expect(db.createInviteCodes).not.toHaveBeenCalled();
   });
@@ -300,7 +301,7 @@ describe('邀请码后台数据库写入', () => {
     expect(db.createInviteCodes).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, 1, 3, MAX_INVITE_BATCH_SIZE])(
+  it.each([undefined, 1, 3, MAX_INVITE_CODES])(
     '生成数量 %p 的完整批次并返回兼容字段',
     async (count) => {
       const result = await handleAdminUserAction({
@@ -382,7 +383,26 @@ describe('邀请码后台数据库写入', () => {
     },
   );
 
-  it('批量超限时直接返回容量错误', async () => {
+  it('只返回存储事务按剩余容量实际创建的码', async () => {
+    (db.createInviteCodes as jest.Mock).mockImplementationOnce(
+      async (items: InviteCode[]) => ({
+        codes: items.slice(0, 5).map((item) => item.code),
+      }),
+    );
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: { action: 'createInviteCode', validDays: 7, count: 200 },
+    });
+    const items = (db.createInviteCodes as jest.Mock).mock
+      .calls[0][0] as InviteCode[];
+    const codes = items.slice(0, 5).map((item) => item.code);
+    expect(items).toHaveLength(200);
+    expect(result.body).toEqual({ ok: true, code: codes[0], codes });
+    expect(db.createInviteCodes).toHaveBeenCalledTimes(1);
+  });
+
+  it('剩余容量为零时直接返回容量错误', async () => {
     (db.createInviteCodes as jest.Mock).mockResolvedValue('limit');
     const result = await handleAdminUserAction({
       operatorUsername: 'manager',
@@ -441,13 +461,18 @@ describe('邀请码后台数据库写入', () => {
 
 describe('LinuxDo 后台注册设置', () => {
   beforeEach(() => {
-    process.env.LINUXDO_CLIENT_ID = 'test-client';
-    process.env.LINUXDO_CLIENT_SECRET = 'test-secret';
     mockGetConfig.mockResolvedValue(makeConfig([]));
   });
   it('按配置身份写入并在冲突重试前重新失效缓存', async () => {
     const config = makeConfig([]);
     mockGetConfig.mockResolvedValue(config);
+    config.UserConfig.LinuxDo = {
+      Enabled: false,
+      MinTrustLevel: 1,
+      ClientId: 'client',
+      ClientSecret: 'secret',
+      RedirectUri: '',
+    };
     mockSaveConfig.mockRejectedValueOnce(new ConfigConflictError());
     const result = await handleAdminUserAction({
       operatorUsername: 'owner',
@@ -461,6 +486,9 @@ describe('LinuxDo 后台注册设置', () => {
     expect(config.UserConfig.LinuxDo).toEqual({
       Enabled: true,
       MinTrustLevel: 3,
+      ClientId: 'client',
+      ClientSecret: 'secret',
+      RedirectUri: '',
     });
     expect(mockSaveConfig).toHaveBeenLastCalledWith(config);
     expect(callOrder).toEqual([
@@ -485,7 +513,6 @@ describe('LinuxDo 后台注册设置', () => {
     expect(mockSaveConfig).not.toHaveBeenCalled();
   });
   it('缺凭证时允许关闭而拒绝开启', async () => {
-    delete process.env.LINUXDO_CLIENT_SECRET;
     const act = (Enabled: boolean) =>
       handleAdminUserAction({
         operatorUsername: 'owner',
@@ -495,4 +522,156 @@ describe('LinuxDo 后台注册设置', () => {
     expect((await act(true)).status).toBe(400);
     expect((await act(false)).body).toEqual({ ok: true });
   });
+});
+
+describe('后台凭证与注册通道写入', () => {
+  let config: AdminConfig;
+  const act = (body: unknown) =>
+    handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body,
+    });
+  const credentials = {
+    action: 'setLinuxDoCredentials',
+    clientId: ' client ',
+    clientSecret: ' secret ',
+    redirectUri: '',
+  };
+  beforeEach(() => {
+    config = makeConfig([]);
+    mockGetConfig.mockResolvedValue(config);
+  });
+  it('管理员保存规范化凭证，空密钥保留已有值，开关保留凭证', async () => {
+    expect(
+      await act({
+        ...credentials,
+        redirectUri: ' HTTPS://EXAMPLE.COM:443/api/auth/linuxdo/callback ',
+      }),
+    ).toMatchObject({
+      body: { ok: true },
+      headers: { 'Cache-Control': 'no-store' },
+    });
+    expect(config.UserConfig.LinuxDo).toEqual({
+      Enabled: false,
+      MinTrustLevel: 1,
+      ClientId: 'client',
+      ClientSecret: 'secret',
+      RedirectUri: 'https://example.com/api/auth/linuxdo/callback',
+    });
+    expect(
+      (await act({ ...credentials, clientId: 'updated', clientSecret: ' ' }))
+        .body,
+    ).toEqual({ ok: true });
+    expect(config.UserConfig.LinuxDo).toMatchObject({
+      ClientId: 'updated',
+      ClientSecret: 'secret',
+      RedirectUri: '',
+    });
+    await act({
+      action: 'setLinuxDo',
+      linuxDo: { Enabled: true, MinTrustLevel: 2, ClientSecret: 'injected' },
+    });
+    expect(config.UserConfig.LinuxDo).toMatchObject({
+      Enabled: true,
+      MinTrustLevel: 2,
+      ClientSecret: 'secret',
+    });
+    expect(mockSaveConfig.mock.calls.every(([saved]) => saved === config)).toBe(
+      true,
+    );
+  });
+  it.each([
+    { clientId: '' },
+    { clientId: 'a b' },
+    { clientId: 'a\u0000b' },
+    { clientId: 'a'.repeat(257) },
+    { clientId: null },
+    { clientSecret: 'a'.repeat(513) },
+    { clientSecret: 'a\nb' },
+    { clientSecret: 'a\u007fb' },
+    { clientSecret: null },
+    { redirectUri: 'ftp://example.com/api/auth/linuxdo/callback' },
+    { redirectUri: '/api/auth/linuxdo/callback' },
+    { redirectUri: 'https://u:p@example.com/api/auth/linuxdo/callback' },
+    { redirectUri: 'https://example.com/api/auth/linuxdo/callback#hash' },
+    { redirectUri: 'https://example.com/other' },
+    { redirectUri: null },
+  ])('拒绝无效凭证字段 %o', async (patch) => {
+    expect((await act({ ...credentials, ...patch })).status).toBe(400);
+    expect(mockSaveConfig).not.toHaveBeenCalled();
+  });
+  it('首次保存要求密钥且启用要求两项凭证', async () => {
+    expect((await act({ ...credentials, clientSecret: '' })).body).toEqual({
+      error: '请填写 Client Secret',
+    });
+    expect(
+      (
+        await act({
+          action: 'setLinuxDo',
+          linuxDo: { Enabled: true, MinTrustLevel: 1 },
+        })
+      ).body,
+    ).toEqual({ error: '请先保存 LinuxDo Client ID 与 Client Secret' });
+  });
+  it.each([
+    null,
+    {},
+    { Password: true, LinuxDo: 'true' },
+    { Password: false, LinuxDo: false },
+  ])('拒绝无效注册通道 %o', async (channels) => {
+    const result = await act({ action: 'setRegisterChannels', channels });
+    expect(result.status).toBe(400);
+    if (channels?.Password === false)
+      expect(result.body).toEqual({ error: '至少保留一个注册通道' });
+    expect(mockSaveConfig).not.toHaveBeenCalled();
+  });
+  it.each([
+    { Password: true, LinuxDo: false },
+    { Password: false, LinuxDo: true },
+    { Password: true, LinuxDo: true },
+  ])('保存注册通道 %o', async (channels) => {
+    expect(
+      (await act({ action: 'setRegisterChannels', channels })).body,
+    ).toEqual({ ok: true });
+    expect(config.UserConfig.RegisterChannels).toEqual(channels);
+    expect(callOrder).toEqual(['invalidateConfigCache', 'getConfig']);
+  });
+  it.each(['setLinuxDoCredentials', 'setRegisterChannels'])(
+    '新动作冲突重试重新读取配置：%s',
+    async (action) => {
+      const latest = makeConfig([]);
+      latest.UserConfig.LinuxDo = {
+        Enabled: true,
+        MinTrustLevel: 2,
+        ClientId: 'old',
+        ClientSecret: 'latest-secret',
+        RedirectUri: '',
+      };
+      config.UserConfig.LinuxDo = {
+        ...latest.UserConfig.LinuxDo,
+        ClientSecret: 'old-secret',
+      };
+      mockGetConfig.mockResolvedValueOnce(config).mockResolvedValueOnce(latest);
+      mockSaveConfig.mockRejectedValueOnce(new ConfigConflictError());
+      expect(
+        (
+          await act({
+            ...credentials,
+            action,
+            clientSecret: '',
+            channels: { Password: false, LinuxDo: true },
+          })
+        ).body,
+      ).toEqual({ ok: true });
+      expect(mockSaveConfig).toHaveBeenLastCalledWith(latest);
+      expect(latest.UserConfig.LinuxDo?.ClientSecret).toBe('latest-secret');
+      expect(callOrder).toEqual([
+        'invalidateConfigCache',
+        'getConfig',
+        'invalidateConfigCache',
+        'getConfig',
+      ]);
+    },
+  );
 });

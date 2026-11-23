@@ -3,6 +3,7 @@ import {
   FileText,
   FolderOpen,
   Gauge,
+  KeyRound,
   Megaphone,
   MessageSquare,
   MessageSquareText,
@@ -19,6 +20,7 @@ export type AdminTabId =
   | 'announcements'
   | 'runtime'
   | 'user'
+  | 'registration'
   | 'reviews'
   | 'danmaku'
   | 'video-source'
@@ -101,6 +103,13 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     ownerOnly: false,
   },
   {
+    id: 'registration',
+    label: '注册与登录',
+    icon: KeyRound,
+    group: 'community',
+    ownerOnly: false,
+  },
+  {
     id: 'reviews',
     label: '评价管理',
     icon: MessageSquare,
@@ -131,6 +140,9 @@ export const ADMIN_TABS: AdminTabMeta[] = [
 ];
 
 export const DEFAULT_ADMIN_TAB: AdminTabId = 'site';
+
+// 从其他页面跳到用户页时预填的搜索词，用户页读取后移除
+export const ADMIN_USER_SEARCH_PARAM = 'q';
 
 export function getVisibleTabs(isOwnerRole: boolean): AdminTabMeta[] {
   return ADMIN_TABS.filter((tab) => isOwnerRole || !tab.ownerOnly);

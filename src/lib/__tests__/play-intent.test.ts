@@ -33,6 +33,33 @@ describe('playIntent', () => {
     expect(sessionStorage.getItem(PLAY_INTENT_KEY)).toBeNull();
   });
 
+  it('播放意图携带记录时长与已知集数，消费后清理', () => {
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 6,
+      resumeTime: 1398,
+      recordDuration: 1400,
+      knownEpisodeCount: 28,
+    });
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 8,
+      }),
+    ).toEqual({
+      episodeIndex: 6,
+      resumeTime: 1398,
+      resumeMode: 'forced',
+      recordDuration: 1400,
+      knownEpisodeCount: 28,
+    });
+    expect(hasMatchingPlayIntent({ source: 'source-a', id: 'id-a' })).toBe(
+      false,
+    );
+  });
+
   it('只在 source/id 匹配时消费播放意图', () => {
     savePlayIntent({
       source: 'source-a',

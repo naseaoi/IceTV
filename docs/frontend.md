@@ -8,6 +8,7 @@
 - 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。吸顶导航与筛选栏同样用实底，底色与页面背景一致（`bg-gray-50` / `dark:bg-gray-950`），靠底部分隔线与内容区分；全站不用毛玻璃。叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 - 吸附在桌面顶栏下方的子栏（分区筛选栏、搜索结果栏）根元素加 `data-nav-subbar`，顶栏据此去掉自己的底线，两者连成一块吸顶区，只在子栏底部留一条分隔线。只在部分断点吸附的子栏，只给在顶栏可见断点上吸附的那个元素加。
 - 图标用 `lucide-react` 或 SVG，不用 emoji。
+- 主题切换的圆形扩散动画基于 View Transitions：圆圈外显示的是整页静态快照，持续变化的内容会冻住。播放器、登录页海报墙这类不随主题变化又一直在动的区域加 `data-theme-transition="live"`，过渡期间单独成层实时绘制；叠在 live 区域上方的元素（如手机端登录面板、播放器边缘的面板开关）加 `data-theme-transition="reveal"`，否则过渡期间会被 live 层盖住。
 - 西文字体只用根布局以 `next/font/local` 加载的 Inter（`src/app/fonts/`，可变字重 200–800），不用 `next/font/google`：它在构建时联网下载，Google 偶发返回异常地址会直接让构建失败。
 - 版本面板的四类改动（新增、改进、修复、后台）各用一种固定语义色（`VersionPanel.tsx` 的 `CHANGE_KINDS`），是全站中性配色的特例，其他界面不借用。
 - 提醒小圆点（版本更新等）用纯色实心点，不加描边。版本更新提醒只对站长显示，入口统一走 `useHasUpdate()`。
@@ -28,6 +29,7 @@
 
 ## 加载反馈与骨架
 
+- 简繁匹配的 OpenCC 字典经 `playback-source-match.ts` 动态加载，转换器首次匹配时才创建；作品身份仍按原规则归一化，不做简繁转换。仅用身份函数的模块从 `source-match.ts` 的轻量重导出取值；客户端播放筛选在异步流程里导入匹配模块，搜索聚合在关键词非空时并行加载，有结果但匹配模块尚未就绪时沿用搜索骨架。同步渲染工具只接收已加载的筛选函数，避免静态依赖把字典重新带回各页面首屏分块。
 - 骨架块用 `globals.css` 的 `skeleton` 类（自带底色与扫光，只加在叶子块上，父子叠加会出现两层动画），转圈用 `src/components/Spinner.tsx`（ArtPlayer 缓冲图标复用其 `SPINNER_MARKUP`），整页加载 / 错误用 `LoadingStatePanel`，播放器内遮罩用 `PlayerStateOverlay`。不要再手写 `animate-pulse` 灰块或 `animate-spin` 图标。
 - 客户端导航能否立即切页取决于目标路由的 `loading.tsx`：动态路由的预取只取到最近的 loading 边界，没有边界时点击后旧页面停留到服务端渲染完成（线上至少一次往返，个人主页这类多查询页面达数秒）。页面在渲染前 await 服务端数据（会话、计数、资料）的路由必须配 `loading.tsx`；loading 自身的 await 在预取未命中时同样推迟切页，骨架条数优先取本标签页已知计数（如 `getKnownPublicReviewCount()`、`peekListSummary()`），未知时内容区只转圈。从顶部导航直达、冷启动时标签页内必然没有计数的页面（如片单广场），把条数写入计数 cookie（`plaza_count`），loading 改为服务端组件经 `peekListCountCookie()` 读取（只读 cookie、不查库，缺失时仍转圈），否则冷启动先出现只有转圈的整屏深色空页。父级 loading 会成为所有子路由的外层边界，只想覆盖本页时把 page 与 loading 放进路由组（如 `/u/[profileId]/(profile)`、`/lists/(plaza)`）。
 - 目标路由的预取仍在途中时点击导航，Next 16.2 原版把该页段渲染为空内容：旧页面已卸载、loading 也不出现，表现为首次切页整页（含顶栏）闪黑，loading 引用的客户端分块越慢窗口越长。`patches/next@16.2.10.patch` 让 `layout-router` 在这种预取 Promise 解析为 `null` 时改用最终数据，从而挂起到 loading 边界。升级 Next 时先确认上游 `InnerLayoutRouter` 是否已处理该情况，未处理则把补丁迁到新版本；改补丁后删除 `.next/cache/webpack` 再本地构建，复现方法是悬停顶部导航约 0.5 秒后点击、并给本地服务加 300ms 响应延迟。
@@ -45,7 +47,7 @@
 
 - 缓动统一用 `globals.css` 的 `--motion-spring`（明显回弹）、`--motion-spring-soft`（轻微回弹）、`--motion-ease-out` 与 `--motion-ease-in`，不在组件里另写贝塞尔曲线。弹簧曲线由 `linear()` 采样，不支持时退回近似的 `cubic-bezier`。
 - 浮层进出场：下拉与菜单加 `motion-popover`，弹窗面板加 `motion-dialog`，遮罩加 `motion-backdrop`，统一用 `data-open` 切换。挂载与卸载交给 `usePresence`，**卸载延时要比 CSS 离场过渡长约 40ms**，否则开发模式或主线程繁忙时离场动画会被截断。下拉与菜单用 `--popover-origin` 指定展开原点、`--popover-shift` 指定位移方向。
-- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。从一个弹窗直接切到另一个（同一次提交里卸载旧弹窗、挂载新弹窗，如资料切到修改密码）时，新弹窗沿用遮罩只播面板入场；被切入的弹窗须静态导入，按需加载会在代码块到达前留下无遮罩的空档。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容（传入值须是稳定引用，如 state 或 props 本身；每次渲染新建的对象会让它反复 setState 直至渲染死循环）；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。消息面板等不经 `ModalShell` 的自绘浮层自行监听 Esc 时，先用 `hasOpenModalShell()` 判断，有弹窗叠在上面就不处理，否则会和上层弹窗一起被关闭。自绘浮层锁页面滚动同样用 `useBodyScrollLock`，它只给 `html` 设 `overflow: hidden`；同时锁 `body` 会让 `body` 成为滚动容器，页面已滚动时顶栏等 `sticky` 元素被移出视口。
+- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。点遮罩关闭要求按下也发生在遮罩上：在面板内按下、移到遮罩上松开时，click 落在两者共同的外层容器，只看 click 会在拖选文字后误关弹窗。从一个弹窗直接切到另一个（同一次提交里卸载旧弹窗、挂载新弹窗，如资料切到修改密码）时，新弹窗沿用遮罩只播面板入场；被切入的弹窗须静态导入，按需加载会在代码块到达前留下无遮罩的空档。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容（传入值须是稳定引用，如 state 或 props 本身；每次渲染新建的对象会让它反复 setState 直至渲染死循环）；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。消息面板等不经 `ModalShell` 的自绘浮层自行监听 Esc 时，先用 `hasOpenModalShell()` 判断，有弹窗叠在上面就不处理，否则会和上层弹窗一起被关闭。自绘浮层锁页面滚动同样用 `useBodyScrollLock`，它只给 `html` 设 `overflow: hidden`；同时锁 `body` 会让 `body` 成为滚动容器，页面已滚动时顶栏等 `sticky` 元素被移出视口。
 - 同一区域整组内容切换（如“常看”切换周/月/年）时，内容容器以当前范围为 `key` 重新挂载，条目加 `motion-swap-in` 并给出 `--stagger-index`，容器的 `--swap-shift` 用正负表示切换方向；首次展示不加。
 - 导航与标签栏的选中条用 `useSlidingIndicator`：目标项加 `data-indicator-target`，容器设为定位元素。指示条由 Web Animations 驱动 `transform`，在合成层运行，换页时主线程繁忙也不掉帧，不要改回 `left`/`width` 过渡。随页面重新挂载的导航（顶栏、移动端频道条）传 `memoryKey`，新页面才能从上一页的位置滑过来；路由完成时旧导航的滑动若未播完，新导航按已播时长接着播，不在目标处直接定格；链接式导航配合同文件的 `usePendingTarget`，点击后立即切换选中态，不等路由完成。
 - 收藏爱心的回弹与粒子只在用户点击后、收藏状态真正翻转时播放，异步加载或其他页面同步的状态变化不播放。评分星的弹起同理，由 `RatingInput` 在用户改分时传 `pop` 给 `RatingStars`，外部传入的新分值不播放。

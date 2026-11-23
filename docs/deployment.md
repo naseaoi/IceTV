@@ -174,11 +174,11 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 
 ## LinuxDo 登录
 
-同时配置 `LINUXDO_CLIENT_ID` 与 `LINUXDO_CLIENT_SECRET`，在后台注册设置中开启 LinuxDo 登录并选择最低信任等级。凭证仅服务端使用；登录按钮随首屏运行时配置下发。
+在后台「注册与登录」配置 LinuxDo Connect 的 Client ID 与 Client Secret，再开启 LinuxDo 登录并选择最低信任等级。凭证保存在数据库配置中，仅服务端使用；后台响应中的 Client Secret 恒为空字符串，保存时留空表示保留已有密钥。登录按钮随首屏运行时配置下发。
 
-生产环境建议设置固定 `LINUXDO_REDIRECT_URI`，并在 LinuxDo Connect 应用中登记同一完整回调地址。缺省路径是 `/api/auth/linuxdo/callback`；只有 `TRUSTED_PROXY_COUNT` 为正数时才使用代理的 `x-forwarded-proto` / `x-forwarded-host`，代理须覆盖客户端传入的转发头。多个实例共用 `AUTH_SECRET`，用于验证十分钟有效的 HttpOnly OAuth 状态与待注册 cookie。
+生产环境建议填写固定回调地址，并在 LinuxDo Connect 应用中登记同一完整地址：使用本站的 HTTP/HTTPS 绝对 URL，路径恰为 `/api/auth/linuxdo/callback`，无用户名、密码与 hash。留空则按请求推导；只有 `TRUSTED_PROXY_COUNT` 为正数时才使用代理的 `x-forwarded-proto` / `x-forwarded-host`，代理须覆盖客户端传入的转发头。多个实例共用 `AUTH_SECRET`，用于验证十分钟有效的 HttpOnly OAuth 状态与待注册 cookie。
 
-未绑定用户遵循开放注册、邀请码与默认用户组设置；关闭注册时，用户先用已有账号登录后绑定。自动建号账号保留 LinuxDo 绑定以确保可继续登录。
+开放注册是总开关，账号密码与 LinuxDo 注册通道分别控制普通注册和未绑定身份的自动建号；两个通道至少保留一个选中，总开关关闭时均停止新注册。邀请码与默认用户组对两种注册方式统一生效。已绑定用户登录与已有账号绑定独立于注册通道开关；关闭 LinuxDo 注册时，用户先用已有账号登录后绑定。自动建号账号保留 LinuxDo 绑定以确保可继续登录。
 
 ## 定时维护与源站探测
 

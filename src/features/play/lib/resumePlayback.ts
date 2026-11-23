@@ -63,7 +63,7 @@ export function shouldForcePlaybackStartFromHead({
 }
 
 /**
- * 进度接近片尾时稍微回退几秒，避免落在 ended 附近直接触发播完逻辑。
+ * 恢复真实记录位置，仅在超过实际时长时裁到媒体边界。
  */
 export function resolveResumeTimeTarget(
   targetTime: number,
@@ -73,31 +73,9 @@ export function resolveResumeTimeTarget(
     return 0;
   }
 
-  let safeTarget = Math.max(0, targetTime);
-  if (
-    Number.isFinite(duration) &&
-    typeof duration === 'number' &&
-    duration > 0 &&
-    safeTarget >= duration - 2
-  ) {
-    safeTarget = Math.max(0, duration - 5);
-  }
-
-  return safeTarget;
-}
-
-/** 续播点已在结尾：这集已看完，起播按从头播处理，而不是落在片尾立刻播完 */
-export function isFinishedResumeTarget(
-  targetTime: number | null | undefined,
-  duration?: number,
-): boolean {
-  return (
-    hasUsableDuration(duration) &&
-    Number.isFinite(targetTime) &&
-    (targetTime as number) > 0 &&
-    (targetTime as number) >=
-      (duration as number) - PLAYBACK_FINISHED_REMAINING_SECONDS
-  );
+  return hasUsableDuration(duration)
+    ? Math.min(targetTime, duration as number)
+    : targetTime;
 }
 
 /**

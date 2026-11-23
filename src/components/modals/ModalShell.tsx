@@ -76,6 +76,10 @@ export default function ModalShell({
   const backdropOpen = isOpen && (visible || backdropHeld);
   const backdropOpenRef = useRef(false);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  // 在面板内按下、移到遮罩上松开时，click 落在两者共同的外层容器上；
+  // 只有按下也发生在遮罩上才算点击遮罩，否则框选文字拖出面板会误关弹窗
+  const pressedOnBackdropRef = useRef(false);
   // 冻结 children 快照：关闭动画期间仍显示关闭前的内容，
   // 避免调用方同步清空数据导致"文字先消失、面板后淡出"的视觉割裂。
   const childrenSnapshot = useRef<ReactNode>(children);
@@ -144,14 +148,20 @@ export default function ModalShell({
       ref={overlayRef}
       tabIndex={-1}
       className='fixed inset-0 z-[9999] flex items-center justify-center p-4 outline-none'
+      onPointerDown={(event) => {
+        pressedOnBackdropRef.current =
+          event.target === event.currentTarget ||
+          event.target === backdropRef.current;
+      }}
       onClick={() => {
-        if (closeOnBackdrop) {
+        if (closeOnBackdrop && pressedOnBackdropRef.current) {
           onClose();
         }
       }}
       role='presentation'
     >
       <div
+        ref={backdropRef}
         aria-hidden='true'
         data-open={backdropOpen}
         className={`motion-backdrop absolute inset-0 ${backdropClassName}`}

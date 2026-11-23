@@ -1,9 +1,9 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import {
   type InviteCodeListState,
-  RegistrationSettingsDialog,
-} from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
+  InviteCodesDialog,
+} from '@/features/admin/components/tabs/registration/InviteCodesDialog';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { showToast } from '@/lib/toast';
 jest.mock('@/lib/clipboard', () => ({ copyTextToClipboard: jest.fn() }));
@@ -32,28 +32,13 @@ function renderDialog(
   const onViewCodeUsers = jest.fn();
   const onPurgeInactiveCodes = jest.fn();
   render(
-    <RegistrationSettingsDialog
+    <InviteCodesDialog
       isOpen
-      openRegister
-      requireInviteCode
-      userGroupNames={[]}
-      defaultUserGroup=''
-      isSettingDefaultGroup={false}
       inviteFilter={filter}
       inviteList={inviteList}
-      isTogglingRegister={false}
-      isTogglingInvite={false}
-      linuxDoConfigured={false}
-      linuxDo={{ Enabled: false, MinTrustLevel: 1 }}
-      isSettingLinuxDo={false}
-      onToggleLinuxDo={jest.fn()}
-      onLinuxDoTrustLevelChange={jest.fn()}
       isCreatingCode={false}
       deletingCode={null}
       isPurgingCodes={false}
-      onToggleOpenRegister={jest.fn()}
-      onToggleRequireInviteCode={jest.fn()}
-      onDefaultUserGroupChange={jest.fn()}
       onInviteFilterChange={jest.fn()}
       onCreateCodes={onCreateCodes}
       onDeleteCode={onDeleteCode}
@@ -65,7 +50,7 @@ function renderDialog(
   return { inviteList, onDeleteCode, onViewCodeUsers, onPurgeInactiveCodes };
 }
 
-describe('RegistrationSettingsDialog invite code list', () => {
+describe('InviteCodesDialog code list', () => {
   it('renders paged rows with status, remaining uses and load more', () => {
     const now = Date.now();
     const { inviteList, onDeleteCode, onViewCodeUsers } = renderDialog({
@@ -169,7 +154,7 @@ describe('RegistrationSettingsDialog invite code list', () => {
   });
 });
 
-describe('RegistrationSettingsDialog invite code generator', () => {
+describe('InviteCodesDialog code generator', () => {
   it('creates a batch of random codes and lists them for copying', async () => {
     const codes = ['AAAA2222BBBB', 'CCCC3333DDDD', 'EEEE4444FFFF'];
     const onCreateCodes = jest.fn().mockResolvedValue(codes);
@@ -207,18 +192,74 @@ describe('RegistrationSettingsDialog invite code generator', () => {
     renderDialog({ activeCount: 195 }, 'all', onCreateCodes);
 
     fireEvent.change(screen.getByLabelText('数量'), {
-      target: { value: '6' },
+      target: { value: '200' },
+    });
+    expect(screen.getByLabelText('数量')).toHaveAttribute('max', '200');
+    expect(screen.getByLabelText('自定义邀请码')).toBeDisabled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '生成 5 个' }));
+    });
+
+    expect(onCreateCodes).toHaveBeenCalledWith({ count: 5, validDays: 7 });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('allows a custom code when the remaining capacity truncates a batch to one', async () => {
+    const onCreateCodes = jest.fn();
+    renderDialog({ activeCount: 199 }, 'all', onCreateCodes);
+    fireEvent.change(screen.getByLabelText('数量'), {
+      target: { value: '200' },
+    });
+    expect(screen.getByLabelText('自定义邀请码')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('自定义邀请码'), {
+      target: { value: 'WELCOME' },
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '生成' }));
     });
+    expect(onCreateCodes).toHaveBeenCalledWith({
+      count: 1,
+      validDays: 7,
+      customCode: 'WELCOME',
+    });
+  });
 
-    expect(onCreateCodes).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('数量')).toHaveAttribute(
-      'aria-invalid',
-      'true',
-    );
-    expect(screen.getByText('数量需在 1-5 之间')).toBeInTheDocument();
+  it.each(['0', '-1', '1.5', '201', ''])(
+    'rejects invalid batch count %s',
+    async (count) => {
+      const onCreateCodes = jest.fn();
+      renderDialog({}, 'all', onCreateCodes);
+      const input = screen.getByLabelText('数量');
+      fireEvent.change(input, { target: { value: count } });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+      expect(onCreateCodes).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '数量需在 1-200 之间',
+      );
+    },
+  );
+
+  it('renders and copies all 200 generated codes', async () => {
+    const codes = Array.from({ length: 200 }, (_, index) => `BATCH-${index}`);
+    const onCreateCodes = jest.fn().mockResolvedValue(codes);
+    jest.mocked(copyTextToClipboard).mockResolvedValueOnce(true);
+    renderDialog({}, 'all', onCreateCodes);
+    fireEvent.change(screen.getByLabelText('数量'), {
+      target: { value: '200' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '生成 200 个' }));
+    });
+    expect(onCreateCodes).toHaveBeenCalledWith({ count: 200, validDays: 7 });
+    expect(screen.getByText('已生成 200 个邀请码')).toBeInTheDocument();
+    const created = screen.getByRole('list', { name: '本次生成的邀请码' });
+    expect(within(created).getAllByRole('listitem')).toHaveLength(200);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '复制全部' }));
+    });
+    expect(copyTextToClipboard).toHaveBeenCalledWith(codes.join('\n'));
   });
 
   it('disables generation when the active code limit is reached', () => {

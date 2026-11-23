@@ -58,6 +58,7 @@ export interface AdminConfig {
       tags?: string[];
     }[];
     OpenRegister?: boolean;
+    RegisterChannels?: RegisterChannels;
     RequireInviteCode?: boolean;
     LinuxDo?: LinuxDoLoginSettings;
     LinuxDoConfigured?: boolean;
@@ -120,4 +121,14 @@ export type LinuxDoTrustLevel = 0 | 1 | 2 | 3 | 4;
 export interface LinuxDoLoginSettings {
   Enabled: boolean;
   MinTrustLevel: LinuxDoTrustLevel;
+  ClientId: string;
+  // 仅存储层持有；后台配置接口响应恒为空字符串
+  ClientSecret: string;
+  // 空串表示按请求推导
+  RedirectUri: string;
+}
+
+export interface RegisterChannels {
+  Password: boolean;
+  LinuxDo: boolean;
 }

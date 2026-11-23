@@ -513,7 +513,59 @@ describe('playrecords route', () => {
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
-  it('不带 limit 时保持返回完整记录', async () => {
+  it.each([
+    '',
+    '?limit=20',
+    '?format=page&limit=20',
+    '?format=page&filter=updated',
+    '?format=page&filter=shelved',
+  ])('列表读取 %s 仅裁剪逐集进度且保留存储原值', async (query) => {
+    const full = {
+      ...records['source+new'],
+      episode_progress: [{ k: 'n:1', t: 120, d: 1800, at: 300 }],
+      progress_session_id: 'session-a',
+      progress_sequence: 2,
+    };
+    const items = { 'source+new': Object.freeze(full) };
+    const page = { items, total: 3, nextCursor: '300|source+new' };
+    mockGetAllPlayRecords.mockResolvedValue(items);
+    mockGetPlayRecordPage.mockResolvedValue(page);
+    const response = await GET(
+      createRequest(`http://localhost/api/playrecords${query}`),
+    );
+    const { episode_progress: _progress, ...summary } = full;
+    const expected = { 'source+new': summary };
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(
+      query.includes('format=page') ? { ...page, items: expected } : expected,
+    );
+    expect(full.episode_progress).toEqual([
+      { k: 'n:1', t: 120, d: 1800, at: 300 },
+    ]);
+  });
+
+  it.each(['?keys=source%2Bnew', '?title=新记录&year=2024'])(
+    '定向读取 %s 保留逐集进度',
+    async (query) => {
+      const items = {
+        'source+new': {
+          ...records['source+new'],
+          episode_progress: [{ k: 'n:1', t: 120, d: 1800, at: 300 }],
+        },
+      };
+      mockGetPlayRecordsByKeys.mockResolvedValue(items);
+      mockGetLatestPlayRecordByTitle.mockResolvedValue(items);
+      const response = await GET(
+        createRequest(`http://localhost/api/playrecords${query}`),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(items);
+      expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+      expect(mockGetPlayRecordPage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('不带 limit 时返回全账户列表', async () => {
     const response = await GET(
       createRequest('http://localhost/api/playrecords'),
     );

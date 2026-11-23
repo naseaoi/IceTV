@@ -8,6 +8,7 @@ import {
   isCacheableFragmentUrl,
 } from '@/features/play/lib/fragmentMemoryCache';
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
+import { isPlayPagePath } from '@/features/play/lib/playPageUrl';
 import {
   buildVodProxyUrl,
   isVodM3u8Url,
@@ -27,7 +28,6 @@ export const NEXT_EPISODE_PRELOAD_LIMITS = {
 const BUFFER_TOLERANCE_SECONDS = 0.5;
 const PLAYLIST_TIMEOUT_MS = 10_000;
 const SEGMENT_TIMEOUT_MS = 20_000;
-const PLAY_PAGE_PATH = '/play';
 
 export type NextEpisodeWarmUpConditions = {
   autoPlayNext: boolean;
@@ -466,7 +466,7 @@ function checkPreloadSession(session: PreloadSession): void {
     options.currentEpisodeIndexRef.current !== options.episodeIndex ||
     detail?.source !== options.sourceKey ||
     detail?.id !== options.videoId ||
-    window.location.pathname !== PLAY_PAGE_PATH
+    !isPlayPagePath(window.location.pathname)
   ) {
     cancelNextEpisodePreload();
     return;
