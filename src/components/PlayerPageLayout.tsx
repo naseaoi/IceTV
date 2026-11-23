@@ -40,6 +40,7 @@ const TogglePanelButton = ({
   const title = collapsed ? '展开面板' : '收起面板';
   return (
     <div
+      data-theme-transition='reveal'
       className={`pointer-events-none absolute top-1/2 z-10 hidden -translate-y-1/2 translate-x-1/2 transition-[right] split:block ${PANEL_TRANSITION_CLASS} ${
         collapsed ? 'right-0' : 'right-[21rem] xl:right-[24rem]'
       }`}
@@ -110,7 +111,7 @@ export function PlayerPageLayout({
         {/* 内容区：移动端与竖屏平板上下排列，分栏时播放器吃满剩余宽高 + 固定宽右面板 */}
         <div className='relative flex min-h-0 flex-1 flex-col split:flex-row'>
           <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 split:aspect-auto split:h-full split:max-h-none split:min-w-0 split:flex-1 phone-landscape:aspect-auto phone-landscape:max-h-none phone-landscape:min-h-0 phone-landscape:flex-1'>
-            <div className='absolute inset-0'>
+            <div data-theme-transition='live' className='absolute inset-0'>
               <div
                 ref={artRef}
                 className='h-full w-full overflow-hidden bg-black md:rounded-xl'

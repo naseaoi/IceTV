@@ -35,6 +35,7 @@ describe('ThemeToggle', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
     Object.defineProperty(document, 'startViewTransition', {
       configurable: true,
       value: originalStartViewTransition,
@@ -158,6 +159,96 @@ describe('ThemeToggle', () => {
         ),
       ).toBe(''),
     );
+  });
+
+  it('keeps live regions out of the page snapshot and reveals overlays in sync', async () => {
+    let finishTransition!: () => void;
+    const transitionFinished = new Promise<void>((resolve) => {
+      finishTransition = resolve;
+    });
+    const animate = jest.fn(
+      () => ({ finished: Promise.resolve() }) as unknown as Animation,
+    );
+    Object.defineProperty(document.documentElement, 'animate', {
+      configurable: true,
+      value: animate,
+    });
+    // jsdom 会丢弃不认识的 view-transition-name，按调用记录元素当前的名称
+    const transitionNames = new Map<CSSStyleDeclaration, string>();
+    jest
+      .spyOn(CSSStyleDeclaration.prototype, 'setProperty')
+      .mockImplementation(function (this: CSSStyleDeclaration, name, value) {
+        if (name === 'view-transition-name') {
+          transitionNames.set(this, String(value));
+        }
+      });
+    jest
+      .spyOn(CSSStyleDeclaration.prototype, 'removeProperty')
+      .mockImplementation(function (this: CSSStyleDeclaration, name) {
+        if (name === 'view-transition-name') transitionNames.delete(this);
+        return '';
+      });
+    const nameOf = (testId: string) =>
+      transitionNames.get(screen.getByTestId(testId).style) ?? '';
+    let namesAtCapture: string[] = [];
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      value: (callback: () => void) => {
+        namesAtCapture = ['live', 'hidden-live', 'reveal'].map(nameOf);
+        callback();
+        return {
+          ready: Promise.resolve(),
+          finished: transitionFinished,
+        } as ViewTransition;
+      },
+    });
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: () => ({ matches: false }),
+    });
+    Object.defineProperties(document.documentElement, {
+      clientWidth: { configurable: true, value: 400 },
+      clientHeight: { configurable: true, value: 800 },
+    });
+
+    render(
+      <>
+        <div data-testid='live' data-theme-transition='live' />
+        <div data-testid='hidden-live' data-theme-transition='live' />
+        <div data-testid='reveal' data-theme-transition='reveal' />
+        <ThemeToggle />
+      </>,
+    );
+    const box =
+      (left: number, top: number, width: number, height: number) => () =>
+        ({ left, top, width, height }) as DOMRect;
+    screen.getByTestId('live').getBoundingClientRect = box(0, 0, 200, 100);
+    screen.getByTestId('hidden-live').getBoundingClientRect = box(0, 0, 0, 0);
+    screen.getByTestId('reveal').getBoundingClientRect = box(110, 0, 300, 400);
+    const button = screen.getByRole('button', { name: '切换主题' });
+    button.querySelector<HTMLElement>(
+      '[data-theme-transition-anchor]',
+    )!.getBoundingClientRect = box(340, 20, 20, 20);
+
+    fireEvent.click(button);
+
+    expect(namesAtCapture).toEqual(['theme-live-0', '', 'theme-reveal-0']);
+    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+    expect(animate).toHaveBeenLastCalledWith(
+      {
+        clipPath: [
+          'circle(0% at 80% 7.5%)',
+          `circle(${(Math.hypot(350, 770) / (500 / Math.SQRT2)) * 100}% at 80% 7.5%)`,
+        ],
+      },
+      expect.objectContaining({
+        pseudoElement: '::view-transition-new(theme-reveal-0)',
+      }),
+    );
+
+    finishTransition();
+    await waitFor(() => expect(nameOf('live')).toBe(''));
+    expect(nameOf('reveal')).toBe('');
   });
 
   it('ignores repeated clicks until the current transition finishes', async () => {

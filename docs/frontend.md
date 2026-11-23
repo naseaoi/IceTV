@@ -8,6 +8,7 @@
 - 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。吸顶导航与筛选栏同样用实底，底色与页面背景一致（`bg-gray-50` / `dark:bg-gray-950`），靠底部分隔线与内容区分；全站不用毛玻璃。叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 - 吸附在桌面顶栏下方的子栏（分区筛选栏、搜索结果栏）根元素加 `data-nav-subbar`，顶栏据此去掉自己的底线，两者连成一块吸顶区，只在子栏底部留一条分隔线。只在部分断点吸附的子栏，只给在顶栏可见断点上吸附的那个元素加。
 - 图标用 `lucide-react` 或 SVG，不用 emoji。
+- 主题切换的圆形扩散动画基于 View Transitions：圆圈外显示的是整页静态快照，持续变化的内容会冻住。播放器、登录页海报墙这类不随主题变化又一直在动的区域加 `data-theme-transition="live"`，过渡期间单独成层实时绘制；叠在 live 区域上方的元素（如手机端登录面板、播放器边缘的面板开关）加 `data-theme-transition="reveal"`，否则过渡期间会被 live 层盖住。
 - 西文字体只用根布局以 `next/font/local` 加载的 Inter（`src/app/fonts/`，可变字重 200–800），不用 `next/font/google`：它在构建时联网下载，Google 偶发返回异常地址会直接让构建失败。
 - 版本面板的四类改动（新增、改进、修复、后台）各用一种固定语义色（`VersionPanel.tsx` 的 `CHANGE_KINDS`），是全站中性配色的特例，其他界面不借用。
 - 提醒小圆点（版本更新等）用纯色实心点，不加描边。版本更新提醒只对站长显示，入口统一走 `useHasUpdate()`。

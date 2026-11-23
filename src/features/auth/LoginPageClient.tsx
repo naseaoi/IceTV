@@ -307,7 +307,10 @@ export function LoginPageClient() {
 
   return (
     <div className='flex min-h-[100dvh] flex-col bg-white dark:bg-gray-950 lg:flex-row'>
-      <section className='relative isolate h-[40svh] min-h-[260px] shrink-0 overflow-hidden bg-gray-950 lg:h-auto lg:min-h-0 lg:flex-1 [@media(max-height:500px)_and_(max-width:1023px)]:h-36 [@media(max-height:500px)_and_(max-width:1023px)]:min-h-0'>
+      <section
+        data-theme-transition='live'
+        className='relative isolate h-[40svh] min-h-[260px] shrink-0 overflow-hidden bg-gray-950 lg:h-auto lg:min-h-0 lg:flex-1 [@media(max-height:500px)_and_(max-width:1023px)]:h-36 [@media(max-height:500px)_and_(max-width:1023px)]:min-h-0'
+      >
         <PosterWallBackdrop />
         <div className='absolute inset-0 bg-[radial-gradient(120%_90%_at_30%_40%,transparent_20%,rgba(0,0,0,0.55)_100%)]' />
         <div className='absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-black/90 via-black/45 to-transparent' />
@@ -325,7 +328,10 @@ export function LoginPageClient() {
         </Link>
       </section>
 
-      <div className='relative z-10 -mt-6 flex flex-1 flex-col rounded-t-[28px] bg-white dark:bg-gray-950 dark:ring-1 dark:ring-white/[0.06] lg:mt-0 lg:w-[480px] lg:flex-none lg:rounded-none xl:w-[520px]'>
+      <div
+        data-theme-transition='reveal'
+        className='relative z-10 -mt-6 flex flex-1 flex-col rounded-t-[28px] bg-white dark:bg-gray-950 dark:ring-1 dark:ring-white/[0.06] lg:mt-0 lg:w-[480px] lg:flex-none lg:rounded-none xl:w-[520px]'
+      >
         <ThemeToggle className='absolute right-4 top-5 flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-200 lg:right-6 lg:top-6' />
 
         <main className='flex flex-1 justify-center px-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-7 sm:px-8 lg:items-center lg:px-14 lg:pb-16 lg:pt-16'>
