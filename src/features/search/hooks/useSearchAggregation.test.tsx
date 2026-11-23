@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 import {
   FilterState,
@@ -28,6 +28,29 @@ function createResult(partial: Partial<SearchResult>): SearchResult {
 }
 
 describe('useSearchAggregation', () => {
+  it.each([
+    ['  Title  ', false],
+    ['   ', true],
+  ])('按非空关键词提前加载匹配模块：%j', async (searchQuery, waiting) => {
+    const { result, rerender } = renderHook(
+      ({ searchResults }: { searchResults: SearchResult[] }) =>
+        useSearchAggregation({
+          searchResults,
+          filterAll: emptyFilter,
+          filterAgg: emptyFilter,
+          searchQuery,
+        }),
+      { initialProps: { searchResults: [] as SearchResult[] } },
+    );
+
+    expect(result.current.isMatchingLoading).toBe(false);
+    await act(async () => {});
+    rerender({ searchResults: [createResult({ title: 'Title' })] });
+
+    expect(result.current.isMatchingLoading).toBe(waiting);
+    expect(result.current.filteredAggResults).toHaveLength(waiting ? 0 : 1);
+  });
+
   it('updates aggregated results when streaming search appends results', async () => {
     const { result, rerender } = renderHook(
       ({ searchResults }: { searchResults: SearchResult[] }) =>

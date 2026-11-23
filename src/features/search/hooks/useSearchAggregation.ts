@@ -224,11 +224,12 @@ export function useSearchAggregation({
   const [matcher, setMatcher] = useState<PlaybackMatcher | null>(null);
   const [matcherError, setMatcherError] = useState<Error | null>(null);
   const hasResults = searchResults.length > 0;
+  const trimmedSearchQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
 
   useEffect(() => {
-    if (!hasResults || matcher) return;
+    if (!trimmedSearchQuery || matcher) return;
     let active = true;
-    // 渲染与排序只使用轻量工具；收到结果后才加载简繁字典。
+    // 渲染与排序只使用轻量工具；搜索开始时并行加载简繁字典。
     void import('@/lib/playback-source-match').then(
       (loaded) => {
         if (active) setMatcher(loaded);
@@ -240,7 +241,7 @@ export function useSearchAggregation({
     return () => {
       active = false;
     };
-  }, [hasResults, matcher]);
+  }, [trimmedSearchQuery, matcher]);
 
   // 聚合卡片 refs 与统计缓存
   const groupRefs = useRef<
@@ -262,7 +263,6 @@ export function useSearchAggregation({
     return ref;
   };
 
-  const trimmedSearchQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
   const searchIndexState = useSearchAggregationIndex(searchResults);
 
   const aggregatedResults = useMemo(

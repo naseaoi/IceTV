@@ -326,19 +326,24 @@ function AuthenticatedSearchPageClient() {
                 onRetry={retryFailedSources}
               />
             )}
-            {searchResults.length === 0 ? (
+            {resultCount === 0 ? (
               isLoading || (allSourcesFailed && retryingFailed) ? (
                 <SearchResultsLoading />
-              ) : error ? null : allSourcesFailed ? (
+              ) : error &&
+                searchResults.length === 0 ? null : allSourcesFailed ? (
                 <LoadErrorState
                   message='搜索失败'
                   onRetry={retryFailedSources}
                 />
               ) : (
-                <SearchEmptyState text='未找到相关结果' />
+                <SearchEmptyState
+                  text={
+                    searchResults.length === 0
+                      ? '未找到相关结果'
+                      : '当前筛选无结果'
+                  }
+                />
               )
-            ) : resultCount === 0 ? (
-              <SearchEmptyState text='当前筛选无结果' />
             ) : aggregate ? (
               <VirtualizedSearchGrid
                 key='search-results-agg'
