@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import { VersionPanel } from '@/components/VersionPanel';
@@ -88,11 +88,45 @@ describe('VersionPanel 后台条目', () => {
     );
   });
 
+  it('站长在升级状态返回前看到不可点的「升级」，不显示「前往更新」', async () => {
+    asRole('owner');
+    let resolveStatus: (value: unknown) => void = () => undefined;
+    global.fetch = jest.fn((url: string) =>
+      url === '/api/admin/upgrade'
+        ? new Promise((resolve) => {
+            resolveStatus = resolve;
+          })
+        : Promise.resolve({
+            ok: true,
+            json: async () => ({ latestVersion: '3.0.0', changelog: [] }),
+          }),
+    ) as never;
+    render(<VersionPanel isOpen onClose={jest.fn()} />);
+
+    const button = await screen.findByRole('button', { name: '升级' });
+    expect(button).toBeDisabled();
+    expect(screen.queryByText('前往更新')).not.toBeInTheDocument();
+
+    resolveStatus({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'application/json']]),
+      json: async () => ({
+        available: true,
+        status: { capable: true, job: { phase: 'idle' } },
+      }),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '升级' })).toBeEnabled(),
+    );
+  });
+
   it.each(['owner', 'admin'] as const)(
     '%s 看到后台条目与仅后台改动的版本',
-    (role) => {
+    async (role) => {
       asRole(role);
       render(<VersionPanel isOpen onClose={jest.fn()} />);
+      await act(async () => undefined);
 
       expect(screen.getByText('当前版本后台改动')).toBeInTheDocument();
       expect(screen.getByText('仅后台改动')).toBeInTheDocument();

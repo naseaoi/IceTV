@@ -122,7 +122,8 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     (session.role === 'owner' || session.role === 'admin');
   const isOwner =
     session.status === 'authenticated' && session.role === 'owner';
-  const upgrade = useWebUpgrade(isOpen && hasUpdate && isOwner);
+  // 与版本检查并行请求升级状态，避免站长先看到「前往更新」
+  const upgrade = useWebUpgrade(isOpen && isOwner);
   const [confirmRestart, setConfirmRestart] = useState(false);
 
   useEffect(() => {
@@ -254,15 +255,16 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   const renderUpdateAction = () => {
     const { view, submitting } = upgrade;
     switch (view.kind) {
+      case 'checking':
       case 'upgrade':
         return (
           <button
             type='button'
             onClick={() => void upgrade.pull()}
-            disabled={submitting}
+            disabled={submitting || view.kind === 'checking'}
             className={UPDATE_ACTION_CLASS}
           >
-            {submitting ? (
+            {submitting || view.kind === 'checking' ? (
               <Spinner className='h-3.5 w-3.5' />
             ) : (
               <Download className='h-3.5 w-3.5' />
