@@ -12,6 +12,8 @@ const SECTION_MAP = {
   Admin: 'admin',
 };
 const SECTION_KEYS = Object.values(SECTION_MAP);
+// 先判受众再判类型：以这些词开头的条目只有站长与管理员能感知，只查 [Unreleased]，已发布版本不回改
+const ADMIN_ONLY_ITEM_RE = /^(?:修复)?(?:后台|站长|管理员)/;
 
 function isEmptyEntry(entry) {
   return SECTION_KEYS.every((key) => entry[key].length === 0);
@@ -130,6 +132,8 @@ function validateChangelog(content) {
   const seenVersions = new Set();
   let seenVersionHeading = false;
   let seenUnreleased = false;
+  let inUnreleased = false;
+  let currentSection = null;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
@@ -138,15 +142,34 @@ function validateChangelog(content) {
         errors.push('[Unreleased] 只能出现一次且位于所有版本之前');
       }
       seenUnreleased = true;
+      inUnreleased = true;
+      currentSection = null;
     } else if (CHANGELOG_VERSION_RE.test(trimmedLine)) {
       seenVersionHeading = true;
+      inUnreleased = false;
     } else if (trimmedLine.startsWith('## ')) {
       errors.push(`无效的版本标题: ${trimmedLine}`);
     }
 
     const sectionMatch = trimmedLine.match(CHANGELOG_SECTION_RE);
-    if (sectionMatch && !SECTION_MAP[sectionMatch[1]]) {
-      errors.push(`不支持的章节标题: ${trimmedLine}`);
+    if (sectionMatch) {
+      currentSection = SECTION_MAP[sectionMatch[1]] || null;
+      if (!currentSection) {
+        errors.push(`不支持的章节标题: ${trimmedLine}`);
+      }
+    }
+
+    const itemMatch = trimmedLine.match(CHANGELOG_ITEM_RE);
+    if (
+      inUnreleased &&
+      itemMatch &&
+      currentSection &&
+      currentSection !== 'admin' &&
+      ADMIN_ONLY_ITEM_RE.test(itemMatch[1])
+    ) {
+      errors.push(
+        `只有站长与管理员能感知的条目应写进 ### Admin: ${trimmedLine}`,
+      );
     }
   }
 

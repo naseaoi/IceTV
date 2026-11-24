@@ -93,14 +93,14 @@
 
 按**完整改动单元和风险**验证，不在每次编辑后重复全量执行。CI（`.github/workflows/quality.yml`）跑 `lint:strict`、`typecheck`、`test --runInBand`，本地以同一口径为准。
 
-| 改动范围                               | 验证要求                                                                                |
-| -------------------------------------- | --------------------------------------------------------------------------------------- |
-| 纯文档                                 | 检查链接、命令与当前实现；无需跑应用测试或构建                                          |
-| 单一模块代码                           | 改动文件 ESLint、相关 Jest；TypeScript 改动加 `pnpm typecheck`；UI 交互加浏览器实际操作 |
-| 跨模块、鉴权、数据写入、共享缓存或并发 | `pnpm lint:strict` → `pnpm typecheck` → `pnpm test --runInBand`                         |
-| 发布、依赖或构建配置                   | 上述全量检查，加 `pnpm build`                                                           |
+| 改动范围                                               | 验证要求                                                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 纯文档                                                 | 检查链接、命令与当前实现；无需跑应用测试或构建                                                                                                   |
+| 界面、组件与业务逻辑（含跨模块共享组件）               | 改动文件 ESLint（跨模块用 `pnpm lint:strict`）、`pnpm typecheck`、`pnpm test --runInBand --findRelatedTests <改动文件>`；UI 交互加浏览器实际操作 |
+| 鉴权、数据写入、共享缓存、并发，或 Jest 配置与测试工具 | `pnpm lint:strict` → `pnpm typecheck` → `pnpm test --runInBand`                                                                                  |
+| 发布、依赖或构建配置                                   | 上述全量检查，加 `pnpm build`                                                                                                                    |
 
-- 影响范围不明确时按全量处理；相关测试可用 `pnpm test --runInBand --runTestsByPath <文件>`。仅后续文档变化时可复用代码验证结果。
+- `--findRelatedTests` 按导入关系选出所有直接或间接依赖改动文件的测试，共享组件改动不必为覆盖使用方而跑全量；删除或重命名文件时把引用方一并列入。影响范围不明确时按全量处理。仅后续文档变化时可复用代码验证结果。
 - 中文变更加 `pnpm check:encoding`；MySQL 查询、事务或共享存储变更加 `pnpm test:mysql`；性能改动按 [性能验证](docs/performance-baseline.md) 选择场景。
 - 提交钩子只检查暂存文件的 lint / 格式，CI 不跑 `check:encoding` 与 `test:mysql`。说明实际检查及未覆盖项，不把 skip 当通过。
 
@@ -108,4 +108,4 @@
 
 `docs/` 的索引与维护规则见 [docs/README.md](docs/README.md)。改动使文档中的约束失效时同次更新对应文档。
 
-用户或部署者可感知的改动，同次提交更新 `CHANGELOG.md` 顶部的 `## [Unreleased]`：重要改动单列，细节改动并入已有的概括条目或省略，取舍见 [发布](docs/release.md#条目取舍)。
+用户或部署者可感知的改动，同次提交更新 `CHANGELOG.md` 顶部的 `## [Unreleased]`：先判受众，只有站长、管理员或部署者能感知的一律写进 `Admin`，其余再按类型分 `Added` / `Changed` / `Fixed`；重要改动单列，细节改动并入已有的概括条目或省略，见 [发布](docs/release.md#发布说明)。

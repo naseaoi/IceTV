@@ -104,6 +104,41 @@ ${RELEASED}`;
     });
   });
 
+  it('未发布区块前三节里以后台、站长、管理员开头的条目报错', () => {
+    const manifest = buildChangelogManifest(
+      `## [Unreleased]
+
+### Fixed
+
+- 修复后台搜索框被自动填充
+- 切到后台时保存进度
+
+### Admin
+
+- 后台改动
+
+${RELEASED}`,
+    );
+
+    expect(manifest.errors).toEqual([
+      '只有站长与管理员能感知的条目应写进 ### Admin: - 修复后台搜索框被自动填充',
+    ]);
+  });
+
+  it('已发布版本不受后台条目归属校验', () => {
+    const manifest = buildChangelogManifest(
+      `## [0.5.3] - 2026-11-05
+
+### Changed
+
+- 后台旧条目
+
+${RELEASED}`,
+    );
+
+    expect(manifest.errors).toEqual([]);
+  });
+
   it('发版说明保留后台章节', () => {
     const release = extractLatestRelease(ADMIN_ONLY);
 
