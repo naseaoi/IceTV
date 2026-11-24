@@ -4,9 +4,6 @@
 const fs = require('fs');
 const path = require('path');
 
-const { resolveAppVersion } = require('../src/lib/build-version');
-const packageJson = require('../package.json');
-
 // 获取项目根目录
 const projectRoot = path.resolve(__dirname, '..');
 const publicDir = path.join(projectRoot, 'public');
@@ -16,12 +13,20 @@ const manifestPath = path.join(publicDir, 'manifest.json');
 const siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'IceTV';
 
 // 与 src/lib/site-icon.ts 一致：图标地址带应用版本，换图后长缓存随发版失效
-const iconVersion = encodeURIComponent(
-  resolveAppVersion({
+function resolveIconVersion() {
+  const explicitVersion = process.env.NEXT_PUBLIC_APP_VERSION?.trim();
+  if (explicitVersion) return explicitVersion;
+
+  // 运行时镜像只带 scripts/ 不带 src/，start.js 每次启动都会执行本脚本，版本只能取镜像 ENV；
+  // 本地构建与开发没有注入版本，按 next.config.js 的同一规则解析
+  const { resolveAppVersion } = require('../src/lib/build-version');
+  return resolveAppVersion({
     rootDir: projectRoot,
-    packageVersion: packageJson.version,
-  }),
-);
+    packageVersion: require('../package.json').version,
+  });
+}
+
+const iconVersion = encodeURIComponent(resolveIconVersion());
 const icon = (file) => `/icons/${file}?v=${iconVersion}`;
 
 // manifest.json 模板

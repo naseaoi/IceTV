@@ -310,7 +310,7 @@ docker compose -f compose.yml -f compose.updater.yml up -d
 - 支持 `latest`、`dev` 等浮动标签与单实例镜像部署。固定版本号、digest、无 Compose 标签、挂载缺失或 updater 不可达时，版本面板保留手动更新入口。服务须使用 `image`，升级期间保持 Compose 配置与目标镜像标签稳定，并暂停外部自动更新器及镜像清理任务。
 - updater 同时只执行一个任务，状态保存在内存；任务期间保持 updater 运行。重建使用已拉取的本地镜像（`--pull never`），避免 `pull_policy: always` 再次拉取并覆盖回退镜像；原有数据卷与其他服务保持不变。
 - 新旧容器都以 Docker 健康检查通过为就绪；未配置健康检查时以连续运行 20 秒为准。自动回退只恢复镜像，数据库仍使用原数据卷；**不可逆迁移回退须恢复升级前备份**。SQLite 在线备份位于数据库同目录的 `backups/`，保留最近两份；MySQL 升级前由部署者自行备份，操作见[升级与备份](#升级与备份)。
-- updater 从镜像（而非容器）的 `NEXT_PUBLIC_APP_VERSION` 环境变量读取版本，版本面板据此显示已下载版本并判断是否需要刷新页面，所以 `Dockerfile` 运行阶段必须保留该 `ENV`。容器上覆盖的同名变量不参与判断。
+- updater 从镜像（而非容器）的 `NEXT_PUBLIC_APP_VERSION` 环境变量读取版本，版本面板据此显示已下载版本并判断是否需要刷新页面，所以 `Dockerfile` 运行阶段必须保留该 `ENV`。`start.js` 每次启动都会重新执行 `scripts/generate-manifest.js`，运行时镜像只带 `scripts/` 而不带 `src/`，该脚本只能用这个 `ENV` 给图标地址加版本号，也不能引用 `src/` 下的模块，否则容器启动即退出，网页升级随之回滚。容器上覆盖的同名变量不参与判断。
 - updater 自身由部署者手动升级：沿用同一组 Compose 文件执行 `docker compose ... pull icetv-updater` 与 `docker compose ... up -d --no-deps icetv-updater`。应用与 updater 选择一致的发布通道；updater 参数默认值见 [.env.example](../.env.example)。
 
 ## 升级与备份
