@@ -22,6 +22,7 @@ import {
 } from '@/lib/site-footer';
 import {
   DEFAULT_APPLE_TOUCH_ICON,
+  DEFAULT_FAVICON,
   withSiteIconCacheBuster,
 } from '@/lib/site-icon';
 
@@ -92,7 +93,7 @@ export function SiteProvider({
       });
 
       document.title = nextSiteName;
-      updateIconLink("link[rel='icon']", nextSiteIcon || '/favicon.ico');
+      updateIconLink("link[rel='icon']", nextSiteIcon || DEFAULT_FAVICON);
       updateIconLink(
         "link[rel='apple-touch-icon']",
         nextSiteIcon || DEFAULT_APPLE_TOUCH_ICON,

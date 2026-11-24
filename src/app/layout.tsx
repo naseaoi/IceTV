@@ -24,7 +24,7 @@ import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
-import { DEFAULT_APPLE_TOUCH_ICON } from '@/lib/site-icon';
+import { DEFAULT_APPLE_TOUCH_ICON, DEFAULT_FAVICON } from '@/lib/site-icon';
 import { getStorageType } from '@/lib/storage-type';
 import { buildThemeInitScript, DEFAULT_THEME } from '@/lib/theme-preference';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
@@ -127,7 +127,7 @@ export default async function RootLayout({
           rel='apple-touch-icon'
           href={initialSiteIcon || DEFAULT_APPLE_TOUCH_ICON}
         />
-        <link rel='icon' href={initialSiteIcon || '/favicon.ico'} />
+        <link rel='icon' href={initialSiteIcon || DEFAULT_FAVICON} />
         <script
           dangerouslySetInnerHTML={{
             __html: `window.RUNTIME_CONFIG = ${serializedRuntimeConfig}; window.__runtimeConfigReady = ${runtimeConfigReadyForGuest ? 'true' : 'false'};`,
