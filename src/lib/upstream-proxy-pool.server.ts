@@ -2,6 +2,8 @@ import 'server-only';
 
 import type { Dispatcher } from 'undici';
 
+import { isDevProxyActive } from '@/lib/dev-proxy';
+
 export interface UpstreamRoute {
   readonly id: string;
   readonly proxyUrl?: string;
@@ -21,10 +23,12 @@ const FAILURE_THRESHOLD = 3;
 const MIN_DOWN_MS = 30_000;
 const MAX_DOWN_MS = 300_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
+const MAX_DIRECT_HEALTH_ENTRIES = 1024;
 
 let pool: { raw: string; routes: UpstreamRoute[] } | undefined;
 let roundRobin = 0;
 const health = new Map<string, NodeHealth>();
+const directHealth = new Map<string, NodeHealth>();
 const dispatchers = new Map<string, Promise<Dispatcher>>();
 
 function loadPool(): UpstreamRoute[] {
@@ -34,6 +38,7 @@ function loadPool(): UpstreamRoute[] {
     void dispatcher.then((agent) => agent.close()).catch(() => {});
   dispatchers.clear();
   health.clear();
+  directHealth.clear();
   roundRobin = 0;
   pool = { raw, routes: parsePool(raw) };
   return pool.routes;
@@ -94,12 +99,27 @@ function stickyScore(key: string, id: string): number {
   return hash >>> 0;
 }
 
-function isAvailable(route: UpstreamRoute, now: number): boolean {
-  return !route.proxyUrl || (health.get(route.id)?.downUntil ?? 0) <= now;
+function healthStore(
+  route: UpstreamRoute,
+  hostname: string,
+): [Map<string, NodeHealth>, string] {
+  return route.proxyUrl
+    ? [health, route.id]
+    : [directHealth, hostname.toLowerCase().replace(/\.$/, '')];
+}
+
+function isAvailable(
+  route: UpstreamRoute,
+  hostname: string,
+  now: number,
+): boolean {
+  const [states, key] = healthStore(route, hostname);
+  return (states.get(key)?.downUntil ?? 0) <= now;
 }
 
 // 有标识时按最高随机权重哈希固定出口：节点下线只让原本分到它的标识顺延
 export function getUpstreamRoutes(
+  hostname: string,
   stickyKey?: string,
   usePool = true,
 ): readonly UpstreamRoute[] {
@@ -119,23 +139,29 @@ export function getUpstreamRoutes(
   }
   const now = Date.now();
   const picked = ordered
-    .filter((route) => isAvailable(route, now))
+    .filter((route) => isAvailable(route, hostname, now))
     .slice(0, MAX_ROUTED_ATTEMPTS);
-  if (!picked.includes(DIRECT_ROUTE)) picked.push(DIRECT_ROUTE);
+  if (
+    !picked.includes(DIRECT_ROUTE) &&
+    (isAvailable(DIRECT_ROUTE, hostname, now) || picked.length === 0)
+  )
+    picked.push(DIRECT_ROUTE);
   return picked;
 }
 
-function dispatcherFor(proxyUrl: string): Promise<Dispatcher> {
-  let dispatcher = dispatchers.get(proxyUrl);
+function dispatcherFor(route: UpstreamRoute): Promise<Dispatcher> {
+  const key = route.proxyUrl ?? DIRECT_ROUTE.id;
+  let dispatcher = dispatchers.get(key);
   if (!dispatcher) {
-    dispatcher = import('undici').then(
-      ({ ProxyAgent }) =>
-        new ProxyAgent({
-          uri: proxyUrl,
-          proxyTls: { timeout: connectTimeoutMs() },
-        }),
+    dispatcher = import('undici').then(({ Agent, ProxyAgent }) =>
+      route.proxyUrl
+        ? new ProxyAgent({
+            uri: route.proxyUrl,
+            proxyTls: { timeout: connectTimeoutMs() },
+          })
+        : new Agent({ connect: { timeout: connectTimeoutMs() } }),
     );
-    dispatchers.set(proxyUrl, dispatcher);
+    dispatchers.set(key, dispatcher);
   }
   return dispatcher;
 }
@@ -144,12 +170,18 @@ export async function fetchViaUpstreamRoute(
   route: UpstreamRoute,
   url: string,
   init: RequestInit,
+  usePool = true,
 ): Promise<Response> {
-  if (!route.proxyUrl) return fetch(url, init);
-  // 内置 fetch 的 undici 版本与依赖不同，代理请求统一用依赖自带的 fetch
+  // 开发代理允许跳过本地 DNS 私网校验，direct 必须沿用其全局 dispatcher。
+  if (
+    !route.proxyUrl &&
+    (!usePool || !isUpstreamProxyPoolConfigured() || isDevProxyActive())
+  )
+    return fetch(url, init);
+  // 内置 fetch 的 undici 版本与依赖不同，池内出口统一用依赖自带的 fetch
   const [{ fetch: undiciFetch }, dispatcher] = await Promise.all([
     import('undici'),
-    dispatcherFor(route.proxyUrl),
+    dispatcherFor(route),
   ]);
   const response = await undiciFetch(url, {
     ...(init as Parameters<typeof undiciFetch>[1]),
@@ -162,19 +194,47 @@ export function isUpstreamNetworkFailure(error: unknown): boolean {
   return error instanceof TypeError && error.message === 'fetch failed';
 }
 
-export function reportUpstreamRouteSuccess(route: UpstreamRoute): void {
-  if (!route.proxyUrl) return;
-  const state = health.get(route.id);
-  if (!state) return;
-  if (state.backoffMs > 0)
-    console.info('Upstream proxy node recovered', { node: route.id });
-  health.delete(route.id);
+// 建连阶段的失败说明请求尚未发出，带请求体的请求也可以安全换出口
+const CONNECT_FAILURE_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+]);
+
+export function isUpstreamConnectFailure(error: unknown): boolean {
+  if (!isUpstreamNetworkFailure(error)) return false;
+  const code = ((error as TypeError).cause as { code?: unknown } | undefined)
+    ?.code;
+  return typeof code === 'string' && CONNECT_FAILURE_CODES.has(code);
 }
 
-export function reportUpstreamRouteFailure(route: UpstreamRoute): void {
-  if (!route.proxyUrl) return;
+export function reportUpstreamRouteSuccess(
+  route: UpstreamRoute,
+  hostname: string,
+): void {
+  if (!route.proxyUrl && !isUpstreamProxyPoolConfigured()) return;
+  const [states, key] = healthStore(route, hostname);
+  const state = states.get(key);
+  if (!state) return;
+  if (state.backoffMs > 0)
+    console.info('Upstream route recovered', {
+      node: route.id,
+      ...(route.proxyUrl ? {} : { hostname: key }),
+    });
+  states.delete(key);
+}
+
+export function reportUpstreamRouteFailure(
+  route: UpstreamRoute,
+  hostname: string,
+): void {
+  if (!route.proxyUrl && !isUpstreamProxyPoolConfigured()) return;
+  const [states, key] = healthStore(route, hostname);
   const now = Date.now();
-  const state = health.get(route.id) ?? {
+  const state = states.get(key) ?? {
     failures: 0,
     downUntil: 0,
     backoffMs: 0,
@@ -188,10 +248,17 @@ export function reportUpstreamRouteFailure(route: UpstreamRoute): void {
       : MIN_DOWN_MS;
     state.downUntil = now + state.backoffMs;
     state.failures = 0;
-    console.warn('Upstream proxy node down', {
+    console.warn('Upstream route down', {
       node: route.id,
+      ...(route.proxyUrl ? {} : { hostname: key }),
       seconds: state.backoffMs / 1000,
     });
   }
-  health.set(route.id, state);
+  states.delete(key);
+  states.set(key, state);
+  // 目标主机基数由外部 URL 决定；保留最近失败记录，同时保留过期退避供翻倍使用。
+  if (directHealth.size > MAX_DIRECT_HEALTH_ENTRIES) {
+    const oldest = directHealth.keys().next().value;
+    if (oldest !== undefined) directHealth.delete(oldest);
+  }
 }

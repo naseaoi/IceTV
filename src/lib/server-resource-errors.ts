@@ -9,7 +9,10 @@ export class ResourceLimitError extends Error {
 }
 
 export class UpstreamCooldownError extends ResourceLimitError {
-  constructor(retryAfterSeconds: number) {
+  constructor(
+    retryAfterSeconds: number,
+    readonly responseReceived = false,
+  ) {
     super(503, retryAfterSeconds);
     this.name = 'UpstreamCooldownError';
   }
