@@ -500,6 +500,10 @@ export function videoReviewContract(createStorage: () => IStorage) {
     expect(profile?.nickname).toBe('Alice');
     expect(await storage.isNicknameAvailable('alice')).toBe(false);
     expect(await storage.isNicknameAvailable('ALICE', 'SOCIAL-A')).toBe(true);
+    expect(await storage.isNicknameAvailable(' ＡＬＩＣＥ ')).toBe(false);
+    await storage.registerUser('social-suffix', 'test-password', 'Alice_ld');
+    expect(await storage.isNicknameAvailable('ＡＬＩＣＥ_ld')).toBe(false);
+    expect(await storage.isNicknameAvailable('Alice_ld2')).toBe(true);
     await expect(
       storage.registerUser('social-b', 'test-password', 'alice'),
     ).rejects.toThrow('昵称已被使用');

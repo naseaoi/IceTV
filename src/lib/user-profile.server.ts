@@ -10,6 +10,7 @@ import { isFavoriteWatchStatus } from '@/lib/catalog-favorites';
 import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
+import { LINUXDO_NAME_ATTEMPTS, linuxDoNameSuffix } from '@/lib/oauth-identity';
 import { NicknameTakenError } from '@/lib/review-social-storage';
 import type {
   IStorage,
@@ -19,6 +20,7 @@ import type {
   UserProfileView,
 } from '@/lib/types';
 import {
+  NICKNAME_MAX_LENGTH,
   ProfileValidationError,
   validateAvatarSeed,
   validateBio,
@@ -87,17 +89,45 @@ function ownProfile(profile: UserProfile, showcase: ProfileShowcaseItem[]) {
   };
 }
 
+async function suggestLinuxDoNickname(
+  username: string,
+): Promise<string | null> {
+  const identity = await db.getUserOAuthIdentity(username);
+  if (identity?.provider !== 'linuxdo') return null;
+  const base = Array.from(
+    identity.providerUsername
+      .normalize('NFKC')
+      .trim()
+      .replace(/[^\p{L}\p{N}_\-·]/gu, ''),
+  ).slice(0, NICKNAME_MAX_LENGTH);
+  try {
+    validateNickname(base.join(''));
+  } catch (error) {
+    if (error instanceof ProfileValidationError) return null;
+    throw error;
+  }
+  for (let attempt = 0; attempt < LINUXDO_NAME_ATTEMPTS; attempt++) {
+    const suffix = linuxDoNameSuffix(attempt);
+    const candidate =
+      base.slice(0, NICKNAME_MAX_LENGTH - suffix.length).join('') + suffix;
+    if (await db.isNicknameAvailable(candidate, username)) return candidate;
+  }
+  return null;
+}
+
 export async function handleProfile(request: NextRequest) {
   try {
     const guard = await requireActiveUser(request);
     if (isGuardFailure(guard)) return guard.response;
-    if (request.method === 'GET')
-      return socialJson(
-        ownProfile(
-          await db.ensureUserProfile(guard.username),
-          await db.getProfileShowcase(guard.username),
-        ),
-      );
+    if (request.method === 'GET') {
+      const profile = await db.ensureUserProfile(guard.username);
+      return socialJson({
+        ...ownProfile(profile, await db.getProfileShowcase(guard.username)),
+        suggestedNickname: profile.nickname
+          ? null
+          : await suggestLinuxDoNickname(guard.username),
+      });
+    }
     const body = await socialBody(request);
     if (
       body.nickname === undefined &&

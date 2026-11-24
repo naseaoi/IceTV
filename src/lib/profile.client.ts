@@ -14,6 +14,7 @@ import { DisplayableError, getHttpErrorMessage } from '@/lib/user-facing-error';
 export const PROFILE_REQUIRED_EVENT = 'auth:profile-required';
 export const PROFILE_UPDATED_EVENT = 'profile:updated';
 export type MyProfile = PublicUserRef & {
+  suggestedNickname?: string | null;
   libraryVisibility: LibraryVisibility;
   bio: string | null;
   showcase: ProfileShowcaseItem[];

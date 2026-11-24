@@ -19,6 +19,8 @@
 
 ## 用户资料与关注
 
+- 本人资料接口的 `suggestedNickname` 仅用于表单草稿：已绑定 LinuxDo 且昵称为空时，按绑定的 `providerUsername` 生成；打开资料面板与首次设置昵称共用此建议，保存前保持原资料。建议先做 NFKC、移除昵称字符集以外的字符并按 Unicode 字符截到 16 字，仍违反长度或保留名规则时返回空值；占用检查复用双后端的 `isNicknameAvailable()`，按 `nicknameNorm` 判重。候选与 LinuxDo 登录名共用原名、`_ld`、`_ld2`…`_ld99` 的顺序，附加后缀前截短主体以满足长度上限，全部占用时返回空值。建议属于读取时快照，保存仍校验唯一性；并发抢占返回 409，表单保留草稿供修改。
+
 - 公开评价、个人主页、关注列表与关注动态使用 `profileId`、昵称和头像标识，登录名仅用于服务端身份和后台接口。公开评价与回复的 `author.role` 仅向站长、管理员返回 `owner` / `admin`（归一化环境变量站长优先，其余取 `user_access.role`），普通用户省略该字段。
 - 每个 `users` 行必须有 `user_profiles` 行；建号同事务写入，初始化时补齐。站长无 `users` 行，在会话恢复时按需 `ensureUserProfile()`。用户名比较先归一化。
 - `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports`、`video_review_replies`、`video_review_reply_reports` 的用户删除与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞、举报、回复和回复举报。

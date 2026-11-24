@@ -24,7 +24,11 @@ import {
   recordLoginActivity,
   setAuthCookies,
 } from '@/lib/login-session.server';
-import type { OAuthIdentity } from '@/lib/oauth-identity';
+import {
+  type OAuthIdentity,
+  LINUXDO_NAME_ATTEMPTS,
+  linuxDoNameSuffix,
+} from '@/lib/oauth-identity';
 import { readJsonLimited } from '@/lib/proxy-response-limits';
 import { checkRegistrationRateLimit } from '@/lib/register.server';
 import { NicknameTakenError } from '@/lib/review-social-storage';
@@ -436,9 +440,9 @@ async function createAccount(
       nickname = undefined;
     }
     const password = randomBytes(32).toString('base64url');
-    for (let attempt = 0; attempt < 100; attempt++) {
+    for (let attempt = 0; attempt < LINUXDO_NAME_ATTEMPTS; attempt++) {
       const candidate =
-        attempt === 0 ? raw : `${base}_ld${attempt === 1 ? '' : attempt}`;
+        attempt === 0 ? raw : `${base}${linuxDoNameSuffix(attempt)}`;
       if (
         !isValidUsername(candidate) ||
         candidate === normalizeUsername(getOwnerUsername()) ||

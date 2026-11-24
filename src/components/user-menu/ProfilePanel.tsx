@@ -88,7 +88,7 @@ export function ProfileForm({
     useState<LibraryVisibility>(0);
   const [bio, setBio] = useState('');
   const [watchTimePublic, setWatchTimePublic] = useState(false);
-  const [loaded, setLoaded] = useState(required);
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -120,7 +120,6 @@ export function ProfileForm({
   }, []);
 
   useEffect(() => {
-    if (required) return;
     let active = true;
     getMyProfile()
       .then((profile) => {
@@ -133,7 +132,7 @@ export function ProfileForm({
           watchTimePublic: profile.watchTimePublic,
         };
         setSaved(next);
-        setNickname(next.nickname);
+        setNickname(next.nickname || profile.suggestedNickname || '');
         setAvatarSeed(next.avatarSeed);
         setLibraryVisibility(next.libraryVisibility);
         setBio(next.bio);
@@ -146,7 +145,7 @@ export function ProfileForm({
     return () => {
       active = false;
     };
-  }, [required]);
+  }, []);
 
   async function save(event: React.FormEvent) {
     event.preventDefault();

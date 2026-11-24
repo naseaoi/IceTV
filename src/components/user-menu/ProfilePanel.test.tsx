@@ -65,7 +65,12 @@ afterEach(() => {
 it('首次设置昵称：检测可用后保存并刷新会话', async () => {
   mockSession(null);
   jest.mocked(updateProfile).mockResolvedValue(savedProfile);
-  render(<ProfileForm required />);
+  jest
+    .mocked(getMyProfile)
+    .mockResolvedValue({ ...savedProfile, nickname: null });
+  await act(async () => {
+    render(<ProfileForm required />);
+  });
   expect(saveButton()).toBeDisabled();
   fireEvent.change(screen.getByLabelText('昵称'), {
     target: { value: '光影旅人' },
@@ -84,6 +89,120 @@ it('首次设置昵称：检测可用后保存并刷新会话', async () => {
   expect(refresh).toHaveBeenCalledTimes(1);
   expect(showToast).toHaveBeenCalledWith('个人资料已保存', 'success');
 });
+it.each([false, true])(
+  '空昵称预填建议，等待确认才保存（required=%s）',
+  async (required) => {
+    mockSession(null);
+    jest.mocked(getMyProfile).mockResolvedValue({
+      ...savedProfile,
+      nickname: null,
+      suggestedNickname: 'LinuxReader_ld2',
+    });
+    jest.mocked(updateProfile).mockResolvedValue(savedProfile);
+    await act(async () => {
+      render(<ProfileForm required={required} />);
+    });
+    expect(screen.getByLabelText('昵称')).toHaveValue('LinuxReader_ld2');
+    expect(updateProfile).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+    expect(saveButton()).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    expect(updateProfile).toHaveBeenCalledWith({ nickname: 'LinuxReader_ld2' });
+  },
+);
+
+it('已有昵称优先于建议，用户编辑后保留草稿', async () => {
+  mockSession('光影旅人');
+  jest
+    .mocked(getMyProfile)
+    .mockResolvedValue({ ...savedProfile, suggestedNickname: 'LinuxReader' });
+  await act(async () => {
+    render(<ProfileForm />);
+  });
+  expect(screen.getByLabelText('昵称')).toHaveValue('光影旅人');
+  fireEvent.change(screen.getByLabelText('昵称'), {
+    target: { value: '自己选择' },
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(400);
+  });
+  expect(screen.getByLabelText('昵称')).toHaveValue('自己选择');
+});
+
+it('建议可清空，加载期间禁止编辑，迟到响应在关闭后丢弃', async () => {
+  mockSession(null);
+  let resolve!: (value: Awaited<ReturnType<typeof getMyProfile>>) => void;
+  jest.mocked(getMyProfile).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const { unmount } = render(<ProfileForm />);
+  expect(screen.getByLabelText('昵称')).toBeDisabled();
+  unmount();
+  await act(async () => {
+    resolve({
+      ...savedProfile,
+      nickname: null,
+      suggestedNickname: 'LinuxReader',
+    });
+  });
+  expect(updateProfile).not.toHaveBeenCalled();
+  jest.mocked(getMyProfile).mockResolvedValue({
+    ...savedProfile,
+    nickname: null,
+    suggestedNickname: 'LinuxReader',
+  });
+  await act(async () => {
+    render(<ProfileForm />);
+  });
+  fireEvent.change(screen.getByLabelText('昵称'), { target: { value: '' } });
+  await act(async () => {
+    jest.advanceTimersByTime(400);
+  });
+  expect(screen.getByLabelText('昵称')).toHaveValue('');
+  expect(saveButton()).toBeDisabled();
+});
+
+it('建议在保存前被占用时展示错误并保留草稿', async () => {
+  const { DisplayableError } = await import('@/lib/user-facing-error');
+  mockSession(null);
+  jest.mocked(getMyProfile).mockResolvedValue({
+    ...savedProfile,
+    nickname: null,
+    suggestedNickname: 'LinuxReader',
+  });
+  jest
+    .mocked(updateProfile)
+    .mockRejectedValue(new DisplayableError('昵称已被使用', { status: 409 }));
+  await act(async () => {
+    render(<ProfileForm />);
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(400);
+  });
+  await act(async () => {
+    fireEvent.click(saveButton());
+  });
+  expect(screen.getByRole('alert')).toHaveTextContent('昵称已被使用');
+  expect(screen.getByLabelText('昵称')).toHaveValue('LinuxReader');
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('资料加载失败时显示错误并禁用保存', async () => {
+  mockSession(null);
+  jest.mocked(getMyProfile).mockRejectedValue(new Error('load failed'));
+  await act(async () => {
+    render(<ProfileForm required />);
+  });
+  expect(screen.getByRole('alert')).toHaveTextContent('资料加载失败');
+  expect(saveButton()).toBeDisabled();
+});
+
 it('打开时不检测当前昵称，未改动不可保存', async () => {
   await renderLoadedForm();
   await act(async () => {
