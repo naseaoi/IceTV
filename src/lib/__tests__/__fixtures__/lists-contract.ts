@@ -58,15 +58,20 @@ export function listsContract(
       expect(await storage.countPlazaLists(viewer)).toBe(
         (await storage.getPlazaLists(viewer, 'hot', null)).lists.length,
       );
-      expect(await storage.getListItemCount(hidden.id, viewer)).toBe(
+      const preview = (id: string) => storage.getListHeaderPreview(id, viewer);
+      expect((await preview(hidden.id))?.itemCount ?? null).toBe(
         viewer === 'ALICE' ? 1 : null,
       );
-      expect(await storage.getListItemCount(members.id, viewer)).toBe(
+      expect((await preview(members.id))?.itemCount ?? null).toBe(
         viewer === null ? null : 1,
       );
-      expect(await storage.getListItemCount(everyone.id, viewer)).toBe(1);
-      expect(await storage.getListItemCount(empty.id, viewer)).toBe(0);
-      expect(await storage.getListItemCount('missing', viewer)).toBeNull();
+      expect(await preview(everyone.id)).toEqual({
+        name: everyone.name,
+        description: everyone.description,
+        itemCount: 1,
+      });
+      expect((await preview(empty.id))?.itemCount).toBe(0);
+      expect(await preview('missing')).toBeNull();
     }
     for (const viewer of ['ALICE', 'bobby']) {
       const profile = await storage.getUserProfileView('alice', viewer);

@@ -848,10 +848,16 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         )}
         {userList.loading && visibleUsers.length === 0 ? (
           <AdminUserRowsSkeleton
-            count={Math.min(config.UserConfig.TotalUsers ?? 50, 50)}
+            count={config.UserConfig.TotalUsers}
+            searching={
+              !!userSearch.trim() || userFilter !== 'all' || !!userGroupFilter
+            }
           />
         ) : (
           <UserTable
+            isFiltering={
+              !!userSearch.trim() || userFilter !== 'all' || !!userGroupFilter
+            }
             total={userList.total}
             selectedCount={selectedCount}
             users={visibleUsers}

@@ -1,9 +1,16 @@
 'use client';
 
-import { Check, ChevronLeft, ChevronRight, LocateFixed } from 'lucide-react';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  LocateFixed,
+  SearchX,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import Spinner from '@/components/Spinner';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
@@ -30,6 +37,8 @@ const USER_SCROLL_IDLE_MS = 2000;
 const PROGRAMMATIC_SCROLL_MS = 800;
 // 弹幕集标题常以「【提供方】」开头，提供方已在源标签中展示
 const EPISODE_PROVIDER_PREFIX = /^【[^】]*】\s*/;
+const CANDIDATE_STATE_CLASS = 'shrink-0 px-2 py-6 text-center';
+
 const PROVIDER_TAG_CLASS =
   'flex-shrink-0 rounded bg-gray-900/[0.06] px-1.5 py-0.5 text-[10px] font-medium uppercase leading-none tracking-wide text-gray-500 dark:bg-white/[0.08] dark:text-gray-400';
 
@@ -435,10 +444,15 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
           style={getVerticalScrollMaskStyle(hasTopFade, hasBottomFade)}
           className='flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pb-1'
         >
+          {candidates.length === 0 && loading && (
+            <SearchingState label='搜索中' className={CANDIDATE_STATE_CLASS} />
+          )}
           {candidates.length === 0 && !loading && !error && (
-            <div className='px-2 py-6 text-center text-[13px] text-gray-400 dark:text-gray-500'>
-              {keyword ? '未找到匹配结果' : '输入关键词搜索番剧'}
-            </div>
+            <ListEmptyState
+              icon={<SearchX />}
+              label={keyword ? '未找到匹配结果' : '输入关键词搜索番剧'}
+              className={CANDIDATE_STATE_CLASS}
+            />
           )}
 
           {!openedGroup &&

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 
+import type { ListHeaderPreview } from '@/features/lists/types';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { db } from '@/lib/db';
 
@@ -29,20 +30,24 @@ export async function getPlazaSkeletonCount(): Promise<number | null> {
   }
 }
 
-export async function getListDetailSkeletonCount(
+export async function getListDetailPreview(
   id: string,
-): Promise<number | null> {
+): Promise<ListHeaderPreview | null> {
   try {
     const viewer = await viewerOrUnknown();
     if (viewer === undefined) return null;
     const blocked = await getBlockedListSources();
     if (blocked.size > 0) {
-      return visibleListItems((await db.getList(id, viewer)).items, blocked)
-        .length;
+      const { list, items } = await db.getList(id, viewer);
+      return {
+        name: list.name,
+        description: list.description,
+        itemCount: visibleListItems(items, blocked).length,
+      };
     }
-    return await db.getListItemCount(id, viewer);
+    return await db.getListHeaderPreview(id, viewer);
   } catch (error) {
-    console.error('读取片单条目计数失败', error);
+    console.error('读取片单概要失败', error);
     return null;
   }
 }

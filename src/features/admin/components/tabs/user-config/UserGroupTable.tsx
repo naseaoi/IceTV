@@ -1,6 +1,10 @@
 'use client';
 
+import { Users } from 'lucide-react';
+
+import { ListEmptyState } from '@/components/ListState';
 import MoreMenu from '@/components/MoreMenu';
+import { ADMIN_LIST_COMPACT_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 
 interface UserGroup {
   name: string;
@@ -26,9 +30,11 @@ export function UserGroupTable({
   return (
     <div className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
       {userGroups.length === 0 ? (
-        <p className='bg-white px-3 py-8 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-          暂无用户组
-        </p>
+        <ListEmptyState
+          className={ADMIN_LIST_COMPACT_EMPTY_CLASS}
+          icon={<Users />}
+          label='暂无用户组'
+        />
       ) : (
         <ul
           aria-label='用户组'

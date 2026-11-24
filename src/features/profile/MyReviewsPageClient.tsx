@@ -120,7 +120,10 @@ function buildFilterOptions(counts: Record<ReviewFilter, number> | null) {
 function noop() {}
 
 function ReviewListSkeleton({ count }: { count: number }) {
-  if (count === 0) return <LibraryEmptySkeleton />;
+  if (count === 0)
+    return (
+      <LibraryEmptySkeleton description='在播放页的「评价」里打分或写下感受，就会出现在这里' />
+    );
   return (
     <ul
       aria-hidden='true'

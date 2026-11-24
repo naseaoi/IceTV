@@ -1,17 +1,19 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 
-import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import { SearchingState } from '@/components/ListState';
 import PageLayout from '@/components/PageLayout';
-import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import { SEARCH_BOX_PAGE_SHAPE_CLASS } from '@/components/SearchBox';
 import SkeletonText, { SKELETON_TEXT_STRUT } from '@/components/SkeletonText';
+import Spinner from '@/components/Spinner';
 import {
   SEARCH_CANCEL_BUTTON_CLASS,
   SEARCH_DESKTOP_BAR_CLASS,
   SEARCH_DESKTOP_BAR_ROW_CLASS,
+  SEARCH_FILTER_GROUP_SHAPE_CLASS,
+  SEARCH_FILTER_TRIGGER_SHAPE_CLASS,
   SEARCH_HISTORY_CHIP_SHAPE_CLASS,
   SEARCH_HISTORY_CONTAINER_CLASS,
   SEARCH_HISTORY_HEADER_BUTTON_SHAPE_CLASS,
@@ -20,20 +22,32 @@ import {
   SEARCH_MOBILE_BAR_CLASS,
   SEARCH_MOBILE_BAR_ROW_CLASS,
   SEARCH_MOBILE_FILTER_ROW_CLASS,
+  SEARCH_RESULT_STATE_CLASS,
   SEARCH_RESULTS_CONTAINER_CLASS,
 } from '@/features/search/lib/search-layout';
+import { cacheManager } from '@/lib/db.client.cache';
+
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function SearchResultsLoading() {
-  return (
-    <div className={POSTER_GRID_CLASS} role='status' aria-label='正在搜索'>
-      {Array.from({ length: 14 }, (_, index) => (
-        <HomePosterCardSkeleton key={index} className='w-full' subtitle />
-      ))}
-    </div>
-  );
+  return <SearchingState className={SEARCH_RESULT_STATE_CLASS} />;
 }
 
-export function SearchHistorySkeleton({ count = 8 }: { count?: number }) {
+export function SearchHistorySkeleton({ count }: { count?: number }) {
+  const [cachedCount, setCachedCount] = useState<number | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    setCachedCount(cacheManager.getCachedSearchHistory()?.length ?? null);
+  }, []);
+  const knownCount = count ?? cachedCount;
+  if (knownCount === 0) return null;
+  if (knownCount === null) {
+    return (
+      <div className='flex justify-center py-12'>
+        <Spinner label='加载搜索历史' className='h-6 w-6' />
+      </div>
+    );
+  }
   return (
     <div aria-hidden='true'>
       <div className={SEARCH_HISTORY_HEADER_CLASS}>
@@ -47,7 +61,7 @@ export function SearchHistorySkeleton({ count = 8 }: { count?: number }) {
         />
       </div>
       <div className='flex flex-wrap gap-2'>
-        {Array.from({ length: count }).map((_, index) => (
+        {Array.from({ length: knownCount }).map((_, index) => (
           <div
             key={index}
             className={`skeleton w-20 ${SEARCH_HISTORY_CHIP_SHAPE_CLASS}`}
@@ -92,10 +106,17 @@ function SearchPagePlaceholder({
         <>
           <div data-nav-subbar className={SEARCH_DESKTOP_BAR_CLASS}>
             <div className={SEARCH_DESKTOP_BAR_ROW_CLASS}>
-              <div className='flex min-w-0 flex-1 gap-2'>
-                {Array.from({ length: 4 }, (_, index) => (
-                  <div key={index} className='skeleton h-8 w-14 rounded-full' />
-                ))}
+              <div className='min-w-0 flex-1'>
+                <div className={SEARCH_FILTER_GROUP_SHAPE_CLASS}>
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <div
+                      key={index}
+                      className={`skeleton w-14 ${SEARCH_FILTER_TRIGGER_SHAPE_CLASS}`}
+                    >
+                      {SKELETON_TEXT_STRUT}
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className='skeleton h-5 w-[70px] rounded-full' />
             </div>
@@ -113,19 +134,12 @@ function SearchPagePlaceholder({
   );
 }
 
-function QueryAwareSearchPlaceholder() {
+// 查询参数的等待交给路由边界，避免关键词搜索先渲染历史页骨架。
+export function SearchPageSkeleton() {
   const searchParams = useSearchParams();
   return (
     <SearchPagePlaceholder
       showResults={Boolean(searchParams.get('q')?.trim())}
     />
-  );
-}
-
-export function SearchPageSkeleton() {
-  return (
-    <Suspense fallback={<SearchPagePlaceholder />}>
-      <QueryAwareSearchPlaceholder />
-    </Suspense>
   );
 }

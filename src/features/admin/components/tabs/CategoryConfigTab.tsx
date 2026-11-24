@@ -18,8 +18,10 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { FolderOpen, SearchX } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
@@ -28,6 +30,7 @@ import { SortableCategoryRow } from '@/features/admin/components/tabs/category/S
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { CustomCategory } from '@/features/admin/types/internal';
 import {
   applyClientServerConfig,
@@ -304,8 +307,12 @@ const CategoryConfig = ({
               className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
               {visibleRows.length === 0 && (
-                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {isFiltering ? '没有匹配的分类' : '暂无分类'}
+                <li>
+                  <ListEmptyState
+                    className={ADMIN_LIST_EMPTY_CLASS}
+                    icon={isFiltering ? <SearchX /> : <FolderOpen />}
+                    label={isFiltering ? '没有匹配的分类' : '暂无分类'}
+                  />
                 </li>
               )}
               {visibleRows.map((category) => (

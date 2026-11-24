@@ -259,13 +259,19 @@ export function FavoritesPageClient({
     setFilter('all');
   };
 
+  const emptyDescription = query.trim()
+    ? `找不到与「${query.trim()}」相关的作品`
+    : '当前筛选下没有作品';
+
   let content: React.ReactNode;
   if (loading) {
     content =
       skeletonCount > 0 ? (
         <FavoriteGridSkeleton count={skeletonCount} />
       ) : (
-        <LibraryEmptySkeleton />
+        <LibraryEmptySkeleton
+          description={narrowed ? emptyDescription : undefined}
+        />
       );
   } else if (error && items.length === 0 && !refreshing) {
     content = (
@@ -300,11 +306,7 @@ export function FavoritesPageClient({
       <LibraryEmptyState
         icon={SearchX}
         title='没有匹配的收藏'
-        description={
-          query.trim()
-            ? `找不到与「${query.trim()}」相关的作品`
-            : '当前筛选下没有作品'
-        }
+        description={emptyDescription}
         action={
           <button
             type='button'

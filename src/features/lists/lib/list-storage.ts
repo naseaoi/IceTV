@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 
 import type {
   CreateListInput,
+  ListHeaderPreview,
   ListItem,
   ListItemInput,
   ListLikeState,
@@ -54,7 +55,10 @@ export interface ListStatement {
 export type ListPlan<T> = Generator<ListStatement, T, ListRow[]>;
 export interface ListStore {
   countPlazaLists(viewer: string | null): Promise<number>;
-  getListItemCount(id: string, viewer: string | null): Promise<number | null>;
+  getListHeaderPreview(
+    id: string,
+    viewer: string | null,
+  ): Promise<ListHeaderPreview | null>;
   setListLike(
     username: string,
     id: string,
@@ -281,12 +285,17 @@ export class ListPlans {
     );
     return Number(row.total);
   }
-  *getListItemCount(
+  *getListHeaderPreview(
     id: string,
     viewer: string | null,
-  ): ListPlan<number | null> {
+  ): ListPlan<ListHeaderPreview | null> {
     try {
-      return Number((yield* this.row(id, viewer)).item_count);
+      const row = yield* this.row(id, viewer);
+      return {
+        name: String(row.name),
+        description: String(row.description),
+        itemCount: Number(row.item_count),
+      };
     } catch (error) {
       if (error instanceof ListError && error.status === 404) return null;
       throw error;

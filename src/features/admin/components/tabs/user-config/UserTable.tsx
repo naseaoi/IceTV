@@ -1,13 +1,16 @@
 'use client';
 
+import { SearchX, Users } from 'lucide-react';
 import { type ComponentType, useMemo } from 'react';
 
 import { LinuxDoIcon } from '@/components/LinuxDoIcon';
+import { ListEmptyState } from '@/components/ListState';
 import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import {
   type PermissionContext,
   canChangeUserPassword,
@@ -47,6 +50,7 @@ interface UserTableSource {
 }
 
 interface UserTableProps {
+  isFiltering?: boolean;
   users: User[];
   userGroups: readonly { name: string; enabledApis?: string[] }[];
   sources: readonly UserTableSource[];
@@ -88,6 +92,7 @@ function formatSourceAccess(
 }
 
 export function UserTable({
+  isFiltering = false,
   users,
   userGroups,
   sources,
@@ -154,9 +159,11 @@ export function UserTable({
         )}
       </div>
       {users.length === 0 ? (
-        <p className='bg-white px-3 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-          没有匹配的用户
-        </p>
+        <ListEmptyState
+          className={ADMIN_LIST_EMPTY_CLASS}
+          icon={isFiltering ? <SearchX /> : <Users />}
+          label={isFiltering ? '没有匹配的用户' : '暂无用户'}
+        />
       ) : (
         <ul
           aria-label='用户列表'

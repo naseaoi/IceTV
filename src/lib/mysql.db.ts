@@ -2003,10 +2003,12 @@ export class MySqlStorage implements IStorage {
   ): ReturnType<IStorage['countPlazaLists']> {
     return this.runListPlan(new ListPlans('mysql').countPlazaLists(...args));
   }
-  async getListItemCount(
-    ...args: Parameters<IStorage['getListItemCount']>
-  ): ReturnType<IStorage['getListItemCount']> {
-    return this.runListPlan(new ListPlans('mysql').getListItemCount(...args));
+  async getListHeaderPreview(
+    ...args: Parameters<IStorage['getListHeaderPreview']>
+  ): ReturnType<IStorage['getListHeaderPreview']> {
+    return this.runListPlan(
+      new ListPlans('mysql').getListHeaderPreview(...args),
+    );
   }
   async setListLike(
     ...args: Parameters<IStorage['setListLike']>

@@ -138,19 +138,19 @@ describe('InviteCodesDialog code list', () => {
     ).toBeLessThan(40);
   });
 
-  it('falls back to one skeleton row when the count is unknown', () => {
+  it('shows a spinner when the count is unknown', () => {
     renderDialog({ loading: true });
     expect(
-      screen.getByRole('status', { name: '加载邀请码' }).childElementCount,
-    ).toBe(1);
+      screen.getByRole('status', { name: '加载邀请码' }),
+    ).toHaveTextContent('加载邀请码');
   });
 
-  it('shows the empty state while loading when no codes are expected', () => {
+  it('shows an empty skeleton while loading when no codes are expected', () => {
     renderDialog({ loading: true, expectedCount: 0 });
     expect(
-      screen.queryByRole('status', { name: '加载邀请码' }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText('还没有邀请码')).toBeInTheDocument();
+      screen.getByRole('status', { name: '加载中' }).querySelector('.skeleton'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('还没有邀请码')).not.toBeInTheDocument();
   });
 });
 

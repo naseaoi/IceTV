@@ -2,6 +2,11 @@
 
 import { createContext, useContext } from 'react';
 
+import {
+  ListEmptySkeleton,
+  ListLoadingState,
+  SearchingState,
+} from '@/components/ListState';
 import SkeletonText from '@/components/SkeletonText';
 import {
   ADMIN_PANEL_CLASS,
@@ -24,6 +29,11 @@ import {
   ANNOUNCEMENT_SKELETON_MAX_ROWS,
   ANNOUNCEMENT_TEXT_CLASS,
 } from '@/features/admin/lib/announcement-layout';
+import { getKnownAdminListCount } from '@/features/admin/lib/list-counts';
+import {
+  ADMIN_LIST_COMPACT_EMPTY_CLASS,
+  ADMIN_LIST_EMPTY_CLASS,
+} from '@/features/admin/lib/list-layout';
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
 import {
   USER_DANMAKU_ACTION_CLASS,
@@ -32,6 +42,7 @@ import {
   USER_DANMAKU_TEXT_CLASS,
   USER_DANMAKU_TOOLBAR_CLASS,
 } from '@/features/admin/lib/user-danmaku-layout';
+import { ADMIN_USER_PAGE_SIZE } from '@/features/admin/lib/user-query';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 import type { AdminConfig } from '@/types/admin';
 
@@ -74,16 +85,32 @@ function Field({
   );
 }
 
-export function AdminUserRowsSkeleton({ count = 50 }: { count?: number }) {
-  return <SourceRows count={Math.min(count, 50)} tab='user' />;
+export function AdminUserRowsSkeleton({
+  count,
+  searching = false,
+}: {
+  count?: number;
+  searching?: boolean;
+}) {
+  return (
+    <SourceRows
+      count={
+        count === undefined ? undefined : Math.min(count, ADMIN_USER_PAGE_SIZE)
+      }
+      tab='user'
+      searching={searching}
+    />
+  );
 }
 
 function SourceRows({
   count,
   tab,
   userGroup = false,
+  searching = false,
 }: {
-  count: number;
+  count?: number;
+  searching?: boolean;
   tab: AdminTabId;
   userGroup?: boolean;
 }) {
@@ -101,12 +128,24 @@ function SourceRows({
         </div>
       )}
       <div className='divide-y divide-gray-200 dark:divide-white/[0.06]'>
-        {count === 0 ? (
-          <div
-            className={`flex justify-center px-6 ${userGroup ? 'py-8' : 'py-12'}`}
-          >
-            <Block className='h-5 w-28' />
-          </div>
+        {searching ? (
+          <SearchingState className={ADMIN_LIST_EMPTY_CLASS} />
+        ) : count === undefined ? (
+          <ListLoadingState
+            className={
+              userGroup
+                ? ADMIN_LIST_COMPACT_EMPTY_CLASS
+                : ADMIN_LIST_EMPTY_CLASS
+            }
+          />
+        ) : count === 0 ? (
+          <ListEmptySkeleton
+            className={
+              userGroup
+                ? ADMIN_LIST_COMPACT_EMPTY_CLASS
+                : ADMIN_LIST_EMPTY_CLASS
+            }
+          />
         ) : (
           Array.from({ length: count }, (_, index) => (
             <div
@@ -185,14 +224,20 @@ function SearchToolbar({
   );
 }
 
-export function AdminUserDanmakuRowsSkeleton() {
+export function AdminUserDanmakuRowsSkeleton({
+  count = getKnownAdminListCount('danmaku'),
+}: { count?: number } = {}) {
+  if (count === undefined)
+    return <ListLoadingState className={ADMIN_LIST_EMPTY_CLASS} />;
+  if (count === 0)
+    return <ListEmptySkeleton className={ADMIN_LIST_EMPTY_CLASS} />;
   return (
     <div
       role='status'
       className='divide-y divide-gray-200 dark:divide-white/[0.06]'
     >
       <span className='sr-only'>加载中...</span>
-      {Array.from({ length: 6 }, (_, index) => (
+      {Array.from({ length: count }, (_, index) => (
         <div key={index} className={USER_DANMAKU_ROW_CLASS}>
           <Block className='h-4 w-4 shrink-0 rounded' />
           <div className='min-w-0 flex-1'>
@@ -212,7 +257,11 @@ export function AdminUserDanmakuRowsSkeleton() {
   );
 }
 
-export function AdminAnnouncementRowsSkeleton({ count }: { count: number }) {
+export function AdminAnnouncementRowsSkeleton({ count }: { count?: number }) {
+  if (count === undefined)
+    return <ListLoadingState className={ANNOUNCEMENT_EMPTY_CLASS} />;
+  if (count === 0)
+    return <ListEmptySkeleton className={ANNOUNCEMENT_EMPTY_CLASS} />;
   const rows = Math.min(count, ANNOUNCEMENT_SKELETON_MAX_ROWS);
   return (
     <div
@@ -220,11 +269,6 @@ export function AdminAnnouncementRowsSkeleton({ count }: { count: number }) {
       className='divide-y divide-gray-200 dark:divide-white/[0.06]'
     >
       <span className='sr-only'>加载中...</span>
-      {rows === 0 && (
-        <div className={ANNOUNCEMENT_EMPTY_CLASS}>
-          <SkeletonText className='text-sm' barClassName='h-4 w-20 rounded' />
-        </div>
-      )}
       {Array.from({ length: rows }, (_, index) => (
         <div key={index} className={ANNOUNCEMENT_ROW_CLASS}>
           <div className='min-w-0 flex-1'>
@@ -246,14 +290,20 @@ export function AdminAnnouncementRowsSkeleton({ count }: { count: number }) {
   );
 }
 
-export function AdminReviewRowsSkeleton() {
+export function AdminReviewRowsSkeleton({
+  count = getKnownAdminListCount('reviews'),
+}: { count?: number } = {}) {
+  if (count === undefined)
+    return <ListLoadingState className={ADMIN_LIST_EMPTY_CLASS} />;
+  if (count === 0)
+    return <ListEmptySkeleton className={ADMIN_LIST_EMPTY_CLASS} />;
   return (
     <div
       role='status'
       className='divide-y divide-gray-200 dark:divide-gray-700'
     >
       <span className='sr-only'>加载中...</span>
-      {Array.from({ length: 4 }, (_, index) => (
+      {Array.from({ length: count }, (_, index) => (
         <div key={index} className='flex gap-3 p-4 sm:gap-4'>
           <Block className='h-20 w-14 shrink-0 rounded-md sm:h-24 sm:w-16' />
           <div className='min-w-0 flex-1 space-y-3'>
@@ -384,7 +434,7 @@ export default function AdminContentSkeleton({
               用户列表
             </h2>
             <SearchToolbar user userGroups={!!data?.UserConfig.Tags?.length} />
-            <AdminUserRowsSkeleton count={data?.UserConfig.TotalUsers ?? 50} />
+            <AdminUserRowsSkeleton count={data?.UserConfig.TotalUsers} />
           </div>
           <div>
             <div className='mb-3 flex items-center justify-between'>
@@ -394,7 +444,7 @@ export default function AdminContentSkeleton({
               <Block className='h-8 w-24 rounded-lg' />
             </div>
             <SourceRows
-              count={data ? (data.UserConfig.Tags?.length ?? 0) : 2}
+              count={data ? (data.UserConfig.Tags?.length ?? 0) : undefined}
               tab={tab}
               userGroup
             />
@@ -468,7 +518,7 @@ export default function AdminContentSkeleton({
           </AdminSettingsGroup>
           <AdminSettingsGroup title='公告列表'>
             <AdminAnnouncementRowsSkeleton
-              count={data?.SiteConfig.AnnouncementCount ?? 4}
+              count={data?.SiteConfig.AnnouncementCount}
             />
           </AdminSettingsGroup>
         </div>
@@ -505,7 +555,7 @@ export default function AdminContentSkeleton({
       break;
     default: {
       const count = !data
-        ? 6
+        ? undefined
         : tab === 'video-source'
           ? data.SourceConfig.length
           : tab === 'live-source'

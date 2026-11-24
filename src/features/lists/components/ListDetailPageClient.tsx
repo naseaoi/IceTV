@@ -46,6 +46,7 @@ import {
 } from '@/features/lists/lib/lists-client';
 import type {
   ListDetail,
+  ListHeaderPreview,
   ListItem,
   ListSummary,
   ListViewerProgress,
@@ -104,11 +105,11 @@ function isMissing(error: unknown) {
 
 export function ListDetailPageClient({
   listId,
-  initialItemCount,
+  initialPreview,
 }: {
   listId: string;
-  // 服务端按当前访客可读性读出的条目数，null 表示未知或不可读
-  initialItemCount: number | null;
+  // 服务端按当前访客可读性读出的标题、简介与条目数，null 表示未知或不可读
+  initialPreview: ListHeaderPreview | null;
 }) {
   const router = useRouter();
   const authenticated = useAuthSession().session.status === 'authenticated';
@@ -273,7 +274,7 @@ export function ListDetailPageClient({
         {state.status === 'loading' && (
           <ListDetailSkeleton
             summary={summary}
-            itemCount={summary?.itemCount ?? initialItemCount}
+            preview={initialPreview}
             showBack={authenticated}
           />
         )}
@@ -585,7 +586,6 @@ function ListHeader({
   showBack?: boolean;
   actions?: ReactNode;
 }) {
-  const description = list.description.trim();
   return (
     <header className={HEADER_CLASS}>
       <ListAmbient cover={list.covers[0]} />
@@ -597,18 +597,7 @@ function ListHeader({
           className={HEADER_COVER_CLASS}
         />
         <div className='min-w-0 flex-1'>
-          <h1
-            className={`${NAME_CLASS} break-words font-semibold text-gray-900 dark:text-gray-50`}
-          >
-            {list.name}
-          </h1>
-          {description && (
-            <ExpandableText
-              text={description}
-              lines={3}
-              className={`${DESCRIPTION_CLASS} max-w-2xl whitespace-pre-line text-gray-600 dark:text-gray-300`}
-            />
-          )}
+          <ListHeaderText name={list.name} description={list.description} />
           <div
             className={`${META_CLASS} flex flex-wrap items-center gap-x-4 gap-y-1.5 text-gray-500 dark:text-gray-400`}
           >
@@ -642,6 +631,32 @@ function ListHeader({
         </div>
       </div>
     </header>
+  );
+}
+
+function ListHeaderText({
+  name,
+  description,
+}: {
+  name: string;
+  description: string;
+}) {
+  const text = description.trim();
+  return (
+    <>
+      <h1
+        className={`${NAME_CLASS} break-words font-semibold text-gray-900 dark:text-gray-50`}
+      >
+        {name}
+      </h1>
+      {text && (
+        <ExpandableText
+          text={text}
+          lines={3}
+          className={`${DESCRIPTION_CLASS} max-w-2xl whitespace-pre-line text-gray-600 dark:text-gray-300`}
+        />
+      )}
+    </>
   );
 }
 
@@ -748,7 +763,7 @@ export function ListDetailPageSkeleton({ listId }: { listId: string }) {
       <div className={PAGE_BODY_CLASS}>
         <ListDetailSkeleton
           summary={summary}
-          itemCount={summary?.itemCount ?? null}
+          preview={null}
           showBack={authenticated}
         />
       </div>
@@ -756,34 +771,61 @@ export function ListDetailPageSkeleton({ listId }: { listId: string }) {
   );
 }
 
+// 操作区内容随身份与观看进度变化，占位只画主按钮与图标按钮的轮廓；行高由 ACTIONS_CLASS 固定
+function ListActionsSkeleton() {
+  return (
+    <>
+      <div className='skeleton mr-2 h-9 w-24 rounded-full' />
+      <div className='skeleton h-9 w-9 rounded-full' />
+    </>
+  );
+}
+
 function ListDetailSkeleton({
   summary,
-  itemCount,
+  preview,
   showBack,
 }: {
   summary: ListSummary | null;
-  itemCount: number | null;
+  // 标签页内没有摘要时，用服务端读出的标题与简介撑出真实高度
+  preview: ListHeaderPreview | null;
   showBack: boolean;
 }) {
+  const itemCount = summary?.itemCount ?? preview?.itemCount ?? null;
   return (
     <div aria-hidden='true'>
       {summary ? (
-        <ListHeader list={summary} owner={null} showBack={showBack} />
+        <ListHeader
+          list={summary}
+          owner={null}
+          showBack={showBack}
+          actions={<ListActionsSkeleton />}
+        />
       ) : (
         <div className={HEADER_CLASS}>
           {showBack && <div className={`h-9 ${BACK_BUTTON_CLASS}`} />}
           <div className={HEADER_BODY_CLASS}>
             <div className={`skeleton ${HEADER_COVER_CLASS}`} />
             <div className='min-w-0 flex-1'>
-              <SkeletonText
-                className={NAME_CLASS}
-                barClassName='h-7 w-48 rounded'
-              />
-              <SkeletonText
-                className={META_CLASS}
-                barClassName='h-4 w-56 rounded'
-              />
-              <div className={ACTIONS_CLASS} />
+              {preview ? (
+                <ListHeaderText
+                  name={preview.name}
+                  description={preview.description}
+                />
+              ) : (
+                <SkeletonText
+                  className={NAME_CLASS}
+                  barClassName='h-7 w-48 rounded'
+                />
+              )}
+              {/* 作者占位与行高同为 h-5，撑起元信息行 */}
+              <div className={`${META_CLASS} flex items-center gap-x-4`}>
+                <div className='skeleton h-5 w-20 rounded-full' />
+                <div className='skeleton h-3.5 w-48 rounded' />
+              </div>
+              <div className={ACTIONS_CLASS}>
+                <ListActionsSkeleton />
+              </div>
             </div>
           </div>
         </div>

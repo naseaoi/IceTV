@@ -18,7 +18,15 @@ export const SEARCH_DESKTOP_BAR_CLASS = `hidden sm:block lg:sticky lg:top-16 lg:
 
 export const SEARCH_DESKTOP_BAR_ROW_CLASS = `${PAGE_CONTAINER_CLASS} flex min-h-[60px] items-center gap-4 py-3`;
 
+export const SEARCH_FILTER_GROUP_SHAPE_CLASS =
+  'relative inline-flex max-w-full gap-0.5 overflow-x-auto rounded-full p-1';
+
+export const SEARCH_FILTER_TRIGGER_SHAPE_CLASS =
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px]';
+
 export const SEARCH_RESULTS_CONTAINER_CLASS = `${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-6`;
+
+export const SEARCH_RESULT_STATE_CLASS = 'py-24';
 
 export const SEARCH_HISTORY_CONTAINER_CLASS = `${PAGE_CONTAINER_CLASS} pb-8 pt-5 md:pt-8`;
 

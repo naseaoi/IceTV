@@ -7,12 +7,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
-import {
-  LIBRARY_PILL_BUTTON_CLASS,
-  LibraryEmptyState,
-} from '@/components/LibraryPage';
+import { LIBRARY_PILL_BUTTON_CLASS } from '@/components/LibraryPage';
+import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
-import SkeletonText from '@/components/SkeletonText';
 import {
   type PlacedCalendarItem,
   type TrackingCalendarItem,
@@ -27,7 +24,7 @@ import {
 import { fetchTrackingCalendar } from '@/features/continue-watching/lib/tracking-calendar-client';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
-// 条目与骨架共用几何类，改动时两侧同步
+// 周历外壳与骨架共用几何类，改动时两侧同步
 const ENTRY_CLASS = 'flex items-center gap-3 rounded-xl p-1.5';
 const ENTRY_COVER_CLASS =
   'relative aspect-[2/3] w-11 shrink-0 overflow-hidden rounded-lg';
@@ -114,24 +111,6 @@ function CalendarEntry({
         </p>
       </div>
     </Link>
-  );
-}
-
-function CalendarEntrySkeleton() {
-  return (
-    <div className={ENTRY_CLASS}>
-      <div className={`${ENTRY_COVER_CLASS} skeleton`} />
-      <div className='min-w-0 flex-1'>
-        <SkeletonText
-          className={ENTRY_TITLE_CLASS}
-          barClassName='h-3 w-4/5 rounded'
-        />
-        <SkeletonText
-          className={ENTRY_META_CLASS}
-          barClassName='h-2.5 w-14 rounded'
-        />
-      </div>
-    </div>
   );
 }
 
@@ -277,32 +256,14 @@ function UnscheduledSection({
   );
 }
 
+const CALENDAR_STATE_CLASS = 'px-6 text-center';
+const CALENDAR_STATE_FRAME_CLASS = 'flex flex-col items-center py-20';
+
 export function TrackingCalendarSkeleton() {
   return (
-    <div aria-hidden='true'>
-      <div className='xl:hidden'>
-        <div
-          className={`skeleton ${DAY_STRIP_CLASS} ${DAY_STRIP_HEIGHT_CLASS} box-content`}
-        />
-        <div className={DAY_LIST_CLASS}>
-          {Array.from({ length: 3 }, (_, index) => (
-            <CalendarEntrySkeleton key={index} />
-          ))}
-        </div>
-      </div>
-      <div className={`hidden xl:grid ${WEEK_GRID_CLASS}`}>
-        {WEEKDAYS.map((weekday) => (
-          <div
-            key={weekday}
-            className={`${DAY_COLUMN_CLASS} bg-white/60 ring-1 ring-inset ring-black/[0.05] dark:bg-white/[0.03] dark:ring-white/[0.05]`}
-          >
-            <div className={DAY_HEADER_CLASS}>
-              <div className='skeleton h-3.5 w-8 rounded' />
-            </div>
-            <CalendarEntrySkeleton />
-          </div>
-        ))}
-      </div>
+    <div className={CALENDAR_STATE_FRAME_CLASS}>
+      <ListLoadingState label='加载追剧周历' className={CALENDAR_STATE_CLASS} />
+      <div aria-hidden='true' className='skeleton mt-5 h-9 w-28 rounded-full' />
     </div>
   );
 }
@@ -345,15 +306,16 @@ export function TrackingCalendar() {
   if (!groups || !items) return <TrackingCalendarSkeleton />;
   if (items.length === 0) {
     return (
-      <LibraryEmptyState
-        icon={CalendarDays}
-        title='还没有在追的剧'
-        action={
-          <Link href='/' className={LIBRARY_PILL_BUTTON_CLASS}>
-            去首页逛逛
-          </Link>
-        }
-      />
+      <div className={CALENDAR_STATE_FRAME_CLASS}>
+        <ListEmptyState
+          icon={<CalendarDays />}
+          label='还没有在追的剧'
+          className={CALENDAR_STATE_CLASS}
+        />
+        <Link href='/' className={`mt-5 ${LIBRARY_PILL_BUTTON_CLASS}`}>
+          去首页逛逛
+        </Link>
+      </div>
     );
   }
 

@@ -25,6 +25,7 @@ import {
 } from '@/features/lists/lib/lists-client';
 import type { ListItemInput, ListSummary } from '@/features/lists/types';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
+import { readListCountCookie } from '@/lib/list-count-cookies';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 import { ListCover } from './ListCard';
@@ -33,7 +34,10 @@ const ROW_CLASS = 'flex w-full items-center gap-3 rounded-xl px-2 py-2';
 const ROW_COVER_CLASS = 'h-11 w-[78px] shrink-0 rounded-md';
 const ROW_NAME_CLASS = 'text-sm leading-5';
 const ROW_META_CLASS = 'text-xs leading-4';
-const SKELETON_ROWS = 3;
+const CREATE_FORM_CLASS = 'px-1 py-1';
+const CREATE_FIELDS_CLASS = 'flex gap-2';
+const CREATE_BUTTON_CLASS =
+  'inline-flex h-10 shrink-0 items-center rounded-lg px-4 text-sm font-medium';
 
 function toItemInput(target: ListPickerTarget): ListItemInput {
   return {
@@ -79,6 +83,7 @@ function ListPicker({
   onClose: () => void;
 }) {
   const [lists, setLists] = useState<ListSummary[] | null>(null);
+  const [knownCount] = useState(() => readListCountCookie('list_count'));
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
@@ -179,7 +184,7 @@ function ListPicker({
             onRetry={() => setReloadKey((value) => value + 1)}
           />
         ) : lists === null ? (
-          <PickerSkeleton />
+          <PickerSkeleton count={knownCount} />
         ) : (
           <ul aria-label='我的片单'>
             {lists.map((list) => (
@@ -200,6 +205,16 @@ function ListPicker({
         </p>
       )}
       <div className='border-t border-gray-900/[0.06] p-3 dark:border-white/[0.06]'>
+        {lists === null && !loadError && knownCount === 0 && (
+          <div aria-hidden='true' className={CREATE_FORM_CLASS}>
+            <div className={CREATE_FIELDS_CLASS}>
+              <div className={`${MODAL_INPUT_CLASS} skeleton`} />
+              <div className={`${CREATE_BUTTON_CLASS} skeleton`}>
+                <span className='invisible'>创建</span>
+              </div>
+            </div>
+          </div>
+        )}
         {lists !== null && lists.length < LIST_MAX_COUNT && (
           <CreateListRow autoOpen={lists.length === 0} onCreate={create} />
         )}
@@ -264,10 +279,18 @@ function PickerRow({
   );
 }
 
-function PickerSkeleton() {
+function PickerSkeleton({ count }: { count: number | null }) {
+  if (count === 0) return null;
+  if (count === null) {
+    return (
+      <div className='flex justify-center py-8'>
+        <Spinner label='加载片单' className='h-5 w-5' />
+      </div>
+    );
+  }
   return (
     <div role='status' aria-label='加载中'>
-      {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+      {Array.from({ length: count }, (_, index) => (
         <div key={index} className={ROW_CLASS}>
           <div className={`skeleton ${ROW_COVER_CLASS}`} />
           <div className='min-w-0 flex-1'>
@@ -333,8 +356,8 @@ function CreateListRow({
   }
 
   return (
-    <form onSubmit={submit} className='px-1 py-1'>
-      <div className='flex gap-2'>
+    <form onSubmit={submit} className={CREATE_FORM_CLASS}>
+      <div className={CREATE_FIELDS_CLASS}>
         <input
           autoFocus
           aria-label='片单名称'
@@ -348,7 +371,7 @@ function CreateListRow({
         <button
           type='submit'
           disabled={saving || !name.trim()}
-          className='inline-flex h-10 shrink-0 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white transition-colors hover:bg-brand-500 disabled:opacity-50'
+          className={`${CREATE_BUTTON_CLASS} bg-brand-600 text-white transition-colors hover:bg-brand-500 disabled:opacity-50`}
         >
           {saving ? <Spinner className='h-4 w-4 text-white' /> : '创建'}
         </button>

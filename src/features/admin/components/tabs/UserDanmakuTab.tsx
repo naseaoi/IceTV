@@ -1,8 +1,9 @@
 'use client';
 
-import { Trash2 } from 'lucide-react';
+import { MessageSquareText, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Spinner from '@/components/Spinner';
 import { AdminUserDanmakuRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
@@ -13,6 +14,8 @@ import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
+import { rememberAdminListCount } from '@/features/admin/lib/list-counts';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { showError } from '@/features/admin/lib/notifications';
 import {
   formatUserDanmakuEpisode,
@@ -61,6 +64,7 @@ export default function UserDanmakuTab() {
         '加载弹幕失败',
       );
       if (id !== requestId.current) return;
+      if (!q && !cursor) rememberAdminListCount('danmaku', page.items.length);
       setItems((previous) => {
         const rows = cursor ? [...previous, ...page.items] : page.items;
         const unique = new Map<string, AdminUserDanmakuItem>();
@@ -121,6 +125,7 @@ export default function UserDanmakuTab() {
       for (let i = 0; i < ids.length; i += ADMIN_USER_DANMAKU_DELETE_LIMIT) {
         const batch = ids.slice(i, i + ADMIN_USER_DANMAKU_DELETE_LIMIT);
         await adminDelete(ENDPOINT, { ids: batch }, '删除弹幕失败');
+        rememberAdminListCount('danmaku', undefined);
         deleted += batch.length;
         for (const id of batch) deletedIds.current.add(id);
         setItems((previous) =>
@@ -229,7 +234,13 @@ export default function UserDanmakuTab() {
             ))}
           </ul>
         )}
-        {loading && items.length === 0 && <AdminUserDanmakuRowsSkeleton />}
+        {loading &&
+          items.length === 0 &&
+          (query ? (
+            <SearchingState className={ADMIN_LIST_EMPTY_CLASS} />
+          ) : (
+            <AdminUserDanmakuRowsSkeleton />
+          ))}
         {loading && items.length > 0 && (
           <div
             role='status'
@@ -240,9 +251,11 @@ export default function UserDanmakuTab() {
           </div>
         )}
         {!loading && !failed && items.length === 0 && (
-          <p className='py-12 text-center text-sm text-gray-500 dark:text-gray-400'>
-            {query ? '没有匹配的弹幕' : '还没有用户发送弹幕'}
-          </p>
+          <ListEmptyState
+            className={ADMIN_LIST_EMPTY_CLASS}
+            icon={query ? <SearchX /> : <MessageSquareText />}
+            label={query ? '没有匹配的弹幕' : '还没有用户发送弹幕'}
+          />
         )}
         {!loading && (failed || nextCursor) && (
           <div className='flex justify-center border-t border-gray-200 p-4 dark:border-white/[0.06]'>

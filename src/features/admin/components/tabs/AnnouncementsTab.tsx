@@ -1,8 +1,9 @@
 'use client';
 
-import { Send } from 'lucide-react';
+import { Megaphone, Send } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import Spinner from '@/components/Spinner';
@@ -34,7 +35,6 @@ const ENDPOINT = '/api/admin/announcements';
 const COMPOSER_DISABLED_CLASS =
   'disabled:cursor-not-allowed disabled:opacity-50';
 const STATUS_BADGE_CLASS = 'rounded px-1.5 font-medium';
-const DEFAULT_SKELETON_ROWS = 4;
 
 type PendingConfirm =
   | { kind: 'push-new' }
@@ -341,17 +341,15 @@ export default function AnnouncementsTab({
           )}
           {loading && items.length === 0 && (
             <AdminAnnouncementRowsSkeleton
-              count={
-                config?.SiteConfig.AnnouncementCount ?? DEFAULT_SKELETON_ROWS
-              }
+              count={config?.SiteConfig.AnnouncementCount}
             />
           )}
           {!loading && !failed && items.length === 0 && (
-            <p
-              className={`${ANNOUNCEMENT_EMPTY_CLASS} text-sm text-gray-500 dark:text-gray-400`}
-            >
-              还没有公告
-            </p>
+            <ListEmptyState
+              className={ANNOUNCEMENT_EMPTY_CLASS}
+              icon={<Megaphone />}
+              label='还没有公告'
+            />
           )}
           {!loading && failed && (
             <div className='flex justify-center p-4'>

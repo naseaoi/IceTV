@@ -60,6 +60,34 @@ const baseProps = {
 };
 
 describe('ReviewsTab', () => {
+  it('公开评价首次加载在列表槽位提示，完成后显示空状态', () => {
+    const { rerender } = render(
+      <ReviewsTab
+        {...baseProps}
+        reviews={buildState({ summary: null, summaryLoading: true })}
+      />,
+    );
+    const section = screen.getByText('大家的评价').closest('section')!;
+    expect(
+      within(section).getByRole('status', { name: '加载中' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('还没有公开评价，来写第一条吧')).toBeNull();
+    rerender(<ReviewsTab {...baseProps} reviews={buildState()} />);
+    expect(within(section).queryByRole('status')).toBeNull();
+    expect(
+      within(section).getByText('还没有公开评价，来写第一条吧'),
+    ).toBeInTheDocument();
+    rerender(
+      <ReviewsTab
+        {...baseProps}
+        reviews={buildState({ summaryLoading: true })}
+      />,
+    );
+    expect(
+      within(section).getByRole('status', { name: '加载中' }),
+    ).toBeInTheDocument();
+  });
+
   it('enables saving once a rating or content is provided', () => {
     render(<ReviewsTab {...baseProps} reviews={buildState()} />);
 

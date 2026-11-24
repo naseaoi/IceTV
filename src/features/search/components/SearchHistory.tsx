@@ -91,7 +91,8 @@ export default function SearchHistory({
     if (searchHistory.length === 0) setEditing(false);
   }, [searchHistory.length]);
 
-  if (loading) return <SearchHistorySkeleton />;
+  if (loading)
+    return <SearchHistorySkeleton count={searchHistory.length || undefined} />;
   if (searchHistory.length === 0) return null;
 
   const search = (item: string) => {

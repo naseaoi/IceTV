@@ -15,6 +15,7 @@ import React, {
 } from 'react';
 
 import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import Spinner from '@/components/Spinner';
 import { AddSourcesModal } from '@/features/play/components/EpisodeSelector/AddSourcesModal';
@@ -41,6 +42,8 @@ import {
 } from '@/lib/source-playback-stats';
 import { SearchResult } from '@/lib/types';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
+
+const SOURCE_STATE_CLASS = 'min-h-0 flex-1 p-6 text-center';
 
 export const VIDEO_INFO_BATCH_SIZE = SOURCE_PROBE_CONCURRENCY;
 
@@ -459,12 +462,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   }, []);
 
   if (sourceSearchLoading) {
-    return (
-      <SourcesTabMessage
-        icon={<Spinner className='h-5 w-5 text-gray-400' />}
-        text='搜索中...'
-      />
-    );
+    return <SearchingState label='搜索中...' className={SOURCE_STATE_CLASS} />;
   }
 
   if (sourceSearchError) {
@@ -478,9 +476,10 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
 
   if (displaySources.length === 0) {
     return (
-      <SourcesTabMessage
-        icon={<SearchX className='h-6 w-6 text-gray-300 dark:text-gray-600' />}
-        text='暂无可用的换源'
+      <ListEmptyState
+        icon={<SearchX />}
+        label='暂无可用的换源'
+        className={SOURCE_STATE_CLASS}
       />
     );
   }

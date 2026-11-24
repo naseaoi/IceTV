@@ -18,9 +18,11 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { SearchX, Video } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import {
@@ -58,6 +60,7 @@ import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { DataSource } from '@/features/admin/types/internal';
 import { useModalState } from '@/hooks/useModalState';
 import {
@@ -666,16 +669,22 @@ const VideoSourceConfig = ({
               className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
               {visibleRows.length === 0 && (
-                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {healthFilter === 'alert' && !normalizedQuery
-                    ? '没有告警中的视频源'
-                    : healthFilter === 'cleanup' && !normalizedQuery
-                      ? '没有待清理的视频源'
-                      : healthFilter === 'relay' && !normalizedQuery
-                        ? '没有使用代理的视频源'
-                        : isFiltering
-                          ? '没有匹配的视频源'
-                          : '暂无视频源'}
+                <li>
+                  <ListEmptyState
+                    className={ADMIN_LIST_EMPTY_CLASS}
+                    icon={isFiltering ? <SearchX /> : <Video />}
+                    label={
+                      healthFilter === 'alert' && !normalizedQuery
+                        ? '没有告警中的视频源'
+                        : healthFilter === 'cleanup' && !normalizedQuery
+                          ? '没有待清理的视频源'
+                          : healthFilter === 'relay' && !normalizedQuery
+                            ? '没有使用代理的视频源'
+                            : isFiltering
+                              ? '没有匹配的视频源'
+                              : '暂无视频源'
+                    }
+                  />
                 </li>
               )}
               {visibleRows.map((source) => (

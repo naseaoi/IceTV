@@ -18,6 +18,13 @@ export interface ListSummary {
   containsItemId?: string | null;
 }
 
+// 详情页首屏骨架用：与条目接口同一可见性口径读出的标题、简介与条目数
+export interface ListHeaderPreview {
+  name: string;
+  description: string;
+  itemCount: number;
+}
+
 export type PlazaSort = 'hot' | 'new';
 export const PLAZA_PAGE_SIZE = 24;
 

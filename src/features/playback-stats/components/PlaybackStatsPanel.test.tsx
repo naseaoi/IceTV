@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import type { CardAction } from '@/components/card-actions/actions';
 import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
 import { PlaybackStatsPanel } from '@/features/playback-stats/components/PlaybackStatsPanel';
+import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
 import {
   getCachedPlaybackPeriodSnapshot,
   getPlaybackPeriodStats,
@@ -255,3 +256,33 @@ it.each(['无 Provider', '无目标'] as const)(
     );
   },
 );
+
+it('常看骨架未知条数时转圈，有周快照时按实际条数占位', () => {
+  const { unmount } = render(<PlaybackStatsSkeleton />);
+  const section = screen.getByText('常看').closest('section')!;
+  expect(section.querySelector('.ice-spinner')).not.toBeNull();
+  expect(section.lastElementChild?.querySelectorAll('.skeleton')).toHaveLength(
+    0,
+  );
+  unmount();
+  jest
+    .mocked(getCachedPlaybackPeriodSnapshot)
+    .mockReturnValue(stats('week', [work('一', 20), work('二', 30)]));
+  render(<PlaybackStatsSkeleton />);
+  const known = screen.getByText('常看').closest('section')!;
+  expect(known.querySelector('.ice-spinner')).toBeNull();
+  expect(known.querySelectorAll('[class*="aspect-"]')).toHaveLength(2);
+});
+
+it('常看周快照为空时保留空状态高度，不显示海报占位或真实空文案', () => {
+  jest
+    .mocked(getCachedPlaybackPeriodSnapshot)
+    .mockReturnValue(stats('week', []));
+  render(<PlaybackStatsSkeleton />);
+  const section = screen.getByText('常看').closest('section')!;
+  expect(section.querySelector('.ice-spinner')).toBeNull();
+  expect(
+    within(section).getByRole('status', { name: '加载中' }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('这周还没有看过什么')).toBeNull();
+});

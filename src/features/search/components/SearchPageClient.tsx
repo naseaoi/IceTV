@@ -6,16 +6,17 @@ import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
+import { ListEmptyState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import PageLayout from '@/components/PageLayout';
 import SearchBox from '@/components/SearchBox';
-import SearchResultFilter from '@/components/SearchResultFilter';
 import Spinner from '@/components/Spinner';
 import VideoCard from '@/components/VideoCard';
 import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { SearchResultsLoading } from '@/features/search/components/SearchPageSkeleton';
+import SearchResultFilter from '@/features/search/components/SearchResultFilter';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
   FilterState,
@@ -35,6 +36,7 @@ import {
   SEARCH_MOBILE_BAR_CLASS,
   SEARCH_MOBILE_BAR_ROW_CLASS,
   SEARCH_MOBILE_FILTER_ROW_CLASS,
+  SEARCH_RESULT_STATE_CLASS,
   SEARCH_RESULTS_CONTAINER_CLASS,
 } from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
@@ -77,10 +79,11 @@ function SearchStatus({
 
 function SearchEmptyState({ text }: { text: string }) {
   return (
-    <div className='flex flex-col items-center justify-center gap-3 py-24 text-gray-400 dark:text-gray-500'>
-      <SearchX aria-hidden='true' className='h-10 w-10 stroke-[1.5]' />
-      <p className='text-sm'>{text}</p>
-    </div>
+    <ListEmptyState
+      icon={<SearchX />}
+      label={text}
+      className={SEARCH_RESULT_STATE_CLASS}
+    />
   );
 }
 

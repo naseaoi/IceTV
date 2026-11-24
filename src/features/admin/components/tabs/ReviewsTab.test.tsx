@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import ReviewsTab from '@/features/admin/components/tabs/ReviewsTab';
 import { getAdminReviewReports } from '@/features/admin/lib/api';
+import { rememberAdminListCount } from '@/features/admin/lib/list-counts';
 import { showToast } from '@/lib/toast';
 import { type AdminVideoReview } from '@/lib/types';
 
@@ -59,6 +60,7 @@ describe('ReviewsTab', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    rememberAdminListCount('reviews', undefined);
     jest
       .mocked(getAdminReviewReports)
       .mockResolvedValue({ items: [], nextCursor: null, pendingTotal: 0 });
@@ -88,7 +90,11 @@ describe('ReviewsTab', () => {
       }),
     );
     render(<ReviewsTab />);
-    expect(screen.getByRole('status')).toHaveTextContent('加载中');
+    expect(
+      screen
+        .getByRole('status', { name: '加载中' })
+        .querySelector('.ice-spinner'),
+    ).toBeInTheDocument();
     await tick();
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/reviews', {
       cache: 'no-store',
@@ -125,6 +131,9 @@ describe('ReviewsTab', () => {
     fireEvent.change(screen.getByRole('searchbox'), {
       target: { value: '测试' },
     });
+    expect(
+      screen.getByRole('status', { name: '正在搜索' }),
+    ).toBeInTheDocument();
     await tick(200);
     fireEvent.change(screen.getByRole('searchbox'), {
       target: { value: 'alice' },
@@ -280,6 +289,21 @@ describe('ReviewsTab', () => {
     await tick(300);
     expect(screen.getByText('暂无匹配的公开评价')).toBeInTheDocument();
   });
+  it('举报首次加载提供状态反馈，完成后展示空结果', async () => {
+    render(<ReviewsTab />);
+    await tick();
+    fireEvent.click(screen.getByRole('tab', { name: /举报待处理/ }));
+    expect(
+      screen.getByRole('status', { name: '加载举报中…' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('暂无待处理举报')).not.toBeInTheDocument();
+    await tick();
+    expect(screen.getByText('暂无待处理举报')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('status', { name: '加载举报中…' }),
+    ).not.toBeInTheDocument();
+  });
+
   it.each(['驳回举报', '标为剧透', '删除评价'])(
     '举报操作 %s 先确认再处理',
     async (label) => {
@@ -337,4 +361,30 @@ describe('ReviewsTab', () => {
       );
     },
   );
+
+  it('再次进入评价列表使用无筛选首页条数，搜索结果不覆盖它', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        items: [review, { ...review, username: 'bob' }],
+        nextCursor: null,
+      }),
+    );
+    const first = render(<ReviewsTab />);
+    await tick();
+    fetchMock.mockResolvedValue(response({ items: [], nextCursor: null }));
+    fireEvent.change(screen.getByRole('searchbox'), {
+      target: { value: 'missing' },
+    });
+    expect(
+      screen.getByRole('status', { name: '正在搜索' }),
+    ).toBeInTheDocument();
+    await tick(300);
+    expect(screen.getByText('暂无匹配的公开评价')).toBeInTheDocument();
+    first.unmount();
+    render(<ReviewsTab />);
+    expect(
+      screen.getByRole('status').querySelectorAll(':scope > div'),
+    ).toHaveLength(2);
+    await tick();
+  });
 });

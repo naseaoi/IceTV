@@ -1,10 +1,13 @@
 'use client';
 
+import { SearchX } from 'lucide-react';
 import { useState } from 'react';
 
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminDialog from '@/features/admin/components/AdminDialog';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_COMPACT_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import {
   MAX_INACTIVE_DAYS,
   MIN_INACTIVE_DAYS,
@@ -66,10 +69,23 @@ export function CleanupInactiveUsersDialog({
             {isScanning ? '筛选中...' : '筛选'}
           </button>
         </div>
-        {candidates && (
-          <p className='mt-4 text-sm text-gray-600 dark:text-gray-400'>
-            匹配到 {candidates.count} 个用户
-          </p>
+        {isScanning ? (
+          <SearchingState
+            className={ADMIN_LIST_COMPACT_EMPTY_CLASS}
+            label='正在筛选用户'
+          />
+        ) : candidates?.count === 0 ? (
+          <ListEmptyState
+            className={ADMIN_LIST_COMPACT_EMPTY_CLASS}
+            icon={<SearchX />}
+            label='没有符合条件的用户'
+          />
+        ) : (
+          candidates && (
+            <p className='mt-4 text-sm text-gray-600 dark:text-gray-400'>
+              匹配到 {candidates.count} 个用户
+            </p>
+          )
         )}
         <div className='mt-6 flex justify-end gap-3'>
           <button onClick={onClose} className={buttonStyles.outline}>

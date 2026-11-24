@@ -1,10 +1,18 @@
 'use client';
 
-import { Globe, Lock, PencilLine, RotateCw, Trash2 } from 'lucide-react';
+import {
+  Globe,
+  Lock,
+  MessageSquare,
+  PencilLine,
+  RotateCw,
+  Trash2,
+} from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ExpandableText from '@/components/ExpandableText';
+import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import PublicReviewContent from '@/components/PublicReviewContent';
 import RatingStars from '@/components/RatingStars';
@@ -20,6 +28,8 @@ import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { VideoReview } from '@/lib/types';
+
+const REVIEWS_STATE_CLASS = 'py-6 text-center';
 
 interface ReviewsTabProps {
   workTitle: string;
@@ -192,26 +202,19 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
     <div
       className={`min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden pb-5 pt-4 ${PLAYER_PANEL_INSET_CLASS}`}
     >
-      {summaryLoading && !summary ? (
-        <div className='flex justify-center py-4'>
-          <Spinner className='h-5 w-5 text-gray-400' />
-        </div>
-      ) : (
-        summary &&
-        average !== null && (
-          <section aria-label='评分概览' className='flex items-end gap-5'>
-            <div className='shrink-0 space-y-1.5'>
-              <span className='block text-[2.25rem] font-semibold tabular-nums leading-none tracking-tight text-gray-900 dark:text-gray-50'>
-                {formatRating(average)}
-              </span>
-              <RatingStars value={average} size='sm' decorative />
-              <p className='text-[11px] text-gray-500 dark:text-gray-400'>
-                {summary.count} 人公开评分
-              </p>
-            </div>
-            <ReviewDistribution distribution={summary.distribution} />
-          </section>
-        )
+      {summary && average !== null && (
+        <section aria-label='评分概览' className='flex items-end gap-5'>
+          <div className='shrink-0 space-y-1.5'>
+            <span className='block text-[2.25rem] font-semibold tabular-nums leading-none tracking-tight text-gray-900 dark:text-gray-50'>
+              {formatRating(average)}
+            </span>
+            <RatingStars value={average} size='sm' decorative />
+            <p className='text-[11px] text-gray-500 dark:text-gray-400'>
+              {summary.count} 人公开评分
+            </p>
+          </div>
+          <ReviewDistribution distribution={summary.distribution} />
+        </section>
       )}
 
       <section className='space-y-2'>
@@ -255,7 +258,9 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
             </button>
           )}
         </SectionTitle>
-        {summary && summary.reviews.length > 0 ? (
+        {summaryLoading && !summary?.reviews.length ? (
+          <ListLoadingState className={REVIEWS_STATE_CLASS} />
+        ) : summary && summary.reviews.length > 0 ? (
           <ul
             ref={containerRef}
             className='relative divide-y divide-gray-100 dark:divide-white/[0.06]'
@@ -276,9 +281,11 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
         ) : (
           !summaryLoading &&
           !summaryError && (
-            <p className='py-1 text-[13px] text-gray-500 dark:text-gray-400'>
-              还没有公开评价，来写第一条吧
-            </p>
+            <ListEmptyState
+              icon={<MessageSquare />}
+              label='还没有公开评价，来写第一条吧'
+              className={REVIEWS_STATE_CLASS}
+            />
           )
         )}
         {summary?.nextCursor && (

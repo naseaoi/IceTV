@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-import { SearchFilterCategory } from '@/components/SearchResultFilter';
 import { VideoCardHandle } from '@/components/VideoCard';
+import { SearchFilterCategory } from '@/features/search/components/SearchResultFilter';
 import {
   compareYear,
   computeGroupStats,

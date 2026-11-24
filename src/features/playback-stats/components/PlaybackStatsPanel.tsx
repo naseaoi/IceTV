@@ -4,18 +4,13 @@ import { Flame } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   type CSSProperties,
-  type ReactNode,
   useEffect,
   useLayoutEffect,
   useState,
 } from 'react';
 
-import {
-  HOME_POSTER_CARD_CLASS,
-  POSTER_CARD_COVER_CLASS,
-  POSTER_CARD_SUBTITLE_ROW_CLASS,
-  POSTER_CARD_TITLE_ROW_CLASS,
-} from '@/components/poster-card-layout';
+import { ListEmptyState } from '@/components/ListState';
+import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import { RecapEntryLink } from '@/features/annual-report/components/RecapEntryLink';
 import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
@@ -34,6 +29,8 @@ import {
   STATS_COLUMN_CLASS,
   STATS_LAYOUT_CLASS,
   StatsHeading,
+  TOP_WORKS_STATE_CLASS,
+  TopWorksStateFrame,
   WEEK_CHART_CLASS,
   WEEK_DAY_CLASS,
   WEEK_LABEL_CLASS,
@@ -304,27 +301,6 @@ function TopWorkCard({
   );
 }
 
-// 占住一行海报的高度，空态与有内容之间切换时不跳动
-function TopWorksMessage({ children }: { children: ReactNode }) {
-  return (
-    <div className='relative'>
-      <ScrollableRow>
-        <div
-          aria-hidden='true'
-          className={`invisible ${HOME_POSTER_CARD_CLASS}`}
-        >
-          <div className={POSTER_CARD_COVER_CLASS} />
-          <p className={POSTER_CARD_TITLE_ROW_CLASS}>&nbsp;</p>
-          <p className={POSTER_CARD_SUBTITLE_ROW_CLASS}>&nbsp;</p>
-        </div>
-      </ScrollableRow>
-      <p className='absolute inset-0 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500'>
-        {children}
-      </p>
-    </div>
-  );
-}
-
 function rangeOrder(value: PlaybackPeriodType) {
   return TOP_RANGE_OPTIONS.findIndex((option) => option.value === value);
 }
@@ -427,11 +403,21 @@ function TopWorks({ week }: { week: PlaybackPeriodStats }) {
         </div>
       </StatsHeading>
       {failed && !loaded ? (
-        <TopWorksMessage>加载失败，请稍后重试</TopWorksMessage>
+        <TopWorksStateFrame>
+          <p
+            className={`${TOP_WORKS_STATE_CLASS} flex items-center justify-center text-sm text-gray-400 dark:text-gray-500`}
+          >
+            加载失败，请稍后重试
+          </p>
+        </TopWorksStateFrame>
       ) : works.length === 0 ? (
-        <TopWorksMessage>
-          {TOP_EMPTY_TEXT[loaded ? range : shownRange]}
-        </TopWorksMessage>
+        <TopWorksStateFrame>
+          <ListEmptyState
+            icon={<Flame />}
+            label={TOP_EMPTY_TEXT[loaded ? range : shownRange]}
+            className={TOP_WORKS_STATE_CLASS}
+          />
+        </TopWorksStateFrame>
       ) : (
         <div
           key={shownRange}

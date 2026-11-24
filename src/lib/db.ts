@@ -124,10 +124,10 @@ class DbManager {
   ): ReturnType<IStorage['countPlazaLists']> {
     return (await this.getStorage()).countPlazaLists(...args);
   }
-  async getListItemCount(
-    ...args: Parameters<IStorage['getListItemCount']>
-  ): ReturnType<IStorage['getListItemCount']> {
-    return (await this.getStorage()).getListItemCount(...args);
+  async getListHeaderPreview(
+    ...args: Parameters<IStorage['getListHeaderPreview']>
+  ): ReturnType<IStorage['getListHeaderPreview']> {
+    return (await this.getStorage()).getListHeaderPreview(...args);
   }
   async setListLike(
     ...args: Parameters<IStorage['setListLike']>

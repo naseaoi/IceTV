@@ -6,6 +6,7 @@ import {
   within,
 } from '@testing-library/react';
 
+import { CleanupInactiveUsersDialog } from '@/features/admin/components/tabs/user-config/CleanupInactiveUsersDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import UserConfigTab from '@/features/admin/components/tabs/UserConfigTab';
 import { showToast } from '@/lib/toast';
@@ -38,6 +39,10 @@ let mockRows: Array<{
   nickname?: string;
   loginProviders?: string[];
 }> = [];
+let mockUserLoading = false;
+afterEach(() => {
+  mockUserLoading = false;
+});
 let mockNextCursor: string | null = null;
 jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
   useAdminUsers: (query: { q: string; filter: string }) => {
@@ -58,7 +63,7 @@ jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
       items,
       total: items.length,
       nextCursor: mockNextCursor,
-      loading: false,
+      loading: mockUserLoading,
       error: '',
       refresh: jest.fn(),
       loadMore: jest.fn(),
@@ -421,6 +426,22 @@ describe('UserConfigTab user search and selection', () => {
     expectVisibleUsers(usernames as string[]);
   });
 
+  it('搜索或条件筛选尚无结果时显示查找动画', () => {
+    mockUserLoading = true;
+    mockRows = [];
+    const search = setup();
+    fireEvent.change(search, { target: { value: 'missing' } });
+    expect(
+      screen.getByRole('status', { name: '正在搜索' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+    mockRows = [];
+    filterUsers('已封禁');
+    expect(
+      screen.getByRole('status', { name: '正在搜索' }),
+    ).toBeInTheDocument();
+  });
+
   it('combines search with the status filter and shows an empty state', () => {
     const search = setup();
     filterUsers('已封禁');
@@ -631,4 +652,33 @@ describe('UserGroupTable responsive list', () => {
     expect(screen.getByText('暂无用户组')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
+});
+
+it('清理用户从筛选反馈切换到空结果，并禁用清理按钮', () => {
+  const props = {
+    isOpen: true,
+    inactiveDays: 30,
+    candidates: null,
+    isScanning: true,
+    isDeleting: false,
+    onInactiveDaysChange: jest.fn(),
+    onScan: jest.fn(),
+    onConfirm: jest.fn(),
+    onClose: jest.fn(),
+  };
+  const { rerender } = render(<CleanupInactiveUsersDialog {...props} />);
+  expect(
+    screen.getByRole('status', { name: '正在筛选用户' }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+  rerender(
+    <CleanupInactiveUsersDialog
+      {...props}
+      isScanning={false}
+      candidates={{ count: 0, confirmation: 'empty' }}
+    />,
+  );
+  expect(screen.getByText('没有符合条件的用户')).toBeInTheDocument();
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
 });

@@ -1,10 +1,11 @@
 'use client';
 
-import { Trash2 } from 'lucide-react';
+import { MessageSquare, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import ExpandableText from '@/components/ExpandableText';
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingStars from '@/components/RatingStars';
 import Spinner from '@/components/Spinner';
@@ -17,6 +18,8 @@ import {
   getAdminReviewReports,
 } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { rememberAdminListCount } from '@/features/admin/lib/list-counts';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { showError } from '@/features/admin/lib/notifications';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
@@ -72,6 +75,7 @@ function AllReviews({ search }: { search: string }) {
         '加载评价失败',
       );
       if (id !== requestId.current) return;
+      if (!q && !cursor) rememberAdminListCount('reviews', page.items.length);
       setItems((previous) => {
         const rows = cursor ? [...previous, ...page.items] : page.items;
         return Array.from(
@@ -124,6 +128,7 @@ function AllReviews({ search }: { search: string }) {
         },
         '删除评价失败',
       );
+      rememberAdminListCount('reviews', undefined);
       const key = reviewKey(review);
       // 在途分页响应也要过滤已删除行，避免迟到响应将其重新放回列表。
       deletedKeys.current.add(key);
@@ -214,7 +219,13 @@ function AllReviews({ search }: { search: string }) {
             ))}
           </ul>
         )}
-        {loading && items.length === 0 && <AdminReviewRowsSkeleton />}
+        {loading &&
+          items.length === 0 &&
+          (query ? (
+            <SearchingState className={ADMIN_LIST_EMPTY_CLASS} />
+          ) : (
+            <AdminReviewRowsSkeleton />
+          ))}
         {loading && items.length > 0 && (
           <div
             role='status'
@@ -225,9 +236,11 @@ function AllReviews({ search }: { search: string }) {
           </div>
         )}
         {!loading && !failed && items.length === 0 && (
-          <p className='py-12 text-center text-sm text-gray-500 dark:text-gray-400'>
-            {query ? '暂无匹配的公开评价' : '暂无公开评价'}
-          </p>
+          <ListEmptyState
+            className={ADMIN_LIST_EMPTY_CLASS}
+            icon={query ? <SearchX /> : <MessageSquare />}
+            label={query ? '暂无匹配的公开评价' : '暂无公开评价'}
+          />
         )}
         {!loading && (failed || nextCursor) && (
           <div className='flex justify-center p-4'>
