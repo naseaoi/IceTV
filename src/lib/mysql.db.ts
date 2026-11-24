@@ -216,6 +216,7 @@ import { assertValidUsernameFormat, normalizeUsername } from './username';
 const REVIEW_SQL = reviewSql('mysql');
 const {
   createdAt: MYSQL_TRACKING_CREATED_AT,
+  updatedWhere: MYSQL_UPDATED_TRACKING_WHERE,
   unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(MYSQL_TRACKING_DIALECT);
 const PLAY_RECORD_BATCH_SIZE = 200;
@@ -1472,7 +1473,7 @@ export class MySqlStorage implements IStorage {
     const hasCursor = cursorTime !== undefined && !!cursorKey;
     const updatedWhere =
       filter === 'updated'
-        ? ` AND ${MYSQL_UNREAD_TRACKING_WHERE}`
+        ? ` AND ${MYSQL_UPDATED_TRACKING_WHERE}`
         : filter === 'shelved'
           ? ` AND ${buildShelvedPlayRecordWhere(MYSQL_TRACKING_DIALECT)}`
           : '';
@@ -1618,9 +1619,9 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     await this.pool.execute(favoriteReadStatement('mysql'), [
       episodes,
+      episodes,
       normalizeUsername(userName),
       key,
-      episodes,
       episodes,
     ]);
   }

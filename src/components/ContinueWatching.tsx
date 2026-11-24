@@ -12,7 +12,6 @@ import {
 
 import ContinueCard from '@/components/ContinueCard';
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
-import { useOptionalMessageCenter } from '@/components/messages/MessageCenterProvider';
 import ScrollableRow from '@/components/ScrollableRow';
 import {
   SECTION_HEADER_CLASS,
@@ -129,12 +128,63 @@ export default function ContinueWatching({
   const [skeletonCount, setSkeletonCount] = useState(
     seededRecords ? 0 : normalizedInitialSkeletonCount,
   );
-  const messageCenter = useOptionalMessageCenter();
   const seededUpdateCount =
     initialUpdateCount === undefined
       ? 0
       : Math.max(0, Math.floor(initialUpdateCount));
-  const updateCount = messageCenter?.trackingUnreadCount ?? seededUpdateCount;
+  const [updateCount, setUpdateCount] = useState(seededUpdateCount);
+
+  useEffect(() => {
+    setUpdateCount(seededUpdateCount);
+    if (!refreshOnMount || !getAuthInfoFromBrowserCookie()?.username) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+
+    const refreshCount = () => {
+      clearTimeout(timer);
+      controller?.abort();
+      // 首页种子与 recent 事件只有最近几条，计数只接受完整缓存快照。
+      const snapshot = getCachedPlayRecordsSnapshot();
+      if (snapshot) {
+        setUpdateCount(
+          Object.values(snapshot).filter(hasPlayRecordUpdate).length,
+        );
+        return;
+      }
+
+      timer = setTimeout(async () => {
+        const request = new AbortController();
+        controller = request;
+        try {
+          const page = await getPlayRecordPage(1, null, {
+            filter: 'updated',
+            signal: request.signal,
+          });
+          if (!request.signal.aborted) setUpdateCount(page.total);
+        } catch (error) {
+          if (!request.signal.aborted) {
+            console.error('获取继续观看更新计数失败:', error);
+          }
+        }
+      }, 100);
+    };
+
+    refreshCount();
+    const unsubscribers = (
+      [
+        'playRecordsUpdated',
+        'recentPlayRecordsUpdated',
+        'playRecordStatesUpdated',
+      ] as const
+    ).map((event) => subscribeToDataUpdates(event, refreshCount));
+
+    return () => {
+      clearTimeout(timer);
+      controller?.abort();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [refreshOnMount, seededUpdateCount]);
 
   const updatePlayRecords = useCallback(
     (allRecords: Record<string, PlayRecord>) => {

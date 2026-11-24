@@ -71,7 +71,7 @@ export function ContinueWatchingPageClient({
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // 消息通知静音时追更未读数被置零，计数以筛选接口的结果为准
+  // 更新计数与筛选同口径，消息已读和通知静音均保留尚未观看的更新。
   const updatedCount = counts.updated;
   const showUpdatedChip = filter === 'updated' || (updatedCount ?? 0) > 0;
   const shelvedCount = counts.shelved;

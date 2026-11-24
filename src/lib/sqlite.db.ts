@@ -221,6 +221,7 @@ const REVIEW_SQL = reviewSql('sqlite');
 
 const {
   createdAt: SQLITE_TRACKING_CREATED_AT,
+  updatedWhere: SQLITE_UPDATED_TRACKING_WHERE,
   unreadWhere: SQLITE_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(SQLITE_TRACKING_DIALECT);
 
@@ -499,6 +500,7 @@ export class LocalSqliteStorage implements IStorage {
     countPlayRecords: Database.Statement;
     getUnreadTrackingPlayRecordPage: Database.Statement;
     getUnreadTrackingPlayRecordPageAfter: Database.Statement;
+    countUpdatedPlayRecords: Database.Statement;
     countUnreadTrackingPlayRecords: Database.Statement;
     deletePlayRecord: Database.Statement;
     getVideoReview: Database.Statement;
@@ -1346,7 +1348,7 @@ export class LocalSqliteStorage implements IStorage {
       getUpdatedPlayRecordPage: this.db.prepare(
         `SELECT record_key, record_json
          FROM play_records
-         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         WHERE username = ? AND ${SQLITE_UPDATED_TRACKING_WHERE}
          ORDER BY CAST(json_extract(record_json, '$.save_time') AS INTEGER) DESC,
                   record_key DESC
          LIMIT ?`,
@@ -1354,7 +1356,7 @@ export class LocalSqliteStorage implements IStorage {
       getUpdatedPlayRecordPageAfter: this.db.prepare(
         `SELECT record_key, record_json
          FROM play_records
-         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         WHERE username = ? AND ${SQLITE_UPDATED_TRACKING_WHERE}
            AND (
              CAST(json_extract(record_json, '$.save_time') AS INTEGER) < ?
              OR (
@@ -1390,6 +1392,11 @@ export class LocalSqliteStorage implements IStorage {
            )
          ORDER BY ${SQLITE_TRACKING_CREATED_AT} DESC, record_key DESC
          LIMIT ?`,
+      ),
+      countUpdatedPlayRecords: this.db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UPDATED_TRACKING_WHERE}`,
       ),
       countUnreadTrackingPlayRecords: this.db.prepare(
         `SELECT COUNT(*) AS count
@@ -2402,7 +2409,7 @@ export class LocalSqliteStorage implements IStorage {
         : this.stmts.getPlayRecordPageAfter;
     const countStatement =
       filter === 'updated'
-        ? this.stmts.countUnreadTrackingPlayRecords
+        ? this.stmts.countUpdatedPlayRecords
         : this.stmts.countPlayRecords;
     const rows = (
       cursorTime !== undefined && cursorKey
@@ -2491,7 +2498,7 @@ export class LocalSqliteStorage implements IStorage {
   ): Promise<void> {
     this.db
       .prepare(favoriteReadStatement('sqlite'))
-      .run(episodes, normalizeUsername(userName), key, episodes, episodes);
+      .run(episodes, episodes, normalizeUsername(userName), key, episodes);
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {

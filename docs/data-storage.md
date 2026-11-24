@@ -22,6 +22,7 @@
 - 每个 `users` 行必须有 `user_access` 行；建号同事务写入，初始化时补齐。站长角色和封禁豁免由环境变量决定，表仅保存其源权限和用户组。
 - 用户权限更新与批量操作在存储事务内复核角色；配置 CAS 同事务清理被删除组和源的用户引用，避免配置冲突后留下部分写入。
 - 后台用户操作复用 `src/features/admin/services/userActions.ts`，不在 `route.ts` 里重新展开权限与用户组逻辑。后台用户列表走 `/api/admin/user` 的 SQL 游标分页，全部匹配批量操作提交筛选与排除项；`/api/admin/config` 仅返回用户总数。
+- 用户筛选的 `role=banned` 跨管理员与普通用户匹配封禁账号，`role=admin|user` 包含各自角色的全部封禁状态；站长始终豁免封禁。具体用户组用 `group` 原名，未分组用独立的 `ungrouped=true`，两者互斥；未分组按 `user_group_members` 无记录判定，包含没有组成员记录的站长。列表、计数、游标范围与全部匹配选择共用这些条件。
 
 ## 邀请码
 
@@ -78,7 +79,7 @@
 - OAuth 凭证保存在 `UserConfig.LinuxDo`；后台配置响应复制后将 `ClientSecret` 置空，共享冻结配置保持原值。数据库备份包含凭证，备份文件按密钥管理。部署与注册通道语义见[LinuxDo 登录](deployment.md#linuxdo-登录)。
 
 - `oauth_identities` 是外部身份归属的唯一真相源；主键 `(provider, provider_user_id)`，唯一键 `(provider, username)`，用户名按本站规则归一化。LinuxDo 用户名仅用于显示，登录归属按不可变 ID 查询，同名本站账号始终独立。
-- 后台用户列表的登录渠道标记由 `oauth_identities` 按用户名聚合，只保留 `OAUTH_PROVIDERS`（`src/lib/oauth-identity.ts`）中的取值；按渠道筛选同样以 `OAUTH_PROVIDERS` 生成选项与校验参数（`provider:<渠道>`），服务端按 `oauth_identities` 过滤。新增渠道须先加入该列表，`UserTable` 的图标与名称映射随类型强制补齐，否则该渠道的账号不显示标记，筛选项也缺少名称。
+- 后台用户列表的登录渠道标记由 `oauth_identities` 按用户名聚合，只保留 `OAUTH_PROVIDERS`（`src/lib/oauth-identity.ts`）中的取值；按渠道筛选同样以 `OAUTH_PROVIDERS` 生成选项与校验参数（`login=provider:<渠道>`），服务端按 `oauth_identities` 过滤；第三方绑定状态与 `users.password_set` 独立，已绑定与未绑定筛选均不代表密码是否可用。新增渠道须先加入该列表，`UserTable` 的图标与名称映射随类型强制补齐，否则该渠道的账号不显示标记，筛选项也缺少名称。
 - `registerUser()` 的身份参数与账号、权限、资料和活跃记录同事务写入；身份冲突时整笔回滚。自动建号写随机密码哈希并记录 `auto_created`，存储条件删除也拒绝解绑。
 - 是否设过可用密码是账号级状态 `users.password_set`，与绑定了几个、哪种外部身份无关；密码登录始终使用本站用户名。第三方自动建号写为未设置，普通注册写为已设置。未设置时首次设密免旧密码，之后修改校验旧密码；密码与状态同事务更新，管理员重置同样标记已设置。加列迁移时，存在 `auto_created` 身份的存量账号一次性标为未设置（只有随机密码，无法提供旧密码）。
 - 删除用户及不活跃清理同事务清理身份；SQLite 大小写合并保留已有规范用户名的绑定，冲突旧绑定移除，其余迁移到规范用户名。两后端共享身份契约，MySQL 同时执行 fake pool 与真实数据库用例。
@@ -87,6 +88,7 @@
 ## 用户发送的弹幕
 
 - `user_danmaku` 保存登录用户发送的弹幕，独立于第三方弹幕缓存和用户弹幕开关、集映射表；`episode_key` 按共享约定逐字匹配，`time_ms` 是减去校准偏移后的弹幕集时间轴毫秒数。
+- 本人弹幕管理复用 `userDanmakuPageSql()`，在 `LIMIT` 前同时约束 `episode_key` 与规范用户名，按 `created_at DESC, id DESC` 分页；播放读取仍按单集全站预算截取，两者窗口独立。
 - 删除用户（含不活跃清理）在事务内同步处理该表；SQLite 大小写迁移收集本表用户名并合并归属，包括仅有弹幕数据的站长账号。
 - 发送限额使用共享资源表的独立 `user-danmaku-send` 命名空间，按规范用户名每分钟 10 条；该额度属于临时资源状态。站点关闭用户弹幕后仍可删除本人弹幕，管理员仍可清理存量内容。
 

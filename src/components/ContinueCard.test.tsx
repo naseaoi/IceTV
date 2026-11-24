@@ -8,7 +8,13 @@ import {
   saveFavorite,
   setPlayRecordTracking,
 } from '@/lib/db.client';
+import {
+  hasPlayRecordUpdate,
+  markPlayRecordMessageRead,
+  markPlayRecordUpdateRead as acknowledgeUpdate,
+} from '@/lib/play-records';
 import { showToast } from '@/lib/toast';
+import type { PlayRecord } from '@/lib/types';
 
 jest.mock('@/lib/toast', () => ({
   showToast: jest.fn(),
@@ -222,4 +228,28 @@ it('继续观看菜单收藏失败时不提示成功', async () => {
     actions.find(({ id }) => id === 'favorite')?.onClick(),
   ).rejects.toThrow('failed');
   expect(showToast).not.toHaveBeenCalled();
+});
+
+it('读消息后继续展示更新角标，卡片确认更新后清除角标', () => {
+  const read = markPlayRecordMessageRead({
+    index: 3,
+    total_episodes: 14,
+    update_baseline_episodes: 12,
+  } as PlayRecord);
+  const { rerender } = render(
+    <ContinueCard
+      {...baseProps}
+      hasUpdate={hasPlayRecordUpdate(read)}
+      availableEpisodes={14}
+    />,
+  );
+  expect(screen.getByText('更新至 14 集')).toBeInTheDocument();
+  rerender(
+    <ContinueCard
+      {...baseProps}
+      hasUpdate={hasPlayRecordUpdate(acknowledgeUpdate(read))}
+      availableEpisodes={14}
+    />,
+  );
+  expect(screen.queryByText('更新至 14 集')).not.toBeInTheDocument();
 });

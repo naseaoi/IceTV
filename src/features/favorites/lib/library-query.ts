@@ -1,6 +1,7 @@
 import type {
   FavoriteFilter,
   FavoriteFilterCounts,
+  FavoriteReviewFilter,
   FavoriteSort,
 } from '@/features/favorites/lib/favorite-library';
 import type { FavoritePageItem, FavoriteWatchStatus } from '@/lib/types';
@@ -8,6 +9,7 @@ import type { FavoritePageItem, FavoriteWatchStatus } from '@/lib/types';
 export interface FavoriteLibraryQuery {
   query: string;
   filter: FavoriteFilter;
+  review?: FavoriteReviewFilter;
   sort: FavoriteSort;
   cursor?: string | null;
   limit?: number;
@@ -25,7 +27,14 @@ export interface FavoriteBatchInput {
   action: 'set-status' | 'remove';
   target:
     | { keys: string[] }
-    | { match: { q: string; filter: FavoriteFilter }; exclude: string[] };
+    | {
+        match: {
+          q: string;
+          filter: FavoriteFilter;
+          review?: FavoriteReviewFilter;
+        };
+        exclude: string[];
+      };
   watchStatus?: FavoriteWatchStatus | null;
   watchedAt?: number | null;
 }

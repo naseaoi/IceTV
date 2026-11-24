@@ -37,6 +37,7 @@ installCryptoPolyfill();
 installStreamPolyfills();
 const { NextRequest, NextResponse } = require('next/server');
 const own = require('./route') as typeof import('./route');
+const mine = require('./mine/route') as typeof import('./mine/route');
 const admin =
   require('@/app/api/admin/danmaku/user/route') as typeof import('@/app/api/admin/danmaku/user/route');
 
@@ -267,4 +268,51 @@ test('unexpected failures expose only display-safe text', async () => {
   expect(response.status).toBe(500);
   expect(JSON.stringify(await response.json())).not.toContain('secret');
   log.mockRestore();
+});
+
+test('本人列表从会话确定用户名，按集分页并且关闭发送后仍可管理', async () => {
+  jest
+    .mocked(getConfigForRead)
+    .mockResolvedValue({ SiteConfig: { EnableUserDanmaku: false } } as never);
+  jest.mocked(db.getUserDanmakuPage).mockResolvedValue(
+    Array.from({ length: 51 }, (_, index) => ({
+      ...userDanmaku,
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    })),
+  );
+  const response = await mine.GET(
+    request('GET', '?key=dandan:123&username=bob'),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('no-store');
+  expect(db.getUserDanmakuPage).toHaveBeenCalledWith({
+    episodeKey: 'dandan:123',
+    username: 'alice',
+    cursor: undefined,
+  });
+  expect(db.getUserDanmaku).not.toHaveBeenCalled();
+  const page = await response.json();
+  expect(page.items).toHaveLength(50);
+  expect(page.items[0]).toMatchObject({ mine: true, time: 1.234 });
+  expect(page.items[0].username).toBeUndefined();
+  await mine.GET(request('GET', `?key=dandan:123&cursor=${page.nextCursor}`));
+  expect(db.getUserDanmakuPage).toHaveBeenLastCalledWith({
+    episodeKey: 'dandan:123',
+    username: 'alice',
+    cursor: { id: page.items[49].id, createdAt: 1000 },
+  });
+});
+
+test('本人弹幕拒绝未登录、无效归属键和游标，空页结束分页', async () => {
+  expect((await mine.GET(request('GET', '?key=bad'))).status).toBe(400);
+  expect(
+    (await mine.GET(request('GET', '?key=dandan:123&cursor=bad'))).status,
+  ).toBe(400);
+  expect(
+    await (await mine.GET(request('GET', '?key=dandan:123'))).json(),
+  ).toEqual({ items: [], nextCursor: null });
+  jest.mocked(requireActiveUser).mockResolvedValue({
+    response: NextResponse.json({ error: '请先登录' }, { status: 401 }),
+  });
+  expect((await mine.GET(request('GET', '?key=dandan:123'))).status).toBe(401);
 });

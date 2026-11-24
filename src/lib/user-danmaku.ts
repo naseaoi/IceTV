@@ -4,7 +4,8 @@ export const USER_DANMAKU_KEY_MAX_LENGTH = 256;
 // 单集读取上限占 DanmakuEpisodeLimit 的比例，剩余预算留给第三方弹幕
 export const USER_DANMAKU_BUDGET_RATIO = 0.5;
 export const USER_DANMAKU_DEFAULT_COLOR = '#ffffff';
-export const ADMIN_USER_DANMAKU_PAGE_SIZE = 50;
+export const USER_DANMAKU_PAGE_SIZE = 50;
+export const ADMIN_USER_DANMAKU_PAGE_SIZE = USER_DANMAKU_PAGE_SIZE;
 export const ADMIN_USER_DANMAKU_DELETE_LIMIT = 100;
 
 export type UserDanmakuMode = 0 | 1 | 2;
@@ -23,6 +24,11 @@ export interface UserDanmakuListResponse {
   items: UserDanmakuItem[];
   // 当前 DanmakuEpisodeLimit，客户端据此给第三方弹幕分配剩余预算
   limit: number;
+}
+
+export interface MyUserDanmakuPage {
+  items: UserDanmakuItem[];
+  nextCursor: string | null;
 }
 
 export interface UserDanmakuSendInput {

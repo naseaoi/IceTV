@@ -28,6 +28,7 @@ import {
 import { useFavoriteLibrary } from '@/features/favorites/hooks/useFavoriteLibrary';
 import {
   type FavoriteFilter,
+  type FavoriteReviewFilter,
   type FavoriteSort,
 } from '@/features/favorites/lib/favorite-library';
 import type { FavoriteBatchInput } from '@/features/favorites/lib/library-query';
@@ -138,6 +139,7 @@ export function FavoritesPageClient({
   }, [session]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FavoriteFilter>('all');
+  const [review, setReview] = useState<FavoriteReviewFilter>('all');
   const [sort, setSort] = useState<FavoriteSort>('saved');
   const {
     items,
@@ -148,17 +150,24 @@ export function FavoritesPageClient({
     retry,
     skeletonCount,
     clearFavorites,
+    canOperate,
     counts,
+    countsLoading,
     total: resultTotal,
     libraryTotal,
     hasMore,
     loadMore,
-  } = useFavoriteLibrary(favoriteSkeletonCount, { query, filter, sort });
+  } = useFavoriteLibrary(favoriteSkeletonCount, {
+    query,
+    filter,
+    review,
+    sort,
+  });
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const narrowed = query.trim() !== '' || filter !== 'all';
+  const narrowed = query.trim() !== '' || filter !== 'all' || review !== 'all';
   const [selecting, setSelecting] = useState(false);
-  const scope = `${filter}\n${query}`;
+  const scope = `${filter}:${review}\n${query}`;
   const [rawSelection, setSelection] = useState<FavoriteSelection>({
     scope,
     all: false,
@@ -215,8 +224,9 @@ export function FavoritesPageClient({
   }, [selecting, confirmBatchRemove, exitSelecting]);
 
   const runBatch = async (command: FavoriteBatchCommand, propagate = false) => {
+    if (!canOperate) return;
     const target: FavoriteBatchInput['target'] = selection.all
-      ? { match: { q: query, filter }, exclude: [...selection.keys] }
+      ? { match: { q: query, filter, review }, exclude: [...selection.keys] }
       : { keys: [...selection.keys] };
     setBatchBusy(command);
     setBatchError('');
@@ -257,19 +267,21 @@ export function FavoritesPageClient({
   const resetNarrowing = () => {
     setQuery('');
     setFilter('all');
+    setReview('all');
   };
 
   const emptyDescription = query.trim()
     ? `找不到与「${query.trim()}」相关的作品`
-    : '当前筛选下没有作品';
+    : undefined;
 
   let content: React.ReactNode;
   if (loading) {
     content =
-      skeletonCount > 0 ? (
-        <FavoriteGridSkeleton count={skeletonCount} />
+      (skeletonCount ?? 0) > 0 ? (
+        <FavoriteGridSkeleton count={skeletonCount ?? 0} />
       ) : (
         <LibraryEmptySkeleton
+          loading={skeletonCount === null}
           description={narrowed ? emptyDescription : undefined}
         />
       );
@@ -330,7 +342,7 @@ export function FavoritesPageClient({
           <div ref={sentinelRef} className='mt-8 flex justify-center'>
             <button
               type='button'
-              onClick={loadMore}
+              onClick={error ? retry : loadMore}
               disabled={loadingMore}
               className='inline-flex h-9 items-center rounded-full px-4 text-sm text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-100'
             >
@@ -350,18 +362,22 @@ export function FavoritesPageClient({
     <LibraryPageFrame
       title='我的收藏'
       toolbar={
-        ((loading && skeletonCount > 0) || libraryTotal > 0 || narrowed) && (
+        ((loading && (skeletonCount ?? 0) > 0) ||
+          libraryTotal > 0 ||
+          narrowed) && (
           <FavoriteLibraryToolbar
             query={query}
             onQueryChange={setQuery}
             filter={filter}
             onFilterChange={setFilter}
+            review={review}
+            onReviewChange={setReview}
             sort={sort}
             onSortChange={setSort}
             counts={counts}
-            loading={loading}
+            loading={countsLoading}
             action={
-              (loading ? skeletonCount > 0 : libraryTotal > 0) && (
+              (loading ? (skeletonCount ?? 0) > 0 : libraryTotal > 0) && (
                 <>
                   <SelectModeButton
                     active={selecting}
@@ -398,7 +414,7 @@ export function FavoritesPageClient({
       >
         {content}
       </div>
-      {selecting && (
+      {selecting && canOperate && (
         <FavoriteSelectionBar
           count={selectedCount}
           allSelected={allSelected}

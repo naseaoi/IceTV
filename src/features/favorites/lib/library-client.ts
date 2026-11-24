@@ -1,5 +1,6 @@
 import type {
   FavoriteFilter,
+  FavoriteReviewFilter,
   FavoriteSort,
 } from '@/features/favorites/lib/favorite-library';
 import type { FavoriteLibraryPage } from '@/features/favorites/lib/library-query';
@@ -13,6 +14,7 @@ import { parseStorageKey } from '@/lib/utils';
 export interface FavoriteLibraryRequest {
   query: string;
   filter: FavoriteFilter;
+  review?: FavoriteReviewFilter;
   sort: FavoriteSort;
   cursor?: string;
   limit?: number;
@@ -26,6 +28,7 @@ export async function fetchFavoriteLibraryPage(
     format: 'library',
     q: request.query,
     filter: request.filter,
+    review: request.review ?? 'all',
     sort: request.sort,
   });
   if (request.cursor) params.set('cursor', request.cursor);

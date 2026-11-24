@@ -1,4 +1,5 @@
 import type {
+  MyUserDanmakuPage,
   UserDanmakuItem,
   UserDanmakuListResponse,
   UserDanmakuSendInput,
@@ -31,6 +32,24 @@ export async function fetchUserDanmaku(
     items: Array.isArray(payload.items) ? payload.items : [],
     limit: typeof payload.limit === 'number' ? payload.limit : 0,
   };
+}
+
+export async function fetchMyUserDanmaku(
+  key: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<MyUserDanmakuPage> {
+  const params = new URLSearchParams({ key });
+  if (cursor) params.set('cursor', cursor);
+  const response = await fetch(`${ENDPOINT}/mine?${params}`, {
+    cache: 'no-store',
+    signal,
+  });
+  if (!response.ok)
+    throw new DisplayableError(
+      await readError(response, '弹幕加载失败，请重试'),
+    );
+  return response.json();
 }
 
 export async function sendUserDanmaku(

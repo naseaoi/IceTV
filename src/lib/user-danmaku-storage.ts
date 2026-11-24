@@ -21,6 +21,7 @@ export interface UserDanmakuCursor {
 }
 
 export interface UserDanmakuQuery {
+  episodeKey?: string;
   cursor?: UserDanmakuCursor;
   q?: string;
   username?: string;
@@ -90,6 +91,10 @@ export function userDanmakuSchema(dialect: 'sqlite' | 'mysql'): string[] {
 export function userDanmakuPageSql(query: UserDanmakuQuery) {
   const where: string[] = [];
   const params: (string | number)[] = [];
+  if (query.episodeKey) {
+    where.push('episode_key = ?');
+    params.push(query.episodeKey);
+  }
   if (query.cursor) {
     where.push('(created_at < ? OR (created_at = ? AND id < ?))');
     params.push(

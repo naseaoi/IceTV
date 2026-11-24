@@ -475,6 +475,7 @@ export function buildRefreshedPlayRecord(
         group_total: undefined,
         group_label: undefined,
         update_baseline_group_total: undefined,
+        update_message_read_group_total: undefined,
       };
 
   const groupChanged =
@@ -496,6 +497,12 @@ export function buildRefreshedPlayRecord(
     index: aligned.episodeIndex + 1,
     ...nextGroupFields,
     ...(groupChanged ? { update_baseline_group_total: nextTotal } : {}),
+    ...(groupChanged || keepsGrouping !== isGroupedPlayRecordScale(record)
+      ? {
+          update_message_read_episodes: undefined,
+          update_message_read_group_total: undefined,
+        }
+      : {}),
     ...(hasNewEpisodes ? { update_detected_at: checkedAt } : {}),
   };
 

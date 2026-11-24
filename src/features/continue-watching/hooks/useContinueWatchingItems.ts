@@ -171,11 +171,46 @@ export function useContinueWatchingItems({
     const unsubscribeStates = subscribeToDataUpdates(
       'playRecordStatesUpdated',
       (updates: Record<string, PlayRecord>) => {
-        setItems((current) =>
-          current.map((item) =>
-            updates[item.key] ? { ...updates[item.key], key: item.key } : item,
-          ),
+        const snapshot = getCachedPlayRecordsSnapshot();
+        if (snapshot) {
+          applySnapshot(
+            snapshot,
+            filter,
+            Math.max(CONTINUE_WATCHING_PAGE_SIZE, itemsRef.current.length),
+          );
+          return;
+        }
+        let updatedDelta = 0;
+        let shelvedDelta = 0;
+        const merged = itemsRef.current.map((item) => {
+          const update = updates[item.key];
+          if (!update) return item;
+          updatedDelta +=
+            Number(hasPlayRecordUpdate(update)) -
+            Number(hasPlayRecordUpdate(item));
+          shelvedDelta +=
+            Number(isPlayRecordShelved(update)) -
+            Number(isPlayRecordShelved(item));
+          return { ...update, key: item.key };
+        });
+        const visible = merged.filter((item) =>
+          filter === 'updated'
+            ? hasPlayRecordUpdate(item)
+            : filter !== 'shelved' || isPlayRecordShelved(item),
         );
+        itemsRef.current = visible;
+        setItems(visible);
+        setCounts((current) => ({
+          ...current,
+          updated:
+            current.updated === null
+              ? null
+              : Math.max(0, current.updated + updatedDelta),
+          shelved:
+            current.shelved === null
+              ? null
+              : Math.max(0, current.shelved + shelvedDelta),
+        }));
       },
     );
 

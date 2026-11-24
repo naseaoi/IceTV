@@ -20,6 +20,7 @@ import SearchResultFilter from '@/features/search/components/SearchResultFilter'
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
   FilterState,
+  reconcileSearchFilter,
   useSearchAggregation,
 } from '@/features/search/hooks/useSearchAggregation';
 import {
@@ -217,6 +218,33 @@ function AuthenticatedSearchPageClient() {
     !allSourcesFailed;
 
   const aggregate = viewMode === 'agg';
+  const changeAggregate = (next: boolean) => {
+    if (next)
+      setFilterAgg(
+        reconcileSearchFilter(filterAgg, filterOptions.categoriesAgg),
+      );
+    else
+      setFilterAll(
+        reconcileSearchFilter(filterAll, filterOptions.categoriesAll),
+      );
+    setViewMode(next ? 'agg' : 'all');
+  };
+  useEffect(() => {
+    if (isMatchingLoading) return;
+    const current = aggregate ? filterAgg : filterAll;
+    const next = reconcileSearchFilter(
+      current,
+      aggregate ? filterOptions.categoriesAgg : filterOptions.categoriesAll,
+    );
+    if (
+      next.source !== current.source ||
+      next.title !== current.title ||
+      next.year !== current.year
+    ) {
+      if (aggregate) setFilterAgg(next);
+      else setFilterAll(next);
+    }
+  }, [aggregate, filterAgg, filterAll, filterOptions, isMatchingLoading]);
   const resultCount = aggregate
     ? filteredAggResults.length
     : filteredAllResults.length;
@@ -279,7 +307,7 @@ function AuthenticatedSearchPageClient() {
               values={filterValues}
               onChange={(v) => setFilterValues(v as FilterState)}
               aggregate={aggregate}
-              onAggregateChange={(next) => setViewMode(next ? 'agg' : 'all')}
+              onAggregateChange={changeAggregate}
             />
           </div>
         )}
@@ -312,7 +340,7 @@ function AuthenticatedSearchPageClient() {
                     type='checkbox'
                     className='peer sr-only'
                     checked={aggregate}
-                    onChange={() => setViewMode(aggregate ? 'all' : 'agg')}
+                    onChange={() => changeAggregate(!aggregate)}
                   />
                   <span className='block h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-500 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40 dark:bg-gray-600' />
                   <span className='absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4' />

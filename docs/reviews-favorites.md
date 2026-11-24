@@ -14,6 +14,7 @@
 - 正文上限是前后端共用的 `REVIEW_CONTENT_MAX_LENGTH`（`src/lib/video-reviews.ts`），不要另写数字。
 - 私密评价只对作者可见；作品汇总、后台列表与后台删除都带 `is_public = 1`，新增读取路径须同样过滤。
 - 本人评价数与轻量评分索引走 `/api/reviews/mine?view=count|ratings`，收藏库页走 `/api/favorites?format=library`，不要为此翻取完整列表。
+- 我的评价将可见性 `filter=all|public|private` 与内容 `content=all|rating|text|both` 取交集；仅评分要求有评分且正文经 `trim()` 为空，仅文字要求无评分且正文非空，评分和文字要求两者都有。正常写入裁剪正文并拒绝双空记录；导入或遗留的双空记录仅进入全部内容。两后端 SQL 的空白集合与客户端 `trim()` 一致。可见性 chip 计数保留搜索与内容条件，响应 `total` 始终是本人评价总数，用于首屏计数；游标绑定搜索、可见性、内容与排序，旧游标或条件不一致返回 400。编辑与删除按同一交集修正本地条目及计数。
 - 评价与收藏相互独立：取消收藏不删评价。播放页评价与标记评分面板保存时由前端补收藏，「我的评价」编辑只改评价。
 - 保存评价、点赞、举报和关注的服务端写入口必须校验昵称，缺失返回 403 `NICKNAME_REQUIRED`；注册昵称与账号同事务保存，失败释放邀请码名额。
 
@@ -43,7 +44,8 @@
 - 收藏仍按 `source+id` 存储。收藏查询投影与 JSON 同次写入，写入与用户名合并都经 `favoriteProjection()` 重建；启动按 `projection_version` 分批补齐，投影规则改变须升级版本并回填。
 - 有效观看状态（想看 / 在看 / 看过）与看过时间只在 `src/features/favorites/lib/library-storage.ts` 的 SQL 中推导：手动 `watch_status` 优先，其次评分或末集进度 ≥ 90% 判看过（播放记录 `series_status = 'ongoing'` 时末集进度不算看过），有播放记录判在看。收藏库、按作品查询、批量匹配与公开收藏共用这段 SQL，**不要在前端或其他查询里另写推导**，否则计数与列表对不上。
 - 收藏列表与收藏数经收藏库查询获取（`libraryStatements()`，接口 `/api/favorites?format=library`，客户端 `src/features/favorites/lib/library-client.ts`）：「我的」页收藏栏按 `limit` 取前几条，登录写入的收藏计数取 `libraryTotal`。收藏范围统一为 `library_valid = 1`，公开范围再加 `profileFavoriteOriginSql()`；个人主页收藏数这类单独的 `COUNT` 必须沿用同样条件，否则与列表对不上。
-- 状态修改与批量移出走 `POST /api/favorites/batch`；全选提交筛选条件加排除项，筛选语义与 `/api/favorites?format=library` 同一实现，不要先拉全量键再提交。
+- 收藏库将观看状态 `filter=all|planned|watching|completed` 与评价 `review=all|reviewed|unreviewed` 取交集；已评价按匹配评价记录是否存在判定，包含仅文字及私密评价。状态 chip 计数保留搜索与评价条件，`total` 为两维交集数，`libraryTotal` 为未筛选收藏总数；分页游标绑定两维条件。状态修改与批量移出走 `POST /api/favorites/batch`；全选提交 `match: { q, filter, review }` 加排除项，筛选语义与列表共用 SQL，不要先拉全量键再提交。
+- 收藏与我的评价的筛选仅存于组件状态，分页首页快照仅在当前实例内按完整条件保存；计数 cookie 只存未筛选总数。新进入页面使用全部条件，切换筛选沿用不可交互的旧结果；首次加载时当前条件计数未知则走 `ListState` 加载反馈，已知为零则用空状态骨架。
 - `user_profiles.favorites_public` 存公开等级 0–3（不公开 / 仅收藏 / 加状态 / 加评分），接口字段为 `libraryVisibility`，本人始终按 3 级查看。公开评分只取 `is_public = 1` 的评价；精确年份的私密评价存在时不回落到空年份评价，避免泄露私密评分。
 
 ## 目录收藏

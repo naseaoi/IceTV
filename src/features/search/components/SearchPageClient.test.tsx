@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useSearchParams } from 'next/navigation';
-import { type ReactNode, Suspense } from 'react';
+import { type ReactNode, Suspense, useState } from 'react';
 
 import SearchPageClient from '@/features/search/components/SearchPageClient';
+import SearchResultFilter from '@/features/search/components/SearchResultFilter';
 import { useSearchAggregation } from '@/features/search/hooks/useSearchAggregation';
 import { useSearchExecution } from '@/features/search/hooks/useSearchExecution';
 import { useSearchViewMode } from '@/features/search/hooks/useSearchViewMode';
@@ -37,7 +38,7 @@ jest.mock('@/components/SearchBox', () => ({
 }));
 jest.mock('@/features/search/components/SearchResultFilter', () => ({
   __esModule: true,
-  default: () => null,
+  default: jest.fn(() => null),
 }));
 jest.mock('@/components/VideoCard', () => ({
   __esModule: true,
@@ -75,6 +76,9 @@ jest.mock('@/features/search/components/VirtualizedSearchGrid', () => ({
   ),
 }));
 jest.mock('@/features/search/hooks/useSearchAggregation', () => ({
+  reconcileSearchFilter: jest.requireActual(
+    '@/features/search/hooks/useSearchAggregation',
+  ).reconcileSearchFilter,
   useSearchAggregation: jest.fn(),
 }));
 jest.mock('@/features/search/hooks/useSearchExecution', () => ({
@@ -286,4 +290,53 @@ describe('搜索结果区状态', () => {
     expect(screen.getAllByText('搜索未完成')).toHaveLength(1);
     expect(screen.getByText('当前筛选无结果')).toBeInTheDocument();
   });
+});
+
+it('切回聚合视图时将已经合并消失的年份筛选重置为全部', () => {
+  setup({ results: [item] });
+  jest.mocked(useSearchViewMode).mockImplementation(function useTestMode() {
+    return useState<'agg' | 'all'>('agg');
+  });
+  let years = ['all', 'unknown'];
+  jest.mocked(useSearchAggregation).mockImplementation(() => ({
+    isMatchingLoading: false,
+    filterOptions: {
+      categoriesAll: [
+        {
+          key: 'year',
+          label: '年份',
+          options: ['all', 'unknown'].map((value) => ({ label: value, value })),
+        },
+      ],
+      categoriesAgg: [
+        {
+          key: 'year',
+          label: '年份',
+          options: years.map((value) => ({ label: value, value })),
+        },
+      ],
+    },
+    filteredAllResults: [item],
+    filteredAggResults: [],
+    getGroupRef: jest.fn(),
+  }));
+  const { rerender } = render(<SearchPageClient />);
+  act(() =>
+    jest.mocked(SearchResultFilter).mock.calls.at(-1)![0].onChange({
+      source: 'all',
+      title: 'all',
+      year: 'unknown',
+      yearOrder: 'none',
+    }),
+  );
+  expect(
+    jest.mocked(useSearchAggregation).mock.calls.at(-1)![0].filterAgg.year,
+  ).toBe('unknown');
+  fireEvent.click(screen.getByRole('checkbox', { name: '聚合' }));
+  years = ['all', '2026'];
+  rerender(<SearchPageClient />);
+  fireEvent.click(screen.getByRole('checkbox', { name: '聚合' }));
+  expect(
+    jest.mocked(useSearchAggregation).mock.calls.at(-1)![0].filterAgg.year,
+  ).toBe('all');
 });

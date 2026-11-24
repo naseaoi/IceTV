@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import {
   FilterState,
+  reconcileSearchFilter,
   useSearchAggregation,
 } from '@/features/search/hooks/useSearchAggregation';
 import type { SearchResult } from '@/lib/types';
@@ -197,5 +198,65 @@ describe('useSearchAggregation', () => {
       '非凡影视',
     ]);
     expect(cardHandle.setSourceNames).not.toHaveBeenCalled();
+  });
+});
+
+it('聚合选项来自代表标题和年份，来源筛选不改变代表口径', async () => {
+  const searchResults = [
+    createResult({ id: 'a', title: 'Re：从零开始', year: '2026', source: 'a' }),
+    createResult({
+      id: 'b',
+      title: 'Re:从零开始',
+      year: 'unknown',
+      source: 'b',
+    }),
+  ];
+  const { result, rerender } = renderHook(
+    ({ filterAgg }) =>
+      useSearchAggregation({
+        searchResults,
+        filterAll: emptyFilter,
+        filterAgg,
+        searchQuery: '从零开始',
+      }),
+    { initialProps: { filterAgg: emptyFilter } },
+  );
+  await waitFor(() => expect(result.current.isMatchingLoading).toBe(false));
+  const { categoriesAll, categoriesAgg } = result.current.filterOptions;
+  const values = (categories: typeof categoriesAll, key: string) =>
+    categories
+      .find((category) => category.key === key)
+      ?.options.map((option) => option.value);
+  expect(values(categoriesAll, 'year')).toContain('unknown');
+  expect(values(categoriesAll, 'title')).toContain('Re:从零开始');
+  expect(values(categoriesAgg, 'year')).toEqual(['all', '2026']);
+  expect(values(categoriesAgg, 'title')).toEqual(['all', 'Re：从零开始']);
+  expect(values(categoriesAgg, 'source')).toEqual(
+    expect.arrayContaining(['a', 'b']),
+  );
+  const selected = {
+    ...emptyFilter,
+    title: 'Re:从零开始',
+    year: 'unknown',
+    source: 'b',
+  };
+  expect(reconcileSearchFilter(selected, categoriesAgg)).toEqual({
+    ...emptyFilter,
+    source: 'b',
+  });
+  expect(reconcileSearchFilter(selected, categoriesAll)).toEqual(selected);
+  rerender({
+    filterAgg: {
+      ...emptyFilter,
+      title: 'Re：从零开始',
+      year: '2026',
+      source: 'b',
+    },
+  });
+  expect(result.current.filteredAggResults).toHaveLength(1);
+  expect(result.current.filteredAggResults[0]).toMatchObject({
+    title: 'Re：从零开始',
+    year: '2026',
+    group: [expect.objectContaining({ source: 'b' })],
   });
 });

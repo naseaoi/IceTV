@@ -46,6 +46,8 @@ export async function GET(request: NextRequest) {
         query: searchParams.get('q') ?? '',
         filter: (searchParams.get('filter') ??
           'all') as FavoriteLibraryQuery['filter'],
+        review: (searchParams.get('review') ??
+          'all') as FavoriteLibraryQuery['review'],
         sort: (searchParams.get('sort') ??
           'saved') as FavoriteLibraryQuery['sort'],
         cursor: searchParams.get('cursor'),
@@ -174,6 +176,7 @@ export async function POST(request: NextRequest) {
       total_episodes: favorite.total_episodes ?? 0,
       tracking_enabled: undefined,
       update_baseline_episodes: undefined,
+      update_message_read_episodes: undefined,
       update_detected_at: undefined,
       catalog_bind: undefined,
       catalog_origin: undefined,

@@ -35,8 +35,10 @@ export function selectionQuery(
   );
   return {
     q: filter.q,
-    filter: filter.filter,
+    role: filter.role,
+    login: filter.login,
     group: filter.group,
+    ungrouped: filter.ungrouped,
     sort: 'username',
     limit: 100,
     ownerUsername: getOwnerUsername() || '',

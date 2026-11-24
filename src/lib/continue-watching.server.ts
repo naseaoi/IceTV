@@ -58,7 +58,13 @@ export async function getContinueWatchingPageData(
   try {
     const [page, trackingPage, shelvedPage] = await Promise.all([
       db.getPlayRecordPage(session.username, 1),
-      db.getUnreadTrackingPlayRecordPage(session.username, 1),
+      db.getPlayRecordPage(
+        session.username,
+        1,
+        undefined,
+        undefined,
+        'updated',
+      ),
       db.getPlayRecordPage(
         session.username,
         1,
@@ -104,7 +110,13 @@ export async function getContinueWatchingInitialData(): Promise<ContinueWatching
   try {
     const [page, trackingPage] = await Promise.all([
       db.getPlayRecordPage(session.username, CONTINUE_WATCHING_LIMIT),
-      db.getUnreadTrackingPlayRecordPage(session.username, 1),
+      db.getPlayRecordPage(
+        session.username,
+        1,
+        undefined,
+        undefined,
+        'updated',
+      ),
     ]);
     return {
       records: toPlayRecordList(page.items),

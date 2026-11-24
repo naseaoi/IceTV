@@ -83,16 +83,25 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     params.delete(ADMIN_USER_SEARCH_PARAM);
     router.replace(`${pathname}?${params}`, { scroll: false });
   }, [presetSearch, searchParams, router, pathname]);
-  const [userFilter, setUserFilter] =
-    useState<AdminUserFilter['filter']>('all');
+  const [userRole, setUserRole] = useState<AdminUserFilter['role']>('all');
+  const [userLogin, setUserLogin] = useState<AdminUserFilter['login']>('all');
   const [userGroupFilter, setUserGroupFilter] = useState('');
   const [userSort, setUserSort] = useState<AdminUserQuery['sort']>('priority');
-  const userList = useAdminUsers({
+  const userFilter: AdminUserFilter = {
     q: userSearch,
-    filter: userFilter,
-    group: userGroupFilter,
-    sort: userSort,
-  });
+    role: userRole,
+    login: userLogin,
+    group: userGroupFilter.startsWith('group:')
+      ? userGroupFilter.slice('group:'.length)
+      : '',
+    ungrouped: userGroupFilter === 'ungrouped',
+  };
+  const isFiltering =
+    !!userSearch.trim() ||
+    userRole !== 'all' ||
+    userLogin !== 'all' ||
+    !!userGroupFilter;
+  const userList = useAdminUsers({ ...userFilter, sort: userSort });
   const refreshUsersAndConfig = async () => {
     setSelectedUsers(new Set());
     setAllMatching(false);
@@ -194,7 +203,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     setAllMatching(false);
     setExcludedUsers(new Set());
     setBatchPreview(null);
-  }, [userSearch, userFilter, userGroupFilter, userSort]);
+  }, [userSearch, userRole, userLogin, userGroupFilter, userSort]);
   const selectedCount = allMatching
     ? Math.max(0, userList.total - excludedUsers.size)
     : selectedUsers.size;
@@ -549,7 +558,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     const selection: AdminUserSelection = allMatching
       ? {
           mode: 'all',
-          filter: { q: userSearch, filter: userFilter, group: userGroupFilter },
+          filter: userFilter,
           excluded: [...excludedUsers],
         }
       : { mode: 'explicit', usernames: [...selectedUsers] };
@@ -695,19 +704,32 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
               className='w-full sm:w-64'
             />
             <Select
-              value={userFilter || 'all'}
+              value={userRole || 'all'}
               onChange={(value) =>
-                setUserFilter(value as AdminUserFilter['filter'])
+                setUserRole(value as AdminUserFilter['role'])
               }
-              ariaLabel='筛选用户角色或状态'
+              ariaLabel='筛选用户角色'
               variant='pill'
               className='shrink-0'
               options={[
-                { value: 'all', label: '全部' },
-                { value: 'owner', label: '站长' },
+                { value: 'all', label: '全部角色' },
                 { value: 'admin', label: '管理员' },
                 { value: 'user', label: '普通用户' },
-                { value: 'banned', label: '已封禁' },
+                { value: 'banned', label: '封禁用户' },
+              ]}
+            />
+            <Select
+              value={userLogin || 'all'}
+              onChange={(value) =>
+                setUserLogin(value as AdminUserFilter['login'])
+              }
+              ariaLabel='筛选登录方式'
+              variant='pill'
+              className='shrink-0'
+              options={[
+                { value: 'all', label: '全部登录方式' },
+                { value: 'none', label: '未绑定第三方' },
+                { value: 'any', label: '已绑定第三方' },
                 ...OAUTH_PROVIDERS.map((provider) => ({
                   value: `provider:${provider}`,
                   label: `已绑定 ${LOGIN_PROVIDER_BADGES[provider].label}`,
@@ -723,8 +745,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                 className='shrink-0'
                 options={[
                   { value: '', label: '全部用户组' },
+                  { value: 'ungrouped', label: '未分组' },
                   ...userGroups.map((group) => ({
-                    value: group.name,
+                    value: `group:${group.name}`,
                     label: group.name,
                   })),
                 ]}
@@ -849,15 +872,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         {userList.loading && visibleUsers.length === 0 ? (
           <AdminUserRowsSkeleton
             count={config.UserConfig.TotalUsers}
-            searching={
-              !!userSearch.trim() || userFilter !== 'all' || !!userGroupFilter
-            }
+            searching={isFiltering}
           />
         ) : (
           <UserTable
-            isFiltering={
-              !!userSearch.trim() || userFilter !== 'all' || !!userGroupFilter
-            }
+            isFiltering={isFiltering}
             total={userList.total}
             selectedCount={selectedCount}
             users={visibleUsers}

@@ -26,13 +26,13 @@ export function trackingCalendarSql(dialect: 'sqlite' | 'mysql'): string {
       : `NULLIF(JSON_UNQUOTE(JSON_EXTRACT(${column}, '$.${field}')), 'null')`;
   return `SELECT entry_key, entry_json, origin, has_update FROM (
     SELECT record_key AS entry_key, record_json AS entry_json, 'record' AS origin,
-      CASE WHEN ${tracking.unreadWhere} THEN 1 ELSE 0 END AS has_update,
+      CASE WHEN ${tracking.updatedWhere} THEN 1 ELSE 0 END AS has_update,
       COALESCE(${primitives.jsonTimestamp('save_time')}, 0) AS activity_at
     FROM play_records WHERE username = ? AND ${primitives.trackingEnabled()}
       AND COALESCE(${text('record_json', 'series_status')}, '') <> 'ended'
     UNION ALL
     SELECT f.favorite_key AS entry_key, f.favorite_json AS entry_json, 'favorite' AS origin,
-      CASE WHEN ${favorite.unread} THEN 1 ELSE 0 END AS has_update,
+      CASE WHEN ${favorite.updated} THEN 1 ELSE 0 END AS has_update,
       COALESCE(${primitives.jsonTimestamp('save_time').replaceAll('record_json', 'f.favorite_json')}, 0) AS activity_at
     FROM favorites f WHERE f.username = ? AND ${favorite.eligible}
   ) calendar_entries ORDER BY activity_at DESC, entry_key DESC LIMIT 200`;

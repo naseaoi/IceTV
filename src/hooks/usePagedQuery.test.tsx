@@ -278,3 +278,34 @@ it('survives StrictMode effect cleanup and setup', async () => {
   expect(signals[0].aborted).toBe(true);
   expect(result.current.data?.items).toEqual([{ id: 'a' }]);
 });
+
+it('隔离 A 占位数据，B 首页失败后只重试 B 首页', async () => {
+  const { result, requests, switchQuery, resolve, reject } = setup();
+  await resolve(0, page(['a'], 'a-next'));
+  switchQuery('b');
+  expect(result.current.isPlaceholderData).toBe(true);
+  expect(result.current.currentData).toBeNull();
+  const updater = jest.fn(() => page(['wrong']));
+  act(() => {
+    result.current.loadMore();
+    result.current.updateData(updater);
+  });
+  expect(updater).not.toHaveBeenCalled();
+  expect(requests).toHaveLength(2);
+  await reject(1);
+  expect(result.current.errorPhase).toBe('first');
+  expect(result.current.data).toBeNull();
+  expect(result.current.currentData).toBeNull();
+  act(() => result.current.loadMore());
+  expect(requests).toHaveLength(2);
+  act(() => result.current.retry());
+  expect(requests[2]).toMatchObject({ queryKey: 'b', cursor: undefined });
+  await resolve(2, page(['b'], 'b-next'));
+  expect(result.current.currentData?.items).toEqual([{ id: 'b' }]);
+  act(() => result.current.loadMore());
+  expect(requests[3]).toMatchObject({ queryKey: 'b', cursor: 'b-next' });
+  await reject(3);
+  expect(result.current.errorPhase).toBe('more');
+  act(() => result.current.retry());
+  expect(requests[4]).toMatchObject({ queryKey: 'b', cursor: 'b-next' });
+});

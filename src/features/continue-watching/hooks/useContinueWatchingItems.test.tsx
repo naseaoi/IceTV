@@ -7,6 +7,7 @@ import {
   deletePlayRecords,
   getCachedPlayRecordsSnapshot,
   getPlayRecordPage,
+  subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { writeContinueWatchingPageCount } from '@/lib/local-preferences';
 import type { PlayRecord } from '@/lib/types';
@@ -131,4 +132,39 @@ it('读取失败可重试，续页失败保留记录与游标', async () => {
     undefined,
   );
   expect(result.current.error).toBeNull();
+});
+
+it('消息已读保留有更新列表，卡片已读立即移除并同步计数，重复事件不重复扣减', async () => {
+  jest.mocked(getCachedPlayRecordsSnapshot).mockReturnValue(null);
+  const record = {
+    title: '作品',
+    save_time: 1,
+    index: 1,
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+  } as PlayRecord;
+  jest.mocked(getPlayRecordPage).mockResolvedValue({
+    items: { 'src+1': record },
+    total: 1,
+    nextCursor: null,
+  });
+  const { result } = renderHook(() =>
+    useContinueWatchingItems({
+      filter: 'updated',
+      initialCounts: { all: 5, updated: 1, shelved: 0 },
+    }),
+  );
+  await waitFor(() => expect(result.current.items).toHaveLength(1));
+  const callback = jest
+    .mocked(subscribeToDataUpdates)
+    .mock.calls.findLast(([event]) => event === 'playRecordStatesUpdated')![1];
+  const read = { ...record, update_message_read_episodes: 12 };
+  act(() => callback({ 'src+1': read }));
+  expect(result.current.items).toHaveLength(1);
+  expect(result.current.counts).toEqual({ all: 5, updated: 1, shelved: 0 });
+  act(() => callback({ 'src+1': { ...read, update_baseline_episodes: 12 } }));
+  expect(result.current.items).toHaveLength(0);
+  expect(result.current.counts).toEqual({ all: 5, updated: 0, shelved: 0 });
+  act(() => callback({ 'src+1': { ...read, update_baseline_episodes: 12 } }));
+  expect(result.current.counts.updated).toBe(0);
 });

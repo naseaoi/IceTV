@@ -76,6 +76,56 @@ export function userDanmakuContract(
     expect(await storage.deleteUserDanmakuBatch([])).toBe(0);
   });
 
+  it('先按本人和当前集过滤再分页，较早弹幕不受全站窗口挤占', async () => {
+    for (let index = 0; index < 160; index++) {
+      await storage.addUserDanmaku({
+        ...userDanmaku,
+        id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        username: index < 55 || index >= 110 ? 'alice' : 'bob',
+        episodeKey: index >= 110 ? 'dandan:456' : 'dandan:123',
+        createdAt: index < 55 ? 1000 + (index % 3) : 2000,
+      });
+    }
+    expect(
+      (await storage.getUserDanmaku('dandan:123', 50)).every(
+        (row) => row.username === 'bob',
+      ),
+    ).toBe(true);
+    const query = { username: 'ALICE', episodeKey: 'dandan:123' };
+    const first = await storage.getUserDanmakuPage(query);
+    expect(first).toHaveLength(51);
+    expect(
+      first.every(
+        (row) =>
+          row.username === 'alice' && row.episodeKey === query.episodeKey,
+      ),
+    ).toBe(true);
+    const last = first[49];
+    const second = await storage.getUserDanmakuPage({
+      ...query,
+      cursor: { createdAt: last.createdAt, id: last.id },
+    });
+    expect(second).toHaveLength(5);
+    const expected = Array.from({ length: 55 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      createdAt: 1000 + (index % 3),
+    })).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+    expect([...first.slice(0, 50), ...second].map((row) => row.id)).toEqual(
+      expected.map((row) => row.id),
+    );
+    expect(first[50].id).toBe(second[0].id);
+    const end = second.at(-1)!;
+    expect(
+      await storage.getUserDanmakuPage({
+        ...query,
+        cursor: { createdAt: end.createdAt, id: end.id },
+      }),
+    ).toEqual([]);
+    expect(
+      await storage.getUserDanmakuPage({ ...query, episodeKey: 'DANDAN:123' }),
+    ).toEqual([]);
+  });
+
   it('删除用户时同步清理本人弹幕并保留其他用户数据', async () => {
     await storage.registerUser('alice', 'password');
     await storage.addUserDanmaku(userDanmaku);

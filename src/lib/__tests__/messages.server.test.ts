@@ -1,5 +1,9 @@
 /** @jest-environment node */
 
+import {
+  hasPlayRecordUpdate,
+  hasUnreadPlayRecordMessage,
+} from '@/lib/play-records';
 import type { SiteAnnouncement } from '@/lib/types';
 
 const mockGetCapsuleMessages = jest.fn();
@@ -294,7 +298,7 @@ describe('messages server', () => {
     );
   });
 
-  it('收藏与播放同毫秒分页不重漏，摘要和已读使用收藏基线', async () => {
+  it('收藏与播放同毫秒分页不重漏，摘要和已读使用收藏消息水位', async () => {
     const { buildFavoriteUpdateMessage } =
       await import('@/features/favorites/lib/favorite-tracking');
     const favorite = { ...updatedRecord, update_detected_at: 4000 };
@@ -944,14 +948,75 @@ describe('messages server', () => {
 
     expect(result?.updatedRecord?.record).toMatchObject({
       total_episodes: 13,
-      update_baseline_episodes: 12,
+      update_baseline_episodes: 10,
+      update_message_read_episodes: 12,
     });
+    expect(hasPlayRecordUpdate(result!.updatedRecord!.record)).toBe(true);
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: { 'source-a+video-1': result!.updatedRecord!.record },
+      total: 1,
+      nextCursor: null,
+    });
+    expect((await getUserMessagePage('demo', 20)).items).toContainEqual(
+      expect.objectContaining({
+        fromEpisodes: 12,
+        toEpisodes: 13,
+        id: 'tracking:source-a%2Bvideo-1:12:13',
+      }),
+    );
     expect(mockSavePlayRecord).toHaveBeenCalledWith(
       'demo',
       'source-a',
       'video-1',
-      expect.objectContaining({ update_baseline_episodes: 12 }),
+      expect.objectContaining({
+        update_baseline_episodes: 10,
+        update_message_read_episodes: 12,
+      }),
     );
+  });
+
+  it('单条与全部已读消掉消息，保留普通和分组记录的更新基线', async () => {
+    const records: Record<string, PlayRecord> = {
+      'source-a+video-1': { ...updatedRecord },
+      'source-a+group': {
+        ...updatedRecord,
+        group_index: 1,
+        group_total: 4,
+        update_baseline_group_total: 2,
+      },
+    };
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetUnreadTrackingPlayRecordPage.mockImplementation(async () => {
+      const items = Object.fromEntries(
+        Object.entries(records).filter(([, record]) =>
+          hasUnreadPlayRecordMessage(record),
+        ),
+      );
+      return { items, total: Object.keys(items).length, nextCursor: null };
+    });
+    mockGetPlayRecord.mockImplementation(
+      async (_user, source, id) => records[`${source}+${id}`],
+    );
+    mockSavePlayRecord.mockImplementation(async (_user, source, id, record) => {
+      records[`${source}+${id}`] = record;
+    });
+    const page = await getUserMessagePage('demo', 20);
+    const single = page.items.find(
+      (item) =>
+        item.type === 'tracking-update' &&
+        item.recordKey === 'source-a+video-1',
+    )!;
+    await readUserMessage('demo', single.id);
+    expect((await getUserMessagePage('demo', 20)).items).toHaveLength(1);
+    expect(hasPlayRecordUpdate(records['source-a+video-1'])).toBe(true);
+    await readAllUserMessages('demo');
+    expect((await getUserMessagePage('demo', 20)).items).toEqual([]);
+    expect((await getUserMessageSummary('demo')).trackingUnreadCount).toBe(0);
+    expect(records['source-a+group']).toMatchObject({
+      update_baseline_group_total: 2,
+      update_message_read_group_total: 4,
+    });
+    expect(Object.values(records).every(hasPlayRecordUpdate)).toBe(true);
   });
 
   it('marks tracking updates against the latest record', async () => {
@@ -970,8 +1035,12 @@ describe('messages server', () => {
     const result = await readAllUserMessages('demo');
 
     expect(result.updatedRecords['source-a+video-1']).toMatchObject({
-      update_baseline_episodes: 12,
+      update_baseline_episodes: 10,
+      update_message_read_episodes: 12,
     });
+    expect(hasPlayRecordUpdate(result.updatedRecords['source-a+video-1'])).toBe(
+      true,
+    );
     expect(mockUpdatePlayRecord).toHaveBeenCalledWith(
       'demo',
       'source-a',

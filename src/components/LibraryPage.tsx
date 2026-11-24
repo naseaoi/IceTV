@@ -3,7 +3,11 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { ListEmptySkeleton, ListEmptyState } from '@/components/ListState';
+import {
+  ListEmptySkeleton,
+  ListEmptyState,
+  ListLoadingState,
+} from '@/components/ListState';
 
 const LIBRARY_EMPTY_FRAME_CLASS =
   'flex flex-col items-center px-6 py-20 text-center';
@@ -27,13 +31,19 @@ export const LIBRARY_DANGER_BUTTON_CLASS =
 export function LibraryEmptySkeleton({
   action = true,
   description,
+  loading = false,
 }: {
   action?: boolean;
   description?: string;
+  loading?: boolean;
 }) {
   return (
     <div className={LIBRARY_EMPTY_FRAME_CLASS}>
-      <ListEmptySkeleton className={LIBRARY_EMPTY_STATE_CLASS} />
+      {loading ? (
+        <ListLoadingState className={LIBRARY_EMPTY_STATE_CLASS} />
+      ) : (
+        <ListEmptySkeleton className={LIBRARY_EMPTY_STATE_CLASS} />
+      )}
       {description && (
         <p
           aria-hidden='true'

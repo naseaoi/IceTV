@@ -142,6 +142,7 @@ export function ListPlazaPageClient({
   );
   const {
     data,
+    currentData,
     initialLoading,
     refreshing,
     loadingMore,
@@ -157,7 +158,7 @@ export function ListPlazaPageClient({
     getItemKey: (list) => list.id,
   });
   const lists = data?.items ?? [];
-  const cursor = data?.nextCursor;
+  const cursor = currentData?.nextCursor;
   const total = initialTotal;
   // 总数在浏览期间可能变化，有下一页时至少画一张
   const moreSkeletonCount =

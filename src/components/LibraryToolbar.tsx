@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpDown, Search, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import Select from '@/components/Select';
@@ -80,6 +80,7 @@ export interface LibraryToolbarProps<F extends string, S extends string> {
   countsKey: string;
   // 页面级操作：窄屏排在搜索框右侧，宽屏排在排序之后
   action?: ReactNode;
+  extraFilters?: ReactNode;
 }
 
 // 收藏、我的评价等个人内容库共用的搜索 + 筛选胶囊 + 排序工具栏
@@ -96,6 +97,7 @@ export function LibraryToolbar<F extends string, S extends string>({
   loading = false,
   countsKey,
   action,
+  extraFilters,
 }: LibraryToolbarProps<F, S>) {
   const inputRef = useRef<HTMLInputElement>(null);
   const lastDigits = countDigits.get(countsKey);
@@ -192,10 +194,10 @@ export function LibraryToolbar<F extends string, S extends string>({
           })}
         </div>
 
+        {extraFilters}
         <Select
           variant='pill'
           align='end'
-          icon={ArrowUpDown}
           ariaLabel='排序'
           value={sort}
           onChange={(value) => onSortChange(value as S)}

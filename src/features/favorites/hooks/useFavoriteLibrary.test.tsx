@@ -48,7 +48,7 @@ const page = (
       watchedAt: null,
     },
   ],
-  counts: { all: 100, planned: 100, watching: 0, completed: 0, reviewed: 0 },
+  counts: { all: 100, planned: 100, watching: 0, completed: 0 },
   total: 100,
   libraryTotal: 100,
   nextCursor,
@@ -147,13 +147,18 @@ it('keeps current results while switching filters and reuses first-page snapshot
     )
     .mockImplementationOnce(() => new Promise(() => {}));
   const { result, rerender } = renderHook(
-    ({ filter }: { filter: 'all' | 'reviewed' }) =>
-      useFavoriteLibrary(0, { query: '', filter, sort: 'saved' }),
-    { initialProps: { filter: 'all' } },
+    ({ review }: { review: 'all' | 'reviewed' }) =>
+      useFavoriteLibrary(0, {
+        query: '',
+        filter: 'all',
+        review,
+        sort: 'saved',
+      }),
+    { initialProps: { review: 'all' } },
   );
   await waitFor(() => expect(result.current.loading).toBe(false));
 
-  rerender({ filter: 'reviewed' });
+  rerender({ review: 'reviewed' });
   expect(result.current.loading).toBe(false);
   expect(result.current.refreshing).toBe(true);
   expect(result.current.items[0].title).toBe('all');
@@ -161,7 +166,45 @@ it('keeps current results while switching filters and reuses first-page snapshot
   expect(result.current.refreshing).toBe(false);
   expect(result.current.items[0].title).toBe('reviewed');
 
-  rerender({ filter: 'all' });
+  rerender({ review: 'all' });
   expect(result.current.items[0].title).toBe('all');
   expect(result.current.refreshing).toBe(true);
+});
+
+it('首次组合筛选条数未知时保持未知，响应后使用交集条数且总数 cookie 不受筛选影响', async () => {
+  let resolvePage!: (value: ReturnType<typeof response>) => void;
+  mockFetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      }),
+  );
+  const { result } = renderHook(() =>
+    useFavoriteLibrary(100, {
+      query: '',
+      filter: 'completed',
+      review: 'unreviewed',
+      sort: 'saved',
+    }),
+  );
+  expect(result.current.skeletonCount).toBeNull();
+  expect(result.current.countsLoading).toBe(true);
+  const url = new URL(mockFetch.mock.calls[0][0], 'http://localhost');
+  expect(url.searchParams.get('filter')).toBe('completed');
+  expect(url.searchParams.get('review')).toBe('unreviewed');
+  await act(async () =>
+    resolvePage(
+      response({
+        ...page('filtered'),
+        total: 0,
+        items: [],
+        counts: { all: 3, planned: 3, watching: 0, completed: 0 },
+      }),
+    ),
+  );
+  expect(result.current.skeletonCount).toBe(0);
+  expect(result.current.countsLoading).toBe(false);
+  expect(result.current.total).toBe(0);
+  expect(result.current.counts.planned).toBe(3);
+  expect(mockWriteCount).toHaveBeenLastCalledWith(100);
 });

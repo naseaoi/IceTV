@@ -29,11 +29,13 @@ export function PageFooter({
   error,
   cursor,
   loadMore,
+  retry,
 }: {
   loading: boolean;
   error: string;
   cursor: string | null;
   loadMore: () => Promise<void>;
+  retry: () => Promise<void>;
 }) {
   if (!loading && !cursor && !error) return null;
   return (
@@ -50,7 +52,7 @@ export function PageFooter({
           <button
             type='button'
             className={profileButtonClass}
-            onClick={() => void loadMore()}
+            onClick={() => void (error ? retry() : loadMore())}
           >
             {error ? '重试' : '加载更多'}
           </button>

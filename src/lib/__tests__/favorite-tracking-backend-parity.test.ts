@@ -53,6 +53,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         await storage.setFavorite(user, 'source+1', {
           ...base,
           tracking_enabled: false,
+          update_message_read_episodes: 11,
           total_episodes: 12,
           update_baseline_episodes: 10,
           update_detected_at: 100,
@@ -77,6 +78,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         expect(await storage.getFavorite(user, 'source+1')).toMatchObject({
           tracking_enabled: false,
           watch_status: 'completed',
+          update_message_read_episodes: 11,
           update_baseline_episodes: 10,
         });
         await storage.setFavoriteTracking(user, 'source+1', true);
@@ -261,7 +263,8 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         await storage.readFavoriteUpdate(user, 'source+1', 9);
         expect(await storage.getFavorite(user, 'source+1')).toMatchObject({
           total_episodes: 12,
-          update_baseline_episodes: 10,
+          update_baseline_episodes: 8,
+          update_message_read_episodes: 10,
           watch_status: 'planned',
         });
         expect(
@@ -279,6 +282,24 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         expect(
           (await storage.getFavoriteUpdateMessagePage(user, 10)).total,
         ).toBe(0);
+        expect(
+          (await storage.getTrackingCalendarItems(user)).find(
+            (item) => item.key === 'source+1',
+          )?.hasUpdate,
+        ).toBe(true);
+        const read = (await storage.getFavorite(user, 'source+1'))!;
+        await storage.setFavorite(user, 'source+1', {
+          ...read,
+          total_episodes: 13,
+        });
+        expect(
+          (await storage.getFavoriteUpdateMessagePage(user, 10)).items[0],
+        ).toMatchObject({ fromEpisodes: 12, toEpisodes: 13 });
+        await storage.readFavoriteUpdate(user, 'source+1', 99);
+        expect(await storage.getFavorite(user, 'source+1')).toMatchObject({
+          update_baseline_episodes: 8,
+          update_message_read_episodes: 13,
+        });
         await storage.deleteFavorite(user, 'source+1');
         await storage.readFavoriteUpdate(user, 'source+1', 12);
         expect(await storage.getFavorite(user, 'source+1')).toBeNull();

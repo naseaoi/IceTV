@@ -50,9 +50,8 @@ export function validateFavoriteBatch(input: unknown): FavoriteBatchInput {
       !match ||
       typeof match.q !== 'string' ||
       match.q.length > 500 ||
-      !['all', 'planned', 'watching', 'completed', 'reviewed'].includes(
-        match.filter,
-      ) ||
+      !['all', 'planned', 'watching', 'completed'].includes(match.filter) ||
+      !['all', 'reviewed', 'unreviewed'].includes(match.review ?? 'all') ||
       !keysValid(exclude)
     )
       return fail();
@@ -80,6 +79,7 @@ export function batchSelection(
   const sql = libraryStatements(dialect, username, {
     query: 'match' in target ? target.match.q : '',
     filter: 'match' in target ? target.match.filter : 'all',
+    review: 'match' in target ? (target.match.review ?? 'all') : 'all',
     sort: 'saved',
   });
   const keys = 'keys' in target ? target.keys : target.exclude;
@@ -189,6 +189,8 @@ export function mergeFavorite(
     target?.favorite.update_baseline_episodes ??
     target?.favorite.total_episodes ??
     merged.total_episodes;
+  merged.update_message_read_episodes =
+    target?.favorite.update_message_read_episodes;
   merged.update_detected_at = target?.favorite.update_detected_at;
   merged.tracking_enabled = (
     target?.favorite ??

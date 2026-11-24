@@ -12,6 +12,7 @@ import { useAuthSession } from '@/components/AuthProvider';
 import { EMPTY_FAVORITE_COUNTS } from '@/features/favorites/components/FavoriteLibraryToolbar';
 import type {
   FavoriteFilter,
+  FavoriteReviewFilter,
   FavoriteSort,
 } from '@/features/favorites/lib/favorite-library';
 import {
@@ -33,7 +34,12 @@ const useIsomorphicLayoutEffect =
 
 export function useFavoriteLibrary(
   initialSkeletonCount = 0,
-  options: { query: string; filter: FavoriteFilter; sort: FavoriteSort } = {
+  options: {
+    query: string;
+    filter: FavoriteFilter;
+    review?: FavoriteReviewFilter;
+    sort: FavoriteSort;
+  } = {
     query: '',
     filter: 'all',
     sort: 'saved',
@@ -50,13 +56,20 @@ export function useFavoriteLibrary(
   const fetchPage = useCallback(
     (cursor: string | undefined, signal: AbortSignal) =>
       fetchFavoriteLibraryPage(
-        { query, filter: options.filter, sort: options.sort, cursor },
+        {
+          query,
+          filter: options.filter,
+          review: options.review,
+          sort: options.sort,
+          cursor,
+        },
         signal,
       ),
-    [query, options.filter, options.sort],
+    [query, options.filter, options.review, options.sort],
   );
   const {
     data: page,
+    currentData,
     initialLoading,
     refreshing,
     loadingMore,
@@ -66,17 +79,22 @@ export function useFavoriteLibrary(
     loadMore,
   } = usePagedQuery({
     scopeKey: profileId,
-    queryKey: JSON.stringify([query, options.filter, options.sort]),
+    queryKey: JSON.stringify([
+      query,
+      options.filter,
+      options.review,
+      options.sort,
+    ]),
     enabled: !queryPending,
     fetchPage,
     getItemKey: (item) => item.key,
   });
 
   useEffect(() => {
-    if (!page) return;
-    writeFavoriteItemsCount(page.libraryTotal);
-    setSkeletonCount(Math.min(page.libraryTotal, FAVORITE_RENDER_CHUNK));
-  }, [page]);
+    if (!currentData) return;
+    writeFavoriteItemsCount(currentData.libraryTotal);
+    setSkeletonCount(Math.min(currentData.libraryTotal, FAVORITE_RENDER_CHUNK));
+  }, [currentData]);
 
   useIsomorphicLayoutEffect(() => {
     setSkeletonCount((current) =>
@@ -137,12 +155,21 @@ export function useFavoriteLibrary(
     loadingMore,
     error: error ? '收藏加载失败，请重试' : null,
     retry,
-    skeletonCount,
+    countsLoading: !currentData || queryPending,
+    skeletonCount:
+      currentData && !queryPending
+        ? Math.min(currentData.total, FAVORITE_RENDER_CHUNK)
+        : options.query.trim() ||
+            options.filter !== 'all' ||
+            (options.review ?? 'all') !== 'all'
+          ? null
+          : skeletonCount,
     clearFavorites,
-    counts: page?.counts ?? EMPTY_FAVORITE_COUNTS,
-    total: page?.total ?? 0,
-    libraryTotal: page?.libraryTotal ?? 0,
-    hasMore: Boolean(page?.nextCursor),
+    canOperate: currentData !== null && !queryPending && !refreshing,
+    counts: currentData?.counts ?? EMPTY_FAVORITE_COUNTS,
+    total: currentData?.total ?? 0,
+    libraryTotal: currentData?.libraryTotal ?? 0,
+    hasMore: Boolean(currentData?.nextCursor),
     loadMore,
   };
 }

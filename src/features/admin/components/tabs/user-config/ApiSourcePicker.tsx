@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import Select from '@/components/Select';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
@@ -19,31 +19,11 @@ interface ApiSourcePickerProps {
   onChange: (next: string[]) => void;
 }
 
-type PickerFilter =
-  | 'all'
-  | 'selected'
-  | 'unselected'
-  | 'direct'
-  | 'relay'
-  | 'cleanup';
-
-const FILTER_LABEL: Record<PickerFilter, string> = {
-  all: '全部',
-  selected: '已选',
-  unselected: '未选',
-  direct: '直连 / 自动',
-  relay: '代理',
-  cleanup: '待清理',
-};
-
-const FILTERS = Object.keys(FILTER_LABEL) as PickerFilter[];
+type SelectionFilter = 'all' | 'selected' | 'unselected';
+type SourceFilter = 'all' | 'direct' | 'relay' | 'cleanup' | 'disabled';
 
 const CHIP_CLASS = 'shrink-0 rounded px-1.5 text-xs';
 const NEUTRAL_CHIP_CLASS = `${CHIP_CLASS} bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-300`;
-
-function isPickerFilter(value: string): value is PickerFilter {
-  return (FILTERS as string[]).includes(value);
-}
 
 function extractDomain(url: string): string {
   try {
@@ -61,47 +41,26 @@ export function ApiSourcePicker({
 }: ApiSourcePickerProps) {
   const { health } = useSourceInsights('api-source-picker');
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<PickerFilter>('all');
+  const [selectionFilter, setSelectionFilter] =
+    useState<SelectionFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const selectedSet = useMemo(() => new Set(selected), [selected]);
-  // 列表按选中筛选项那一刻的勾选状态过滤，勾选或全选后条目留在原处；数量仍按实时状态统计
+  // 仅切换勾选筛选时更新快照，勾选或切换源条件后条目留在原处。
   const [filterSelection, setFilterSelection] = useState(selectedSet);
   const normalizedQuery = query.trim().toLowerCase();
-
-  const createMatchers = useCallback(
-    (membership: ReadonlySet<string>) => {
-      const isRelay = (source: DataSource) => source.proxyMode === 'server';
-      return {
-        all: () => true,
-        selected: (source: DataSource) => membership.has(source.key),
-        unselected: (source: DataSource) => !membership.has(source.key),
-        direct: (source: DataSource) => !isRelay(source),
-        relay: isRelay,
-        cleanup: (source: DataSource) =>
-          isSourceCleanupCandidate(health.get(source.key)),
-      } satisfies Record<PickerFilter, (source: DataSource) => boolean>;
-    },
-    [health],
-  );
-  const matchers = useMemo(
-    () => createMatchers(selectedSet),
-    [createMatchers, selectedSet],
-  );
-  const listMatchers = useMemo(
-    () => createMatchers(filterSelection),
-    [createMatchers, filterSelection],
-  );
-
-  const counts = useMemo(
-    () =>
-      Object.fromEntries(
-        FILTERS.map((key) => [key, sources.filter(matchers[key]).length]),
-      ) as Record<PickerFilter, number>,
-    [sources, matchers],
-  );
-
+  const sourceMatchers: Record<SourceFilter, (source: DataSource) => boolean> =
+    {
+      all: () => true,
+      direct: (source) => source.proxyMode !== 'server',
+      relay: (source) => source.proxyMode === 'server',
+      cleanup: (source) => isSourceCleanupCandidate(health.get(source.key)),
+      disabled: (source) => Boolean(source.disabled),
+    };
   const visibleSources = sources.filter(
     (source) =>
-      listMatchers[filter](source) &&
+      (selectionFilter === 'all' ||
+        filterSelection.has(source.key) === (selectionFilter === 'selected')) &&
+      sourceMatchers[sourceFilter](source) &&
       (!normalizedQuery ||
         [source.name, source.key, source.api].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
@@ -143,19 +102,30 @@ export function ApiSourcePicker({
         />
         <Select
           variant='pill'
-          ariaLabel='筛选视频源'
-          value={filter}
+          ariaLabel='筛选勾选状态'
+          value={selectionFilter}
           onChange={(value) => {
-            setFilter(isPickerFilter(value) ? value : 'all');
+            setSelectionFilter(value as SelectionFilter);
             setFilterSelection(selectedSet);
           }}
-          options={FILTERS.map((key) => ({
-            value: key,
-            label:
-              key === 'all'
-                ? FILTER_LABEL.all
-                : `${FILTER_LABEL[key]} ${counts[key]}`,
-          }))}
+          options={[
+            { value: 'all', label: '全部' },
+            { value: 'selected', label: '已选' },
+            { value: 'unselected', label: '未选' },
+          ]}
+        />
+        <Select
+          variant='pill'
+          ariaLabel='筛选视频源'
+          value={sourceFilter}
+          onChange={(value) => setSourceFilter(value as SourceFilter)}
+          options={[
+            { value: 'all', label: '全部源' },
+            { value: 'direct', label: '直连或自动' },
+            { value: 'relay', label: '代理' },
+            { value: 'cleanup', label: '待清理' },
+            { value: 'disabled', label: '已禁用' },
+          ]}
         />
         <label className='ml-auto flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400'>
           <input
@@ -194,7 +164,7 @@ export function ApiSourcePicker({
                     <span className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
                       {source.name}
                     </span>
-                    {matchers.relay(source) && (
+                    {sourceMatchers.relay(source) && (
                       <span
                         className={`${CHIP_CLASS} bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300`}
                       >

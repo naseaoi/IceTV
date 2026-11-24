@@ -224,6 +224,7 @@ function ProfileFavorites({
       ) : (
         <div
           aria-busy={refreshing}
+          inert={refreshing}
           className={`transition-opacity ${refreshing ? 'pointer-events-none opacity-60' : ''}`}
         >
           <FavoriteGrid

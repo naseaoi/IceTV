@@ -28,7 +28,9 @@ export interface PlayRecord {
   progress_sequence?: number;
   metadata_checked_at?: number;
   update_baseline_episodes?: number;
+  update_message_read_episodes?: number;
   update_baseline_group_total?: number;
+  update_message_read_group_total?: number;
   update_detected_at?: number;
   tracking_enabled?: boolean;
   series_status?: 'ongoing' | 'ended';
@@ -82,6 +84,7 @@ export interface Favorite {
   origin?: 'vod' | 'live';
   tracking_enabled?: boolean; // 缺省开启，由服务端维护
   update_baseline_episodes?: number;
+  update_message_read_episodes?: number;
   update_detected_at?: number;
   watch_status?: FavoriteWatchStatus;
   watched_at?: number;

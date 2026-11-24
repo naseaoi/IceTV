@@ -19,6 +19,12 @@ export function buildFavoriteUpdateMessage(
 ): TrackingUpdateUserMessage | null {
   const parsed = parseStorageKey(key);
   const baseline = favorite.update_baseline_episodes;
+  const readThrough = Math.max(
+    baseline ?? 0,
+    Number.isSafeInteger(favorite.update_message_read_episodes)
+      ? (favorite.update_message_read_episodes as number)
+      : (baseline ?? 0),
+  );
   if (
     !parsed ||
     isCatalogFavoriteSource(parsed.source) ||
@@ -28,12 +34,12 @@ export function buildFavoriteUpdateMessage(
     !Number.isSafeInteger(baseline) ||
     baseline < 0 ||
     !Number.isSafeInteger(favorite.total_episodes) ||
-    favorite.total_episodes <= baseline ||
+    favorite.total_episodes <= readThrough ||
     !favorite.update_detected_at
   )
     return null;
   return {
-    id: `favorite-tracking:${encodeURIComponent(key)}:${baseline}:${favorite.total_episodes}`,
+    id: `favorite-tracking:${encodeURIComponent(key)}:${readThrough}:${favorite.total_episodes}`,
     type: 'tracking-update',
     recordKey: key,
     source: parsed.source,
@@ -43,7 +49,7 @@ export function buildFavoriteUpdateMessage(
     ...(favorite.search_title ? { searchTitle: favorite.search_title } : {}),
     sourceName: favorite.source_name,
     cover: favorite.cover,
-    fromEpisodes: baseline,
+    fromEpisodes: readThrough,
     toEpisodes: favorite.total_episodes,
     createdAt: favorite.update_detected_at,
   };
@@ -64,6 +70,7 @@ export function favoriteTrackingSql(dialect: 'sqlite' | 'mysql') {
   };
   const total = number('total_episodes');
   const baseline = number('update_baseline_episodes');
+  const messageRead = `COALESCE(${number('update_message_read_episodes')}, ${baseline})`;
   const createdAt = number('update_detected_at');
   const origin =
     dialect === 'sqlite'
@@ -82,13 +89,16 @@ export function favoriteTrackingSql(dialect: 'sqlite' | 'mysql') {
   const eligible = `f.library_valid = 1
     AND ${trackable} AND ${trackingEnabled}
     AND NOT EXISTS (SELECT 1 FROM play_records p WHERE p.username = f.username AND p.record_key = f.favorite_key)`;
+  const updated = `${eligible} AND ${baseline} >= 0 AND ${baseline} = FLOOR(${baseline}) AND ${total} <= 9007199254740991 AND ${total} = FLOOR(${total}) AND ${total} > ${baseline} AND ${createdAt} > 0`;
   return {
     total,
+    messageRead,
+    updated,
     baseline,
     createdAt,
     eligible,
     trackable,
-    unread: `${eligible} AND ${baseline} >= 0 AND ${baseline} = FLOOR(${baseline}) AND ${total} <= 9007199254740991 AND ${total} = FLOOR(${total}) AND ${total} > ${baseline} AND ${createdAt} > 0`,
+    unread: `${updated} AND ${total} > ${messageRead}`,
   };
 }
 
@@ -121,12 +131,12 @@ export function favoriteTrackingStatement(dialect: 'sqlite' | 'mysql') {
     WHERE f.username = ? AND f.favorite_key = ? AND ${favoriteTrackingSql(dialect).trackable}`;
 }
 
-// 只更新基线，不覆盖并发刷新、观看状态或取消收藏；新发现的集数留待下一次确认。
+// 只推进消息水位，保留更新基线与并发刷新发现的新集数。
 export function favoriteReadStatement(dialect: 'sqlite' | 'mysql') {
-  const { total, baseline, unread } = favoriteTrackingSql(dialect);
+  const { total, messageRead, unread } = favoriteTrackingSql(dialect);
   const value = dialect === 'mysql' ? 'CAST(? AS SIGNED)' : '?';
-  return `UPDATE favorites AS f SET favorite_json = JSON_SET(f.favorite_json, '$.update_baseline_episodes', ${value})
-    WHERE f.username = ? AND f.favorite_key = ? AND ${unread} AND ${baseline} < ? AND ${total} >= ?`;
+  return `UPDATE favorites AS f SET favorite_json = JSON_SET(f.favorite_json, '$.update_message_read_episodes', CASE WHEN ${total} < ${value} THEN ${dialect === 'mysql' ? `CAST(${total} AS SIGNED)` : total} ELSE ${value} END)
+    WHERE f.username = ? AND f.favorite_key = ? AND ${unread} AND ${messageRead} < ?`;
 }
 
 export function favoriteMessagesFromRows(

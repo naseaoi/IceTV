@@ -283,7 +283,7 @@ export async function getRecentPlayRecords(
 export async function getPlayRecordPage(
   limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   cursor?: string | null,
-  options?: { filter?: 'updated' | 'shelved' },
+  options?: { filter?: 'updated' | 'shelved'; signal?: AbortSignal },
 ): Promise<PlayRecordPage> {
   const normalizedLimit = normalizePlayRecordLimit(limit);
   const params = new URLSearchParams({
@@ -300,6 +300,7 @@ export async function getPlayRecordPage(
 
   const page = await fetchFromApi<PlayRecordPage>(
     `/api/playrecords?${params.toString()}`,
+    options?.signal ? { signal: options.signal } : undefined,
   );
   mergePlayRecordsIntoCache(page.items);
   return page;
@@ -518,6 +519,8 @@ async function patchPlayRecordState(
       window.dispatchEvent(
         new CustomEvent('playRecordsUpdated', { detail: nextRecords }),
       );
+    } else {
+      applyPlayRecordStateUpdates({ [key]: record });
     }
 
     return record;

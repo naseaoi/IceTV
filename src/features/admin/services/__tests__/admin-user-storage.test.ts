@@ -105,7 +105,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         ).toBe(0);
         expect(
           (
-            await storage.getAdminUserPage({ ...query, filter: 'admin' })
+            await storage.getAdminUserPage({ ...query, role: 'admin' })
           ).items.map((row) => row.username),
         ).toEqual(['page-alice']);
         expect(
@@ -119,6 +119,66 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         expect(
           (await storage.getAdminUserPage({ ...query, group: 'vip' })).total,
         ).toBe(0);
+      });
+      it('includes every banned role while keeping role filters independent of bans', async () => {
+        await storage.updateUserAccess(['page-alice'], { banned: true });
+        try {
+          for (const [role, expected] of [
+            ['banned', ['page-alice', 'page-bob']],
+            ['admin', ['page-alice']],
+            ['user', ['page-bob', 'page-carol', 'page-dave']],
+          ] as const) {
+            const page = await storage.getAdminUserPage({
+              ...query,
+              role,
+              limit: 100,
+            });
+            expect(page.items.map((item) => item.username).sort()).toEqual(
+              expected,
+            );
+            expect(page.total).toBe(expected.length);
+          }
+        } finally {
+          await storage.updateUserAccess(['page-alice'], { banned: false });
+        }
+      });
+      it('paginates ungrouped users including the owner, with composable filters and exclusions', async () => {
+        const first = await storage.getAdminUserPage({
+          ...query,
+          ungrouped: true,
+        });
+        expect(first.total).toBe(3);
+        const second = await storage.getAdminUserPage({
+          ...query,
+          ungrouped: true,
+          cursor: first.nextCursor!,
+        });
+        expect(second.total).toBe(3);
+        expect(
+          [...first.items, ...second.items].map((item) => item.username).sort(),
+        ).toEqual(['page-carol', 'page-dave', 'page-owner']);
+        const filtered = await storage.getAdminUserPage({
+          ...query,
+          ungrouped: true,
+          role: 'user',
+          login: 'none',
+          q: 'page-',
+          excluded: ['PAGE-DAVE'],
+        });
+        expect(filtered.items.map((item) => item.username)).toEqual([
+          'page-carol',
+        ]);
+        expect(filtered.total).toBe(1);
+        await storage.registerUser('page-owner', 'password');
+        await storage.updateUserAccess(['page-owner'], { tags: ['VIP'] });
+        try {
+          expect(
+            (await storage.getAdminUserPage({ ...query, ungrouped: true }))
+              .total,
+          ).toBe(2);
+        } finally {
+          await storage.deleteUser('page-owner');
+        }
       });
       it('records the invite code used at registration until the user is deleted', async () => {
         const name = 'page-erin';
@@ -179,7 +239,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           });
           const byProvider = await storage.getAdminUserPage({
             ...query,
-            filter: 'provider:linuxdo',
+            login: 'provider:linuxdo',
           });
           expect(byProvider.items.map((item) => item.username)).toEqual([name]);
           expect(byProvider.total).toBe(1);
@@ -187,12 +247,95 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           await storage.deleteUser(name);
         }
       });
-      it('binds cursors to filters', async () => {
+      it.each(['none', 'any', 'provider:linuxdo'] as const)(
+        'combines role, login=%s, group and search',
+        async (login) => {
+          await storage.bindOAuthIdentity({
+            provider: 'linuxdo',
+            providerUserId: 'page-bob-ld',
+            username: 'page-bob',
+            providerUsername: 'bob',
+            autoCreated: false,
+            createdAt: 1000,
+          });
+          try {
+            const page = await storage.getAdminUserPage({
+              ...query,
+              role: 'banned',
+              login,
+              q: 'page-',
+              group: 'VIP',
+            });
+            expect(page.items.map((item) => item.username)).toEqual(
+              login === 'none' ? [] : ['page-bob'],
+            );
+            expect(page.total).toBe(login === 'none' ? 0 : 1);
+            const all = await storage.getAdminUserPage({
+              ...query,
+              login,
+              limit: 100,
+            });
+            expect(all.items.map((item) => item.username).sort()).toEqual(
+              login === 'none'
+                ? ['page-alice', 'page-carol', 'page-dave', 'page-owner']
+                : ['page-bob'],
+            );
+            expect(all.total).toBe(login === 'none' ? 4 : 1);
+          } finally {
+            await storage.unbindOAuthIdentity('page-bob');
+          }
+        },
+      );
+      it('treats the owner as active and excludes it from specific roles despite stored access', async () => {
+        await storage.registerUser('page-owner', 'password');
+        await storage.updateUserAccess(['page-owner'], {
+          role: 'admin',
+          banned: true,
+        });
+        try {
+          for (const role of ['admin', 'user'] as const) {
+            const page = await storage.getAdminUserPage({
+              ...query,
+              role,
+              limit: 100,
+            });
+            expect(
+              page.items.some((item) => item.username === 'page-owner'),
+            ).toBe(false);
+          }
+          const active = await storage.getAdminUserPage({
+            ...query,
+            limit: 100,
+          });
+          expect(
+            active.items.find((item) => item.username === 'page-owner'),
+          ).toMatchObject({ role: 'owner', banned: false });
+          const banned = await storage.getAdminUserPage({
+            ...query,
+            role: 'banned',
+            limit: 100,
+          });
+          expect(banned.items.map((item) => item.username)).toEqual([
+            'page-bob',
+          ]);
+        } finally {
+          await storage.deleteUser('page-owner');
+        }
+      });
+      it.each([
+        { role: 'admin' },
+        { role: 'banned' },
+        { ungrouped: true },
+        { group: 'VIP' },
+        { login: 'none' },
+        { login: 'any' },
+        { login: 'provider:linuxdo' },
+      ] as const)('binds cursors to each dimension %j', async (filter) => {
         const page = await storage.getAdminUserPage(query);
         await expect(
           storage.getAdminUserPage({
             ...query,
-            filter: 'banned',
+            ...filter,
             cursor: page.nextCursor!,
           }),
         ).rejects.toThrow('用户游标无效');

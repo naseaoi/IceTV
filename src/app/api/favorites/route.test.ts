@@ -211,7 +211,7 @@ describe('favorites route', () => {
   it('收藏库模式返回服务端计数与评分，并保留无参数全量协议', async () => {
     const page = {
       items: [],
-      counts: { all: 9, planned: 7, watching: 1, completed: 1, reviewed: 1 },
+      counts: { all: 9, planned: 7, watching: 1, completed: 1 },
       total: 1,
       libraryTotal: 30,
       nextCursor: null,
@@ -219,13 +219,14 @@ describe('favorites route', () => {
     mockGetFavoriteLibraryPage.mockResolvedValue(page);
     const response = await GET(
       createRequest(
-        'http://localhost/api/favorites?format=library&q=test&filter=reviewed&sort=rating&cursor=token',
+        'http://localhost/api/favorites?format=library&q=test&filter=completed&review=unreviewed&sort=rating&cursor=token',
       ),
     );
     expect(await response.json()).toEqual(page);
     expect(mockGetFavoriteLibraryPage).toHaveBeenCalledWith('demo', {
       query: 'test',
-      filter: 'reviewed',
+      filter: 'completed',
+      review: 'unreviewed',
       sort: 'rating',
       cursor: 'token',
     });
@@ -264,6 +265,7 @@ describe('favorites route', () => {
     expect(mockGetFavoriteLibraryPage).toHaveBeenCalledWith('demo', {
       query: '',
       filter: 'all',
+      review: 'all',
       sort: 'saved',
       cursor: null,
       limit: 24,

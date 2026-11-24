@@ -9,6 +9,7 @@ import { db } from '@/lib/db';
 import { requireNickname } from '@/lib/user-profile.server';
 import { normalizeUsername } from '@/lib/username';
 import {
+  type MyReviewContent,
   type MyReviewFilter,
   type MyReviewSort,
   decodeReviewCursor,
@@ -130,6 +131,7 @@ export async function handleMyReviews(request: NextRequest) {
       cursor: params.get('cursor') || undefined,
       q: params.get('q') || '',
       filter: (params.get('filter') || 'all') as MyReviewFilter,
+      content: (params.get('content') || 'all') as MyReviewContent,
       sort: (params.get('sort') || 'updated') as MyReviewSort,
     };
     validateMyReviewQuery(query);

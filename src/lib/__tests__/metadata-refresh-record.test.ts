@@ -456,3 +456,19 @@ describe('refreshMetadataCandidates', () => {
     expect(saved[0].next.metadata_checked_at).toEqual(expect.any(Number));
   });
 });
+
+it('定时刷新在换组或撤销分组时清除两个消息水位', () => {
+  const record = createRecord({
+    group_label: '旧组',
+    update_message_read_episodes: 22,
+    update_message_read_group_total: 11,
+  });
+  for (const detail of [
+    createDetail(),
+    createDetail({ episode_groups: undefined }),
+  ]) {
+    const refreshed = buildRefreshedPlayRecord(record, detail, 2000);
+    expect(refreshed.update_message_read_episodes).toBeUndefined();
+    expect(refreshed.update_message_read_group_total).toBeUndefined();
+  }
+});
