@@ -6,6 +6,7 @@ import type {
   ListItemInput,
   ListPatch,
   ListSummary,
+  SavedListSummary,
 } from '@/features/lists/types';
 import {
   getOptionalActiveUser,
@@ -15,6 +16,7 @@ import {
 import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { writeListCountCookieOnResponse } from '@/lib/list-count-cookies';
 import { requireNickname } from '@/lib/user-profile.server';
 import { normalizeUsername } from '@/lib/username';
 
@@ -176,10 +178,46 @@ export async function handleLists(
     if (action === 'like' && ['PUT', 'DELETE'].includes(request.method)) {
       const nicknameFailure = await requireNickname(username);
       if (nicknameFailure) return nicknameFailure;
-      return json(await db.setListLike(username, id, request.method === 'PUT'));
+      const response = json(
+        await db.setListLike(username, id, request.method === 'PUT'),
+      );
+      writeListCountCookieOnResponse(
+        response,
+        'saved_list_count',
+        await db.countSavedLists(username),
+      );
+      return response;
     }
     if (action === 'collection' && request.method === 'GET') {
       const query = request.nextUrl.searchParams;
+      const scope = query.get('scope');
+      if (scope !== null && scope !== 'saved')
+        throw new ListError('片单范围不正确');
+      if (scope === 'saved') {
+        if (['profileId', 'title', 'year'].some((key) => query.has(key)))
+          throw new ListError('收藏片单仅支持读取本人收藏');
+        const saved = await db.getSavedLists(username);
+        const available = await filterListSummaries(
+          saved.filter(
+            (
+              entry,
+            ): entry is Extract<SavedListSummary, { status: 'available' }> =>
+              entry.status === 'available',
+          ),
+          username,
+        );
+        const byId = new Map(available.map((entry) => [entry.id, entry]));
+        const lists = saved.map((entry) =>
+          entry.status === 'available' ? byId.get(entry.id)! : entry,
+        );
+        const response = json({ lists });
+        writeListCountCookieOnResponse(
+          response,
+          'saved_list_count',
+          lists.length,
+        );
+        return response;
+      }
       const profileId = query.get('profileId');
       let owner = username;
       if (profileId !== null) {

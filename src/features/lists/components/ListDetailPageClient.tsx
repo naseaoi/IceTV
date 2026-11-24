@@ -275,7 +275,7 @@ export function ListDetailPageClient({
           <ListDetailSkeleton
             summary={summary}
             preview={initialPreview}
-            showBack={authenticated}
+            authenticated={authenticated}
           />
         )}
         {state.status === 'missing' && (
@@ -304,6 +304,7 @@ export function ListDetailPageClient({
               list={detail.list}
               owner={detail.owner}
               showBack={authenticated}
+              progress={draft === null ? detail.viewerProgress : undefined}
               actions={
                 <ListActions
                   detail={detail}
@@ -413,14 +414,28 @@ function ListActions({
   const { list, isOwner } = detail;
   const showLike = list.visibility !== 'private' && !isOwner;
   const progress = editing ? null : detail.viewerProgress;
-  const showProgress = Boolean(progress && progress.total > 0);
+  const next =
+    progress && progress.total > 0
+      ? detail.items.find((item) => item.id === progress.nextItemId)
+      : undefined;
   return (
     // 首个按钮是图标按钮时左移内边距，让图标与上方文字左对齐
     <div
-      className={`flex min-w-0 items-center gap-1 ${showLike || showProgress ? '' : '-ml-2.5'}`}
+      className={`flex min-w-0 items-center gap-1 ${showLike || next ? '' : '-ml-2.5'}`}
     >
-      {progress && showProgress && (
-        <ViewerProgress progress={progress} items={detail.items} />
+      {next && progress && (
+        <Link
+          href={listItemPlayUrl(next)}
+          title={`《${next.title}》`}
+          className={`${LIBRARY_PILL_BUTTON_CLASS} mr-2 shrink-0 gap-1.5 pl-3.5`}
+        >
+          <Play aria-hidden='true' className='h-4 w-4 fill-current' />
+          {next.viewerStatus === 'watching'
+            ? '继续看'
+            : progress.completed === 0
+              ? '开始看'
+              : '看下一部'}
+        </Link>
       )}
       {showLike && like}
       <ListActionButtons
@@ -438,69 +453,43 @@ function ListActions({
 const PROGRESS_RING_RADIUS = 7;
 const PROGRESS_RING_LENGTH = 2 * Math.PI * PROGRESS_RING_RADIUS;
 
-function ViewerProgress({
-  progress,
-  items,
-}: {
-  progress: ListViewerProgress;
-  items: ListItem[];
-}) {
+function ViewerProgress({ progress }: { progress: ListViewerProgress }) {
   const { completed, total, nextItemId } = progress;
-  const next = nextItemId
-    ? items.find((item) => item.id === nextItemId)
-    : undefined;
   const ratio = Math.min(1, completed / total);
-  const label = !next
-    ? null
-    : next.viewerStatus === 'watching'
-      ? '继续看'
-      : completed === 0
-        ? '开始看'
-        : '看下一部';
   return (
-    <div className='mr-2 flex min-w-0 items-center gap-3'>
-      {next && label && (
-        <Link
-          href={listItemPlayUrl(next)}
-          title={`《${next.title}》`}
-          className={`${LIBRARY_PILL_BUTTON_CLASS} shrink-0 gap-1.5 pl-3.5`}
-        >
-          <Play aria-hidden='true' className='h-4 w-4 fill-current' />
-          {label}
-        </Link>
-      )}
-      <span
-        className='inline-flex shrink-0 items-center gap-1.5 text-sm tabular-nums text-gray-500 dark:text-gray-400'
-        aria-label={`已看 ${completed} 部，共 ${total} 部`}
+    <span
+      className='inline-flex shrink-0 items-center gap-1 tabular-nums'
+      aria-label={`已看 ${completed} 部，共 ${total} 部`}
+    >
+      <svg
+        aria-hidden='true'
+        viewBox='0 0 18 18'
+        className='h-3.5 w-3.5 -rotate-90'
       >
-        <svg
-          aria-hidden='true'
-          viewBox='0 0 18 18'
-          className='h-[18px] w-[18px] -rotate-90'
-        >
-          <circle
-            cx='9'
-            cy='9'
-            r={PROGRESS_RING_RADIUS}
-            fill='none'
-            strokeWidth='2.5'
-            className='stroke-gray-200 dark:stroke-gray-700'
-          />
-          <circle
-            cx='9'
-            cy='9'
-            r={PROGRESS_RING_RADIUS}
-            fill='none'
-            strokeWidth='2.5'
-            strokeLinecap='round'
-            strokeDasharray={PROGRESS_RING_LENGTH}
-            strokeDashoffset={PROGRESS_RING_LENGTH * (1 - ratio)}
-            className={`stroke-brand-500 transition-[stroke-dashoffset] duration-500 ${ratio === 0 ? 'opacity-0' : ''}`}
-          />
-        </svg>
-        {next ? `已看 ${completed}/${total}` : '已全部看过'}
-      </span>
-    </div>
+        <circle
+          cx='9'
+          cy='9'
+          r={PROGRESS_RING_RADIUS}
+          fill='none'
+          strokeWidth='2.5'
+          className='stroke-gray-200 dark:stroke-gray-700'
+        />
+        <circle
+          cx='9'
+          cy='9'
+          r={PROGRESS_RING_RADIUS}
+          fill='none'
+          strokeWidth='2.5'
+          strokeLinecap='round'
+          strokeDasharray={PROGRESS_RING_LENGTH}
+          strokeDashoffset={PROGRESS_RING_LENGTH * (1 - ratio)}
+          className={`stroke-brand-500 transition-[stroke-dashoffset] duration-500 ${ratio === 0 ? 'opacity-0' : ''}`}
+        />
+      </svg>
+      {nextItemId
+        ? `已看 ${completed}/${total} 部`
+        : `已看完 ${total}/${total}`}
+    </span>
   );
 }
 
@@ -579,11 +568,13 @@ function ListHeader({
   list,
   owner,
   showBack = true,
+  progress,
   actions,
 }: {
   list: ListSummary;
   owner: PublicUserRef | null;
   showBack?: boolean;
+  progress?: ListViewerProgress;
   actions?: ReactNode;
 }) {
   return (
@@ -616,10 +607,14 @@ function ListHeader({
                 className='skeleton h-5 w-20 rounded-full'
               />
             )}
-            <span className='inline-flex items-center gap-1 tabular-nums'>
-              <ListVideo aria-hidden='true' className='h-3.5 w-3.5' />
-              {list.itemCount} 部
-            </span>
+            {progress && progress.total > 0 ? (
+              <ViewerProgress progress={progress} />
+            ) : (
+              <span className='inline-flex items-center gap-1 tabular-nums'>
+                <ListVideo aria-hidden='true' className='h-3.5 w-3.5' />
+                {list.itemCount} 部
+              </span>
+            )}
             <ListStats list={list} iconClassName='h-3.5 w-3.5' />
             <ListVisibilityBadge visibility={list.visibility} />
             <span className='inline-flex items-center gap-1'>
@@ -764,46 +759,50 @@ export function ListDetailPageSkeleton({ listId }: { listId: string }) {
         <ListDetailSkeleton
           summary={summary}
           preview={null}
-          showBack={authenticated}
+          authenticated={authenticated}
         />
       </div>
     </PageLayout>
   );
 }
 
-// 操作区内容随身份与观看进度变化，占位只画主按钮与图标按钮的轮廓；行高由 ACTIONS_CLASS 固定
-function ListActionsSkeleton() {
+// 按最常见的他人片单视角占位：登录且有条目时有主按钮，其后为收藏与复制链接；行高由 ACTIONS_CLASS 固定
+function ListActionsSkeleton({ showPlay }: { showPlay: boolean }) {
   return (
-    <>
-      <div className='skeleton mr-2 h-9 w-24 rounded-full' />
+    <div className='flex items-center gap-1'>
+      {showPlay && <div className='skeleton mr-2 h-9 w-24 rounded-full' />}
+      <div className='skeleton h-9 w-24 rounded-full' />
       <div className='skeleton h-9 w-9 rounded-full' />
-    </>
+    </div>
   );
 }
 
 function ListDetailSkeleton({
   summary,
   preview,
-  showBack,
+  authenticated,
 }: {
   summary: ListSummary | null;
   // 标签页内没有摘要时，用服务端读出的标题与简介撑出真实高度
   preview: ListHeaderPreview | null;
-  showBack: boolean;
+  authenticated: boolean;
 }) {
   const itemCount = summary?.itemCount ?? preview?.itemCount ?? null;
+  const actions = (
+    <ListActionsSkeleton showPlay={authenticated && itemCount !== 0} />
+  );
   return (
     <div aria-hidden='true'>
       {summary ? (
         <ListHeader
           list={summary}
           owner={null}
-          showBack={showBack}
-          actions={<ListActionsSkeleton />}
+          showBack={authenticated}
+          actions={actions}
         />
       ) : (
         <div className={HEADER_CLASS}>
-          {showBack && <div className={`h-9 ${BACK_BUTTON_CLASS}`} />}
+          {authenticated && <div className={`h-9 ${BACK_BUTTON_CLASS}`} />}
           <div className={HEADER_BODY_CLASS}>
             <div className={`skeleton ${HEADER_COVER_CLASS}`} />
             <div className='min-w-0 flex-1'>
@@ -823,9 +822,7 @@ function ListDetailSkeleton({
                 <div className='skeleton h-5 w-20 rounded-full' />
                 <div className='skeleton h-3.5 w-48 rounded' />
               </div>
-              <div className={ACTIONS_CLASS}>
-                <ListActionsSkeleton />
-              </div>
+              <div className={ACTIONS_CLASS}>{actions}</div>
             </div>
           </div>
         </div>

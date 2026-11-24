@@ -6,7 +6,6 @@ import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import { LIBRARY_PILL_BUTTON_CLASS } from '@/components/LibraryPage';
-import { libraryChipClass } from '@/components/LibraryToolbar';
 import {
   ListEmptySkeleton,
   ListEmptyState,
@@ -23,6 +22,7 @@ import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { writeListCountCookie } from '@/lib/list-count-cookies';
 
 import { ListGrid, ListGridSkeleton } from './ListCard';
+import { ListPillSwitch } from './ListPillSwitch';
 
 const SORT_OPTIONS: { value: PlazaSort; label: string }[] = [
   { value: 'hot', label: '最热' },
@@ -91,19 +91,12 @@ function PlazaShell({
       <div className={`${PAGE_CONTAINER_CLASS} pb-12 pt-4 sm:pt-8`}>
         <h1 className='sr-only'>片单广场</h1>
         <div className='mb-5 flex items-center justify-between gap-3'>
-          <div role='group' aria-label='排序' className='flex gap-2'>
-            {SORT_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type='button'
-                aria-pressed={sort === option.value}
-                onClick={() => onSortChange?.(option.value)}
-                className={libraryChipClass(sort === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <ListPillSwitch
+            label='排序'
+            options={SORT_OPTIONS}
+            value={sort}
+            onChange={onSortChange}
+          />
           {authenticated && (
             <Link href='/me/lists' className={LIBRARY_PILL_BUTTON_CLASS}>
               我的片单

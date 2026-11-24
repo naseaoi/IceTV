@@ -1727,6 +1727,8 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (normalized === "SHOW COLUMNS FROM list_likes LIKE 'list_name'")
+      return [[{ Field: 'list_name' }], []];
     if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")
       return [[{ Field: 'like_count' }], []];
     if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'view_count'")

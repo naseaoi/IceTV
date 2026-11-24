@@ -149,6 +149,16 @@ class DbManager {
   ): ReturnType<IStorage['getLists']> {
     return (await this.getStorage()).getLists(...args);
   }
+  async getSavedLists(
+    ...args: Parameters<IStorage['getSavedLists']>
+  ): ReturnType<IStorage['getSavedLists']> {
+    return (await this.getStorage()).getSavedLists(...args);
+  }
+  async countSavedLists(
+    ...args: Parameters<IStorage['countSavedLists']>
+  ): ReturnType<IStorage['countSavedLists']> {
+    return (await this.getStorage()).countSavedLists(...args);
+  }
   async countUserLists(
     ...args: Parameters<IStorage['countUserLists']>
   ): ReturnType<IStorage['countUserLists']> {

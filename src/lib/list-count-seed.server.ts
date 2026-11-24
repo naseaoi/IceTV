@@ -5,11 +5,13 @@ import type { NextResponse } from 'next/server';
 import { CONTINUE_WATCHING_PAGE_SIZE } from '@/features/continue-watching/lib/layout';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
-import type { ListCountCookieName } from '@/lib/list-count-cookies';
+import {
+  type ListCountCookieName,
+  writeListCountCookieOnResponse,
+} from '@/lib/list-count-cookies';
 import { normalizePlayRecordLimit } from '@/lib/play-records';
 import { runtimeParamsFromConfig } from '@/lib/runtime-params';
 
-const MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 async function countHistoryFirstPage(
   username: string,
   pageSize: number,
@@ -24,7 +26,7 @@ async function computeListCounts(
 ): Promise<Record<ListCountCookieName, number>> {
   const params = runtimeParamsFromConfig(await getConfigForRead());
   const historyPageSize = params.PlaybackHistoryPageSize;
-  const [favorites, reviews, history, playRecords, lists, plaza] =
+  const [favorites, reviews, history, playRecords, lists, plaza, savedLists] =
     await Promise.all([
       db.getFavoriteLibraryPage(username, {
         query: '',
@@ -37,12 +39,14 @@ async function computeListCounts(
       db.getPlayRecordPage(username, 1),
       db.countUserLists(username),
       db.countPlazaLists(username),
+      db.countSavedLists(username),
     ]);
   return {
     fav_count: favorites.libraryTotal,
     review_count: reviews,
     history_count: history,
     list_count: lists,
+    saved_list_count: savedLists,
     plaza_count: plaza,
     cw_count: Math.min(
       playRecords.total,
@@ -60,11 +64,11 @@ export async function seedListCountCookies(
   try {
     const counts = await computeListCounts(username);
     for (const [name, value] of Object.entries(counts)) {
-      response.cookies.set(name, String(Math.max(0, Math.floor(value))), {
-        path: '/',
-        maxAge: MAX_AGE_SECONDS,
-        sameSite: 'lax',
-      });
+      writeListCountCookieOnResponse(
+        response,
+        name as ListCountCookieName,
+        value,
+      );
     }
   } catch (error) {
     console.warn('写入列表计数失败', error);

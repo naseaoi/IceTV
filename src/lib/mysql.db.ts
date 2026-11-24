@@ -707,6 +707,22 @@ export class MySqlStorage implements IStorage {
         }
       }
     }
+    const [likeColumns] = await this.pool.query<RowDataPacket[]>(
+      "SHOW COLUMNS FROM list_likes LIKE 'list_name'",
+    );
+    if (!likeColumns.length) {
+      try {
+        await this.pool.execute(
+          "ALTER TABLE list_likes ADD COLUMN list_name VARCHAR(30) NOT NULL DEFAULT ''",
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    await this.pool.execute(
+      "UPDATE list_likes k JOIN user_lists l ON l.id = k.list_id SET k.list_name = l.name WHERE k.list_name = ''",
+    );
     await new MysqlConfigStateStore(this.pool).migrateSchema();
 
     for (const [name, size] of [
@@ -2029,6 +2045,16 @@ export class MySqlStorage implements IStorage {
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
     return this.runListPlan(new ListPlans('mysql').getLists(...args));
+  }
+  async getSavedLists(
+    ...args: Parameters<IStorage['getSavedLists']>
+  ): ReturnType<IStorage['getSavedLists']> {
+    return this.runListPlan(new ListPlans('mysql').getSavedLists(...args));
+  }
+  async countSavedLists(
+    ...args: Parameters<IStorage['countSavedLists']>
+  ): ReturnType<IStorage['countSavedLists']> {
+    return this.runListPlan(new ListPlans('mysql').countSavedLists(...args));
   }
   async countUserLists(
     ...args: Parameters<IStorage['countUserLists']>

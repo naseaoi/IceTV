@@ -11,6 +11,38 @@ export function queryLists(
   state: ListFakeState,
   profiles: ListRow[] = [],
 ): ListRow[] | undefined {
+  if (sql.startsWith('SELECT l.*, k.list_id AS saved_id'))
+    return state.listLikes
+      .filter((row) => row.username === params[0])
+      .sort(
+        (a, b) =>
+          Number(b.created_at) - Number(a.created_at) ||
+          String(a.list_id).localeCompare(String(b.list_id)),
+      )
+      .slice(0, 500)
+      .map((row) => {
+        const list = state.lists.find((entry) => entry.id === row.list_id);
+        const profile = profiles.find(
+          (entry) => entry.username === list?.username,
+        );
+        return {
+          id: null,
+          ...list,
+          profile_id: profile?.profile_id ?? null,
+          nickname: profile?.nickname ?? null,
+          avatar_seed: profile?.avatar_seed ?? null,
+          saved_id: row.list_id,
+          saved_name: row.list_name,
+          saved_at: row.created_at,
+        };
+      });
+  if (sql.startsWith('SELECT COUNT(*) AS total FROM list_likes'))
+    return [
+      {
+        total: state.listLikes.filter((row) => row.username === params[0])
+          .length,
+      },
+    ];
   if (sql.startsWith('SELECT l.*, p.profile_id')) {
     const score = (row: ListRow) =>
       sql.includes('l.like_count * 10')
@@ -133,6 +165,22 @@ export function executeLists(
   params: unknown[],
   state: ListFakeState,
 ): number | undefined {
+  if (sql.startsWith('UPDATE list_likes k JOIN user_lists')) {
+    let count = 0;
+    for (const row of state.listLikes) {
+      const list = state.lists.find((entry) => entry.id === row.list_id);
+      if (!row.list_name && list) {
+        row.list_name = list.name;
+        count++;
+      }
+    }
+    return count;
+  }
+  if (sql.startsWith('UPDATE list_likes SET list_name')) {
+    const rows = state.listLikes.filter((row) => row.list_id === params[1]);
+    for (const row of rows) row.list_name = String(params[0]);
+    return rows.length;
+  }
   if (sql.startsWith('INSERT IGNORE INTO list_likes')) {
     if (
       state.listLikes.some(
@@ -144,6 +192,7 @@ export function executeLists(
       list_id: String(params[0]),
       username: String(params[1]),
       created_at: Number(params[2]),
+      list_name: String(params[3]),
     });
     return 1;
   }

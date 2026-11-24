@@ -8,6 +8,7 @@ export const LIST_COUNT_COOKIE_NAMES = [
   'review_count',
   'history_count',
   'list_count',
+  'saved_list_count',
   'plaza_count',
 ] as const;
 
@@ -46,6 +47,18 @@ export function clearListCountCookie(name: ListCountCookieName): void {
   try {
     document.cookie = `${name}=0;path=/;max-age=0;samesite=lax`;
   } catch {}
+}
+
+export function writeListCountCookieOnResponse(
+  response: NextResponse,
+  name: ListCountCookieName,
+  value: number,
+): void {
+  response.cookies.set(name, String(Math.max(0, Math.floor(value))), {
+    path: '/',
+    maxAge: MAX_AGE_SECONDS,
+    sameSite: 'lax',
+  });
 }
 
 export function clearListCountCookiesOnResponse(response: NextResponse): void {

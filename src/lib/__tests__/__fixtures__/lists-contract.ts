@@ -84,9 +84,9 @@ export function listsContract(
       everyone,
     );
   });
-  it('点赞取消幂等，不改版本时间，私密保留点赞且不可操作', async () => {
+  it('收藏取消幂等，不改版本时间，私密保留收藏且允许取消', async () => {
     const list = await storage.createList('alice', {
-      name: '点赞',
+      name: '收藏',
       visibility: 'everyone',
       item: listItem,
     });
@@ -104,15 +104,14 @@ export function listsContract(
     });
     await expect(
       storage.setListLike('alice', list.id, true),
-    ).rejects.toMatchObject({ status: 400, message: '不能给自己点赞' });
+    ).rejects.toMatchObject({ status: 400, message: '不能收藏自己的片单' });
     const hidden = await storage.updateList('alice', list.id, {
       visibility: 'private',
     });
     expect(hidden.likeCount).toBe(1);
-    for (const liked of [true, false])
-      await expect(
-        storage.setListLike('bobby', list.id, liked),
-      ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      storage.setListLike('bobby', list.id, true),
+    ).rejects.toMatchObject({ status: 404 });
     await expect(
       storage.setListLike(
         'bobby',
@@ -134,8 +133,89 @@ export function listsContract(
       likeCount: 0,
     });
   });
+  it('收藏快照只跟随登录可见名称，失效后保留且允许本人取消', async () => {
+    const list = await storage.createList('alice', {
+      name: '初始名称',
+      visibility: 'members',
+      item: listItem,
+    });
+    await storage.setListLike('bobby', list.id, true);
+    const [initial] = await storage.getSavedLists('BOBBY');
+    const author = await storage.getUserProfile('alice');
+    expect(initial.status === 'available' && initial.owner).toEqual({
+      profileId: author!.profile_id,
+      nickname: author!.nickname,
+      avatarSeed: author!.avatar_seed,
+      level: author!.level ?? 1,
+    });
+    expect(initial.status === 'available' && initial.owner).toEqual(
+      (await storage.getPlazaLists('bobby', 'hot', null)).lists[0].owner,
+    );
+    expect(initial).toMatchObject({
+      ...list,
+      likeCount: 1,
+      status: 'available',
+      savedAt: expect.any(Number),
+    });
+    await storage.updateList('alice', list.id, { name: '最后公开名称' });
+    expect((await storage.getSavedLists('bobby'))[0]).toMatchObject({
+      name: '最后公开名称',
+      savedAt: initial.savedAt,
+    });
+    await storage.updateList('alice', list.id, {
+      name: '私密名称',
+      visibility: 'private',
+    });
+    await storage.updateList('alice', list.id, {
+      name: '私密重命名',
+      description: '私密内容',
+    });
+    const hidden = {
+      status: 'private',
+      id: list.id,
+      name: '最后公开名称',
+      savedAt: initial.savedAt,
+    };
+    expect(await storage.getSavedLists('bobby')).toEqual([hidden]);
+    await storage.updateList('alice', list.id, {
+      name: '重新公开',
+      visibility: 'everyone',
+    });
+    await storage.updateList('alice', list.id, { visibility: 'private' });
+    expect(await storage.getSavedLists('bobby')).toEqual([
+      { ...hidden, name: '重新公开' },
+    ]);
+    expect(await storage.setListLike('bobby', list.id, false)).toEqual({
+      liked: false,
+      likeCount: 0,
+    });
+    expect((await storage.getList(list.id, 'alice')).list.likeCount).toBe(0);
+    await expect(
+      storage.setListLike('bobby', list.id, false),
+    ).rejects.toMatchObject({ status: 404 });
+    await storage.updateList('alice', list.id, { visibility: 'members' });
+    await storage.setListLike('bobby', list.id, true);
+    await storage.deleteList('alice', list.id);
+    expect(await storage.getSavedLists('bobby')).toEqual([
+      {
+        ...hidden,
+        status: 'deleted',
+        name: '重新公开',
+        savedAt: expect.any(Number),
+      },
+    ]);
+    expect(await storage.countSavedLists('bobby')).toBe(1);
+    expect(await storage.setListLike('bobby', list.id, false)).toEqual({
+      liked: false,
+      likeCount: 0,
+    });
+    expect(await storage.getSavedLists('bobby')).toEqual([]);
+    await expect(
+      storage.setListLike('bobby', list.id, false),
+    ).rejects.toMatchObject({ status: 404 });
+  });
   it.each(['delete', 'inactive'] as const)(
-    '删号 %s 清除用户点赞并重算其他作者片单',
+    '删号 %s 清除用户收藏并重算其他作者片单',
     async (mode) => {
       const list = await storage.createList('alice', {
         name: '保留',
@@ -157,6 +237,15 @@ export function listsContract(
           ),
         ).toBe(true);
       expect((await storage.getList(list.id, 'alice')).list).toEqual(list);
+      expect(await storage.getSavedLists('alice')).toEqual([
+        {
+          status: 'deleted',
+          id: removed.id,
+          name: '删除',
+          savedAt: expect.any(Number),
+        },
+      ]);
+      expect(await storage.countSavedLists('bobby')).toBe(0);
       await expect(storage.getList(removed.id, 'alice')).rejects.toMatchObject({
         status: 404,
       });

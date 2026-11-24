@@ -1,6 +1,6 @@
 'use client';
 
-import { ThumbsUp } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { setListLiked } from '@/features/lists/lib/lists-client';
@@ -11,7 +11,7 @@ import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 const BUTTON_CLASS =
   'mr-1 inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors';
 
-// 点赞数在头部统计行显示，这里只负责切换；作者不能给自己点赞，游客点击提示登录
+// 收藏数在头部统计行显示，这里只负责切换；作者隐藏入口，游客点击提示登录
 export function ListLikeButton({
   listId,
   state,
@@ -32,7 +32,7 @@ export function ListLikeButton({
 
   async function toggle() {
     if (!authenticated) {
-      showToast('登录后可点赞', 'info');
+      showToast('登录后可收藏', 'info');
       return;
     }
     if (inFlight.current) return;
@@ -65,12 +65,25 @@ export function ListLikeButton({
           : 'bg-gray-900/[0.06] text-gray-700 hover:bg-gray-900/[0.1] dark:bg-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.12]'
       }`}
     >
-      <ThumbsUp
+      <Heart
         key={pop}
         aria-hidden='true'
-        className={`h-4 w-4 ${state.liked ? 'fill-current' : ''} ${state.liked && pop > 0 ? 'motion-pop' : ''}`}
+        className={`h-4 w-4 shrink-0 ${state.liked ? 'fill-red-600 stroke-red-600' : ''} ${state.liked && pop > 0 ? 'motion-pop' : ''}`}
       />
-      点赞
+      <span className='grid'>
+        <span
+          aria-hidden={state.liked}
+          className={`[grid-area:1/1] ${state.liked ? 'invisible' : ''}`}
+        >
+          收藏
+        </span>
+        <span
+          aria-hidden={!state.liked}
+          className={`[grid-area:1/1] ${state.liked ? '' : 'invisible'}`}
+        >
+          已收藏
+        </span>
+      </span>
     </button>
   );
 }

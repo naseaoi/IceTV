@@ -162,7 +162,7 @@ export function ListsSlide({ report, audience }: SlideProps) {
                     className={`mt-1.5 flex items-center gap-1.5 text-[13px] tabular-nums ${RECAP_TEXT.accent}`}
                   >
                     <Heart className='h-3.5 w-3.5 fill-current' />
-                    今年收获 {featured.likes} 个赞
+                    今年被收藏 {featured.likes} 次
                     <span className={RECAP_TEXT.muted}>
                       · {featured.itemCount} 部作品
                     </span>

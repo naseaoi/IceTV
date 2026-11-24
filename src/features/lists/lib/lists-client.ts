@@ -9,6 +9,7 @@ import type {
   PlazaListSummary,
   PlazaPage,
   PlazaSort,
+  SavedListSummary,
 } from '@/features/lists/types';
 import {
   readListCountCookie,
@@ -61,6 +62,20 @@ export async function fetchMyLists(
   });
   lists.forEach(remember);
   writeListCountCookie('list_count', lists.length);
+  return lists;
+}
+export async function fetchSavedLists(
+  signal?: AbortSignal,
+): Promise<SavedListSummary[]> {
+  const { lists } = await request<{ lists: SavedListSummary[] }>(
+    '?scope=saved',
+    { signal },
+  );
+  for (const list of lists) {
+    if (list.status === 'available') remember(list);
+    else summaryCache.delete(list.id);
+  }
+  writeListCountCookie('saved_list_count', lists.length);
   return lists;
 }
 export async function fetchProfileLists(

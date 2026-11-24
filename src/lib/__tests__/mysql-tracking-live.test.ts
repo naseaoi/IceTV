@@ -494,7 +494,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     await assertBatchDeletePlayRecords(storage);
   });
 
-  it('新粉丝与点赞通知双后端契约', async () => {
+  it('新粉丝与收藏通知双后端契约', async () => {
     await assertSocialNotifications(storage, 'mysql-notification');
   });
 
@@ -1536,6 +1536,33 @@ describeLive('MySQL 片单并发（真实实例）', () => {
       storage as unknown as { pool: import('mysql2/promise').Pool }
     ).pool.end();
   });
+  it('旧收藏名称迁移幂等，重新初始化保持私密片单快照', async () => {
+    const internal = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      initializeSchema(): Promise<void>;
+    };
+    await storage.ensureUserProfile('migration-owner');
+    await storage.ensureUserProfile('migration-saver');
+    const list = await storage.createList('migration-owner', {
+      name: '旧公开名称',
+      visibility: 'members',
+    });
+    await storage.setListLike('migration-saver', list.id, true);
+    await internal.pool.execute('ALTER TABLE list_likes DROP COLUMN list_name');
+    await internal.initializeSchema();
+    expect((await storage.getSavedLists('migration-saver'))[0].name).toBe(
+      '旧公开名称',
+    );
+    await storage.updateList('migration-owner', list.id, {
+      name: '秘密名称',
+      visibility: 'private',
+    });
+    await internal.initializeSchema();
+    expect((await storage.getSavedLists('migration-saver'))[0]).toMatchObject({
+      status: 'private',
+      name: '旧公开名称',
+    });
+  });
   it('并发创建守住上限，重复添加幂等，旧版本排序失败', async () => {
     for (let i = 0; i < 49; i++)
       await storage.createList('lists-owner', { name: '片单' });
@@ -1579,12 +1606,12 @@ describeLive('MySQL 片单并发（真实实例）', () => {
       { reason: { code: 'LIST_VERSION_CONFLICT' } },
     );
   });
-  it('并发点赞幂等，删号重算计数，删片单清除点赞行', async () => {
+  it('并发收藏幂等，删号重算计数，删片单保留收藏行', async () => {
     const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
       .pool;
     await storage.ensureUserProfile('likes-owner');
     const list = await storage.createList('likes-owner', {
-      name: '点赞并发',
+      name: '收藏并发',
       visibility: 'everyone',
     });
     await storage.ensureUserProfile('lists-liker');
@@ -1612,7 +1639,17 @@ describeLive('MySQL 片单并发（真实实例）', () => {
       'SELECT COUNT(*) AS total FROM list_likes WHERE list_id = ?',
       [list.id],
     );
-    expect(Number(rows[0].total)).toBe(0);
+    expect(Number(rows[0].total)).toBe(1);
+    expect(await storage.getSavedLists('lists-liker')).toEqual([
+      {
+        status: 'deleted',
+        id: list.id,
+        name: '收藏并发',
+        savedAt: expect.any(Number),
+      },
+    ]);
+    await storage.setListLike('lists-liker', list.id, false);
+    expect(await storage.countSavedLists('lists-liker')).toBe(0);
   });
 });
 

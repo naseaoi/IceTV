@@ -669,20 +669,7 @@ export class LocalSqliteStorage implements IStorage {
     for (const statement of viewingHappinessSchema('sqlite'))
       this.db.exec(statement);
     for (const statement of listSchema('sqlite')) this.db.exec(statement);
-    runWithBusyRetry('迁移 SQLite 片单浏览量', () => {
-      this.db
-        .transaction(() => {
-          const columns = this.db.pragma('table_info(user_lists)') as {
-            name: string;
-          }[];
-          for (const column of ['view_count', 'like_count'])
-            if (!columns.some((entry) => entry.name === column))
-              this.db.exec(
-                `ALTER TABLE user_lists ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
-              );
-        })
-        .immediate();
-    });
+    this.migrateListSchema();
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
@@ -1054,6 +1041,33 @@ export class LocalSqliteStorage implements IStorage {
     if (result.changes > 0) {
       console.log(`已补齐 ${result.changes} 个用户的活跃记录`);
     }
+  }
+
+  private migrateListSchema(): void {
+    runWithBusyRetry('迁移 SQLite 片单结构', () => {
+      this.db
+        .transaction(() => {
+          const columns = this.db.pragma('table_info(user_lists)') as {
+            name: string;
+          }[];
+          for (const column of ['view_count', 'like_count'])
+            if (!columns.some((entry) => entry.name === column))
+              this.db.exec(
+                `ALTER TABLE user_lists ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
+              );
+          const likeColumns = this.db.pragma('table_info(list_likes)') as {
+            name: string;
+          }[];
+          if (!likeColumns.some((entry) => entry.name === 'list_name'))
+            this.db.exec(
+              "ALTER TABLE list_likes ADD COLUMN list_name VARCHAR(30) NOT NULL DEFAULT ''",
+            );
+          this.db.exec(
+            "UPDATE list_likes SET list_name = (SELECT name FROM user_lists WHERE id = list_id) WHERE list_name = '' AND EXISTS (SELECT 1 FROM user_lists WHERE id = list_id)",
+          );
+        })
+        .immediate();
+    });
   }
 
   private initializeSchema(): void {
@@ -2794,6 +2808,16 @@ export class LocalSqliteStorage implements IStorage {
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
     return this.runListPlan(new ListPlans('sqlite').getLists(...args));
+  }
+  async getSavedLists(
+    ...args: Parameters<IStorage['getSavedLists']>
+  ): ReturnType<IStorage['getSavedLists']> {
+    return this.runListPlan(new ListPlans('sqlite').getSavedLists(...args));
+  }
+  async countSavedLists(
+    ...args: Parameters<IStorage['countSavedLists']>
+  ): ReturnType<IStorage['countSavedLists']> {
+    return this.runListPlan(new ListPlans('sqlite').countSavedLists(...args));
   }
   async countUserLists(
     ...args: Parameters<IStorage['countUserLists']>

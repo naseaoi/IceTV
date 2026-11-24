@@ -1,6 +1,14 @@
 'use client';
 
-import { Clapperboard, Eye, ListVideo, ThumbsUp } from 'lucide-react';
+import {
+  Clapperboard,
+  Eye,
+  Heart,
+  HeartOff,
+  ListVideo,
+  Lock,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -11,7 +19,7 @@ import ProfileAvatar from '@/components/ProfileAvatar';
 import SkeletonText from '@/components/SkeletonText';
 import { formatCompactCount } from '@/features/lists/lib/compact-count';
 import { listUrl } from '@/features/lists/lib/list-links';
-import type { ListSummary } from '@/features/lists/types';
+import type { ListSummary, SavedListSummary } from '@/features/lists/types';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import type { PublicUserRef } from '@/lib/types';
 
@@ -101,7 +109,7 @@ export function ListCover({
   );
 }
 
-// 私密片单不能被点赞，没有历史点赞时不显示点赞数
+// 私密片单保留历史收藏数，没有收藏时隐藏统计
 export function ListStats({
   list,
   iconClassName,
@@ -122,9 +130,10 @@ export function ListStats({
       {showLikes && (
         <span
           className='inline-flex items-center gap-1'
-          aria-label={`${list.likeCount} 人点赞`}
+          aria-label={`${list.likeCount} 人收藏`}
+          title='收藏'
         >
-          <ThumbsUp aria-hidden='true' className={iconClassName} />
+          <Heart aria-hidden='true' className={iconClassName} />
           <AnimatedCount value={list.likeCount} format={formatCompactCount} />
         </span>
       )}
@@ -205,6 +214,64 @@ export function ListGrid({
           <ListCard list={list} owner={list.owner} showPrivacy={showPrivacy} />
         </div>
       ))}
+    </div>
+  );
+}
+
+export function SavedListGrid({
+  lists,
+  onUnsave,
+}: {
+  lists: SavedListSummary[];
+  onUnsave: (list: SavedListSummary) => void;
+}) {
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    lists.map((list) => list.id),
+  );
+  return (
+    <div ref={containerRef} className={`relative ${LIST_GRID_CLASS}`}>
+      {lists.map((list) => {
+        const Icon = list.status === 'deleted' ? Trash2 : Lock;
+        return (
+          <div key={list.id} data-list-motion-key={list.id}>
+            {list.status === 'available' ? (
+              <ListCard list={list} owner={list.owner} />
+            ) : (
+              <article aria-label={list.name}>
+                <div
+                  className={`${LIST_COVER_CLASS} flex flex-col items-center justify-center gap-2 bg-gray-200/70 text-gray-500 dark:bg-white/[0.05] dark:text-gray-400`}
+                >
+                  <Icon aria-hidden='true' className='h-6 w-6 stroke-[1.5]' />
+                  <span className='text-xs'>
+                    {list.status === 'deleted' ? '作者已删除' : '作者暂不公开'}
+                  </span>
+                </div>
+                <h3
+                  title={list.name}
+                  className={`${LIST_TITLE_CLASS} truncate font-medium text-gray-500 dark:text-gray-400`}
+                >
+                  {list.name}
+                </h3>
+                {/* 保留简介行，取消收藏与可读卡片的统计行对齐。 */}
+                <div aria-hidden='true' className={LIST_DESCRIPTION_CLASS}>
+                  &nbsp;
+                </div>
+                <div className={`${LIST_META_CLASS} flex items-center`}>
+                  <button
+                    type='button'
+                    aria-label={`取消收藏「${list.name}」`}
+                    onClick={() => onUnsave(list)}
+                    className='inline-flex items-center gap-1 text-gray-500 transition-colors hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400'
+                  >
+                    <HeartOff aria-hidden='true' className='h-3.5 w-3.5' />
+                    取消收藏
+                  </button>
+                </div>
+              </article>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

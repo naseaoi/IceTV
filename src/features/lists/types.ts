@@ -37,6 +37,17 @@ export interface PlazaPage {
   nextCursor: string | null;
 }
 
+export const SAVED_LIST_LIMIT = 500;
+
+export type SavedListSummary =
+  | (PlazaListSummary & { status: 'available'; savedAt: number })
+  | {
+      status: 'deleted' | 'private';
+      id: string;
+      name: string;
+      savedAt: number;
+    };
+
 export interface ListLikeState {
   liked: boolean;
   likeCount: number;
