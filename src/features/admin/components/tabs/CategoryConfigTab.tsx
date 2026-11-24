@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
 import { CategoryEditForm } from '@/features/admin/components/tabs/category/CategoryEditForm';
@@ -51,16 +52,22 @@ const CategoryConfig = ({
   });
   const [categories, setCategories] = useState<CustomCategory[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'enabled' | 'disabled'
+  >('all');
   const normalizedQuery = filterQuery.trim().toLowerCase();
-  const isFiltering = normalizedQuery.length > 0;
+  const isFiltering = normalizedQuery.length > 0 || statusFilter !== 'all';
   const visibleRows = useMemo(
     () =>
-      categories.filter((item) =>
-        [item.name, item.query].some((value) =>
-          value?.toLowerCase().includes(normalizedQuery),
-        ),
+      categories.filter(
+        (item) =>
+          (statusFilter === 'all' ||
+            (statusFilter === 'disabled' ? item.disabled : !item.disabled)) &&
+          [item.name, item.query].some((value) =>
+            value?.toLowerCase().includes(normalizedQuery),
+          ),
       ),
-    [categories, normalizedQuery],
+    [categories, normalizedQuery, statusFilter],
   );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CustomCategory | null>(
@@ -234,14 +241,29 @@ const CategoryConfig = ({
           {actionError}
         </p>
       )}
-      <div className='flex items-center justify-between gap-3'>
+      <div className='flex flex-wrap items-center justify-between gap-3'>
         <AdminSearchField
           value={filterQuery}
           onChange={setFilterQuery}
           label='搜索分类'
           className='min-w-0 flex-1 sm:w-72 sm:flex-none'
         />
-        <div className='flex shrink-0 items-center'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Select
+            variant='pill'
+            align='end'
+            value={statusFilter}
+            onChange={(value) =>
+              setStatusFilter(value as 'all' | 'enabled' | 'disabled')
+            }
+            options={[
+              { value: 'all', label: '全部状态' },
+              { value: 'enabled', label: '已启用' },
+              { value: 'disabled', label: '已禁用' },
+            ]}
+            showSelectedIcon={false}
+            ariaLabel='筛选分类状态'
+          />
           <button
             onClick={() => {
               setFormError('');

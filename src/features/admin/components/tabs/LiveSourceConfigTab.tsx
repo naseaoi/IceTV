@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
@@ -54,16 +55,22 @@ const LiveSourceConfig = ({
   });
   const [liveSources, setLiveSources] = useState<LiveDataSource[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'enabled' | 'disabled'
+  >('all');
   const normalizedQuery = filterQuery.trim().toLowerCase();
-  const isFiltering = normalizedQuery.length > 0;
+  const isFiltering = normalizedQuery.length > 0 || statusFilter !== 'all';
   const visibleRows = useMemo(
     () =>
-      liveSources.filter((item) =>
-        [item.name, item.key, item.url].some((value) =>
-          value?.toLowerCase().includes(normalizedQuery),
-        ),
+      liveSources.filter(
+        (item) =>
+          (statusFilter === 'all' ||
+            (statusFilter === 'disabled' ? item.disabled : !item.disabled)) &&
+          [item.name, item.key, item.url].some((value) =>
+            value?.toLowerCase().includes(normalizedQuery),
+          ),
       ),
-    [liveSources, normalizedQuery],
+    [liveSources, normalizedQuery, statusFilter],
   );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingLiveSource, setEditingLiveSource] =
@@ -248,14 +255,29 @@ const LiveSourceConfig = ({
           {actionError}
         </p>
       )}
-      <div className='flex items-center justify-between gap-3'>
+      <div className='flex flex-wrap items-center justify-between gap-3'>
         <AdminSearchField
           value={filterQuery}
           onChange={setFilterQuery}
           label='搜索直播源'
           className='min-w-0 flex-1 sm:w-72 sm:flex-none'
         />
-        <div className='flex shrink-0 items-center gap-2'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Select
+            variant='pill'
+            align='end'
+            value={statusFilter}
+            onChange={(value) =>
+              setStatusFilter(value as 'all' | 'enabled' | 'disabled')
+            }
+            options={[
+              { value: 'all', label: '全部状态' },
+              { value: 'enabled', label: '已启用' },
+              { value: 'disabled', label: '已禁用' },
+            ]}
+            showSelectedIcon={false}
+            ariaLabel='筛选直播源状态'
+          />
           <button
             onClick={() => {
               setFormError('');

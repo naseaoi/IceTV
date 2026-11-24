@@ -32,7 +32,10 @@ import {
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
 import { announcementContract } from './__fixtures__/announcement-contract';
-import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import {
+  inviteCodeBatchContract,
+  inviteCodeFilterContract,
+} from './__fixtures__/invite-code-contract';
 import { listsContract } from './__fixtures__/lists-contract';
 import { resetMysqlTestData } from './__fixtures__/mysql-test-data';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
@@ -741,6 +744,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       [],
     );
   });
+  describe('邀请码未使用筛选（真实实例）', () => {
+    inviteCodeFilterContract(() => storage);
+  });
+
   describe('邀请码批量事务契约（真实实例）', () => {
     inviteCodeBatchContract(() => storage, resetMysqlTestData);
   });

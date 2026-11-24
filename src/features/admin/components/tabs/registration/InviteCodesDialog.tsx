@@ -692,6 +692,7 @@ export function InviteCodesDialog({
                 options={[
                   { value: 'all', label: '全部' },
                   { value: 'active', label: `有效 ${activeCount}` },
+                  { value: 'unused', label: '未使用' },
                   { value: 'expired', label: '已过期' },
                   { value: 'exhausted', label: '已用尽' },
                 ]}

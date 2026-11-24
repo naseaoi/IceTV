@@ -222,6 +222,104 @@ describe.each(cases)('$label列表搜索', (testCase) => {
   });
 });
 
+describe.each(cases.filter(({ label }) => label !== '视频源'))(
+  '$label状态筛选',
+  ({ Component, label, first, second, firstId, secondId }) => {
+    const filteredConfig = {
+      ...config,
+      LiveConfig: config.LiveConfig!.map((item, index) => ({
+        ...item,
+        disabled: index === 1,
+      })),
+      CustomCategories: config.CustomCategories.map((item, index) => ({
+        ...item,
+        disabled: index === 1,
+      })),
+    };
+    const choose = (value: string) => {
+      fireEvent.click(screen.getByRole('button', { name: `筛选${label}状态` }));
+      fireEvent.click(screen.getByRole('option', { name: value }));
+    };
+    const visible = () =>
+      within(screen.getByRole('list', { name: `${label}列表` }));
+
+    it('三档状态与关键词取交集，清除搜索保留状态', () => {
+      render(<Component config={filteredConfig} refreshConfig={jest.fn()} />);
+      expect(visible().getAllByRole('listitem')).toHaveLength(2);
+      choose('已启用');
+      expect(visible().getByText(first)).toBeInTheDocument();
+      expect(visible().queryByText(second)).not.toBeInTheDocument();
+      expect(screen.getByText('共 1 个')).toBeInTheDocument();
+      choose('已禁用');
+      expect(visible().getByText(second)).toBeInTheDocument();
+      expect(visible().queryByText(first)).not.toBeInTheDocument();
+
+      const search = screen.getByRole('searchbox', { name: `搜索${label}` });
+      fireEvent.change(search, { target: { value: second.toUpperCase() } });
+      expect(visible().getByText(second)).toBeInTheDocument();
+      fireEvent.change(search, { target: { value: first } });
+      expect(visible().getByText(`没有匹配的${label}`)).toBeInTheDocument();
+      expect(screen.getByText('共 0 个')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+      expect(visible().getByText(second)).toBeInTheDocument();
+      expect(visible().queryByText(first)).not.toBeInTheDocument();
+      choose('全部状态');
+      expect(visible().getAllByRole('listitem')).toHaveLength(2);
+      expect(adminGet).not.toHaveBeenCalled();
+      expect(adminPost).not.toHaveBeenCalled();
+    });
+
+    it('缺省状态视为启用，仅状态筛选无结果时显示查找空状态', () => {
+      render(<Component config={config} refreshConfig={jest.fn()} />);
+      choose('已启用');
+      expect(visible().getAllByRole('listitem')).toHaveLength(2);
+      choose('已禁用');
+      expect(visible().getByText(`没有匹配的${label}`)).toBeInTheDocument();
+    });
+
+    it('状态筛选禁用拖拽并忽略排序事件，全部状态恢复排序', () => {
+      render(<Component config={config} refreshConfig={jest.fn()} />);
+      choose('已启用');
+      for (const handle of visible().getAllByRole('button', {
+        name: /拖动排序/,
+      })) {
+        expect(handle).toHaveAttribute('aria-disabled', 'true');
+        expect(handle).toHaveAttribute('tabindex', '-1');
+      }
+      expect(useSortable).toHaveBeenCalledWith({ id: firstId, disabled: true });
+      expect(useSortable).toHaveBeenCalledWith({
+        id: secondId,
+        disabled: true,
+      });
+      const event = {
+        active: { id: firstId },
+        over: { id: secondId },
+      } as DragEndEvent;
+      act(() => mockOnDragEnd(event));
+      expect(visible().getAllByRole('listitem')[0]).toHaveTextContent(first);
+      expect(
+        screen.queryByRole('button', { name: '保存排序' }),
+      ).not.toBeInTheDocument();
+
+      const search = screen.getByRole('searchbox', { name: `搜索${label}` });
+      fireEvent.change(search, { target: { value: 'a' } });
+      choose('全部状态');
+      expect(
+        visible().getByRole('button', { name: `拖动排序 ${first}` }),
+      ).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+      expect(
+        visible().getByRole('button', { name: `拖动排序 ${first}` }),
+      ).toHaveAttribute('aria-disabled', 'false');
+      act(() => mockOnDragEnd(event));
+      expect(visible().getAllByRole('listitem')[0]).toHaveTextContent(second);
+      expect(
+        screen.getByRole('button', { name: '保存排序' }),
+      ).toBeInTheDocument();
+    });
+  },
+);
+
 describe('视频源状态与线路组合筛选', () => {
   const filteredConfig = {
     ...config,

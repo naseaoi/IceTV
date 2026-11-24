@@ -2,6 +2,7 @@
 
 import Database from 'better-sqlite3';
 
+import { inviteCodeFilterContract } from '@/lib/__tests__/__fixtures__/invite-code-contract';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
 
@@ -11,6 +12,17 @@ const makeCode = (code: string, extra = {}) => ({
   expiresAt: Date.now() + 86400000,
   createdBy: 'owner',
   ...extra,
+});
+
+describe('邀请码未使用筛选（SQLite）', () => {
+  let storage: LocalSqliteStorage;
+  beforeEach(() => {
+    storage = new LocalSqliteStorage(':memory:');
+  });
+  afterEach(() => {
+    (storage as unknown as { db: Database.Database }).db.close();
+  });
+  inviteCodeFilterContract(() => storage);
 });
 
 describe('邀请码数据库分页及迁移', () => {
