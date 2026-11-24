@@ -32,11 +32,11 @@ export interface ReviewEditorProps {
   isOpen?: boolean;
 }
 
-const surfaceClass =
-  'rounded-xl bg-white ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10';
+// 与播放面板内弹幕设置等区块同一实底，不加描边
+const surfaceClass = 'rounded-xl bg-gray-900/[0.03] dark:bg-white/[0.04]';
 
 const iconButtonClass =
-  'inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
+  'inline-flex h-8 items-center justify-center gap-1 rounded-full px-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
 
 // 可见性与剧透收在同一入口，触发器直接显示当前状态
 export function ReviewOptionsMenu({
@@ -182,7 +182,8 @@ function SaveButton({
       className={
         modal
           ? `${MODAL_PRIMARY_BUTTON_CLASS} gap-1.5`
-          : `inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none dark:hover:bg-brand-500 dark:disabled:bg-white/[0.06] dark:disabled:text-gray-500 ${
+          : // 不可用时保留半透明品牌色，与左侧中性色的设置胶囊区分主次
+            `inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-600 font-semibold text-white transition-colors enabled:hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40 dark:enabled:hover:bg-brand-500 ${
               large ? 'h-9 px-5 text-sm' : 'h-8 px-3.5 text-xs'
             }`
       }
@@ -281,7 +282,7 @@ export function ReviewEditor({
           className='space-y-2'
         >
           <div
-            className={`${surfaceClass} transition-shadow focus-within:ring-2 focus-within:ring-brand-500/40`}
+            className={`${surfaceClass} transition-shadow focus-within:ring-1 focus-within:ring-brand-500/40`}
           >
             <div className='flex items-center justify-between gap-2 px-3.5 pt-3.5'>
               <RatingInput
@@ -313,7 +314,7 @@ export function ReviewEditor({
               onKeyDown={handleShortcut}
             />
 
-            <div className='flex flex-wrap items-center gap-1.5 border-t border-gray-100 px-2.5 py-2 dark:border-white/[0.06]'>
+            <div className='flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5'>
               <ReviewOptionsMenu
                 isPublic={isPublic}
                 spoiler={spoiler}

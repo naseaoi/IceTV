@@ -41,11 +41,11 @@ interface ReviewsTabProps {
   onEditRequestHandled: () => void;
 }
 
-const surfaceClass =
-  'rounded-xl bg-white ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10';
+// 与评价编辑器同一实底，编辑前后切换不跳变
+const surfaceClass = 'rounded-xl bg-gray-900/[0.03] dark:bg-white/[0.04]';
 
 const iconButtonClass =
-  'inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
+  'inline-flex h-8 items-center justify-center gap-1 rounded-full px-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
 
 function MyReviewCard({
   review,

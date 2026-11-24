@@ -145,16 +145,20 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
       >
         <RatingStars value={shown} size='lg' decorative pop={pop} />
       </div>
-      <label className='flex h-9 w-14 shrink-0 items-center rounded-lg bg-gray-900/[0.04] px-1.5 transition focus-within:ring-2 focus-within:ring-amber-500/50 dark:bg-white/[0.06]'>
+      {/* 分数框平时只显示数字，悬停或聚焦才出底色提示可直接输入；未评分时留空占位，评分后不挤动星星 */}
+      <label
+        className={`flex h-9 w-14 shrink-0 cursor-text items-center rounded-lg px-1.5 transition-colors focus-within:bg-gray-900/[0.05] focus-within:ring-2 focus-within:ring-amber-500/50 dark:focus-within:bg-white/[0.06] ${
+          disabled ? '' : 'hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06]'
+        }`}
+      >
         <span className='sr-only'>分数（1.0–10.0）</span>
         <input
           type='text'
           inputMode='decimal'
           value={text}
           disabled={disabled}
-          placeholder='—'
           maxLength={4}
-          className='w-full border-0 bg-transparent p-0 text-center text-lg font-semibold tabular-nums leading-none text-amber-600 outline-none placeholder:text-gray-300 focus:ring-0 disabled:opacity-60 dark:text-amber-400 dark:placeholder:text-gray-600'
+          className='w-full border-0 bg-transparent p-0 text-center text-xl font-semibold tabular-nums leading-none text-amber-600 outline-none focus:ring-0 disabled:opacity-60 dark:text-amber-400'
           onChange={(event) => setText(event.target.value)}
           onBlur={commitText}
           onKeyDown={(event) => {
