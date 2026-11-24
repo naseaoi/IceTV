@@ -1,4 +1,12 @@
-import { getDoubanCategories } from '../douban.client';
+import {
+  getDoubanCategories,
+  getDoubanList,
+  getDoubanRecommends,
+} from '../douban.client';
+import {
+  readDoubanFallbackRoute,
+  rememberDoubanFallbackRoute,
+} from '../douban-route-memory';
 import { writeDoubanProxyType } from '../douban-source';
 
 let signedIn = true;
@@ -37,6 +45,8 @@ describe('getDoubanCategories via server', () => {
   });
 
   afterEach(() => {
+    signedIn = true;
+    jest.useRealTimers();
     global.fetch = originalFetch;
   });
 
@@ -52,6 +62,29 @@ describe('getDoubanCategories via server', () => {
     expect(String(fetchMock.mock.calls[0][0])).toMatch(
       /^\/api\/douban\/categories\?/,
     );
+  });
+
+  it('rejects after fifteen seconds in explicit server mode without fallback', async () => {
+    jest.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce((_url: string, init: RequestInit) => {
+      signal = init.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal?.reason));
+      });
+    });
+
+    const pending = expect(getDoubanCategories(params())).rejects.toThrow(
+      'timeout',
+    );
+    jest.advanceTimersByTime(14_999);
+    expect(signal?.aborted).toBe(false);
+    jest.advanceTimersByTime(1);
+
+    await pending;
+    expect(signal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it.each([
@@ -88,8 +121,9 @@ describe('getDoubanCategories in auto mode', () => {
 
   function routeOf(url: string) {
     if (url.startsWith('https://ciao-cors.is-an.org/')) return 'zwei';
-    if (url.startsWith('https://m.douban.cmliussss.net/')) return 'tencent';
-    if (url.startsWith('/api/douban/')) return 'server';
+    if (/^https:\/\/(m|movie)\.douban\.cmliussss\.net\//.test(url))
+      return 'tencent';
+    if (/^\/api\/douban[/?]/.test(url)) return 'server';
     return url;
   }
 
@@ -109,41 +143,227 @@ describe('getDoubanCategories in auto mode', () => {
   });
 
   afterEach(() => {
+    signedIn = true;
+    jest.useRealTimers();
     global.fetch = originalFetch;
   });
 
-  it('uses Zwei first and stops there when it works', async () => {
-    fetchMock.mockResolvedValue(upstream);
+  it('uses the server first for signed-in users', async () => {
+    fetchMock.mockResolvedValue(server);
 
     await getDoubanCategories(params());
 
-    expect(requestedRoutes()).toEqual(['zwei']);
+    expect(requestedRoutes()).toEqual(['server']);
+    expect(readDoubanFallbackRoute('data')).toBeNull();
   });
 
   it('falls back in order and remembers the working route', async () => {
     fetchMock
       .mockRejectedValueOnce(new TypeError('network'))
       .mockResolvedValueOnce(response({ error: 'x' }, 502))
-      .mockResolvedValueOnce(server)
-      .mockResolvedValueOnce(server);
+      .mockResolvedValueOnce(upstream)
+      .mockResolvedValueOnce(upstream);
 
     await getDoubanCategories(params());
     await getDoubanCategories(params());
 
-    expect(requestedRoutes()).toEqual(['zwei', 'tencent', 'server', 'server']);
+    expect(requestedRoutes()).toEqual(['server', 'tencent', 'zwei', 'zwei']);
+    expect(readDoubanFallbackRoute('data')).toBe('cors-proxy-zwei');
   });
 
-  it('never asks the server for guests', async () => {
+  it.each([
+    ['HTTP 400', response({ error: 'bad request' }, 400)],
+    ['HTTP 401', response({ error: 'unauthorized' }, 401)],
+    ['HTTP 429', response({ error: 'rate limited' }, 429)],
+    ['HTTP 503', response({ error: 'unavailable' }, 503)],
+    ['a malformed body', response({ items: [] })],
+    ['an invalid result code', response({ code: 500, list: [] })],
+    ['invalid JSON', { ok: true, json: async () => JSON.parse('{') }],
+  ])('falls back to Tencent after server returns %s', async (_, failure) => {
+    fetchMock.mockResolvedValueOnce(failure).mockResolvedValueOnce(upstream);
+
+    await expect(getDoubanCategories(params())).resolves.toMatchObject({
+      code: 200,
+      list: [],
+    });
+
+    expect(requestedRoutes()).toEqual(['server', 'tencent']);
+    expect(readDoubanFallbackRoute('data')).toBe('cmliussss-cdn-tencent');
+  });
+
+  it('uses Tencent first for guests', async () => {
     signedIn = false;
+    fetchMock.mockResolvedValue(upstream);
+
+    await getDoubanCategories(params());
+
+    expect(requestedRoutes()).toEqual(['tencent']);
+    expect(readDoubanFallbackRoute('data')).toBeNull();
+  });
+
+  it('never asks the server for guests, even with an old server preference', async () => {
+    signedIn = false;
+    rememberDoubanFallbackRoute('data', 'server');
     fetchMock.mockRejectedValue(new TypeError('network'));
 
     await expect(getDoubanCategories(params())).rejects.toThrow();
 
-    expect(requestedRoutes()).toEqual(['zwei', 'tencent']);
+    expect(requestedRoutes()).toEqual(['tencent', 'zwei']);
   });
 
+  it.each([true, false])(
+    'clears route memory when the default route recovers (signed in: %s)',
+    async (authenticated) => {
+      signedIn = authenticated;
+      rememberDoubanFallbackRoute('data', 'cors-proxy-zwei');
+      fetchMock
+        .mockRejectedValueOnce(new TypeError('network'))
+        .mockResolvedValueOnce(authenticated ? server : upstream);
+
+      await getDoubanCategories(params());
+
+      expect(requestedRoutes()).toEqual([
+        'zwei',
+        authenticated ? 'server' : 'tencent',
+      ]);
+      expect(readDoubanFallbackRoute('data')).toBeNull();
+    },
+  );
+
+  it.each([true, false])(
+    'does not renew a remembered winner and restores defaults after five minutes (signed in: %s)',
+    async (authenticated) => {
+      jest.useFakeTimers();
+      signedIn = authenticated;
+      const startedAt = Date.now();
+      const fallback = authenticated
+        ? 'cmliussss-cdn-tencent'
+        : 'cors-proxy-zwei';
+      fetchMock
+        .mockRejectedValueOnce(new TypeError('network'))
+        .mockResolvedValue(upstream);
+
+      await getDoubanCategories(params());
+      expect(readDoubanFallbackRoute('data')).toBe(fallback);
+      jest.setSystemTime(startedAt + 4 * 60 * 1000);
+      await getDoubanCategories(params());
+      expect(
+        readDoubanFallbackRoute('data', startedAt + 5 * 60 * 1000),
+      ).toBeNull();
+
+      jest.setSystemTime(startedAt + 5 * 60 * 1000);
+      fetchMock.mockResolvedValueOnce(authenticated ? server : upstream);
+      await getDoubanCategories(params());
+
+      const first = authenticated ? 'server' : 'tencent';
+      const winner = authenticated ? 'tencent' : 'zwei';
+      expect(requestedRoutes()).toEqual([first, winner, winner, first]);
+    },
+  );
+
+  it.each(['auto', 'server'] as const)(
+    'accepts a server response just before fifteen seconds in %s mode',
+    async (mode) => {
+      jest.useFakeTimers();
+      writeDoubanProxyType(mode);
+      let signal: AbortSignal | undefined;
+      fetchMock.mockImplementationOnce((_url: string, init: RequestInit) => {
+        signal = init.signal as AbortSignal;
+        return new Promise((resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal?.reason));
+          setTimeout(() => resolve(server), 14_999);
+        });
+      });
+
+      const pending = getDoubanCategories(params());
+      jest.advanceTimersByTime(14_999);
+
+      await expect(pending).resolves.toMatchObject({ code: 200, list: [] });
+      expect(signal?.aborted).toBe(false);
+      expect(requestedRoutes()).toEqual(['server']);
+      expect(readDoubanFallbackRoute('data')).toBeNull();
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([
+    ['server', true, 15_000, 'reason'],
+    ['server', true, 15_000, 'AbortError'],
+    ['tencent', false, 10_000, 'reason'],
+    ['tencent', false, 10_000, 'AbortError'],
+  ] as const)(
+    'falls back after %s (signed in: %s) reaches %s ms (%s rejection)',
+    async (route, authenticated, timeoutMs, rejection) => {
+      jest.useFakeTimers();
+      signedIn = authenticated;
+      let signal: AbortSignal | undefined;
+      fetchMock
+        .mockImplementationOnce((_url: string, init: RequestInit) => {
+          signal = init.signal as AbortSignal;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => {
+              reject(
+                rejection === 'reason'
+                  ? signal?.reason
+                  : new DOMException('Aborted', 'AbortError'),
+              );
+            });
+          });
+        })
+        .mockResolvedValueOnce(upstream);
+
+      const pending = getDoubanCategories(params());
+      jest.advanceTimersByTime(timeoutMs - 1);
+      expect(signal?.aborted).toBe(false);
+      expect(requestedRoutes()).toEqual([route]);
+      jest.advanceTimersByTime(1);
+
+      await expect(pending).resolves.toMatchObject({ code: 200, list: [] });
+      expect(signal?.aborted).toBe(true);
+      expect(requestedRoutes()).toEqual([
+        route,
+        authenticated ? 'tencent' : 'zwei',
+      ]);
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([
+    ['categories', () => getDoubanCategories(params())],
+    [
+      'list',
+      () =>
+        getDoubanList({
+          tag: '热门',
+          type: 'movie',
+          pageStart: params().pageStart,
+        }),
+    ],
+    [
+      'recommends',
+      () =>
+        getDoubanRecommends({ kind: 'movie', pageStart: params().pageStart }),
+    ],
+  ] as const)(
+    'preserves cancellation without fallback for %s',
+    async (_, load) => {
+      const abort = new DOMException('Aborted', 'AbortError');
+      fetchMock.mockRejectedValue(abort);
+
+      await expect(load()).rejects.toBe(abort);
+      expect(requestedRoutes()).toEqual(['server']);
+
+      signedIn = false;
+      fetchMock.mockClear();
+      rememberDoubanFallbackRoute('data', 'cmliussss-cdn-tencent');
+      await expect(load()).rejects.toBe(abort);
+      expect(requestedRoutes()).toEqual(['tencent']);
+      expect(readDoubanFallbackRoute('data')).toBe('cmliussss-cdn-tencent');
+    },
+  );
+
   it('treats an empty list as a valid answer', async () => {
-    fetchMock.mockResolvedValue(response({ items: [] }));
+    fetchMock.mockResolvedValue(server);
 
     await expect(getDoubanCategories(params())).resolves.toMatchObject({
       list: [],
