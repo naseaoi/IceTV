@@ -29,6 +29,7 @@ import {
   useAdminAlerts,
   useRefreshAdminAlerts,
 } from '@/features/admin/components/AdminAlertsProvider';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
@@ -524,62 +525,67 @@ const VideoSourceConfig = ({
           {actionError}
         </p>
       )}
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <AdminSearchField
-          value={filterQuery}
-          onChange={setFilterQuery}
-          label='搜索视频源'
-          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
-        />
-        <div className='flex flex-wrap items-center gap-2'>
-          <Select
-            variant='pill'
-            align='end'
-            value={healthFilter}
-            onChange={(value) =>
-              setHealthFilter(isSourceHealthFilter(value) ? value : 'all')
-            }
-            options={[
-              { value: 'all', label: '全部状态' },
-              ...(alertCount > 0 || healthFilter === 'alert'
-                ? [{ value: 'alert', label: '告警中' }]
-                : []),
-              { value: 'cleanup', label: '待清理' },
-              { value: 'disabled', label: '已禁用' },
-            ]}
-            showSelectedIcon={false}
-            ariaLabel='筛选视频源状态'
+      <AdminListToolbar
+        search={
+          <AdminSearchField
+            value={filterQuery}
+            onChange={setFilterQuery}
+            label='搜索视频源'
           />
-          <Select
-            variant='pill'
-            align='end'
-            value={routeFilter}
-            onChange={(value) =>
-              setRouteFilter(value as 'all' | SourceProxyMode)
-            }
-            options={[
-              { value: 'all', label: '全部线路' },
-              { value: 'auto', label: '自动' },
-              { value: 'browser', label: '直连' },
-              { value: 'server', label: '代理' },
-            ]}
-            showSelectedIcon={false}
-            ariaLabel='筛选视频源线路'
-          />
-          <Select
-            variant='pill'
-            align='end'
-            value={sortMode}
-            onChange={(value) =>
-              setSortMode(value === 'quality' ? 'quality' : 'manual')
-            }
-            options={[
-              { value: 'manual', label: '手动排序' },
-              { value: 'quality', label: '质量排序' },
-            ]}
-            showSelectedIcon={false}
-            ariaLabel='视频源排序方式'
-          />
+        }
+        filters={
+          <>
+            <Select
+              variant='pill'
+              align='end'
+              value={healthFilter}
+              onChange={(value) =>
+                setHealthFilter(isSourceHealthFilter(value) ? value : 'all')
+              }
+              options={[
+                { value: 'all', label: '全部状态' },
+                ...(alertCount > 0 || healthFilter === 'alert'
+                  ? [{ value: 'alert', label: '告警中' }]
+                  : []),
+                { value: 'cleanup', label: '待清理' },
+                { value: 'disabled', label: '已禁用' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='筛选视频源状态'
+            />
+            <Select
+              variant='pill'
+              align='end'
+              value={routeFilter}
+              onChange={(value) =>
+                setRouteFilter(value as 'all' | SourceProxyMode)
+              }
+              options={[
+                { value: 'all', label: '全部线路' },
+                { value: 'auto', label: '自动' },
+                { value: 'browser', label: '直连' },
+                { value: 'server', label: '代理' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='筛选视频源线路'
+            />
+            <Select
+              variant='pill'
+              align='end'
+              value={sortMode}
+              onChange={(value) =>
+                setSortMode(value === 'quality' ? 'quality' : 'manual')
+              }
+              options={[
+                { value: 'manual', label: '手动排序' },
+                { value: 'quality', label: '质量排序' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='视频源排序方式'
+            />
+          </>
+        }
+        actions={
           <button
             onClick={() => {
               setFormError('');
@@ -590,8 +596,8 @@ const VideoSourceConfig = ({
           >
             添加视频源
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <VideoSourceAddForm
         error={formError}

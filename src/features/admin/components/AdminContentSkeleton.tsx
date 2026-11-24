@@ -8,6 +8,7 @@ import {
   SearchingState,
 } from '@/components/ListState';
 import SkeletonText from '@/components/SkeletonText';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import {
   ADMIN_PANEL_CLASS,
   AdminSettingRow,
@@ -37,10 +38,10 @@ import {
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
 import {
   USER_DANMAKU_ACTION_CLASS,
+  USER_DANMAKU_HEADER_CLASS,
   USER_DANMAKU_META_CLASS,
   USER_DANMAKU_ROW_CLASS,
   USER_DANMAKU_TEXT_CLASS,
-  USER_DANMAKU_TOOLBAR_CLASS,
 } from '@/features/admin/lib/user-danmaku-layout';
 import { ADMIN_USER_PAGE_SIZE } from '@/features/admin/lib/user-query';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
@@ -187,40 +188,37 @@ function SourceRows({
 }
 
 function SearchToolbar({
-  user = false,
-  live = false,
+  tab,
   userGroups = false,
 }: {
-  user?: boolean;
-  live?: boolean;
+  tab: AdminTabId;
   userGroups?: boolean;
 }) {
-  if (user) {
-    return (
-      <div className='mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
-        <div className='flex min-w-0 flex-wrap items-center gap-2'>
-          <Block className='h-9 w-full rounded-lg sm:w-64' />
-          <Block className='h-8 w-16 shrink-0 rounded-full' />
-          {userGroups && <Block className='h-8 w-24 shrink-0 rounded-full' />}
-          <Block className='h-8 w-24 shrink-0 rounded-full' />
-        </div>
-        <div className='flex shrink-0 items-center gap-2'>
-          <Block className='h-8 w-24 rounded-lg' />
-          <Block className='h-8 w-24 rounded-lg' />
-        </div>
-      </div>
-    );
-  }
+  const user = tab === 'user';
   return (
-    <div className='flex items-center justify-between gap-3'>
-      <div className='min-w-0 flex-1 sm:w-72 sm:flex-none'>
-        <Block className='h-9 w-full rounded-lg' />
-      </div>
-      <div className='flex shrink-0 items-center gap-2'>
-        {live && <Block className='h-8 w-24 rounded-lg' />}
-        <Block className='h-8 w-24 rounded-lg' />
-      </div>
-    </div>
+    <AdminListToolbar
+      search={<Block className='h-9 w-full rounded-lg' />}
+      filters={
+        <>
+          <Block className='h-8 w-24 rounded-full' />
+          {(user || tab === 'video-source') && (
+            <>
+              <Block className='h-8 w-24 rounded-full' />
+              {user && userGroups && (
+                <Block className='h-8 w-24 rounded-full' />
+              )}
+              <Block className='h-8 w-24 rounded-full' />
+            </>
+          )}
+        </>
+      }
+      actions={
+        <>
+          {user && <Block className='h-8 w-24 rounded-lg' />}
+          <Block className='h-8 w-24 rounded-lg' />
+        </>
+      }
+    />
   );
 }
 
@@ -433,7 +431,12 @@ export default function AdminContentSkeleton({
             <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
               用户列表
             </h2>
-            <SearchToolbar user userGroups={!!data?.UserConfig.Tags?.length} />
+            <div className='mb-4'>
+              <SearchToolbar
+                tab='user'
+                userGroups={!!data?.UserConfig.Tags?.length}
+              />
+            </div>
             <AdminUserRowsSkeleton count={data?.UserConfig.TotalUsers} />
           </div>
           <div>
@@ -527,11 +530,14 @@ export default function AdminContentSkeleton({
     case 'danmaku':
       content = (
         <div className='space-y-5'>
-          <div className={USER_DANMAKU_TOOLBAR_CLASS}>
-            <Block className='h-9 w-24 rounded-lg' />
-            <Block className='h-9 w-full rounded-lg sm:w-72' />
-          </div>
+          <AdminListToolbar
+            search={<Block className='h-9 w-full rounded-lg' />}
+          />
           <div className={ADMIN_PANEL_CLASS}>
+            <div className={USER_DANMAKU_HEADER_CLASS}>
+              <Block className='h-4 w-4 shrink-0' />
+              <Block className='h-3 w-20' />
+            </div>
             <AdminUserDanmakuRowsSkeleton />
           </div>
         </div>
@@ -543,11 +549,11 @@ export default function AdminContentSkeleton({
     case 'reviews':
       content = (
         <div className='space-y-5'>
-          <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-            <Block className='h-9 w-64 rounded-lg' />
-            <Block className='h-9 w-full rounded-lg sm:w-72' />
-          </div>
-          <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
+          <AdminListToolbar
+            search={<Block className='h-9 w-full rounded-lg' />}
+            filters={<Block className='h-9 w-64 rounded-lg' />}
+          />
+          <div className={ADMIN_PANEL_CLASS}>
             <AdminReviewRowsSkeleton />
           </div>
         </div>
@@ -563,7 +569,7 @@ export default function AdminContentSkeleton({
             : data.CustomCategories.length;
       content = (
         <div className='space-y-6'>
-          <SearchToolbar live={tab === 'live-source'} />
+          <SearchToolbar tab={tab} />
           <SourceRows count={count} tab={tab} />
         </div>
       );

@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -781,31 +782,79 @@ describe('UserGroupTable responsive list', () => {
   });
 });
 
-it('清理用户从筛选反馈切换到空结果，并禁用清理按钮', () => {
-  const props = {
-    isOpen: true,
-    inactiveDays: 30,
-    candidates: null,
-    isScanning: true,
-    isDeleting: false,
-    onInactiveDaysChange: jest.fn(),
-    onScan: jest.fn(),
-    onConfirm: jest.fn(),
-    onClose: jest.fn(),
+describe('CleanupInactiveUsersDialog', () => {
+  const renderDialog = (
+    onPreview: (days: number) => Promise<{
+      count: number;
+      confirmation: string;
+    }>,
+  ) => {
+    const onConfirm = jest.fn();
+    render(
+      <CleanupInactiveUsersDialog
+        isOpen
+        isDeleting={false}
+        onPreview={onPreview}
+        onConfirm={onConfirm}
+        onClose={jest.fn()}
+      />,
+    );
+    return { onConfirm };
   };
-  const { rerender } = render(<CleanupInactiveUsersDialog {...props} />);
-  expect(
-    screen.getByRole('status', { name: '正在筛选用户' }),
-  ).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
-  rerender(
-    <CleanupInactiveUsersDialog
-      {...props}
-      isScanning={false}
-      candidates={{ count: 0, confirmation: 'empty' }}
-    />,
-  );
-  expect(screen.getByText('没有符合条件的用户')).toBeInTheDocument();
-  expect(screen.queryByRole('status')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+
+  it('打开即按默认天数筛选，无匹配时禁用清理', async () => {
+    const onPreview = jest
+      .fn()
+      .mockResolvedValue({ count: 0, confirmation: 'empty' });
+    renderDialog(onPreview);
+    expect(
+      screen.getByRole('status', { name: '正在筛选用户' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+    expect(await screen.findByText('没有符合条件的用户')).toBeInTheDocument();
+    expect(onPreview).toHaveBeenCalledWith(90);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+  });
+
+  it('改天数后丢弃旧结果，确认时提交当前天数与凭据', async () => {
+    let resolveFirst!: (value: { count: number; confirmation: string }) => void;
+    const onPreview = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ count: 3, confirmation: 'days-30' });
+    const { onConfirm } = renderDialog(onPreview);
+    await waitFor(() => expect(onPreview).toHaveBeenCalledWith(90));
+    fireEvent.change(screen.getByLabelText('未活跃天数超过'), {
+      target: { value: '30' },
+    });
+    await act(async () => {
+      resolveFirst({ count: 9, confirmation: 'days-90' });
+    });
+    expect(screen.queryByText('9')).not.toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole('button', { name: '清理 3 个用户' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    expect(onConfirm).toHaveBeenCalledWith(30, 'days-30');
+  });
+
+  it('天数越界时提示范围且不发起筛选', async () => {
+    const onPreview = jest
+      .fn()
+      .mockResolvedValue({ count: 2, confirmation: 'ok' });
+    renderDialog(onPreview);
+    fireEvent.change(screen.getByLabelText('未活跃天数超过'), {
+      target: { value: '0' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入');
+    expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(onPreview).not.toHaveBeenCalled();
+  });
 });

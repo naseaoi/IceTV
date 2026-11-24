@@ -182,11 +182,13 @@ describe('ReviewsTab', () => {
     render(<ReviewsTab />);
     await tick();
     const first = screen.getAllByRole('listitem')[0];
-    fireEvent.click(within(first).getByRole('button', { name: /删除/ }));
+    fireEvent.click(within(first).getByRole('button', { name: /评价操作/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除评价' }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(first).getByRole('button', { name: /删除/ }));
+    fireEvent.click(within(first).getByRole('button', { name: /评价操作/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除评价' }));
     fetchMock.mockResolvedValueOnce(response({ ok: true }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await tick();
@@ -207,7 +209,8 @@ describe('ReviewsTab', () => {
   it('keeps the row and displays server errors when deletion fails', async () => {
     render(<ReviewsTab />);
     await tick();
-    fireEvent.click(screen.getByRole('button', { name: /删除 alice/ }));
+    fireEvent.click(screen.getByRole('button', { name: /alice.*评价操作/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除评价' }));
     fetchMock.mockResolvedValueOnce(response({ error: '权限不足' }, false));
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await tick();
@@ -229,7 +232,8 @@ describe('ReviewsTab', () => {
         }),
     );
     fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
-    fireEvent.click(screen.getByRole('button', { name: /删除 alice/ }));
+    fireEvent.click(screen.getByRole('button', { name: /alice.*评价操作/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除评价' }));
     fetchMock.mockResolvedValueOnce(response({ ok: true }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await tick();

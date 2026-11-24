@@ -689,6 +689,8 @@ export function InviteCodesDialog({
                 }
                 ariaLabel='筛选邀请码状态'
                 variant='pill'
+                align='end'
+                showSelectedIcon={false}
                 options={[
                   { value: 'all', label: '全部' },
                   { value: 'active', label: `有效 ${activeCount}` },

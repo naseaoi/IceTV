@@ -57,10 +57,18 @@ export function AddUserForm({
           {error}
         </p>
       )}
-      <div className='space-y-4 p-4 sm:p-6'>
+      {/* 独立 form，避免浏览器把背景里的搜索框当作用户名自动填充 */}
+      <form
+        className='space-y-4 p-4 sm:p-6'
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!disabled) onSubmit();
+        }}
+      >
         <div className='flex items-start justify-between gap-3'>
           <h5 className={MODAL_TITLE_CLASS}>添加用户</h5>
           <button
+            type='button'
             onClick={onCancel}
             aria-label='关闭'
             className={MODAL_CLOSE_BUTTON_CLASS}
@@ -72,6 +80,7 @@ export function AddUserForm({
           <input
             type='text'
             placeholder='用户名'
+            autoComplete='off'
             value={value.username}
             onChange={(e) => onChange({ ...value, username: e.target.value })}
             className={`w-full ${inputStyles.withFocus}`}
@@ -79,6 +88,7 @@ export function AddUserForm({
           <div className='flex items-center gap-2'>
             <PasswordInput
               placeholder='密码'
+              autoComplete='new-password'
               value={value.password}
               onChange={(e) => onChange({ ...value, password: e.target.value })}
               wrapperClassName='min-w-0 flex-1'
@@ -111,18 +121,22 @@ export function AddUserForm({
           />
         </div>
         <div className='flex justify-end space-x-2'>
-          <button onClick={onCancel} className={buttonStyles.outline}>
+          <button
+            type='button'
+            onClick={onCancel}
+            className={buttonStyles.outline}
+          >
             取消
           </button>
           <button
-            onClick={onSubmit}
+            type='submit'
             disabled={disabled}
             className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {isSubmitting ? '添加中...' : '添加'}
           </button>
         </div>
-      </div>
+      </form>
     </ModalShell>
   );
 }

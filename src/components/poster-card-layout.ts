@@ -8,6 +8,9 @@ export const POSTER_CARD_COVER_CLASS = 'aspect-[2/3] rounded-lg';
 // VideoCard、历史与排行卡片的标题行，高度取自然行高
 export const POSTER_CARD_TITLE_ROW_CLASS = 'mt-2 text-[13px]';
 
+// 海报尺寸的虚线格：横排末尾入口与空横排占位共用
+export const POSTER_DASHED_SLOT_CLASS = `${POSTER_CARD_COVER_CLASS} border border-dashed border-gray-300/80 dark:border-white/15`;
+
 // PosterCard 标题行固定 h-5
 export const POSTER_CARD_FIXED_TITLE_ROW_CLASS = 'mt-2 h-5 text-[13px]';
 

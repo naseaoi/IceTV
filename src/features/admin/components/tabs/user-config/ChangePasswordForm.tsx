@@ -45,10 +45,18 @@ export function ChangePasswordForm({
           {error}
         </p>
       )}
-      <div className='space-y-4 p-4 sm:p-6'>
+      {/* 独立 form 并带 username 字段，否则浏览器把背景里的搜索框当作用户名自动填充 */}
+      <form
+        className='space-y-4 p-4 sm:p-6'
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!disabled) onSubmit();
+        }}
+      >
         <div className='flex items-start justify-between gap-3'>
           <h5 className={MODAL_TITLE_CLASS}>修改用户密码</h5>
           <button
+            type='button'
             onClick={onCancel}
             aria-label='关闭'
             className={MODAL_CLOSE_BUTTON_CLASS}
@@ -59,14 +67,16 @@ export function ChangePasswordForm({
         <div className='space-y-3'>
           <input
             type='text'
-            placeholder='用户名'
+            aria-label='用户名'
+            autoComplete='username'
             value={username}
-            disabled
-            className={`w-full ${inputStyles.withFocus}`}
+            readOnly
+            className={`w-full read-only:opacity-60 ${inputStyles.withFocus}`}
           />
           <div className='flex items-center gap-2'>
             <PasswordInput
               placeholder='新密码'
+              autoComplete='new-password'
               value={password}
               onChange={(e) => onPasswordChange(e.target.value)}
               wrapperClassName='min-w-0 flex-1'
@@ -76,18 +86,22 @@ export function ChangePasswordForm({
           </div>
         </div>
         <div className='flex justify-end space-x-2'>
-          <button onClick={onCancel} className={buttonStyles.outline}>
+          <button
+            type='button'
+            onClick={onCancel}
+            className={buttonStyles.outline}
+          >
             取消
           </button>
           <button
-            onClick={onSubmit}
+            type='submit'
             disabled={disabled}
             className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {isSubmitting ? '修改中...' : '修改密码'}
           </button>
         </div>
-      </div>
+      </form>
     </ModalShell>
   );
 }

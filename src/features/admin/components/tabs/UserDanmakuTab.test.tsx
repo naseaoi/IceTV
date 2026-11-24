@@ -44,7 +44,9 @@ it('每批成功立即移除，后续失败保留剩余选中项并可重试', a
     .mockResolvedValue(undefined);
   render(<UserDanmakuTab />);
   await screen.findByText('弹幕0');
+  expect(screen.getByText(`共 ${size + 1} 条`)).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('全选'));
+  expect(screen.getByText(`已选 ${size + 1} 条`)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '删除所选' }));
   fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
   await waitFor(() => expect(adminDelete).toHaveBeenCalledTimes(2));
