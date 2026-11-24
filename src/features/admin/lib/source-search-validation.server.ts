@@ -20,12 +20,6 @@ import { searchWithScriptFallback } from '@/lib/search-script-fallback';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
-export function isSpecialSearchSource(site: ApiSite): boolean {
-  return (
-    isGirigiriSource(site) || isXgcartoonSource(site) || isXifanSource(site)
-  );
-}
-
 async function validateSourceSearchQuery(
   site: ApiSite,
   query: string,
