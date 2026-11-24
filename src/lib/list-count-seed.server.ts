@@ -2,15 +2,16 @@ import 'server-only';
 
 import type { NextResponse } from 'next/server';
 
-import { CONTINUE_WATCHING_PAGE_SIZE } from '@/features/continue-watching/lib/layout';
-import { getConfigForRead } from '@/lib/config';
+import {
+  CONTINUE_WATCHING_LIMIT,
+  CONTINUE_WATCHING_PAGE_SIZE,
+} from '@/features/continue-watching/lib/layout';
+import { PLAYBACK_HISTORY_PAGE_SIZE } from '@/features/playback-stats/types';
 import { db } from '@/lib/db';
 import {
   type ListCountCookieName,
   writeListCountCookieOnResponse,
 } from '@/lib/list-count-cookies';
-import { normalizePlayRecordLimit } from '@/lib/play-records';
-import { runtimeParamsFromConfig } from '@/lib/runtime-params';
 
 async function countHistoryFirstPage(
   username: string,
@@ -24,8 +25,6 @@ async function countHistoryFirstPage(
 async function computeListCounts(
   username: string,
 ): Promise<Record<ListCountCookieName, number>> {
-  const params = runtimeParamsFromConfig(await getConfigForRead());
-  const historyPageSize = params.PlaybackHistoryPageSize;
   const [favorites, reviews, history, playRecords, lists, plaza, savedLists] =
     await Promise.all([
       db.getFavoriteLibraryPage(username, {
@@ -35,7 +34,7 @@ async function computeListCounts(
         limit: 1,
       }),
       db.getMyVideoReviewCount(username),
-      countHistoryFirstPage(username, historyPageSize),
+      countHistoryFirstPage(username, PLAYBACK_HISTORY_PAGE_SIZE),
       db.getPlayRecordPage(username, 1),
       db.countUserLists(username),
       db.countPlazaLists(username),
@@ -48,10 +47,7 @@ async function computeListCounts(
     list_count: lists,
     saved_list_count: savedLists,
     plaza_count: plaza,
-    cw_count: Math.min(
-      playRecords.total,
-      normalizePlayRecordLimit(params.ContinueWatchingLimit),
-    ),
+    cw_count: Math.min(playRecords.total, CONTINUE_WATCHING_LIMIT),
     cw_page_count: Math.min(playRecords.total, CONTINUE_WATCHING_PAGE_SIZE),
   };
 }

@@ -12,14 +12,6 @@ const mockDb = {
 
 jest.mock('server-only', () => ({}));
 jest.mock('@/lib/db', () => ({ db: mockDb }));
-jest.mock('@/lib/config', () => ({
-  getConfigForRead: async () => ({
-    SiteConfig: {
-      PlaybackHistoryPageSize: 10,
-      ContinueWatchingLimit: 8,
-    },
-  }),
-}));
 
 const { seedListCountCookies } =
   require('@/lib/list-count-seed.server') as typeof import('@/lib/list-count-seed.server');
@@ -65,7 +57,7 @@ it('按各列表接口口径写入计数', async () => {
     saved_list_count: '3',
     plaza_count: '4',
     history_count: '3',
-    cw_count: '8',
+    cw_count: '10',
     cw_page_count: '24',
   });
 });

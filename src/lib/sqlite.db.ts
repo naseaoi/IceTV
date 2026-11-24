@@ -56,6 +56,7 @@ import {
   aggregateSourceUsage,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
+import { SEARCH_HISTORY_LIMIT } from '@/features/search/lib/searchQuery';
 import {
   ViewingHappinessPlans,
   viewingHappinessSchema,
@@ -216,7 +217,6 @@ import {
   planUsernameMigration,
 } from './username-migration';
 
-const SEARCH_HISTORY_LIMIT = 20;
 const REVIEW_SQL = reviewSql('sqlite');
 
 const {

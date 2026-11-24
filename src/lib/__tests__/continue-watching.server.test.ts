@@ -18,9 +18,6 @@ jest.mock('@/lib/auth-session.server', () => ({
 }));
 
 const mockGetPlayRecordPage = jest.fn();
-jest.mock('@/lib/config', () => ({
-  getPublicConfig: async () => ({ ContinueWatchingLimit: 20 }),
-}));
 jest.mock('@/lib/db', () => ({
   db: {
     getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
@@ -121,7 +118,7 @@ it('首页 SSR 只传列表摘要，保留主进度和更新计数', async () =>
   }));
   const full = Object.freeze({ ...summary, episode_progress: episodeProgress });
   const items = Object.fromEntries(
-    Array.from({ length: 20 }, (_, index) => [`s+${index}`, full]),
+    Array.from({ length: 10 }, (_, index) => [`s+${index}`, full]),
   );
   mockGetPlayRecordPage.mockResolvedValue({
     items,
@@ -129,7 +126,7 @@ it('首页 SSR 只传列表摘要，保留主进度和更新计数', async () =>
     nextCursor: null,
   });
   const result = await getContinueWatchingInitialData();
-  expect(mockGetPlayRecordPage).toHaveBeenCalledWith('tester', 20);
+  expect(mockGetPlayRecordPage).toHaveBeenCalledWith('tester', 10);
   expect(result.updateCount).toBe(2);
   expect(result.records).toEqual(
     Object.fromEntries(Object.keys(items).map((key) => [key, summary])),

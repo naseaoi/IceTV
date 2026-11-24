@@ -32,10 +32,6 @@ import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { CustomCategory } from '@/features/admin/types/internal';
-import {
-  applyClientServerConfig,
-  fetchClientServerConfig,
-} from '@/lib/runtime-config';
 import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
@@ -52,9 +48,6 @@ const CategoryConfig = ({
   const { runAction } = useAdminSourceActions({
     endpoint: '/api/admin/category',
     refreshConfig,
-    afterRefresh: async () => {
-      applyClientServerConfig(await fetchClientServerConfig());
-    },
   });
   const [categories, setCategories] = useState<CustomCategory[]>([]);
   const [filterQuery, setFilterQuery] = useState('');

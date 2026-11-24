@@ -50,10 +50,6 @@ export async function GET(request: NextRequest) {
     FluidSearch: publicConfig.FluidSearch,
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,
     VodFragmentTimeoutSeconds: publicConfig.VodFragmentTimeoutSeconds,
-    PlaybackHistoryPageSize: publicConfig.PlaybackHistoryPageSize,
-    SearchHistoryLimit: publicConfig.SearchHistoryLimit,
-    ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
-    CoverImageCacheSize: publicConfig.CoverImageCacheSize,
     ImageProxyTimeoutSeconds: publicConfig.ImageProxyTimeoutSeconds,
     SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
   };

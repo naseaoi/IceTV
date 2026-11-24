@@ -23,12 +23,8 @@ export interface AdminConfig {
     SiteInterfaceCacheTime: number;
     VodPageTimeoutSeconds: number;
     VodFragmentTimeoutSeconds: number;
-    PlaybackHistoryPageSize: number;
-    SearchHistoryLimit: number;
     SearchRequestTimeoutSeconds: number;
     SourceFailureCooldownSeconds: number;
-    ContinueWatchingLimit: number;
-    CoverImageCacheSize: number;
     SourceCoverProxyMode?: 'auto' | 'browser' | 'server';
     LivePrecheckTimeoutSeconds: number;
     ProxyRequestTimeoutSeconds: number;

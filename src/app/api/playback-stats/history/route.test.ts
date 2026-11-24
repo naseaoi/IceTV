@@ -10,11 +10,6 @@ jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: (...args: unknown[]) => mockGuard(...args),
   isGuardFailure: (result: object) => 'response' in result,
 }));
-jest.mock('@/lib/config', () => ({
-  getConfigForRead: async () => ({
-    SiteConfig: { PlaybackHistoryPageSize: 2 },
-  }),
-}));
 jest.mock('@/lib/db', () => ({
   db: {
     getWatchHistoryPage: (...args: unknown[]) => mockPage(...args),
@@ -49,7 +44,7 @@ it('SQL 查询请求多取一条并返回不透明双键游标，同名作品独
   mockPage.mockResolvedValue([rows[2]]);
   const next = await (await GET(request(`?cursor=${body.nextCursor}`))).json();
   expect(mockPage).toHaveBeenLastCalledWith('demo', {
-    limit: 3,
+    limit: 11,
     keyword: undefined,
     cursor: { lastWatchedAt: 100, id: 'history_002' },
   });
@@ -59,7 +54,7 @@ it('拒绝非法游标并限制分页大小', async () => {
   expect((await GET(request('?cursor=not-json'))).status).toBe(400);
   expect(mockPage).not.toHaveBeenCalled();
   await GET(request('?limit=999999'));
-  expect(mockPage.mock.calls[0][1].limit).toBe(3);
+  expect(mockPage.mock.calls[0][1].limit).toBe(11);
 });
 it('删除只调用当前用户的历史删除', async () => {
   expect((await DELETE(request('?id=history_001'))).status).toBe(200);

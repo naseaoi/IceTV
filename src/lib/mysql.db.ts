@@ -62,6 +62,7 @@ import {
   aggregateSourceUsage,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
+import { SEARCH_HISTORY_LIMIT } from '@/features/search/lib/searchQuery';
 import {
   ViewingHappinessPlans,
   viewingHappinessSchema,
@@ -212,7 +213,6 @@ import {
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 
-const SEARCH_HISTORY_LIMIT = 20;
 const REVIEW_SQL = reviewSql('mysql');
 const {
   createdAt: MYSQL_TRACKING_CREATED_AT,

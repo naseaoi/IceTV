@@ -2,10 +2,15 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { adminGet } from '@/features/admin/lib/api';
+import { syncClientConfigAfterSave } from '@/lib/runtime-config';
 import { showToast } from '@/lib/toast';
 
 jest.mock('@/features/admin/lib/api', () => ({
   adminGet: jest.fn(),
+}));
+
+jest.mock('@/lib/runtime-config', () => ({
+  syncClientConfigAfterSave: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('@/lib/toast', () => ({
@@ -64,6 +69,32 @@ describe('useAdminPageActions', () => {
     expect(setRole).toHaveBeenCalledWith('owner');
     expect(setError).toHaveBeenCalledWith(null);
     expect(setLoading).toHaveBeenLastCalledWith(false);
+    expect(syncClientConfigAfterSave).not.toHaveBeenCalled();
+  });
+
+  it('保存后的公共刷新同时更新表单与客户端配置', async () => {
+    mockedAdminGet
+      .mockResolvedValueOnce({ authenticated: true, role: 'owner' } as never)
+      .mockResolvedValueOnce({
+        Role: 'owner',
+        Config: { SiteConfig: { SiteName: '新站点' } },
+      } as never);
+    const setConfig = jest.fn();
+    const { result } = renderHook(() =>
+      useAdminPageActions({
+        setConfig,
+        setRole: jest.fn(),
+        setError: jest.fn(),
+        setLoading: jest.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.refreshConfig();
+    });
+    expect(syncClientConfigAfterSave).toHaveBeenCalledTimes(1);
+    expect(setConfig).toHaveBeenCalledWith({
+      SiteConfig: { SiteName: '新站点' },
+    });
   });
 
   it('stops before admin config when user is not admin', async () => {
@@ -161,7 +192,10 @@ describe('useAdminPageActions', () => {
   it('resets admin config through reset endpoint', async () => {
     const showAlert = jest.fn();
 
-    mockedAdminGet.mockResolvedValueOnce({} as never);
+    mockedAdminGet
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({ authenticated: true, role: 'owner' } as never)
+      .mockResolvedValueOnce({ Role: 'owner', Config: {} } as never);
 
     const { result } = renderHook(() =>
       useAdminPageActions({
@@ -177,6 +211,7 @@ describe('useAdminPageActions', () => {
     });
 
     expect(mockedAdminGet).toHaveBeenCalledWith('/api/admin/reset', '重置失败');
+    expect(syncClientConfigAfterSave).toHaveBeenCalledTimes(1);
     expect(showToast).not.toHaveBeenCalled();
     expect(showAlert).not.toHaveBeenCalled();
   });

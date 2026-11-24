@@ -382,6 +382,33 @@ describe('failed source reporting', () => {
     );
   });
 
+  it.each(['api', 'detail'] as const)(
+    '修改 %s 后使用独立冷却，成功重试清除对应冷却',
+    async (field) => {
+      const updated = { ...site, [field]: 'https://new.example' };
+      (searchFromApi as jest.Mock)
+        .mockRejectedValueOnce(new Error('old timeout'))
+        .mockRejectedValueOnce(new Error('new timeout'))
+        .mockResolvedValue([createResult({ title: '重试成功' })]);
+      await collectSearchAggregation(baseOptions);
+      const updatedOptions = { ...baseOptions, apiSites: [updated] };
+      await collectSearchAggregation(updatedOptions);
+      expect(searchFromApi).toHaveBeenCalledTimes(2);
+      await collectSearchAggregation(updatedOptions);
+      expect(searchFromApi).toHaveBeenCalledTimes(2);
+
+      await collectSearchAggregation({ ...updatedOptions, retryFailed: true });
+      expect(
+        (await collectSearchAggregation(updatedOptions)).failedSources,
+      ).toEqual([]);
+      expect(searchFromApi).toHaveBeenCalledTimes(4);
+      expect(
+        (await collectSearchAggregation(baseOptions)).failedSources,
+      ).toEqual(['flaky']);
+      expect(searchFromApi).toHaveBeenCalledTimes(4);
+    },
+  );
+
   it('retries a cooled-down source and refreshes its first page', async () => {
     (searchFromApi as jest.Mock)
       .mockRejectedValueOnce(new Error('timeout'))

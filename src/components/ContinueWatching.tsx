@@ -13,13 +13,13 @@ import {
 import ContinueCard from '@/components/ContinueCard';
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
 import { useOptionalMessageCenter } from '@/components/messages/MessageCenterProvider';
-import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
 import {
   SECTION_HEADER_CLASS,
   SECTION_LINK_TEXT_CLASS,
   SECTION_TITLE_TEXT_CLASS,
 } from '@/components/section-header';
+import { CONTINUE_WATCHING_LIMIT } from '@/features/continue-watching/lib/layout';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -51,8 +51,6 @@ const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 type PlayRecordWithKey = PlayRecord & { key: string };
-
-const DEFAULT_CONTINUE_WATCHING_LIMIT = 10;
 
 function sortPlayRecords(
   allRecords: Record<string, PlayRecord>,
@@ -110,13 +108,7 @@ export default function ContinueWatching({
   initialUpdateCount,
   refreshOnMount = true,
 }: ContinueWatchingProps) {
-  const runtimeConfig = useRuntimeConfig();
-  const continueWatchingLimit = Math.max(
-    1,
-    Math.floor(
-      runtimeConfig.CONTINUE_WATCHING_LIMIT || DEFAULT_CONTINUE_WATCHING_LIMIT,
-    ),
-  );
+  const continueWatchingLimit = CONTINUE_WATCHING_LIMIT;
   const normalizedInitialSkeletonCount = Math.min(
     initialSkeletonCount,
     continueWatchingLimit,

@@ -11,8 +11,10 @@ import {
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
+  type ServerConfigPayload,
   applyClientServerConfig,
   fetchClientServerConfig,
+  SERVER_CONFIG_UPDATED_EVENT,
 } from '@/lib/runtime-config';
 import {
   DEFAULT_SITE_FOOTER_TEXT,
@@ -70,52 +72,50 @@ export function SiteProvider({
   });
 
   useEffect(() => {
-    if (!getAuthInfoFromBrowserCookie()?.username) {
-      window.__runtimeConfigReady = true;
-      return;
-    }
+    const updateSite = (event: Event) => {
+      const data = (event as CustomEvent<ServerConfigPayload>).detail;
+      const nextSiteName = data.SiteName || siteName;
+      const nextSiteIcon = withSiteIconCacheBuster(
+        data.SiteIcon || '',
+        Date.now(),
+      );
+      const nextAnnouncement = data.Announcement || defaultAnnouncement;
+      const nextFooterText = normalizeSiteFooterText(
+        data.FooterText || defaultFooterText,
+      );
+
+      setSiteState({
+        siteName: nextSiteName,
+        siteIcon: nextSiteIcon,
+        announcement: nextAnnouncement,
+        footerText: nextFooterText,
+      });
+
+      document.title = nextSiteName;
+      updateIconLink("link[rel='icon']", nextSiteIcon || '/favicon.ico');
+      updateIconLink(
+        "link[rel='apple-touch-icon']",
+        nextSiteIcon || DEFAULT_APPLE_TOUCH_ICON,
+      );
+    };
+    window.addEventListener(SERVER_CONFIG_UPDATED_EVENT, updateSite);
 
     let cancelled = false;
-
-    fetchClientServerConfig()
-      .then((data) => {
-        applyClientServerConfig(data);
-        if (cancelled) {
-          return;
-        }
-
-        const nextSiteName = data.SiteName || siteName;
-        const nextSiteIcon = withSiteIconCacheBuster(
-          data.SiteIcon || '',
-          Date.now(),
-        );
-        const nextAnnouncement = data.Announcement || defaultAnnouncement;
-        const nextFooterText = normalizeSiteFooterText(
-          data.FooterText || defaultFooterText,
-        );
-
-        setSiteState({
-          siteName: nextSiteName,
-          siteIcon: nextSiteIcon,
-          announcement: nextAnnouncement,
-          footerText: nextFooterText,
+    if (getAuthInfoFromBrowserCookie()?.username) {
+      fetchClientServerConfig()
+        .then((data) => {
+          if (!cancelled) applyClientServerConfig(data);
+        })
+        .catch(() => {
+          if (!cancelled) window.__runtimeConfigReady = true;
         });
-
-        document.title = nextSiteName;
-        updateIconLink("link[rel='icon']", nextSiteIcon || '/favicon.ico');
-        updateIconLink(
-          "link[rel='apple-touch-icon']",
-          nextSiteIcon || DEFAULT_APPLE_TOUCH_ICON,
-        );
-      })
-      .catch(() => {
-        if (typeof window !== 'undefined') {
-          window.__runtimeConfigReady = true;
-        }
-      });
+    } else {
+      window.__runtimeConfigReady = true;
+    }
 
     return () => {
       cancelled = true;
+      window.removeEventListener(SERVER_CONFIG_UPDATED_EVENT, updateSite);
     };
   }, [defaultAnnouncement, defaultFooterText, siteName]);
 

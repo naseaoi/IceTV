@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { PLAYBACK_HISTORY_PAGE_SIZE } from '@/features/playback-stats/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { normalizePlaybackSearchKeyword } from '@/lib/playback-query';
-import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import type { WatchHistoryCursor } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -45,13 +44,12 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const { searchParams } = new URL(request.url);
-    const runtimeParams = normalizeRuntimeParams(
-      (await getConfigForRead()).SiteConfig,
-    );
-    const pageSize = runtimeParams.PlaybackHistoryPageSize;
     const limit = Math.min(
-      parsePositiveInteger(searchParams.get('limit'), pageSize),
-      pageSize,
+      parsePositiveInteger(
+        searchParams.get('limit'),
+        PLAYBACK_HISTORY_PAGE_SIZE,
+      ),
+      PLAYBACK_HISTORY_PAGE_SIZE,
     );
     const rawCursor = searchParams.get('cursor');
     const cursor = rawCursor ? parseCursor(rawCursor) : undefined;

@@ -185,6 +185,34 @@ describe('config cache persistence', () => {
     },
   );
 
+  it('discards retired runtime keys when reading and saving legacy config', async () => {
+    const legacy = cloneBaseConfig();
+    const retired = {
+      CoverImageCacheSize: 'invalid',
+      PlaybackHistoryPageSize: 2,
+      SearchHistoryLimit: 100,
+      ContinueWatchingLimit: 30,
+    };
+    Object.assign(legacy.SiteConfig, retired);
+    const persist = jest.fn();
+    const { getConfig, saveConfig, getPublicConfig } = await loadConfigModule(
+      persist,
+      { adminConfig: legacy },
+    );
+    const config = await getConfig();
+    const publicConfig = await getPublicConfig();
+    for (const key of Object.keys(retired)) {
+      expect(config.SiteConfig).not.toHaveProperty(key);
+      expect(publicConfig).not.toHaveProperty(key);
+    }
+    await saveConfig(config);
+    const saved = persist.mock.calls.at(-1)?.[0] as AdminConfig;
+    for (const key of Object.keys(retired)) {
+      expect(saved.SiteConfig).not.toHaveProperty(key);
+    }
+    expect(saved.SiteConfig.SiteInterfaceCacheTime).toBe(300);
+  });
+
   it('preserves user danmaku through self-check and public config', async () => {
     const config = cloneBaseConfig();
     config.SiteConfig.EnableUserDanmaku = true;

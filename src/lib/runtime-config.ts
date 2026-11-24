@@ -1,3 +1,4 @@
+import { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
 import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
@@ -26,10 +27,6 @@ export interface RuntimeConfig {
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
   VOD_FRAGMENT_TIMEOUT_SECONDS: number;
-  PLAYBACK_HISTORY_PAGE_SIZE: number;
-  SEARCH_HISTORY_LIMIT: number;
-  CONTINUE_WATCHING_LIMIT: number;
-  COVER_IMAGE_CACHE_SIZE: number;
   IMAGE_PROXY_TIMEOUT_SECONDS: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
 }
@@ -56,10 +53,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
   VOD_FRAGMENT_TIMEOUT_SECONDS: 10,
-  PLAYBACK_HISTORY_PAGE_SIZE: 10,
-  SEARCH_HISTORY_LIMIT: 20,
-  CONTINUE_WATCHING_LIMIT: 10,
-  COVER_IMAGE_CACHE_SIZE: 500,
   IMAGE_PROXY_TIMEOUT_SECONDS: 15,
   SOURCE_COVER_PROXY_MODE: 'auto',
 };
@@ -97,10 +90,6 @@ export type ServerConfigPayload = {
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
   VodFragmentTimeoutSeconds?: number;
-  PlaybackHistoryPageSize?: number;
-  SearchHistoryLimit?: number;
-  ContinueWatchingLimit?: number;
-  CoverImageCacheSize?: number;
   ImageProxyTimeoutSeconds?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
 };
@@ -179,16 +168,6 @@ function runtimeConfigFromServerConfig(
     VOD_FRAGMENT_TIMEOUT_SECONDS:
       data.VodFragmentTimeoutSeconds ??
       DEFAULT_RUNTIME_CONFIG.VOD_FRAGMENT_TIMEOUT_SECONDS,
-    PLAYBACK_HISTORY_PAGE_SIZE:
-      data.PlaybackHistoryPageSize ??
-      DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,
-    SEARCH_HISTORY_LIMIT:
-      data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
-    CONTINUE_WATCHING_LIMIT:
-      data.ContinueWatchingLimit ??
-      DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
-    COVER_IMAGE_CACHE_SIZE:
-      data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
     IMAGE_PROXY_TIMEOUT_SECONDS:
       data.ImageProxyTimeoutSeconds ??
       DEFAULT_RUNTIME_CONFIG.IMAGE_PROXY_TIMEOUT_SECONDS,
@@ -198,13 +177,18 @@ function runtimeConfigFromServerConfig(
   };
 }
 
-let serverConfigRequest: Promise<ServerConfigPayload> | null = null;
+export const SERVER_CONFIG_UPDATED_EVENT = 'server-config-updated';
 
-export async function fetchClientServerConfig(): Promise<ServerConfigPayload> {
-  if (!serverConfigRequest) {
-    serverConfigRequest = fetch('/api/server-config', {
+let serverConfigRequest: Promise<ServerConfigPayload> | null = null;
+let serverConfigRequestPending = false;
+
+export async function fetchClientServerConfig({
+  forceFresh = false,
+}: { forceFresh?: boolean } = {}): Promise<ServerConfigPayload> {
+  if (forceFresh || !serverConfigRequestPending || !serverConfigRequest) {
+    const request: Promise<ServerConfigPayload> = fetch('/api/server-config', {
       method: 'GET',
-      cache: 'no-cache',
+      cache: 'no-store',
     })
       .then((response) => {
         if (!response.ok) {
@@ -212,12 +196,34 @@ export async function fetchClientServerConfig(): Promise<ServerConfigPayload> {
         }
         return response.json() as Promise<ServerConfigPayload>;
       })
+      .then(
+        // 保存前的请求即使晚到，也只向调用方交付最新请求的结果。
+        (data) =>
+          serverConfigRequest === request ? data : serverConfigRequest!,
+        (error) => {
+          if (serverConfigRequest !== request) return serverConfigRequest!;
+          throw error;
+        },
+      )
       .finally(() => {
-        serverConfigRequest = null;
+        if (serverConfigRequest === request) serverConfigRequestPending = false;
       });
+    serverConfigRequest = request;
+    serverConfigRequestPending = true;
   }
 
   return serverConfigRequest;
+}
+
+export async function syncClientConfigAfterSave(): Promise<void> {
+  clearSearchSnapshotCache();
+  try {
+    applyClientServerConfig(
+      await fetchClientServerConfig({ forceFresh: true }),
+    );
+  } catch (error) {
+    console.warn('刷新客户端运行配置失败:', error);
+  }
 }
 
 export function applyClientServerConfig(
@@ -230,6 +236,9 @@ export function applyClientServerConfig(
     window.__runtimeConfigReady = true;
     window.dispatchEvent(
       new CustomEvent('runtime-config-updated', { detail: nextConfig }),
+    );
+    window.dispatchEvent(
+      new CustomEvent(SERVER_CONFIG_UPDATED_EVENT, { detail: data }),
     );
   }
 

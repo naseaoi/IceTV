@@ -1,8 +1,6 @@
-import { getRuntimeConfig } from '@/lib/runtime-config';
-
 const STORAGE_KEY = 'icetv:cover-image-loaded';
 const FAILED_STORAGE_KEY = 'icetv:cover-image-failed';
-const DEFAULT_CACHE_MAX_SIZE = 500;
+const COVER_IMAGE_CACHE_SIZE = 500;
 const LOADED_EVENT = 'loaded';
 export const COVER_IMAGE_FAILURE_TTL_MS = 10 * 60 * 1000;
 
@@ -40,15 +38,6 @@ function getSessionStorage(): Storage | null {
   } catch {
     return null;
   }
-}
-
-function getCacheMaxSize(): number {
-  return Math.max(
-    50,
-    Math.floor(
-      getRuntimeConfig()?.COVER_IMAGE_CACHE_SIZE || DEFAULT_CACHE_MAX_SIZE,
-    ),
-  );
 }
 
 function hydrateCacheFromStorage(
@@ -106,12 +95,11 @@ function hydrateFailedFromStorage() {
 }
 
 function trimCache(cache: Map<string, number>) {
-  const cacheMaxSize = getCacheMaxSize();
-  if (cache.size <= cacheMaxSize) {
+  if (cache.size <= COVER_IMAGE_CACHE_SIZE) {
     return;
   }
 
-  const trimToSize = Math.max(1, Math.floor(cacheMaxSize / 2));
+  const trimToSize = Math.floor(COVER_IMAGE_CACHE_SIZE / 2);
   const evictCount = cache.size - trimToSize;
   const cacheKeys = Array.from(cache.keys());
   for (

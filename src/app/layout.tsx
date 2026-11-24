@@ -109,10 +109,6 @@ export default async function RootLayout({
     FLUID_SEARCH: publicConfig.FluidSearch,
     VOD_PAGE_TIMEOUT_SECONDS: publicConfig.VodPageTimeoutSeconds,
     VOD_FRAGMENT_TIMEOUT_SECONDS: publicConfig.VodFragmentTimeoutSeconds,
-    PLAYBACK_HISTORY_PAGE_SIZE: publicConfig.PlaybackHistoryPageSize,
-    SEARCH_HISTORY_LIMIT: publicConfig.SearchHistoryLimit,
-    CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
-    COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
     IMAGE_PROXY_TIMEOUT_SECONDS: publicConfig.ImageProxyTimeoutSeconds,
     SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,
   };

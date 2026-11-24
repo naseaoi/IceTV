@@ -1,14 +1,101 @@
 import {
+  getSearchSnapshot,
+  setSearchSnapshot,
+} from '@/features/search/lib/searchSnapshotCache';
+import {
   applyClientServerConfig,
   DEFAULT_RUNTIME_CONFIG,
+  fetchClientServerConfig,
   getClientAuthRuntimeConfig,
   getCustomCategoryLabel,
+  syncClientConfigAfterSave,
 } from '@/lib/runtime-config';
+
+const originalFetch = global.fetch;
+
+function deferredResponse() {
+  let resolve!: (value: Response) => void;
+  const promise = new Promise<Response>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function response(SiteName: string): Response {
+  return {
+    ok: true,
+    json: async () => ({ SiteName, EnableLiveEntry: true }),
+  } as Response;
+}
+
+function seedSnapshot() {
+  setSearchSnapshot('test', {
+    results: [],
+    totalSources: 1,
+    completedSources: 1,
+    failedSources: [],
+    useFluidSearch: true,
+  });
+}
 
 describe('runtime config', () => {
   afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
     delete window.RUNTIME_CONFIG;
     delete window.__runtimeConfigReady;
+  });
+
+  it.each([true, false])(
+    '保存后新发请求并隔离旧响应（旧响应先完成：%s）',
+    async (oldFirst) => {
+      const old = deferredResponse();
+      const fresh = deferredResponse();
+      const fetchMock = jest
+        .fn()
+        .mockReturnValueOnce(old.promise)
+        .mockReturnValueOnce(fresh.promise);
+      global.fetch = fetchMock;
+      const beforeSave = fetchClientServerConfig();
+      seedSnapshot();
+      const synced = syncClientConfigAfterSave();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/server-config', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      const duringSync = fetchClientServerConfig();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(getSearchSnapshot('test')).toBeNull();
+
+      if (oldFirst) {
+        old.resolve(response('旧站点'));
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(window.RUNTIME_CONFIG).toBeUndefined();
+      }
+      fresh.resolve(response('新站点'));
+      await synced;
+      old.resolve(response('旧站点'));
+      expect(await beforeSave).toMatchObject({ SiteName: '新站点' });
+      expect(await duringSync).toMatchObject({ SiteName: '新站点' });
+      expect(window.RUNTIME_CONFIG?.ENABLE_LIVE_ENTRY).toBe(true);
+    },
+  );
+
+  it('同步失败只记录警告并清除搜索快照，保留当前运行配置', async () => {
+    const config = applyClientServerConfig({ EnableLiveEntry: true });
+    const failure = new Error('offline');
+    global.fetch = jest.fn().mockRejectedValueOnce(failure);
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    seedSnapshot();
+
+    await expect(syncClientConfigAfterSave()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith('刷新客户端运行配置失败:', failure);
+    expect(window.RUNTIME_CONFIG).toBe(config);
+    expect(getSearchSnapshot('test')).toBeNull();
   });
 
   it('账号注册入口独立读取 PasswordRegister，缺省关闭', async () => {
@@ -65,12 +152,10 @@ describe('runtime config', () => {
     const config = applyClientServerConfig({
       VodPageTimeoutSeconds: 20,
       VodFragmentTimeoutSeconds: 25,
-      ContinueWatchingLimit: 0,
     });
 
     expect(config.VOD_PAGE_TIMEOUT_SECONDS).toBe(20);
     expect(config.VOD_FRAGMENT_TIMEOUT_SECONDS).toBe(25);
-    expect(config.CONTINUE_WATCHING_LIMIT).toBe(0);
     expect(window.RUNTIME_CONFIG).toEqual(config);
   });
 

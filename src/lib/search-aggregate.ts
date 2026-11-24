@@ -6,6 +6,7 @@ import { searchFromApi } from '@/lib/downstream';
 import type { CachedSearchAggregateEntry } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
+import { getSourceCacheKey } from '@/lib/source-cache-key';
 import {
   type SourceHealthTier,
   SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
@@ -210,7 +211,7 @@ function clearSourceFailureCooldown(site: ApiSite): void {
 }
 
 function getSourceFailureKey(site: ApiSite): string {
-  return site.key || site.api || site.name;
+  return getSourceCacheKey(site);
 }
 
 function getSourceFailureCooldownMs(sourceFailureCooldownMs?: number): number {

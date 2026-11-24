@@ -9,14 +9,16 @@ import {
   useState,
 } from 'react';
 
-import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
   cachePlaybackHistorySnapshot,
   deletePlaybackHistoryItem,
   getCachedPlaybackHistorySnapshot,
   getPlaybackHistory,
 } from '@/features/playback-stats/lib/client';
-import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
+import {
+  type PlaybackHistoryResponse,
+  PLAYBACK_HISTORY_PAGE_SIZE,
+} from '@/features/playback-stats/types';
 import { readListCountCookie } from '@/lib/list-count-cookies';
 import {
   getCurrentNavigationPath,
@@ -35,11 +37,7 @@ const useIsomorphicLayoutEffect =
 // 只读已有快照与计数 cookie，不为占位发起请求；initialCount 是服务端读到的计数，供首屏 HTML 使用。
 // count 为首页应显示的条数，已按请求页大小截断。
 export function usePlaybackHistoryPlaceholder(initialCount = 0) {
-  const runtimeConfig = useRuntimeConfig();
-  const pageSize = Math.max(
-    1,
-    Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
-  );
+  const pageSize = PLAYBACK_HISTORY_PAGE_SIZE;
   const [state, setState] = useState<{
     snapshot: PlaybackHistoryResponse | null;
     known: number;
@@ -60,11 +58,7 @@ export function usePlaybackHistoryPlaceholder(initialCount = 0) {
 }
 
 export function usePlaybackHistory() {
-  const runtimeConfig = useRuntimeConfig();
-  const pageSize = Math.max(
-    1,
-    Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
-  );
+  const pageSize = PLAYBACK_HISTORY_PAGE_SIZE;
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const generation = useRef(0);

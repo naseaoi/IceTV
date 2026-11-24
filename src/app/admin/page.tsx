@@ -221,7 +221,7 @@ function AdminPageClient() {
     };
   }, [hasUnsavedChanges]);
 
-  const { fetchConfig, resetConfig } = useAdminPageActions({
+  const { fetchConfig, refreshConfig, resetConfig } = useAdminPageActions({
     setConfig,
     setRole,
     setError,
@@ -288,7 +288,6 @@ function AdminPageClient() {
     await withLoading('resetConfig', async () => {
       try {
         await resetConfig();
-        await fetchConfig();
         setShowResetConfigModal(false);
       } catch (err) {
         showError(err, '重置失败');
@@ -339,7 +338,7 @@ function AdminPageClient() {
         activeTab={activeTab}
         config={config}
         role={role}
-        refreshConfig={fetchConfig}
+        refreshConfig={refreshConfig}
         onSiteConfigSavingChange={setSiteConfigSaving}
         onRuntimeParamsSavingChange={setRuntimeParamsSaving}
         onConfigFileSavingChange={setConfigFileSaving}
