@@ -6,6 +6,7 @@ import {
   type SourceHealthTier,
   SOURCE_HEALTH_TIER_PRIORITY,
 } from '@/lib/source-quality-policy';
+import { sourceWorkFailureKey } from '@/lib/source-work-failures';
 
 export interface SourceSelectionContext {
   proxyModes: Readonly<Record<string, string>>;
@@ -20,12 +21,18 @@ export const EMPTY_SOURCE_SELECTION_CONTEXT: SourceSelectionContext = {
 
 // 本地可靠性独立于远端上下文；只有双方均为中性档时才参考全局健康。
 export function compareSourceRoutePreference(
-  a: { source: string },
-  b: { source: string },
+  a: { source: string; id: string },
+  b: { source: string; id: string },
   context: SourceSelectionContext,
   playbackStats: ReadonlyMap<string, SourcePlaybackStat>,
   now = Date.now(),
+  workFailures: ReadonlySet<string> = new Set(),
 ): number {
+  const failureDifference =
+    Number(workFailures.has(sourceWorkFailureKey(a.source, a.id))) -
+    Number(workFailures.has(sourceWorkFailureKey(b.source, b.id)));
+  if (failureDifference) return failureDifference;
+
   const aTier = getSourcePlaybackPreferenceTier(
     playbackStats.get(a.source),
     now,
@@ -61,13 +68,23 @@ export function compareSourceRoutePreference(
     : 0;
 }
 
-export function preferDirectRouteSources<T extends { source: string }>(
+export function preferDirectRouteSources<
+  T extends { source: string; id: string },
+>(
   sources: readonly T[],
   context: SourceSelectionContext,
   playbackStats: ReadonlyMap<string, SourcePlaybackStat>,
   now = Date.now(),
+  workFailures: ReadonlySet<string> = new Set(),
 ): T[] {
   return [...sources].sort((a, b) =>
-    compareSourceRoutePreference(a, b, context, playbackStats, now),
+    compareSourceRoutePreference(
+      a,
+      b,
+      context,
+      playbackStats,
+      now,
+      workFailures,
+    ),
   );
 }

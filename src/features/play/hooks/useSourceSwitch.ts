@@ -32,6 +32,7 @@ import {
   resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
+import { getHlsResourceRetryDelay } from '@/features/play/lib/hlsSourceFailure';
 import { getVodStartupNow } from '@/features/play/lib/playerLoading';
 import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
@@ -434,6 +435,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             () => detailAbortController.abort(),
             idleMs,
           );
+          let resourceLimited = false;
           let rejectAborted: () => void = () => undefined;
           try {
             const fullDetail = await Promise.race([
@@ -447,6 +449,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
                       }
                     : { signal: detailAbortController.signal },
                 );
+                resourceLimited =
+                  getHlsResourceRetryDelay({ networkDetails: response }) !==
+                  null;
                 return response.ok
                   ? ((await response.json()) as SearchResult)
                   : null;
@@ -464,6 +469,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
               }),
             ]);
             if (!isCurrentRequest()) return;
+            if (resourceLimited) {
+              setIsVideoLoading(false);
+              setRealtimeLoadSpeed('');
+              playbackRequestModeRef.current = 'initial';
+              setError('本站资源暂时受限，请稍后重试');
+              return;
+            }
             if (fullDetail?.episodes?.length) {
               saveDetailSnapshot(newSource, newId, fullDetail);
               newDetail = mergeSourceSwitchDetail(
@@ -513,7 +525,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             );
             // 本次换源到此结束，放开进行中标记才能接着尝试下一个候选
             sourceSwitchInFlightRef.current = false;
-            reportVodPlaybackOutcome(intent, newSource, false);
+            reportVodPlaybackOutcome(intent, newSource, false, newId);
             if (!tryAutoSwitchSourceRef.current('missing-episode')) {
               setIsVideoLoading(false);
               setRealtimeLoadSpeed('');
@@ -524,7 +536,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           }
 
           if (!newDetail.episodes?.length) {
-            reportVodPlaybackOutcome(intent, newSource, false);
+            reportVodPlaybackOutcome(intent, newSource, false, newId);
           }
           const targetEpisodeNumber = episodeAnchor.episodeIndex + 1;
           const notice = `该源没有第 ${targetEpisodeNumber} 集，已保留当前播放`;
@@ -693,7 +705,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           (err as Error)?.name !== 'AbortError' &&
           canHandleVodPlaybackFailure(intent, playbackIntentRef.current)
         ) {
-          reportVodPlaybackOutcome(intent, newSource, false);
+          reportVodPlaybackOutcome(intent, newSource, false, newId);
         }
         setIsVideoLoading(false);
         setRealtimeLoadSpeed('');
@@ -851,7 +863,12 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         return true;
       }
       onPlaybackStartFailed?.();
-      reportVodPlaybackOutcome(intent, currentSourceRef.current, false);
+      reportVodPlaybackOutcome(
+        intent,
+        currentSourceRef.current,
+        false,
+        currentIdRef.current,
+      );
       if (tryAutoSwitchSourceRef.current('loading-timeout')) {
         return true;
       }
@@ -877,11 +894,16 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         return false;
       if (sourceSwitchInFlightRef.current) return true;
       onPlaybackStartFailed?.();
-      reportVodPlaybackOutcome(intent, currentSourceRef.current, false);
+      reportVodPlaybackOutcome(
+        intent,
+        currentSourceRef.current,
+        false,
+        currentIdRef.current,
+      );
       if (tryAutoSwitchSourceRef.current(reason)) return true;
       return false;
     },
-    [onPlaybackStartFailed, currentSourceRef],
+    [onPlaybackStartFailed, currentSourceRef, currentIdRef],
   );
 
   const handleEpisodeUrlResolveFailed = useCallback(
@@ -890,7 +912,12 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         return;
       if (sourceSwitchInFlightRef.current) return;
       onPlaybackStartFailed?.();
-      reportVodPlaybackOutcome(intent, currentSourceRef.current, false);
+      reportVodPlaybackOutcome(
+        intent,
+        currentSourceRef.current,
+        false,
+        currentIdRef.current,
+      );
       if (tryAutoSwitchSourceRef.current('episode-url-resolve-failed')) {
         return;
       }
@@ -902,6 +929,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       setRealtimeLoadSpeed,
       onPlaybackStartFailed,
       currentSourceRef,
+      currentIdRef,
     ],
   );
 

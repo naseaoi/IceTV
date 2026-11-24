@@ -68,7 +68,7 @@
 ## 本地设置
 
 - `localStorage` 只经 `src/lib/browser-storage.ts` 访问（ESLint 拦截直接访问），它统一处理服务端渲染、隐私模式与配额已满时的异常；写入返回是否成功，配额满时调用方可清理后重试。
-- 业务代码不直接拼 key 与默认值，各类设置用对应 helper（均在 `src/lib/`）：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`。新增设置先补 helper，再让设置面板和消费方接入。
+- 业务代码不直接拼 key 与默认值，各类设置用对应 helper（均在 `src/lib/`）：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`、源与作品近期失败记忆 `source-work-failures.ts`。新增设置先补 helper，再让设置面板和消费方接入。
 - 主题的存储键、默认值与首屏主题脚本都在 `src/lib/theme-preference.ts`，脚本与 `ThemeProvider` 共用常量；新增主题取值时同步改脚本里的取值判断。
 
 ## 错误处理

@@ -11,7 +11,12 @@ import {
   seedProbeResults,
 } from '@/features/play/lib/sourceProbeStore';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
+import { removeStorage } from '@/lib/browser-storage';
 import type { SourcePlaybackStat } from '@/lib/source-playback-stats';
+import {
+  recordSourceWorkFailure,
+  SOURCE_WORK_FAILURES_STORAGE_KEY,
+} from '@/lib/source-work-failures';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/features/play/lib/vodProbe', () => ({
@@ -59,11 +64,35 @@ function info(
 describe('auto source switch policy', () => {
   beforeEach(() => {
     resetProbes();
+    removeStorage(SOURCE_WORK_FAILURES_STORAGE_KEY);
     jest.clearAllMocks();
   });
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('keeps recently failed works after other candidates, even with fresh successful probes', () => {
+    const failed = createSource('a', ['第1集']);
+    const other = createSource('b', ['第1集']);
+    recordSourceWorkFailure(failed.source, failed.id);
+    const probes = new Map([
+      [buildAutoSwitchSourceKey(failed.source, failed.id), info('10 MB/s')],
+      [
+        buildAutoSwitchSourceKey(other.source, other.id),
+        info('未知', { hasError: true }),
+      ],
+    ]);
+    expect(
+      rankAutoSwitchCandidates([failed, other], probes, new Map()),
+    ).toEqual([other, failed]);
+    expect(rankAutoSwitchCandidates([failed], probes, new Map())).toEqual([
+      failed,
+    ]);
+    const anotherWork = { ...failed, id: 'different-work' };
+    expect(
+      rankAutoSwitchCandidates([failed, anotherWork], probes, new Map()),
+    ).toEqual([anotherWork, failed]);
   });
 
   it('prefers local reliability over global health just like initial selection', () => {

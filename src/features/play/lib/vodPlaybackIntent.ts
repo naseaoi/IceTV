@@ -1,4 +1,8 @@
 import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
+import {
+  recordSourceWorkFailure,
+  recordSourceWorkSuccess,
+} from '@/lib/source-work-failures';
 
 export type VodSourceAttempt = {
   source: string;
@@ -63,6 +67,7 @@ export function reportVodPlaybackOutcome(
   intent: VodPlaybackIntent,
   source: string,
   success: boolean,
+  id: string,
 ): void {
   if (
     !source ||
@@ -71,6 +76,8 @@ export function reportVodPlaybackOutcome(
   )
     return;
   intent.reportedSources.add(source);
+  if (success) recordSourceWorkSuccess(source, id);
+  else recordSourceWorkFailure(source, id);
   reportSourcePlayOutcome(source, success);
 }
 

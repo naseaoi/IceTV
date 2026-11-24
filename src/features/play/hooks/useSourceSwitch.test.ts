@@ -31,6 +31,11 @@ import {
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
 import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
+import {
+  readSourceWorkFailures,
+  recordSourceWorkFailure,
+  sourceWorkFailureKey,
+} from '@/lib/source-work-failures';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/features/play/lib/sourceProbeStore', () => ({
@@ -639,9 +644,55 @@ describe('useSourceSwitch 自动换源', () => {
     result.current.handleEpisodeUrlResolveFailed(oldIntent);
     expect(options.setCurrentSource).not.toHaveBeenCalled();
     expect(options.setAvailableSources).not.toHaveBeenCalled();
+    expect(readSourceWorkFailures()).toEqual(
+      new Set([sourceWorkFailureKey('a', 'a-id')]),
+    );
     expect(result.current.playbackIntentRef.current.attempts).toBe(0);
     expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(1);
     expect(reportSourcePlayOutcome).toHaveBeenCalledWith('a', false);
+  });
+
+  it.each([429, 503])(
+    '候选详情资源限额 %s 保持健康与作品记忆不变',
+    async (status) => {
+      const { result, options } = setupHook({
+        availableSources: createWaitingSources(['a', 'b']),
+      });
+      jest.mocked(global.fetch).mockResolvedValueOnce({
+        ok: false,
+        status,
+        headers: {
+          get: (key: string) =>
+            key === 'x-icetv-resource-limited' ? '1' : null,
+        },
+      } as Response);
+      await act(async () =>
+        result.current.handleSourceChange('b', 'b-id', '测试剧'),
+      );
+      expect(options.setError).toHaveBeenLastCalledWith(
+        '本站资源暂时受限，请稍后重试',
+      );
+      expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
+      expect(readSourceWorkFailures().size).toBe(0);
+    },
+  );
+
+  it('手动选源仍尝试近期失败作品，成功后清除记忆', async () => {
+    recordSourceWorkFailure('b', 'b-id');
+    const { result, options } = setupHook({
+      availableSources: createWaitingSources(['a', 'b']),
+    });
+    await act(async () =>
+      result.current.handleSourceChange('b', 'b-id', '测试剧'),
+    );
+    expect(options.setCurrentSource).toHaveBeenCalledWith('b');
+    reportVodPlaybackOutcome(
+      result.current.playbackIntentRef.current,
+      'b',
+      true,
+      'b-id',
+    );
+    expect(readSourceWorkFailures().size).toBe(0);
   });
 
   it('中间失败源与成功候选各上报一次，候选独立获得预算', async () => {
@@ -656,12 +707,15 @@ describe('useSourceSwitch 自动换源', () => {
     await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
     const intent = result.current.playbackIntentRef.current;
     expect(intent.activeSource?.startedAt).toBe(59_750);
-    reportVodPlaybackOutcome(intent, 'b', true);
-    reportVodPlaybackOutcome(intent, 'b', true);
+    reportVodPlaybackOutcome(intent, 'b', true, 'b-id');
+    reportVodPlaybackOutcome(intent, 'b', true, 'b-id');
     result.current.handlePlaybackRecoveryExhausted('fatal');
     expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(2);
     expect(reportSourcePlayOutcome).toHaveBeenNthCalledWith(1, 'a', false);
     expect(reportSourcePlayOutcome).toHaveBeenNthCalledWith(2, 'b', true);
+    expect(readSourceWorkFailures()).toEqual(
+      new Set([sourceWorkFailureKey('a', 'a-id')]),
+    );
   });
 
   it('页面超时优先切到服务端代理，不急于换源', () => {
@@ -681,6 +735,7 @@ describe('useSourceSwitch 自动换源', () => {
     });
 
     expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(readSourceWorkFailures().size).toBe(0);
     expect(switchToServerProxy).toHaveBeenCalledWith('page-loading-timeout');
     expect(global.fetch).not.toHaveBeenCalled();
     expect(options.onPlaybackStartFailed).not.toHaveBeenCalled();

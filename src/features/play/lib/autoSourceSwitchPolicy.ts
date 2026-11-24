@@ -13,6 +13,10 @@ import {
   type SourcePlaybackStat,
   compareSourcePlaybackPreference,
 } from '@/lib/source-playback-stats';
+import {
+  readSourceWorkFailures,
+  sourceWorkFailureKey,
+} from '@/lib/source-work-failures';
 import type { SearchResult } from '@/lib/types';
 
 // 同一次播放意图内最多自动换源的次数，防止所有源都坏时无限轮换
@@ -70,7 +74,7 @@ export function selectAutoSwitchCandidates({
   });
 }
 
-// 本次有效测速失败先排最后；其余按本地可靠性、条件性健康等级、线路、历史偏好和速度排序。
+// 近期作品级失败先排后，其次是有效测速失败；其余沿用可靠性、健康、线路、历史偏好和速度。
 export function rankAutoSwitchCandidates(
   candidates: readonly SearchResult[],
   videoInfoByKey: ReadonlyMap<string, VideoQualityInfo>,
@@ -80,6 +84,7 @@ export function rankAutoSwitchCandidates(
 ): SearchResult[] {
   // 面板尚未挂载时也接入预计算结果；之后只消费 store，过期条目不回退到旧参数。
   seedProbeResults(videoInfoByKey, now);
+  const workFailures = readSourceWorkFailures(now);
   return candidates
     .map((candidate, index) => {
       const info = getFreshProbeInfo(
@@ -90,6 +95,9 @@ export function rankAutoSwitchCandidates(
       return {
         candidate,
         index,
+        workFailed: workFailures.has(
+          sourceWorkFailureKey(candidate.source, candidate.id),
+        ),
         playbackStat: playbackStats.get(candidate.source),
         failed,
         speedKBps: info && !failed ? parseLoadSpeedKBps(info.loadSpeed) : 0,
@@ -97,6 +105,7 @@ export function rankAutoSwitchCandidates(
     })
     .sort(
       (a, b) =>
+        Number(a.workFailed) - Number(b.workFailed) ||
         Number(a.failed) - Number(b.failed) ||
         compareSourceRoutePreference(
           a.candidate,
@@ -104,6 +113,7 @@ export function rankAutoSwitchCandidates(
           selectionContext,
           playbackStats,
           now,
+          workFailures,
         ) ||
         compareSourcePlaybackPreference(a.playbackStat, b.playbackStat, now) ||
         b.speedKBps - a.speedKBps ||
