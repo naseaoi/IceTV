@@ -144,8 +144,15 @@ export const DEFAULT_ADMIN_TAB: AdminTabId = 'site';
 // 从其他页面跳到用户页时预填的搜索词，用户页读取后移除
 export const ADMIN_USER_SEARCH_PARAM = 'q';
 
-export function getVisibleTabs(isOwnerRole: boolean): AdminTabMeta[] {
-  return ADMIN_TABS.filter((tab) => isOwnerRole || !tab.ownerOnly);
+export function getVisibleTabs(
+  isOwnerRole: boolean,
+  trafficTabVisible: boolean,
+): AdminTabMeta[] {
+  return ADMIN_TABS.filter(
+    (tab) =>
+      (isOwnerRole || !tab.ownerOnly) &&
+      (trafficTabVisible || tab.id !== 'traffic'),
+  );
 }
 
 export function groupAdminTabs(tabs: AdminTabMeta[]): AdminTabGroup[] {
@@ -166,8 +173,9 @@ export function groupAdminTabs(tabs: AdminTabMeta[]): AdminTabGroup[] {
 export function resolveTabId(
   raw: string | null,
   isOwnerRole: boolean,
+  trafficTabVisible: boolean,
 ): AdminTabId {
-  const visible = getVisibleTabs(isOwnerRole);
+  const visible = getVisibleTabs(isOwnerRole, trafficTabVisible);
   const matched = visible.find((tab) => tab.id === raw);
   return matched ? matched.id : DEFAULT_ADMIN_TAB;
 }

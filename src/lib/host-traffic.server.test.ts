@@ -6,6 +6,7 @@ import { getConfigForRead } from '@/lib/config';
 import {
   getHostTrafficStatus,
   isServerRelayPaused,
+  isTrafficTabVisible,
   resetHostTrafficCache,
 } from '@/lib/host-traffic.server';
 import type { AdminConfig } from '@/types/admin';
@@ -147,5 +148,42 @@ describe('host traffic snapshot coalescing', () => {
       .mocked(getConfigForRead)
       .mockRejectedValue(new Error('config unavailable'));
     expect(await isServerRelayPaused()).toBe(false);
+  });
+});
+
+describe('traffic tab visibility', () => {
+  const noQuota = {
+    TrafficConfig: { QuotaGB: 0, ResetDay: 1 },
+  } as AdminConfig;
+
+  beforeEach(() => {
+    resetHostTrafficCache();
+    jest.mocked(fs.open).mockReset();
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('hides the tab without a stats file or quota', async () => {
+    jest.mocked(getConfigForRead).mockResolvedValue(noQuota);
+    jest
+      .mocked(fs.open)
+      .mockRejectedValue(
+        Object.assign(new Error('missing'), { code: 'ENOENT' }),
+      );
+    await expect(isTrafficTabVisible()).resolves.toBe(false);
+  });
+
+  it('shows the tab once the stats file is readable', async () => {
+    jest.mocked(getConfigForRead).mockResolvedValue(noQuota);
+    jest.mocked(fs.open).mockResolvedValue(fileHandle(1));
+    await expect(isTrafficTabVisible()).resolves.toBe(true);
+  });
+
+  it('keeps the tab while a quota is set so unavailable-stats alerts can link to it', async () => {
+    jest.mocked(getConfigForRead).mockResolvedValue(config);
+    await expect(isTrafficTabVisible()).resolves.toBe(true);
+    expect(fs.open).not.toHaveBeenCalled();
   });
 });
