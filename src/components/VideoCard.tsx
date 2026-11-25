@@ -430,10 +430,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     /** 根据卡片数据构建目标 URL，返回 null 表示无有效跳转 */
     const buildPlayUrl = useCallback((): string | null => {
       if (origin === 'live' && actualSource && actualId) {
-        return `/live?source=${actualSource.replace(
-          'live_',
-          '',
-        )}&id=${actualId.replace('live_', '')}`;
+        return `/live?source=${encodeURIComponent(actualSource.replace('live_', ''))}&id=${encodeURIComponent(actualId.replace('live_', ''))}`;
       }
       if (playsByTitle) {
         const localTarget = findLocalPlaybackTargetByTitle(

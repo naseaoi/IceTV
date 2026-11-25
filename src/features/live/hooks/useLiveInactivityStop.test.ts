@@ -119,3 +119,20 @@ it('resumes on request or when the channel changes', () => {
   act(() => result.current.resume());
   expect(result.current.stopped).toBe(false);
 });
+
+it('前台停播前一分钟预警，继续观看和输入立即清除，隐藏页不提示', () => {
+  const { result, onStop } = renderStop();
+  advance(LIVE_IDLE_STOP_MS - 60_000);
+  expect(result.current.warning).toBe(true);
+  act(() => result.current.continueWatching());
+  expect(result.current.warning).toBe(false);
+  advance(60_000);
+  expect(onStop).not.toHaveBeenCalled();
+  advance(LIVE_IDLE_STOP_MS - 120_000);
+  expect(result.current.warning).toBe(true);
+  act(() => window.dispatchEvent(new Event('pointerdown')));
+  expect(result.current.warning).toBe(false);
+  setHidden(true);
+  advance(LIVE_INACTIVITY_CHECK_MS);
+  expect(result.current.warning).toBe(false);
+});

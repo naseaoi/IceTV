@@ -1,6 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useLiveSources } from '@/features/live/hooks/useLiveSources';
+import { removeStorage } from '@/lib/browser-storage';
+import {
+  LAST_LIVE_CHANNEL_STORAGE_KEY,
+  writeLastLiveChannel,
+} from '@/lib/local-preferences';
 
 const mockRouter = { replace: jest.fn() };
 const mockSearchParams = new URLSearchParams();
@@ -20,6 +25,7 @@ const source = {
 const channels = [
   {
     id: 'ch1',
+    lineId: 'line-1',
     tvgId: 'ch1',
     name: '频道一',
     logo: '',
@@ -28,6 +34,7 @@ const channels = [
   },
   {
     id: 'ch2',
+    lineId: 'line-2',
     tvgId: 'ch2',
     name: '频道二',
     logo: '',
@@ -49,6 +56,9 @@ describe('useLiveSources', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    removeStorage(LAST_LIVE_CHANNEL_STORAGE_KEY);
+    mockSearchParams.delete('source');
+    mockSearchParams.delete('id');
     global.fetch = jest.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith('/api/live/sources')) {
@@ -67,6 +77,45 @@ describe('useLiveSources', () => {
     });
     jest.useRealTimers();
     global.fetch = originalFetch;
+  });
+
+  it('无 URL 参数时恢复上次频道组，新组收藏 URL 优先于本地记忆', async () => {
+    writeLastLiveChannel({ sourceKey: 'src', groupKey: '二' });
+    const first = renderHook(() =>
+      useLiveSources({
+        cleanupPlayer: jest.fn(),
+        channelListRef: { current: null },
+        groupContainerRef: { current: null },
+      }),
+    );
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    expect(first.result.current.currentChannel?.id).toBe('ch2');
+    first.unmount();
+    mockSearchParams.set('source', 'src');
+    mockSearchParams.set('id', `group_${encodeURIComponent('一')}`);
+    const second = renderHook(() =>
+      useLiveSources({
+        cleanupPlayer: jest.fn(),
+        channelListRef: { current: null },
+        groupContainerRef: { current: null },
+      }),
+    );
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+    expect(second.result.current.currentChannel?.id).toBe('ch1');
+  });
+
+  it('ends loading as soon as sources and channels are ready without advancing timers', async () => {
+    const { result } = renderHook(() =>
+      useLiveSources({
+        cleanupPlayer: jest.fn(),
+        channelListRef: { current: null },
+        groupContainerRef: { current: null },
+      }),
+    );
+    await act(async () => {});
+    expect(result.current.currentChannel?.id).toBe('ch1');
+    expect(result.current.loadingStage).toBe('ready');
+    expect(result.current.loading).toBe(false);
   });
 
   it('keeps the player when the active channel is selected again', async () => {

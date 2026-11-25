@@ -1,3 +1,5 @@
+export const LIVE_STARTUP_SLOW_MS = 10_000;
+export const LIVE_IDLE_WARNING_MS = 60_000;
 export const LIVE_HIDDEN_STOP_MS = 10 * 60 * 1000;
 export const LIVE_IDLE_STOP_MS = 3 * 60 * 60 * 1000;
 export const LIVE_INACTIVITY_CHECK_MS = 30 * 1000;

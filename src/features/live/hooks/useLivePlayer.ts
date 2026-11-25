@@ -106,12 +106,16 @@ async function resolveLiveStreamType(
   return type;
 }
 
-function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
+function cleanupPlayer(
+  artPlayerRef: MutableRefObject<ArtplayerType | null>,
+  audioStateRef: MutableRefObject<{ muted: boolean; volume: number } | null>,
+) {
   if (!artPlayerRef.current) return;
 
   try {
     const video = artPlayerRef.current.video;
     if (video) {
+      audioStateRef.current = { muted: video.muted, volume: video.volume };
       runManagedVideoCleanup(video);
       video.pause();
       video.src = '';
@@ -152,7 +156,7 @@ function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
 
 function requestLiveAutoplay(
   video: HTMLVideoElement | null,
-  options: { muted?: boolean } = {},
+  options: { muted?: boolean; canRetryMuted?: () => boolean } = {},
 ) {
   if (!video) return;
   if (options.muted) {
@@ -164,7 +168,16 @@ function requestLiveAutoplay(
   if (!video.paused && !video.ended) return;
   const playResult = video.play();
   if (playResult && typeof playResult.catch === 'function') {
-    playResult.catch(() => {});
+    playResult.catch((error: unknown) => {
+      if (
+        error instanceof DOMException &&
+        error.name === 'NotAllowedError' &&
+        !video.muted &&
+        options.canRetryMuted?.()
+      ) {
+        requestLiveAutoplay(video, { muted: true });
+      }
+    });
   }
 }
 
@@ -185,6 +198,8 @@ function seekVideoToLiveEdge(
 }
 
 interface UseLivePlayerParams {
+  onFirstFrame?: (channel: LiveChannel, sourceKey: string) => void;
+  onPlaybackFailed?: (channel: LiveChannel, sourceKey: string) => void;
   videoUrl: string;
   currentChannel: LiveChannel | null;
   currentSourceRef: MutableRefObject<LiveSource | null>;
@@ -195,6 +210,8 @@ interface UseLivePlayerParams {
 }
 
 export function useLivePlayer({
+  onFirstFrame,
+  onPlaybackFailed,
   videoUrl,
   currentChannel,
   currentSourceRef,
@@ -203,12 +220,15 @@ export function useLivePlayer({
   setIsVideoLoading,
   setUnsupportedType,
 }: UseLivePlayerParams) {
+  const callbacks = useRef({ onFirstFrame, onPlaybackFailed });
+  callbacks.current = { onFirstFrame, onPlaybackFailed };
   const artPlayerRef = useRef<ArtplayerType | null>(null);
   const loadedUrlRef = useRef('');
   const liveRouteRef = useRef<LivePlaybackRoute>('server');
   const liveSourceKeyRef = useRef('');
   const liveStreamUrlRef = useRef('');
   const mutedAutoplayRequestedRef = useRef(false);
+  const audioStateRef = useRef<{ muted: boolean; volume: number } | null>(null);
   const userPausedRef = useRef(false);
   const livePlaybackRecoveryRef = useRef(false);
   const suppressPlayerPauseIntentRef = useRef(false);
@@ -248,12 +268,11 @@ export function useLivePlayer({
     loadedUrlRef.current = '';
     liveRouteRef.current = 'server';
     liveSourceKeyRef.current = '';
-    mutedAutoplayRequestedRef.current = false;
     userPausedRef.current = false;
     livePlaybackRecoveryRef.current = false;
     suppressPlayerPauseIntentRef.current = false;
     setLiveVideoLoading(false);
-    cleanupPlayer(artPlayerRef);
+    cleanupPlayer(artPlayerRef, audioStateRef);
   };
 
   const retryPlayback = () => {
@@ -261,22 +280,36 @@ export function useLivePlayer({
     setRetryVersion((version) => version + 1);
   };
 
-  const { stopped: inactivityStopped, resume: resumeAfterInactivity } =
-    useLiveInactivityStop({
-      streamKey: videoUrl,
-      isStreaming: () => artPlayerRef.current !== null,
-      onStop: doCleanup,
-    });
+  const {
+    stopped: inactivityStopped,
+    resume: resumeAfterInactivity,
+    warning: inactivityWarning,
+    continueWatching,
+  } = useLiveInactivityStop({
+    streamKey: videoUrl,
+    isStreaming: () => artPlayerRef.current !== null,
+    onStop: doCleanup,
+  });
 
   const requestInitialLiveAutoplay = (video: HTMLVideoElement | null) => {
-    if (userPausedRef.current) return;
-    const shouldMute = !mutedAutoplayRequestedRef.current;
+    if (!video || userPausedRef.current) return;
+    const shouldMute =
+      !mutedAutoplayRequestedRef.current && !audioStateRef.current;
     mutedAutoplayRequestedRef.current = true;
-    requestLiveAutoplay(video, { muted: shouldMute });
+    const runtime = video.hls;
+    requestLiveAutoplay(video, {
+      muted: shouldMute,
+      canRetryMuted: () =>
+        artPlayerRef.current?.video === video &&
+        !artPlayerRef.current.isDestroy &&
+        video.hls === runtime &&
+        !userPausedRef.current,
+    });
   };
 
   useEffect(() => {
     let cancelled = false;
+    let firstFrameReported = false;
 
     const beginLivePlaybackRecovery = (video: HTMLVideoElement | null) => {
       livePlaybackRecoveryRef.current = true;
@@ -295,6 +328,7 @@ export function useLivePlayer({
     const preload = async () => {
       if (
         inactivityStopped ||
+        loading ||
         !videoUrl ||
         !artRef.current ||
         !currentChannel
@@ -325,7 +359,7 @@ export function useLivePlayer({
         if (type !== 'm3u8') {
           loadedUrlRef.current = '';
           liveRouteRef.current = 'server';
-          cleanupPlayer(artPlayerRef);
+          cleanupPlayer(artPlayerRef, audioStateRef);
           setUnsupportedType(type);
           setLiveVideoLoading(false);
           return;
@@ -338,7 +372,6 @@ export function useLivePlayer({
         }
         setPlaybackFailed(false);
         setRelayPaused(false);
-        mutedAutoplayRequestedRef.current = false;
         userPausedRef.current = false;
         livePlaybackRecoveryRef.current = false;
         suppressPlayerPauseIntentRef.current = false;
@@ -363,6 +396,8 @@ export function useLivePlayer({
         );
 
         const m3u8Loader = (video: HTMLVideoElement, url: string) => {
+          const player = artPlayerRef.current;
+          if (!player || player.isDestroy || player.video !== video) return;
           const managedVideo = getManagedVideo(video);
           runManagedVideoCleanup(managedVideo);
           destroyManagedHls(managedVideo);
@@ -493,6 +528,13 @@ export function useLivePlayer({
           };
 
           const handleLivePlaybackResumed = () => {
+            if (videoRuntimeCleaned || artPlayerRef.current?.video !== video)
+              return;
+            if (!firstFrameReported) {
+              firstFrameReported = true;
+              callbacks.current.onFirstFrame?.(currentChannel, sourceKey);
+            }
+            setLiveVideoLoading(false);
             clearStallRecoveryTimer();
             livePlaybackRecoveryRef.current = false;
           };
@@ -546,6 +588,8 @@ export function useLivePlayer({
           });
 
           hls.on(Hls.Events.ERROR, function (_event: any, data: any) {
+            if (videoRuntimeCleaned || artPlayerRef.current?.video !== video)
+              return;
             const logResult = logHlsError(_event, data, {
               scope: 'live',
               sourceKey: liveSourceKeyRef.current,
@@ -560,7 +604,7 @@ export function useLivePlayer({
             const relayRejected = isServerRelayPausedHlsError(data);
             if (relayRejected) {
               loadedUrlRef.current = '';
-              cleanupPlayer(artPlayerRef);
+              cleanupPlayer(artPlayerRef, audioStateRef);
               setLiveVideoLoading(false);
               setRelayPaused(true);
               setPlaybackFailed(true);
@@ -589,9 +633,10 @@ export function useLivePlayer({
             }
             // 整体销毁而非只停 hls：卡顿恢复会重新 startLoad，残留缓冲会在遮罩下继续出声，全屏时遮罩也看不到
             loadedUrlRef.current = '';
-            cleanupPlayer(artPlayerRef);
+            cleanupPlayer(artPlayerRef, audioStateRef);
             setLiveVideoLoading(false);
             setPlaybackFailed(true);
+            callbacks.current.onPlaybackFailed?.(currentChannel, sourceKey);
           });
         };
 
@@ -621,16 +666,31 @@ export function useLivePlayer({
           url: targetUrl,
           ...createArtPlayerConfig({
             isLive: true,
-            muted: true,
+            muted: audioStateRef.current?.muted ?? true,
             setting: true,
             aspectRatio: true,
             screenshot: true,
-            moreVideoAttr: { preload: 'metadata', autoplay: true, muted: true },
+            moreVideoAttr: {
+              preload: 'metadata',
+              autoplay: true,
+              muted: audioStateRef.current?.muted ?? true,
+            },
           }),
           type,
           customType,
           contextmenu: createArtPlayerContextmenus(),
         });
+        const player = artPlayerRef.current;
+        if (!player) return;
+        // Artplayer 会优先读取自身存储的音量，且忽略配置中的 0；以本次会话选择为准。
+        if (audioStateRef.current) {
+          const { muted, volume } = audioStateRef.current;
+          player.video.muted = muted;
+          player.video.defaultMuted = muted;
+          player.video.volume = volume;
+        }
+        // 内建重连会延迟重设 URL，绕过受管恢复的次数上限。
+        player.off('video:error');
         bindPlayerHoverControls(artPlayerRef.current);
         bindPlayerMobileControls(artPlayerRef.current, {
           enableLongPressFastForward: false,
@@ -642,7 +702,6 @@ export function useLivePlayer({
           video: HTMLVideoElement;
         };
         ap.on('ready', () => {
-          setLiveVideoLoading(false);
           livePlaybackRecoveryRef.current = false;
           requestInitialLiveAutoplay(ap.video);
         });
@@ -680,7 +739,14 @@ export function useLivePlayer({
           );
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('Live player init failed:', err);
+        setLiveVideoLoading(false);
+        setPlaybackFailed(true);
+        callbacks.current.onPlaybackFailed?.(
+          currentChannel,
+          currentSourceRef.current?.key || '',
+        );
       }
     };
     preload();
@@ -711,7 +777,7 @@ export function useLivePlayer({
       userPausedRef.current = false;
       livePlaybackRecoveryRef.current = false;
       suppressPlayerPauseIntentRef.current = false;
-      cleanupPlayer(artPlayerRef);
+      cleanupPlayer(artPlayerRef, audioStateRef);
     };
   }, [clearLiveLoadingTimer]);
 
@@ -724,7 +790,7 @@ export function useLivePlayer({
       userPausedRef.current = false;
       livePlaybackRecoveryRef.current = false;
       suppressPlayerPauseIntentRef.current = false;
-      cleanupPlayer(artPlayerRef);
+      cleanupPlayer(artPlayerRef, audioStateRef);
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
@@ -737,7 +803,7 @@ export function useLivePlayer({
       userPausedRef.current = false;
       livePlaybackRecoveryRef.current = false;
       suppressPlayerPauseIntentRef.current = false;
-      cleanupPlayer(artPlayerRef);
+      cleanupPlayer(artPlayerRef, audioStateRef);
     };
   }, [clearLiveLoadingTimer]);
 
@@ -749,5 +815,7 @@ export function useLivePlayer({
     retryPlayback,
     inactivityStopped,
     resumeAfterInactivity,
+    inactivityWarning,
+    continueWatching,
   };
 }

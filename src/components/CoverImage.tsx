@@ -41,6 +41,8 @@ function needsImageUnoptimized(
   url: string,
   usesCoverVariants: boolean,
 ): boolean {
+  // 台标代理需要登录会话，由浏览器直接请求；Image 优化器既不携带会话，也不允许该查询地址。
+  if (url.startsWith('/api/proxy/logo?')) return true;
   if (
     usesCoverVariants ||
     !url ||

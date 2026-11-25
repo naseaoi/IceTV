@@ -29,6 +29,7 @@ interface EpisodeHandlers {
 interface UsePlayerKeyboardParams {
   artPlayerRef: MutableRefObject<Artplayer | null>;
   episodeHandlers?: EpisodeHandlers;
+  channelHandlers?: { previous: () => void; next: () => void };
   mode?: PlayerShortcutMode;
 }
 
@@ -59,6 +60,7 @@ function clampRate(rate: number): number {
 export function usePlayerKeyboard({
   artPlayerRef,
   episodeHandlers,
+  channelHandlers,
   mode = 'vod',
 }: UsePlayerKeyboardParams) {
   useEffect(() => {
@@ -228,6 +230,8 @@ export function usePlayerKeyboard({
       frameForward: () => stepFrame(1),
       prevEpisode: () => switchEpisode(-1),
       nextEpisode: () => switchEpisode(1),
+      prevChannel: () => channelHandlers?.previous(),
+      nextChannel: () => channelHandlers?.next(),
     };
 
     const isEpisodeAction = (action: PlayerShortcutAction) =>
@@ -259,7 +263,9 @@ export function usePlayerKeyboard({
         return;
       }
 
-      if (!artPlayerRef.current) return;
+      if (action === 'prevChannel' || action === 'nextChannel') {
+        if (!channelHandlers) return;
+      } else if (!artPlayerRef.current) return;
 
       e.preventDefault();
       actionHandlers[action]();
@@ -271,5 +277,5 @@ export function usePlayerKeyboard({
       window.removeEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
       releaseLoadingSpinnerGuard();
     };
-  }, [artPlayerRef, episodeHandlers, mode]);
+  }, [artPlayerRef, episodeHandlers, channelHandlers, mode]);
 }

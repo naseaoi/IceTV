@@ -145,6 +145,8 @@
 
 `shared_cache.value_bytes` 与正文同条、同 token 条件写入，记录 UTF-8 字节数；新占位行为 0。两后端初始化幂等加可空列，旧行的 `NULL` 在后台维护中按元数据选出的主键分批精确回填，每批至多 250 条，与删除共用批次和时间预算。SQLite 用 `length(CAST(value_text AS BLOB))`、MySQL 用 `OCTET_LENGTH(value_text)` 取得与 `Buffer.byteLength` 一致的 UTF-8 字节数；更新只作用于仍为 `NULL` 的行，正文、到期时间与租约保持原值。元数据仍含 `NULL` 时只执行条数裁剪，回填完成并重读元数据后恢复字节裁剪，避免升级时因高估体积集中淘汰未过期缓存。容量读取使用 `(updated_at, cache_key, lease_until, value_bytes)` 覆盖索引，只取最新 4097 条无活跃租约记录的元数据确定保留边界；后续批量删除再次校验租约和排序边界，期间已刷新到边界之后的条目保留。过期查询沿用 `(stale_until, lease_until)` 索引并按 `stale_until` 排序。共享 JSON 的序列化结果同时用于内存估重和持久化；自定义估重和自定义序列化保留各自语义。
 
+直播健康快照使用 `live-health:v1:<sourceKey>`，全轮互斥使用独立空占位租约 `live-health:run:v1`。读路径直接读取共享记录、按单条 `checkedAt` 判断时效；写路径复用共享缓存的 acquire / set / release 原语，成功 set 自动释放租约，失败按 token 释放，保留空占位行清理。快照物理保留 7 天以支持旧检查时间展示，单条结果展示时效独立于整行续期；订阅变化在健康任务中裁剪已移除线路，已删除源的整行由缓存过期清理回收。
+
 ## 多维连接租约
 
 `SharedResourceStore.acquireLeases()` 在同一事务检查全部维度，通过后才写入同一 token 的全部租约；拒绝返回调用方顺序中首个超限资源键及其最早到期等待时间。MySQL 多行写入和行锁按资源键升序获取，SQLite 使用即时写事务；锁顺序独立于业务拒绝优先级。新增维度复用该批量入口，保持固定锁顺序。批量续租任一资源键缺失或过期时整批回滚并返回失败，调用方中止上游；释放仅删除指定资源列表中匹配 token 的租约。

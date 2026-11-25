@@ -144,7 +144,10 @@ export async function fetchWithUrlGuard(
       abortState.cleanup();
     }
 
-    if (!isRedirectResponse(response.status)) {
+    if (
+      !isRedirectResponse(response.status) ||
+      requestedRedirect === 'manual'
+    ) {
       return response;
     }
 

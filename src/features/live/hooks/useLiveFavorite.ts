@@ -1,89 +1,112 @@
-import { MutableRefObject, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import type { LiveChannel, LiveSource } from '@/features/live/types';
-import { useFavoriteSync } from '@/hooks/useFavoriteSync';
-import { deleteFavorite, saveFavorite } from '@/lib/db.client';
-
-interface UseLiveFavoriteParams {
-  currentSource: LiveSource | null;
-  currentChannel: LiveChannel | null;
-  currentSourceRef: MutableRefObject<LiveSource | null>;
-  currentChannelRef: MutableRefObject<LiveChannel | null>;
-}
+import {
+  type LiveChannelGroup,
+  liveGroupFavoriteId,
+} from '@/features/live/lib/liveChannelGroups';
+import type { LiveSource } from '@/features/live/types';
+import {
+  deleteFavorite,
+  generateStorageKey,
+  getAllFavorites,
+  saveFavorite,
+  subscribeToDataUpdates,
+} from '@/lib/db.client';
+import { showToast } from '@/lib/toast';
 
 export function useLiveFavorite({
   currentSource,
-  currentChannel,
-  currentSourceRef,
-  currentChannelRef,
-}: UseLiveFavoriteParams) {
-  const [favorited, setFavorited] = useState(false);
-  const favoritedRef = useRef(false);
-
-  // 复用通用的"检查+订阅"逻辑，拼接 live_ 前缀
-  const liveSource = currentSource ? `live_${currentSource.key}` : null;
-  const liveId = currentChannel ? `live_${currentChannel.id}` : null;
-  useFavoriteSync(liveSource, liveId, setFavorited, (isFav) => {
-    favoritedRef.current = isFav;
-  });
-
-  const pendingRef = useRef(false);
-
-  // 切换收藏（乐观更新 + 回滚）
-  const handleToggleFavorite = async () => {
-    if (pendingRef.current) return;
-    if (!currentSourceRef.current || !currentChannelRef.current) return;
-
-    const sourceKey = currentSourceRef.current.key;
-    const channelId = currentChannelRef.current.id;
-    pendingRef.current = true;
-    try {
-      const currentFavorited = favoritedRef.current;
-      const newFavorited = !currentFavorited;
-
-      // 立即更新状态
-      setFavorited(newFavorited);
-      favoritedRef.current = newFavorited;
-
-      try {
-        if (newFavorited) {
-          await saveFavorite(
-            `live_${currentSourceRef.current.key}`,
-            `live_${currentChannelRef.current.id}`,
-            {
-              title: currentChannelRef.current.name,
-              source_name: currentSourceRef.current.name,
-              year: '',
-              cover: `/api/proxy/logo?url=${encodeURIComponent(currentChannelRef.current.logo)}&icetv-source=${currentSourceRef.current.key}`,
-              total_episodes: 1,
-              save_time: Date.now(),
-              search_title: '',
-              origin: 'live',
-            },
-          );
-        } else {
-          await deleteFavorite(
-            `live_${currentSourceRef.current.key}`,
-            `live_${currentChannelRef.current.id}`,
-          );
-        }
-      } catch (err) {
-        console.error('收藏操作失败:', err);
-        // 操作失败，回滚状态
-        if (
-          currentSourceRef.current?.key === sourceKey &&
-          currentChannelRef.current?.id === channelId
-        ) {
-          setFavorited(currentFavorited);
-          favoritedRef.current = currentFavorited;
-        }
+  groups,
+}: {
+  currentSource: LiveSource | null;
+  groups: LiveChannelGroup[];
+}) {
+  const [keys, setKeys] = useState<Set<string>>(new Set());
+  const [ready, setReady] = useState(false);
+  const pending = useRef(new Set<string>());
+  useEffect(() => {
+    let active = true;
+    let revision = 0;
+    const sync = (favorites: Record<string, unknown>) => {
+      if (active) {
+        setKeys(new Set(Object.keys(favorites)));
+        setReady(true);
       }
-    } catch (err) {
-      console.error('切换收藏失败:', err);
+    };
+    const unsubscribe = subscribeToDataUpdates(
+      'favoritesUpdated',
+      (favorites: Record<string, unknown>) => {
+        revision++;
+        sync(favorites);
+      },
+    );
+    const initialRevision = revision;
+    void getAllFavorites()
+      .then((favorites) => {
+        if (revision === initialRevision) sync(favorites);
+      })
+      .catch(() => {
+        if (active) showToast('收藏状态加载失败，请刷新重试', 'error');
+      });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  const idsFor = (group: LiveChannelGroup) => [
+    liveGroupFavoriteId(group.groupKey),
+    ...group.lines.map((line) => `live_${line.id}`),
+  ];
+  const isGroupFavorited = (group: LiveChannelGroup) =>
+    Boolean(
+      currentSource &&
+      idsFor(group).some((id) =>
+        keys.has(generateStorageKey(`live_${currentSource.key}`, id)),
+      ),
+    );
+  const toggleGroupFavorite = async (group: LiveChannelGroup) => {
+    if (!currentSource || !ready) return;
+    const source = `live_${currentSource.key}`;
+    const id = liveGroupFavoriteId(group.groupKey);
+    const key = generateStorageKey(source, id);
+    if (pending.current.has(key)) return;
+    pending.current.add(key);
+    try {
+      if (isGroupFavorited(group)) {
+        // 每次成功的删除由收藏事件同步；部分失败保持尚未删除的旧键可见。
+        for (const existing of idsFor(group)) {
+          const existingKey = generateStorageKey(source, existing);
+          if (!keys.has(existingKey)) continue;
+          await deleteFavorite(source, existing);
+          setKeys((prev) => {
+            const next = new Set(prev);
+            next.delete(existingKey);
+            return next;
+          });
+        }
+      } else {
+        await saveFavorite(source, id, {
+          title: group.name,
+          source_name: currentSource.name,
+          year: '',
+          cover: `/api/proxy/logo?url=${encodeURIComponent(group.logo)}&icetv-source=${encodeURIComponent(currentSource.key)}`,
+          total_episodes: 1,
+          save_time: Date.now(),
+          search_title: '',
+          origin: 'live',
+        });
+        setKeys((prev) => new Set([...prev, key]));
+      }
+    } catch {
+      showToast('收藏操作失败，请重试', 'error');
     } finally {
-      pendingRef.current = false;
+      pending.current.delete(key);
     }
   };
-
-  return { favorited, handleToggleFavorite };
+  return {
+    ready,
+    isGroupFavorited,
+    toggleGroupFavorite,
+    favoriteGroups: groups.filter(isGroupFavorited),
+  };
 }

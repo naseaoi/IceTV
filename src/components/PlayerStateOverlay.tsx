@@ -91,6 +91,11 @@ export default function PlayerStateOverlay({
               </p>
             )}
           </div>
+          {children && (
+            <div className='pointer-events-auto flex items-center gap-2'>
+              {children}
+            </div>
+          )}
         </div>
       ) : (
         <div className='flex w-full max-w-[18rem] flex-col items-center px-4 text-center sm:max-w-sm'>

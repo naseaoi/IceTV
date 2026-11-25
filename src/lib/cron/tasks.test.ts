@@ -16,6 +16,11 @@ const mockCleanupPlaybackSessions = jest.fn();
 const mockCleanupSourceHealth = jest.fn();
 const mockCleanupInviteCodes = jest.fn();
 const mockProbeConfiguredSources = jest.fn();
+const mockProbeConfiguredLiveLines = jest.fn();
+jest.mock('./live-health', () => ({
+  probeConfiguredLiveLines: (...args: unknown[]) =>
+    mockProbeConfiguredLiveLines(...args),
+}));
 
 jest.mock('./source-health', () => ({
   probeConfiguredSources: (...args: unknown[]) =>
@@ -72,6 +77,7 @@ describe('cron task dispatcher', () => {
     await executeCronTask('live');
     expect(mockRefreshSubscribedConfig).not.toHaveBeenCalled();
     expect(mockRefreshConfiguredLiveChannels).toHaveBeenCalledTimes(1);
+    expect(mockProbeConfiguredLiveLines).toHaveBeenCalledTimes(1);
     expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
     expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
     expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
@@ -93,6 +99,13 @@ describe('cron task dispatcher', () => {
     expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
   });
 
+  it('live-health only probes live lines', async () => {
+    await executeCronTask('live-health');
+    expect(mockProbeConfiguredLiveLines).toHaveBeenCalledTimes(1);
+    expect(mockRefreshConfiguredLiveChannels).not.toHaveBeenCalled();
+    expect(mockProbeConfiguredSources).not.toHaveBeenCalled();
+  });
+
   it('source-health only probes sources', async () => {
     await executeCronTask('source-health');
     expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
@@ -111,6 +124,9 @@ describe('cron task dispatcher', () => {
     });
     mockRefreshConfiguredLiveChannels.mockImplementation(() => {
       calls.push('live');
+    });
+    mockProbeConfiguredLiveLines.mockImplementation(() => {
+      calls.push('live-health');
     });
     mockRefreshRecordAndFavorites.mockImplementation(() => {
       calls.push('metadata');
@@ -139,6 +155,7 @@ describe('cron task dispatcher', () => {
     expect(calls).toEqual([
       'config',
       'live',
+      'live-health',
       'metadata',
       'retention',
       'invites',

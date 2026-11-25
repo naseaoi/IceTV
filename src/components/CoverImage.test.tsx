@@ -141,6 +141,15 @@ describe('CoverImage', () => {
     }
   });
 
+  it('直播台标由浏览器携带会话直接请求，绕过 Next 图片优化器', () => {
+    const src =
+      '/api/proxy/logo?url=https%3A%2F%2Fexample.com%2Flogo.png&icetv-source=live';
+    render(<CoverImage src={src} alt='直播台标' priority />);
+    expect(mockImageRender).toHaveBeenLastCalledWith(
+      expect.objectContaining({ src, unoptimized: true }),
+    );
+  });
+
   it('按当前豆瓣图片代理加载，失败后直接显示占位', () => {
     render(
       <CoverImage

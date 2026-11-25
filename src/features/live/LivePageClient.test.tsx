@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 import LivePage, { LivePlayerOverlay } from '@/features/live/LivePageClient';
 
@@ -15,11 +15,14 @@ jest.mock('@/components/PlayerPageLayout', () => ({
   PlayerPageLayout: ({
     playerOverlay,
     rightPanel,
+    artRef,
   }: {
     playerOverlay: ReactNode;
     rightPanel: ReactNode;
+    artRef: RefObject<HTMLDivElement | null>;
   }) => (
     <div>
+      <div ref={artRef} data-testid='player-container' />
       {playerOverlay}
       {rightPanel}
     </div>
@@ -32,8 +35,10 @@ jest.mock('@/features/live/components/LiveChannelSidebar', () => ({
 
 jest.mock('@/features/live/hooks/useLiveFavorite', () => ({
   useLiveFavorite: () => ({
-    favorited: false,
-    handleToggleFavorite: jest.fn(),
+    ready: true,
+    isGroupFavorited: () => false,
+    toggleGroupFavorite: jest.fn(),
+    favoriteGroups: [],
   }),
 }));
 
@@ -125,6 +130,44 @@ describe('LivePlayerOverlay', () => {
 });
 
 describe('LivePage', () => {
+  beforeEach(() => {
+    window.matchMedia = jest.fn().mockReturnValue({
+      matches: false,
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+    });
+  });
+  it('keeps the same player shell when source loading completes', () => {
+    const sources = {
+      loading: true,
+      loadingMessage: '获取直播源',
+      error: null,
+      videoUrl: '',
+      currentChannel: null,
+      currentChannelRef: { current: null },
+      currentChannels: [],
+      currentSource: null,
+      currentSourceRef: { current: null },
+      isVideoLoading: false,
+      unsupportedType: null,
+      isChannelListCollapsed: false,
+    };
+    mockUseLiveSources.mockReturnValue(sources);
+    mockUseLivePlayer.mockReturnValue({
+      artPlayerRef: { current: null },
+      cleanupPlayer: jest.fn(),
+      playbackFailed: false,
+      retryPlayback: jest.fn(),
+    });
+    const { rerender } = render(<LivePage />);
+    const playerContainer = screen.getByTestId('player-container');
+    expect(screen.getByText('获取直播源')).toBeInTheDocument();
+    mockUseLiveSources.mockReturnValue({ ...sources, loading: false });
+    rerender(<LivePage />);
+    expect(screen.getByTestId('player-container')).toBe(playerContainer);
+    expect(screen.getByTestId('live-channel-sidebar')).toBeInTheDocument();
+  });
+
   it('keeps the channel panel and retries in place when playback fails', () => {
     const channel = {
       id: 'ch1',

@@ -3,6 +3,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
 
+export function scrollToVerticalCenter(
+  container: HTMLElement,
+  item: HTMLElement,
+) {
+  const containerRect = container.getBoundingClientRect();
+  const itemRect = item.getBoundingClientRect();
+  const top =
+    container.scrollTop +
+    itemRect.top -
+    containerRect.top -
+    containerRect.height / 2 +
+    itemRect.height / 2;
+  container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
+
 interface UseVerticalScrollEdgeFadeOptions {
   externalRef?: MutableRefObject<HTMLDivElement | null>;
   refreshKey?: string | number;

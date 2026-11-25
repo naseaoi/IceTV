@@ -9,6 +9,31 @@ import {
   writeListCountCookie,
 } from '@/lib/list-count-cookies';
 
+export const LAST_LIVE_CHANNEL_STORAGE_KEY = 'lastLiveChannel';
+export interface LastLiveChannel {
+  sourceKey: string;
+  groupKey: string;
+}
+export function readLastLiveChannel(): LastLiveChannel | null {
+  try {
+    const value = JSON.parse(
+      readStorage(LAST_LIVE_CHANNEL_STORAGE_KEY) || 'null',
+    );
+    return value &&
+      typeof value.sourceKey === 'string' &&
+      value.sourceKey &&
+      typeof value.groupKey === 'string' &&
+      value.groupKey
+      ? { sourceKey: value.sourceKey, groupKey: value.groupKey }
+      : null;
+  } catch {
+    return null;
+  }
+}
+export function writeLastLiveChannel(value: LastLiveChannel): boolean {
+  return writeStorage(LAST_LIVE_CHANNEL_STORAGE_KEY, JSON.stringify(value));
+}
+
 export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';

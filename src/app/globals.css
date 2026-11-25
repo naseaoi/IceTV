@@ -179,7 +179,8 @@ div[data-media-provider] video {
     display: none !important;
   }
 
-  .art-control-volume {
+  /* 保留静音切换入口，窄屏只隐藏音量滑条；点播静音后缩窄屏幕也能恢复声音。 */
+  .art-control-volume .art-volume-panel {
     display: none !important;
   }
 }

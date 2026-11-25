@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { getCachedLiveChannels } from '@/features/live/lib/live';
+import { attachLiveHealth } from '@/features/live/lib/liveHealthSnapshot.server';
 import { requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -14,6 +15,9 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/features/live/lib/live', () => ({
   getCachedLiveChannels: jest.fn(),
+}));
+jest.mock('@/features/live/lib/liveHealthSnapshot.server', () => ({
+  attachLiveHealth: jest.fn(),
 }));
 jest.mock('@/lib/config', () => ({ getConfigForRead: jest.fn() }));
 jest.mock('@/lib/db', () => ({ db: { getUserAccess: jest.fn() } }));
@@ -34,6 +38,9 @@ beforeEach(() => {
   });
   (db.getUserAccess as jest.Mock).mockResolvedValue({ role: 'user', tags: [] });
   (getCachedLiveChannels as jest.Mock).mockResolvedValue({ channels: [] });
+  jest
+    .mocked(attachLiveHealth)
+    .mockImplementation(async (_, channels) => channels);
 });
 
 it('returns 403 before reading channels for a user without live permission', async () => {
@@ -60,6 +67,50 @@ it('returns channels to a member of a granting group', async () => {
   });
   expect((await GET(request)).status).toBe(200);
   expect(getCachedLiveChannels).toHaveBeenCalledWith('live');
+});
+
+it('attaches health and keeps the response private', async () => {
+  (db.getUserAccess as jest.Mock).mockResolvedValue({
+    role: 'user',
+    tags: ['live'],
+  });
+  const channel = {
+    id: 's-0',
+    lineId: 'line',
+    name: 'name',
+    tvgId: '',
+    group: '',
+    logo: '',
+    url: 'https://live.example/a',
+  };
+  (getCachedLiveChannels as jest.Mock).mockResolvedValue({
+    channels: [channel],
+  });
+  jest
+    .mocked(attachLiveHealth)
+    .mockResolvedValue([
+      { ...channel, health: { status: 'ok', checkedAt: 123 } },
+    ]);
+  const response = await GET(request);
+  expect(await response.json()).toEqual({
+    success: true,
+    data: [{ ...channel, health: { status: 'ok', checkedAt: 123 } }],
+  });
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
+  expect(response.headers.get('vary')).toBe('Cookie');
+});
+
+it('degrades snapshot failure to the original channels', async () => {
+  (db.getUserAccess as jest.Mock).mockResolvedValue({
+    role: 'user',
+    tags: ['live'],
+  });
+  jest
+    .mocked(attachLiveHealth)
+    .mockRejectedValue(new Error('database unavailable'));
+  const response = await GET(request);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ success: true, data: [] });
 });
 
 it('preserves the authentication guard response', async () => {

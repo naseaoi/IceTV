@@ -3,6 +3,7 @@ import { cleanupSourceHealth } from '@/lib/source-health.server';
 
 import { refreshSubscribedConfig } from './config-refresh';
 import { cleanupInviteCodes } from './invite-code-retention';
+import { probeConfiguredLiveLines } from './live-health';
 import { refreshConfiguredLiveChannels } from './live-refresh';
 import { refreshRecordAndFavorites } from './metadata-refresh';
 import { cleanupPlaybackSessions } from './playback-retention';
@@ -18,6 +19,9 @@ export async function executeCronTask(task: CronTask): Promise<void> {
   }
   if (task === 'all' || task === 'live') {
     await refreshConfiguredLiveChannels();
+  }
+  if (task === 'all' || task === 'live' || task === 'live-health') {
+    await probeConfiguredLiveLines();
   }
   if (task === 'all' || task === 'metadata') {
     await refreshRecordAndFavorites();

@@ -1,8 +1,11 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
 import { buildLiveM3u8ProxyUrl } from '@/features/live/lib/livePlaybackRoute';
 import type { LiveChannel, LiveSource } from '@/features/live/types';
+import { isManagedVideoExpectedAbort } from '@/lib/player-runtime';
 import {
   HLS_FATAL_MEDIA_RECOVERY_LIMIT,
   HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS,
@@ -55,6 +58,8 @@ class MockHls {
 
 type MockArtplayerOption = {
   url: string;
+  muted: boolean;
+  volume: number;
   customType: { m3u8: (video: HTMLVideoElement, url: string) => void };
 };
 
@@ -65,15 +70,36 @@ class MockArtplayer {
 
   video = document.createElement('video');
   fullscreenWeb = false;
-  destroy = jest.fn();
+  isDestroy = false;
+  private listeners = new Map<string, Listener[]>();
+  builtinReconnect = jest.fn(() => {
+    setTimeout(
+      () => this.option.customType.m3u8(this.video, this.option.url),
+      1000,
+    );
+  });
+  destroy = jest.fn(() => {
+    this.isDestroy = true;
+  });
 
   constructor(public option: MockArtplayerOption) {
+    this.video.muted = option.muted;
+    this.video.volume = option.volume;
+    this.on('video:error', this.builtinReconnect);
     MockArtplayer.instances.push(this);
   }
 
-  on() {}
+  on(event: string, listener: Listener) {
+    this.listeners.set(event, [...(this.listeners.get(event) || []), listener]);
+  }
 
-  off() {}
+  off(event: string) {
+    this.listeners.delete(event);
+  }
+
+  emit(event: string) {
+    for (const listener of this.listeners.get(event) || []) listener();
+  }
 }
 
 jest.mock('@/lib/player-runtime', () => ({
@@ -91,6 +117,7 @@ const source: LiveSource = {
 
 const channel: LiveChannel = {
   id: 'ch1',
+  lineId: 'line-1',
   tvgId: 'ch1',
   name: '频道一',
   logo: '',
@@ -106,7 +133,12 @@ const nextChannel: LiveChannel = {
   url: 'https://example.com/ch2.m3u8',
 };
 
-function renderLivePlayer() {
+function renderLivePlayer(
+  callbacks: Pick<
+    Parameters<typeof useLivePlayer>[0],
+    'onFirstFrame' | 'onPlaybackFailed'
+  > = {},
+) {
   const setIsVideoLoading = jest.fn();
   const setUnsupportedType = jest.fn();
   const artRef = { current: document.createElement('div') };
@@ -114,6 +146,7 @@ function renderLivePlayer() {
   const hook = renderHook(
     ({ currentChannel }: { currentChannel: LiveChannel }) =>
       useLivePlayer({
+        ...callbacks,
         videoUrl: currentChannel.url,
         currentChannel,
         currentSourceRef,
@@ -181,6 +214,145 @@ describe('useLivePlayer playback failure', () => {
     mediaSpies.forEach((spy) => spy.mockRestore());
   });
 
+  it('keeps the narrow-screen mute button visible while hiding only its slider', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'src/app/globals.css'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /\.art-control-volume\s+\.art-volume-panel\s*\{\s*display:\s*none\s*!important/,
+    );
+    const volumeRules = [
+      ...css.matchAll(/\.art-control-volume\s*\{([^}]+)\}/g),
+    ];
+    for (const [, declarations] of volumeRules) {
+      expect(declarations).not.toMatch(/display:\s*none/);
+    }
+  });
+
+  it('removes built-in reconnection while keeping managed media error handling', async () => {
+    jest.useFakeTimers();
+    try {
+      const { result } = renderLivePlayer();
+      const { player, hls } = await waitForPlayer(1);
+      act(() => player.emit('video:error'));
+      expect(player.builtinReconnect).not.toHaveBeenCalled();
+      expect(isManagedVideoExpectedAbort(player.video)).toBe(true);
+      act(() => player.video.dispatchEvent(new Event('pause')));
+      expect(player.video.autoplay).toBe(true);
+      exhaustMediaRecovery(hls);
+      act(() => jest.advanceTimersByTime(1000));
+      expect(result.current.playbackFailed).toBe(true);
+      expect(MockHls.instances).toHaveLength(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores late loaders from destroyed or replaced players and foreign videos', async () => {
+    const { result, rerender } = renderLivePlayer();
+    const { player } = await waitForPlayer(1);
+    act(() => {
+      player.option.customType.m3u8(
+        document.createElement('video'),
+        player.option.url,
+      );
+      player.isDestroy = true;
+      player.option.customType.m3u8(player.video, player.option.url);
+      player.isDestroy = false;
+      result.current.cleanupPlayer();
+    });
+    rerender({ currentChannel: nextChannel });
+    await waitForPlayer(2);
+    act(() => player.option.customType.m3u8(player.video, player.option.url));
+    expect(MockHls.instances).toHaveLength(2);
+  });
+
+  it.each([
+    [true, 0.35],
+    [false, 0.35],
+    [false, 0],
+  ] as const)(
+    'preserves mute=%s and volume=%s when rebuilding for another channel',
+    async (muted, volume) => {
+      const { result, rerender } = renderLivePlayer();
+      const { player, hls } = await waitForPlayer(1);
+      act(() => hls.emit(MockHls.Events.MANIFEST_PARSED, {}));
+      expect(player.video.muted).toBe(true);
+      player.video.muted = muted;
+      player.video.volume = volume;
+      act(() => result.current.cleanupPlayer());
+      rerender({ currentChannel: nextChannel });
+      const { player: nextPlayer, hls: nextHls } = await waitForPlayer(2);
+      act(() => nextHls.emit(MockHls.Events.MANIFEST_PARSED, {}));
+      expect(nextPlayer.video.muted).toBe(muted);
+      expect(nextPlayer.video.volume).toBe(volume);
+    },
+  );
+
+  it('preserves sound when reusing the player and retries muted only on autoplay denial', async () => {
+    const { rerender } = renderLivePlayer();
+    const { player, hls } = await waitForPlayer(1);
+    act(() => hls.emit(MockHls.Events.MANIFEST_PARSED, {}));
+    player.video.muted = false;
+    player.video.volume = 0.4;
+    rerender({ currentChannel: nextChannel });
+    await waitFor(() =>
+      expect((player as unknown as { switch: string }).switch).toContain('ch2'),
+    );
+    expect(player.video.muted).toBe(false);
+    const play = jest.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+    play.mockRejectedValueOnce(
+      new DOMException('Autoplay denied', 'NotAllowedError'),
+    );
+    await act(async () => player.emit('video:canplay'));
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(player.video.muted).toBe(true);
+    expect(player.video.volume).toBe(0.4);
+  });
+
+  it.each(['AbortError', 'NotSupportedError'])(
+    'keeps sound on %s rather than retrying muted',
+    async (name) => {
+      renderLivePlayer();
+      const { player, hls } = await waitForPlayer(1);
+      act(() => hls.emit(MockHls.Events.MANIFEST_PARSED, {}));
+      player.video.muted = false;
+      const play = jest.mocked(HTMLMediaElement.prototype.play);
+      play.mockClear();
+      play.mockRejectedValueOnce(new DOMException('Failed', name));
+      await act(async () => player.emit('video:canplay'));
+      expect(play).toHaveBeenCalledTimes(1);
+      expect(player.video.muted).toBe(false);
+    },
+  );
+
+  it('ignores autoplay denial from a released runtime', async () => {
+    const { result } = renderLivePlayer();
+    const { player, hls } = await waitForPlayer(1);
+    act(() => hls.emit(MockHls.Events.MANIFEST_PARSED, {}));
+    player.video.muted = false;
+    let reject!: (error: Error) => void;
+    const play = jest.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+    play.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    act(() => {
+      player.emit('video:canplay');
+      result.current.cleanupPlayer();
+    });
+    await act(async () =>
+      reject(new DOMException('Denied', 'NotAllowedError')),
+    );
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(player.video.muted).toBe(false);
+  });
+
   it.each([true, false])(
     'only starts loading a parsed manifest when loadingEnabled is false (current: %s)',
     async (loadingEnabled) => {
@@ -207,7 +379,10 @@ describe('useLivePlayer playback failure', () => {
   );
 
   it('enters the player failure state when media recovery is exhausted', async () => {
-    const { result, setIsVideoLoading } = renderLivePlayer();
+    const onPlaybackFailed = jest.fn();
+    const { result, setIsVideoLoading } = renderLivePlayer({
+      onPlaybackFailed,
+    });
     const { player, hls } = await waitForPlayer(1);
 
     exhaustMediaRecovery(hls);
@@ -220,6 +395,24 @@ describe('useLivePlayer playback failure', () => {
     expect(player.destroy).toHaveBeenCalled();
     expect(result.current.artPlayerRef.current).toBeNull();
     expect(setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    expect(onPlaybackFailed).toHaveBeenCalledWith(channel, source.key);
+  });
+
+  it('只在首帧上报成功一次，销毁后的迟到事件被忽略', async () => {
+    const onFirstFrame = jest.fn();
+    const { result } = renderLivePlayer({ onFirstFrame });
+    const { player } = await waitForPlayer(1);
+    act(() => {
+      player.video.dispatchEvent(new Event('canplay'));
+      player.video.dispatchEvent(new Event('playing'));
+    });
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+    expect(onFirstFrame).toHaveBeenCalledWith(channel, source.key);
+    act(() => {
+      result.current.cleanupPlayer();
+      player.video.dispatchEvent(new Event('canplay'));
+    });
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
   });
 
   it('leaves web fullscreen before destroying the failed player', async () => {
@@ -394,8 +587,10 @@ describe('useLivePlayer automatic route', () => {
       url: `https://direct-${hostIndex}.example/live.m3u8`,
     };
     const setIsVideoLoading = jest.fn();
+    const onPlaybackFailed = jest.fn();
     const hook = renderHook(() =>
       useLivePlayer({
+        onPlaybackFailed,
         videoUrl: freshChannel.url,
         currentChannel: freshChannel,
         currentSourceRef: { current: source },
@@ -405,7 +600,7 @@ describe('useLivePlayer automatic route', () => {
         setUnsupportedType: jest.fn(),
       }),
     );
-    return { ...hook, freshChannel };
+    return { ...hook, freshChannel, onPlaybackFailed };
   }
 
   function routeUrl(rawUrl: string, route: 'browser' | 'server') {
@@ -424,11 +619,12 @@ describe('useLivePlayer automatic route', () => {
   }
 
   it('falls back to the server when a direct request fails before playback', async () => {
-    const { freshChannel } = renderFreshChannel();
+    const { freshChannel, onPlaybackFailed } = renderFreshChannel();
     const { player, hls } = await waitForPlayer(1);
     expect(player.option.url).toBe(routeUrl(freshChannel.url, 'browser'));
 
     emitNetworkError(hls, 'https://cdn.example/seg-1.ts');
+    expect(onPlaybackFailed).not.toHaveBeenCalled();
 
     await waitFor(() =>
       expect((player as unknown as { switch?: string }).switch).toBe(
@@ -463,7 +659,7 @@ describe('useLivePlayer automatic route', () => {
   });
 
   it('stops with a relay-paused failure instead of retrying', async () => {
-    const { result } = renderFreshChannel();
+    const { result, onPlaybackFailed } = renderFreshChannel();
     const { hls } = await waitForPlayer(1);
 
     act(() => {
@@ -485,5 +681,6 @@ describe('useLivePlayer automatic route', () => {
 
     expect(result.current.playbackFailed).toBe(true);
     expect(result.current.relayPaused).toBe(true);
+    expect(onPlaybackFailed).not.toHaveBeenCalled();
   });
 });

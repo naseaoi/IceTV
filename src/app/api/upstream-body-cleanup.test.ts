@@ -127,6 +127,22 @@ it.each([
   },
 );
 
+it.each([
+  ['logo', logoRoute.GET],
+  ['precheck', precheckRoute.GET],
+] as const)('%s 直播元数据回源关闭代理池', async (_name, handle) => {
+  mockFetch.mockClear().mockResolvedValue({
+    ok: false,
+    status: 503,
+    body: { cancel: jest.fn().mockResolvedValue(undefined) },
+  });
+  await handle(request);
+  expect(mockFetch).toHaveBeenCalledWith(
+    'https://example.com/image.jpg',
+    expect.objectContaining({ useProxyPool: false }),
+  );
+});
+
 it('logo 成功响应只允许浏览器私有缓存', async () => {
   mockFetch.mockResolvedValue({
     ok: true,

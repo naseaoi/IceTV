@@ -28,7 +28,9 @@ export type PlayerShortcutAction =
   | 'frameBackward'
   | 'frameForward'
   | 'prevEpisode'
-  | 'nextEpisode';
+  | 'nextEpisode'
+  | 'prevChannel'
+  | 'nextChannel';
 
 export type PlayerShortcutMode = 'vod' | 'live';
 
@@ -59,6 +61,8 @@ export const DEFAULT_PLAYER_SHORTCUTS: PlayerShortcutMap = {
   nextEpisode: { key: 'ArrowRight', altKey: true },
   // 后加的默认键放在末尾：按键冲突时按对象顺序匹配，用户已自定义到同一键的旧动作优先
   toggleMute: { key: 'm' },
+  prevChannel: { key: 'PageUp' },
+  nextChannel: { key: 'PageDown' },
 };
 
 export const PLAYER_SHORTCUT_ACTIONS: {
@@ -81,6 +85,8 @@ export const PLAYER_SHORTCUT_ACTIONS: {
   { action: 'frameForward', label: '下一帧' },
   { action: 'prevEpisode', label: '上一集' },
   { action: 'nextEpisode', label: '下一集' },
+  { action: 'prevChannel', label: '上一台' },
+  { action: 'nextChannel', label: '下一台' },
 ];
 
 const LIVE_PLAYER_SHORTCUT_ACTIONS = new Set<PlayerShortcutAction>([
@@ -89,13 +95,17 @@ const LIVE_PLAYER_SHORTCUT_ACTIONS = new Set<PlayerShortcutAction>([
   'volumeDown',
   'toggleMute',
   'fullscreen',
+  'prevChannel',
+  'nextChannel',
 ]);
 
 export function isPlayerShortcutActionEnabled(
   mode: PlayerShortcutMode,
   action: PlayerShortcutAction,
 ): boolean {
-  return mode === 'vod' || LIVE_PLAYER_SHORTCUT_ACTIONS.has(action);
+  return mode === 'vod'
+    ? action !== 'prevChannel' && action !== 'nextChannel'
+    : LIVE_PLAYER_SHORTCUT_ACTIONS.has(action);
 }
 
 function isShortcutBinding(value: unknown): value is ShortcutBinding {
