@@ -172,6 +172,34 @@ it('切换筛选仅保留不可操作的旧列表占位', async () => {
   expect(screen.queryByRole('link', { name: '播放三体' })).toBeNull();
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
 });
+it('全部评价下切换排序保留工具栏与不可操作的旧列表', async () => {
+  const { container } = render(<MyReviewsPageClient />);
+  await screen.findByRole('link', { name: '播放三体' });
+  const search = screen.getByRole('searchbox', { name: '搜索我的评价' });
+  const implementation = jest
+    .mocked(fetchMyVideoReviews)
+    .getMockImplementation()!;
+  let resolvePage!: () => void;
+  jest.mocked(fetchMyVideoReviews).mockImplementationOnce(
+    (query) =>
+      new Promise((resolve) => {
+        resolvePage = () => resolve(implementation(query));
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '排序' }));
+  fireEvent.click(screen.getByRole('option', { name: '评分从高到低' }));
+  expect(screen.getByRole('searchbox', { name: '搜索我的评价' })).toBe(search);
+  expect(screen.getByRole('link', { name: '播放三体' })).toBeInTheDocument();
+  expect(container.querySelector('[aria-busy="true"]')).toHaveAttribute(
+    'inert',
+  );
+  expect(
+    screen.getByRole('button', { name: /^全部/ }).querySelector('.skeleton'),
+  ).not.toBeNull();
+  await act(async () => resolvePage());
+  expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+});
+
 it('loads the next server page without replacing the first page', async () => {
   jest
     .mocked(fetchMyVideoReviews)

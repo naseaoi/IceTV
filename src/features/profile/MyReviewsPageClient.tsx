@@ -417,7 +417,7 @@ export default function MyReviewsPageClient({
     getItemKey: (review) => JSON.stringify([review.title_norm, review.year]),
   });
   const reviews = data?.items ?? [];
-  const total = currentData?.total ?? 0;
+  const displayTotal = data?.total ?? 0;
   const counts = currentData?.counts ?? null;
   const countsQuery = currentData?.countsQuery;
   const cursor = currentData?.nextCursor;
@@ -641,7 +641,9 @@ export default function MyReviewsPageClient({
     <LibraryPageFrame
       title='我的评价'
       toolbar={
-        ((loading && skeletonCount > 0) || total > 0 || narrowed) && (
+        ((initialLoading && skeletonCount > 0) ||
+          displayTotal > 0 ||
+          narrowed) && (
           <LibraryToolbar
             searchLabel='搜索我的评价'
             countsKey='reviews'

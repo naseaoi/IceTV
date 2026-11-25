@@ -29,6 +29,10 @@ export function usePagedQuery<TPage extends PagedData>({
   const [data, setData] = useState<TPage | null>(null);
   const [pending, setPending] = useState(enabled);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [requestIdentity, setRequestIdentity] = useState<{
+    scopeKey: string | null;
+    queryKey: string;
+  } | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [errorPhase, setErrorPhase] = useState<'first' | 'more' | null>(null);
   const dataQueryKey = useRef<string | null>(null);
@@ -71,6 +75,7 @@ export function usePagedQuery<TPage extends PagedData>({
       const controller = new AbortController();
       request.current = controller;
       const firstPage = cursor === undefined;
+      setRequestIdentity({ scopeKey: scope.current, queryKey });
       setPending(firstPage);
       setLoadingMore(!firstPage);
       setError(null);
@@ -145,6 +150,7 @@ export function usePagedQuery<TPage extends PagedData>({
     failedCursor.current = undefined;
     setPending(false);
     setLoadingMore(false);
+    if (!enabled) setRequestIdentity(null);
     void requestPage();
     return () => {
       mounted.current = false;
@@ -182,19 +188,30 @@ export function usePagedQuery<TPage extends PagedData>({
     [publish, requestPage],
   );
 
+  const isCurrentRequest =
+    requestIdentity?.scopeKey === scopeKey &&
+    requestIdentity?.queryKey === queryKey;
+  const currentError = enabled && isCurrentRequest ? error : null;
+  // effect 发起请求前就隔离旧状态；切回条件时直接展示该条件的首页快照。
+  const snapshot =
+    enabled && !isCurrentRequest && scope.current === scopeKey
+      ? snapshots.current.get(queryKey)
+      : undefined;
   const isCurrentData =
     scope.current === scopeKey && dataQueryKey.current === queryKey;
+  const currentData = snapshot ?? (isCurrentData ? data : null);
   const visibleData =
-    scope.current === scopeKey && (isCurrentData || !error) ? data : null;
+    currentData ?? (scope.current === scopeKey && !currentError ? data : null);
+  const currentPending = enabled && (!isCurrentRequest || pending);
   return {
     data: visibleData,
-    currentData: isCurrentData ? data : null,
-    isPlaceholderData: visibleData !== null && !isCurrentData,
-    errorPhase,
-    initialLoading: visibleData === null && pending,
-    refreshing: visibleData !== null && pending,
-    loadingMore,
-    error,
+    currentData,
+    isPlaceholderData: visibleData !== null && currentData === null,
+    errorPhase: currentError ? errorPhase : null,
+    initialLoading: visibleData === null && currentPending,
+    refreshing: visibleData !== null && currentPending,
+    loadingMore: enabled && isCurrentRequest && loadingMore,
+    error: currentError,
     loadMore,
     refresh,
     retry: () => void requestPage(failedCursor.current),

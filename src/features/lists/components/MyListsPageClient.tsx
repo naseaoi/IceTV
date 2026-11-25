@@ -208,15 +208,25 @@ export function MyListsPageClient({
 
   useEffect(() => {
     mounted.current = true;
-    setCookieCounts((previous) => ({
-      created: readListCountCookie('list_count') ?? previous.created,
-      saved: readListCountCookie('saved_list_count') ?? previous.saved,
-    }));
     return () => {
       mounted.current = false;
       savedRefresh.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    const created = readListCountCookie('list_count');
+    const saved = readListCountCookie('saved_list_count');
+    // 服务端补算的计数回写 cookie，下次路由 loading 即可按真实条数渲染。
+    if (created === null && skeletonCount !== null)
+      writeListCountCookie('list_count', skeletonCount);
+    if (saved === null && savedSkeletonCount !== null)
+      writeListCountCookie('saved_list_count', savedSkeletonCount);
+    setCookieCounts((previous) => ({
+      created: created ?? previous.created,
+      saved: saved ?? previous.saved,
+    }));
+  }, [skeletonCount, savedSkeletonCount]);
 
   useEffect(() => {
     if (current !== null) return;

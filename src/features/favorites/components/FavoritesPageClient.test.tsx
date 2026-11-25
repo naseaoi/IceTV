@@ -71,6 +71,7 @@ const items: FavoriteItem[] = ['a', 'b', 'c'].map((id) => ({
 jest.mock('@/features/favorites/hooks/useFavoriteLibrary', () => ({
   useFavoriteLibrary: () => ({
     items,
+    displayPage: { total: 3, libraryTotal: 3, query: '', narrowed: false },
     loading: false,
     refreshing: mockRefreshing,
     loadingMore: false,

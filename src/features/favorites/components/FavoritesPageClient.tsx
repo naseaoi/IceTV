@@ -143,6 +143,7 @@ export function FavoritesPageClient({
   const [sort, setSort] = useState<FavoriteSort>('saved');
   const {
     items,
+    displayPage,
     loading,
     refreshing,
     loadingMore,
@@ -154,7 +155,6 @@ export function FavoritesPageClient({
     counts,
     countsLoading,
     total: resultTotal,
-    libraryTotal,
     hasMore,
     loadMore,
   } = useFavoriteLibrary(favoriteSkeletonCount, {
@@ -270,8 +270,12 @@ export function FavoritesPageClient({
     setReview('all');
   };
 
-  const emptyDescription = query.trim()
-    ? `找不到与「${query.trim()}」相关的作品`
+  const displayTotal = displayPage?.total ?? 0;
+  const displayLibraryTotal = displayPage?.libraryTotal ?? 0;
+  const displayNarrowed = displayPage?.narrowed ?? narrowed;
+  const displayQuery = displayPage?.query ?? query;
+  const emptyDescription = displayQuery.trim()
+    ? `找不到与「${displayQuery.trim()}」相关的作品`
     : undefined;
 
   let content: React.ReactNode;
@@ -301,7 +305,7 @@ export function FavoritesPageClient({
         }
       />
     );
-  } else if (libraryTotal === 0 && !narrowed) {
+  } else if (displayLibraryTotal === 0 && !displayNarrowed) {
     content = (
       <LibraryEmptyState
         icon={Heart}
@@ -313,7 +317,7 @@ export function FavoritesPageClient({
         }
       />
     );
-  } else if (resultTotal === 0) {
+  } else if (displayTotal === 0) {
     content = (
       <LibraryEmptyState
         icon={SearchX}
@@ -335,7 +339,7 @@ export function FavoritesPageClient({
       <>
         <FavoriteGrid
           items={items}
-          virtualized={resultTotal > RENDER_CHUNK}
+          virtualized={displayTotal > RENDER_CHUNK}
           selection={gridSelection}
         />
         {hasMore && (
@@ -363,7 +367,8 @@ export function FavoritesPageClient({
       title='我的收藏'
       toolbar={
         ((loading && (skeletonCount ?? 0) > 0) ||
-          libraryTotal > 0 ||
+          displayLibraryTotal > 0 ||
+          displayNarrowed ||
           narrowed) && (
           <FavoriteLibraryToolbar
             query={query}
@@ -377,18 +382,20 @@ export function FavoritesPageClient({
             counts={counts}
             loading={countsLoading}
             action={
-              (loading ? (skeletonCount ?? 0) > 0 : libraryTotal > 0) && (
+              (loading
+                ? (skeletonCount ?? 0) > 0
+                : displayLibraryTotal > 0) && (
                 <>
                   <SelectModeButton
                     active={selecting}
-                    disabled={loading}
+                    disabled={!canOperate}
                     onClick={
                       selecting ? exitSelecting : () => setSelecting(true)
                     }
                   />
                   {!selecting && (
                     <ClearFavoritesButton
-                      disabled={loading}
+                      disabled={!canOperate}
                       onClick={() => setShowClearConfirm(true)}
                     />
                   )}

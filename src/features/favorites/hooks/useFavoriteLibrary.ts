@@ -54,8 +54,8 @@ export function useFavoriteLibrary(
   );
   const queryPending = query !== options.query;
   const fetchPage = useCallback(
-    (cursor: string | undefined, signal: AbortSignal) =>
-      fetchFavoriteLibraryPage(
+    async (cursor: string | undefined, signal: AbortSignal) => ({
+      ...(await fetchFavoriteLibraryPage(
         {
           query,
           filter: options.filter,
@@ -64,7 +64,13 @@ export function useFavoriteLibrary(
           cursor,
         },
         signal,
-      ),
+      )),
+      query,
+      narrowed:
+        query.trim() !== '' ||
+        options.filter !== 'all' ||
+        (options.review ?? 'all') !== 'all',
+    }),
     [query, options.filter, options.review, options.sort],
   );
   const {
@@ -149,6 +155,7 @@ export function useFavoriteLibrary(
 
   return {
     items,
+    displayPage: page,
     // loading 仅指尚无任何结果的首次加载；已有结果时的重新查询走 refreshing
     loading: initialLoading || (page === null && queryPending),
     refreshing: refreshing || (page !== null && queryPending),
