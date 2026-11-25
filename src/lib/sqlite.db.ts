@@ -100,6 +100,11 @@ import {
   socialSchema,
   updateUserProfilePlan,
 } from '@/lib/review-social-storage';
+import {
+  type SharedCacheMetadata,
+  pruneSharedCacheBatches,
+  SHARED_CACHE_MAX_ENTRIES,
+} from '@/lib/shared-cache-maintenance';
 import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
@@ -570,6 +575,8 @@ export class LocalSqliteStorage implements IStorage {
     setSharedCache: Database.Statement;
     releaseSharedCacheLease: Database.Statement;
     pruneSharedCache: Database.Statement;
+    getSharedCacheMetadata: Database.Statement;
+    trimSharedCache: Database.Statement;
   };
 
   async backup(filename: string): Promise<string> {
@@ -1273,6 +1280,7 @@ export class LocalSqliteStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS shared_cache (
         cache_key TEXT PRIMARY KEY,
         value_text TEXT NOT NULL,
+        value_bytes INTEGER NULL,
         fresh_until INTEGER NOT NULL,
         stale_until INTEGER NOT NULL,
         lease_token TEXT,
@@ -1286,6 +1294,19 @@ export class LocalSqliteStorage implements IStorage {
       CREATE INDEX IF NOT EXISTS idx_shared_cache_updated_at
         ON shared_cache (updated_at);
     `);
+    this.db
+      .transaction(() => {
+        const cacheColumns = this.db
+          .prepare('PRAGMA table_info(shared_cache)')
+          .all() as { name: string }[];
+        if (!cacheColumns.some((column) => column.name === 'value_bytes'))
+          this.db.exec(
+            'ALTER TABLE shared_cache ADD COLUMN value_bytes INTEGER NULL',
+          );
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_shared_cache_budget
+        ON shared_cache (updated_at, cache_key, lease_until, value_bytes)`);
+      })
+      .immediate();
   }
 
   private prepareStatements(): typeof this.stmts {
@@ -1610,9 +1631,9 @@ export class LocalSqliteStorage implements IStorage {
       ),
       acquireSharedCacheLease: this.db.prepare(
         `INSERT INTO shared_cache (
-           cache_key, value_text, fresh_until, stale_until,
+           cache_key, value_text, value_bytes, fresh_until, stale_until,
            lease_token, lease_until, updated_at
-         ) VALUES (?, '', 0, 0, ?, ?, ?)
+         ) VALUES (?, '', 0, 0, 0, ?, ?, ?)
          ON CONFLICT(cache_key) DO UPDATE SET
            lease_token = excluded.lease_token,
            lease_until = excluded.lease_until,
@@ -1621,7 +1642,7 @@ export class LocalSqliteStorage implements IStorage {
       ),
       setSharedCache: this.db.prepare(
         `UPDATE shared_cache
-         SET value_text = ?, fresh_until = ?, stale_until = ?,
+         SET value_text = ?, value_bytes = ?, fresh_until = ?, stale_until = ?,
              lease_token = NULL, lease_until = 0, updated_at = ?
          WHERE cache_key = ? AND lease_token = ?`,
       ),
@@ -1630,12 +1651,24 @@ export class LocalSqliteStorage implements IStorage {
          SET lease_token = NULL, lease_until = 0
          WHERE cache_key = ? AND lease_token = ?`,
       ),
+      getSharedCacheMetadata: this.db.prepare(
+        `SELECT cache_key, updated_at, value_bytes
+         FROM shared_cache INDEXED BY idx_shared_cache_budget WHERE lease_until <= ?
+         ORDER BY updated_at DESC, cache_key DESC LIMIT ?`,
+      ),
+      trimSharedCache: this.db.prepare(
+        `DELETE FROM shared_cache WHERE cache_key IN (
+           SELECT cache_key FROM shared_cache
+           WHERE lease_until <= ? AND (updated_at < ? OR (updated_at = ? AND cache_key <= ?))
+           ORDER BY updated_at ASC, cache_key ASC LIMIT ?
+         )`,
+      ),
       pruneSharedCache: this.db.prepare(
         `DELETE FROM shared_cache
          WHERE cache_key IN (
            SELECT cache_key FROM shared_cache
            WHERE stale_until <= ? AND lease_until <= ?
-           ORDER BY updated_at ASC LIMIT ?
+           ORDER BY stale_until ASC LIMIT ?
          )`,
       ),
     };
@@ -4174,6 +4207,7 @@ export class LocalSqliteStorage implements IStorage {
     return (
       this.stmts.setSharedCache.run(
         value,
+        Buffer.byteLength(value),
         freshUntil,
         staleUntil,
         now,
@@ -4195,23 +4229,32 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async pruneSharedCache(now: number, limit: number): Promise<void> {
-    this.stmts.pruneSharedCache.run(
-      now,
-      now,
-      Math.max(1, Math.min(1000, Math.floor(limit))),
+    await pruneSharedCacheBatches(
+      limit,
+      async (batchSize) =>
+        this.stmts.pruneSharedCache.run(now, now, batchSize).changes,
+      async () =>
+        this.stmts.getSharedCacheMetadata.all(
+          now,
+          SHARED_CACHE_MAX_ENTRIES + 1,
+        ) as SharedCacheMetadata[],
+      async (boundary, batchSize) =>
+        this.stmts.trimSharedCache.run(
+          now,
+          boundary.updated_at,
+          boundary.updated_at,
+          boundary.cache_key,
+          batchSize,
+        ).changes,
+      async (keys) => {
+        this.db
+          .prepare(
+            `UPDATE shared_cache SET value_bytes = length(CAST(value_text AS BLOB))
+          WHERE cache_key IN (${keys.map(() => '?').join(',')}) AND value_bytes IS NULL`,
+          )
+          .run(...keys);
+      },
     );
-    this.db
-      .prepare(
-        `DELETE FROM shared_cache WHERE cache_key IN (
-      SELECT cache_key FROM (
-        SELECT cache_key,
-          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
-          SUM(length(CAST(value_text AS BLOB))) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
-        FROM shared_cache WHERE lease_until <= ?
-      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
-    )`,
-      )
-      .run(now);
   }
 
   async renewSharedCacheLease(

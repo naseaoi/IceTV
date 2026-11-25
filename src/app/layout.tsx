@@ -139,13 +139,13 @@ export default async function RootLayout({
       >
         <ThemeProvider disableTransitionOnChange>
           <RuntimeConfigProvider initialConfig={runtimeConfig}>
-            <SiteProvider
-              siteName={initialSiteName}
-              siteIcon={initialSiteIcon}
-              announcement={initialAnnouncement}
-              footerText={initialFooterText}
-            >
-              <AuthProvider initialSession={initialAuthSession}>
+            <AuthProvider initialSession={initialAuthSession}>
+              <SiteProvider
+                siteName={initialSiteName}
+                siteIcon={initialSiteIcon}
+                announcement={initialAnnouncement}
+                footerText={initialFooterText}
+              >
                 <AdminAlertsProvider>
                   <MessageCenterProvider>
                     <CardInteractionProvider>
@@ -161,8 +161,8 @@ export default async function RootLayout({
                     </CardInteractionProvider>
                   </MessageCenterProvider>
                 </AdminAlertsProvider>
-              </AuthProvider>
-            </SiteProvider>
+              </SiteProvider>
+            </AuthProvider>
           </RuntimeConfigProvider>
         </ThemeProvider>
       </body>

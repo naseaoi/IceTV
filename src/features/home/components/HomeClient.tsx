@@ -48,6 +48,7 @@ interface HomeClientProps {
   continueWatchingSkeletonCount?: number;
   continueWatchingRecords?: Record<string, PlayRecord> | null;
   continueWatchingUpdateCount?: number;
+  continueWatchingFetchedAt?: number;
   routeFallback?: boolean;
   likelyMobile?: boolean;
 }
@@ -144,6 +145,7 @@ export default function HomeClient({
   continueWatchingSkeletonCount = 0,
   continueWatchingRecords = null,
   continueWatchingUpdateCount,
+  continueWatchingFetchedAt,
   routeFallback = false,
   likelyMobile = false,
 }: HomeClientProps) {
@@ -392,6 +394,7 @@ export default function HomeClient({
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
               initialRecords={continueWatchingRecords}
+              initialFetchedAt={continueWatchingFetchedAt}
               initialUpdateCount={continueWatchingUpdateCount}
               refreshOnMount={!routeFallback}
             />

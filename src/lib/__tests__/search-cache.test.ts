@@ -1,5 +1,6 @@
 import {
   clearSearchCachesForTests,
+  dedupeSearchLoad,
   getCachedSearchPage,
   getSearchCacheStats,
   loadSpecialSourceSearch,
@@ -12,6 +13,35 @@ describe('search cache', () => {
   afterEach(() => {
     clearSearchCachesForTests();
     jest.restoreAllMocks();
+  });
+
+  it.each([false, true])(
+    'keeps empty/failed shared pages short (failed=%s)',
+    async (failed) => {
+      const now = Date.parse('2026-01-01T00:00:00.000Z');
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      const loader = jest.fn().mockResolvedValue({ results: [], failed });
+      await dedupeSearchLoad(SOURCE_KEY, 'short', 1, loader);
+      jest.spyOn(Date, 'now').mockReturnValue(now + 59_000);
+      await dedupeSearchLoad(SOURCE_KEY, 'short', 1, loader);
+      expect(loader).toHaveBeenCalledTimes(1);
+      jest.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+      await dedupeSearchLoad(SOURCE_KEY, 'short', 1, loader);
+      expect(loader).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('shares successful pages for ten minutes without extending stale results', async () => {
+    const now = Date.parse('2026-01-01T00:00:00.000Z');
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const loader = jest.fn().mockResolvedValue({ results: [{ id: 'one' }] });
+    await dedupeSearchLoad(SOURCE_KEY, 'full', 1, loader);
+    jest.spyOn(Date, 'now').mockReturnValue(now + 599_000);
+    await dedupeSearchLoad(SOURCE_KEY, 'full', 1, loader);
+    expect(loader).toHaveBeenCalledTimes(1);
+    jest.spyOn(Date, 'now').mockReturnValue(now + 601_000);
+    await dedupeSearchLoad(SOURCE_KEY, 'full', 1, loader);
+    expect(loader).toHaveBeenCalledTimes(2);
   });
 
   it('keeps empty successful search pages for a short ttl', () => {

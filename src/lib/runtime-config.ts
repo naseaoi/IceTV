@@ -1,4 +1,5 @@
 import { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
@@ -179,17 +180,45 @@ function runtimeConfigFromServerConfig(
 
 export const SERVER_CONFIG_UPDATED_EVENT = 'server-config-updated';
 
+export const CLIENT_SERVER_CONFIG_MAX_AGE_MS = 5 * 60_000;
+export const SERVER_CONFIG_INVALIDATION_CHANNEL =
+  'icetv:server-config-invalidated';
+export const SERVER_CONFIG_INVALIDATION_SOURCE = Math.random();
+
 let serverConfigRequest: Promise<ServerConfigPayload> | null = null;
 let serverConfigRequestPending = false;
+let serverConfigExpiresAt = 0;
+let serverConfigScope = '';
+
+function currentConfigScope(): string {
+  const auth = getAuthInfoFromBrowserCookie();
+  return JSON.stringify([auth?.username, auth?.role]);
+}
+
+export function invalidateClientServerConfig(): void {
+  serverConfigRequest = null;
+  serverConfigRequestPending = false;
+  serverConfigExpiresAt = 0;
+}
 
 export async function fetchClientServerConfig({
   forceFresh = false,
 }: { forceFresh?: boolean } = {}): Promise<ServerConfigPayload> {
-  if (forceFresh || !serverConfigRequestPending || !serverConfigRequest) {
-    const request: Promise<ServerConfigPayload> = fetch('/api/server-config', {
-      method: 'GET',
-      cache: 'no-store',
-    })
+  const scope = currentConfigScope();
+  if (scope !== serverConfigScope) {
+    invalidateClientServerConfig();
+    serverConfigScope = scope;
+  }
+  if (
+    forceFresh ||
+    !serverConfigRequest ||
+    (!serverConfigRequestPending && Date.now() >= serverConfigExpiresAt)
+  ) {
+    serverConfigExpiresAt = 0;
+    const request: Promise<ServerConfigPayload> = fetch(
+      forceFresh ? '/api/server-config?fresh=1' : '/api/server-config',
+      { method: 'GET', cache: 'no-store' },
+    )
       .then((response) => {
         if (!response.ok) {
           throw new Error(`server-config: ${response.status}`);
@@ -198,10 +227,21 @@ export async function fetchClientServerConfig({
       })
       .then(
         // 保存前的请求即使晚到，也只向调用方交付最新请求的结果。
-        (data) =>
-          serverConfigRequest === request ? data : serverConfigRequest!,
+        (data) => {
+          if (scope !== currentConfigScope() || !serverConfigRequest) {
+            throw new Error('server-config: session changed');
+          }
+          if (serverConfigRequest !== request) return serverConfigRequest;
+          serverConfigExpiresAt = Date.now() + CLIENT_SERVER_CONFIG_MAX_AGE_MS;
+          return data;
+        },
         (error) => {
-          if (serverConfigRequest !== request) return serverConfigRequest!;
+          if (
+            scope === currentConfigScope() &&
+            serverConfigRequest &&
+            serverConfigRequest !== request
+          )
+            return serverConfigRequest;
           throw error;
         },
       )
@@ -217,6 +257,14 @@ export async function fetchClientServerConfig({
 
 export async function syncClientConfigAfterSave(): Promise<void> {
   clearSearchSnapshotCache();
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel(SERVER_CONFIG_INVALIDATION_CHANNEL);
+    channel.postMessage({
+      type: 'invalidate',
+      source: SERVER_CONFIG_INVALIDATION_SOURCE,
+    });
+    channel.close();
+  }
   try {
     applyClientServerConfig(
       await fetchClientServerConfig({ forceFresh: true }),

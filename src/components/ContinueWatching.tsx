@@ -44,6 +44,7 @@ interface ContinueWatchingProps {
   initialRecords?: Record<string, PlayRecord> | null;
   initialUpdateCount?: number;
   refreshOnMount?: boolean;
+  initialFetchedAt?: number;
 }
 
 const useIsomorphicLayoutEffect =
@@ -100,11 +101,18 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
   };
 }
 
+// 刚完成服务端查询时复用同次渲染的数据；预取、后退恢复的旧种子仍重新验证。
+function isFreshInitialData(fetchedAt: number): boolean {
+  const age = Date.now() - fetchedAt;
+  return fetchedAt > 0 && age >= 0 && age < 5_000;
+}
+
 export default function ContinueWatching({
   className,
   initialSkeletonCount = 0,
   initialRecords = null,
   initialUpdateCount,
+  initialFetchedAt = 0,
   refreshOnMount = true,
 }: ContinueWatchingProps) {
   const continueWatchingLimit = CONTINUE_WATCHING_LIMIT;
@@ -170,7 +178,12 @@ export default function ContinueWatching({
       }, 100);
     };
 
-    refreshCount();
+    if (
+      !isFreshInitialData(initialFetchedAt) ||
+      initialUpdateCount === undefined ||
+      getCachedPlayRecordsSnapshot()
+    )
+      refreshCount();
     const unsubscribers = (
       [
         'playRecordsUpdated',
@@ -184,7 +197,7 @@ export default function ContinueWatching({
       controller?.abort();
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [refreshOnMount, seededUpdateCount]);
+  }, [refreshOnMount, seededUpdateCount, initialFetchedAt, initialUpdateCount]);
 
   const updatePlayRecords = useCallback(
     (allRecords: Record<string, PlayRecord>) => {
@@ -241,7 +254,8 @@ export default function ContinueWatching({
       }
     };
 
-    fetchPlayRecords();
+    if (!seededRecords || !isFreshInitialData(initialFetchedAt))
+      void fetchPlayRecords();
 
     const unsubscribe = subscribeToDataUpdates(
       'playRecordsUpdated',
@@ -273,7 +287,13 @@ export default function ContinueWatching({
       unsubscribeRecent();
       unsubscribeStates();
     };
-  }, [continueWatchingLimit, refreshOnMount, seededRecords, updatePlayRecords]);
+  }, [
+    continueWatchingLimit,
+    refreshOnMount,
+    seededRecords,
+    updatePlayRecords,
+    initialFetchedAt,
+  ]);
 
   if (!loading && playRecords.length === 0) {
     return null;

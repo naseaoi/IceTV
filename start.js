@@ -61,8 +61,10 @@ const REQUEST_HOSTNAME = '127.0.0.1';
 const HEALTH_PATH = '/api/health';
 const TARGET_URL = `http://${REQUEST_HOSTNAME}:${process.env.PORT || 3000}${HEALTH_PATH}`;
 const readyPollStartedAt = Date.now();
+let ready = false;
 
 const intervalId = setInterval(() => {
+  if (ready) return;
   if (Date.now() - readyPollStartedAt > READY_POLL_TIMEOUT_MS) {
     console.error(`Server readiness polling timed out: ${TARGET_URL}`);
     clearInterval(intervalId);
@@ -74,7 +76,13 @@ const intervalId = setInterval(() => {
 
   const req = http.get(TARGET_URL, (res) => {
     // 当返回 2xx 状态码时认为成功，然后停止轮询
-    if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+    if (
+      !ready &&
+      res.statusCode &&
+      res.statusCode >= 200 &&
+      res.statusCode < 300
+    ) {
+      ready = true;
       console.log('Server is up, stop polling.');
       clearInterval(intervalId);
       scheduleCronTasks();

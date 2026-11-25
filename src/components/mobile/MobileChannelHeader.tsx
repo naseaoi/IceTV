@@ -78,7 +78,13 @@ export default function MobileChannelHeader({
           collapsed ? 'opacity-0' : 'opacity-100'
         }`}
       >
-        <Link href='/' aria-label='首页' className='h-7 w-7 shrink-0'>
+        <Link
+          href='/'
+          prefetch={false}
+          onTouchStart={() => prefetchRoute('/')}
+          aria-label='首页'
+          className='h-7 w-7 shrink-0'
+        >
           <SiteIcon />
         </Link>
         <Link

@@ -4,10 +4,12 @@ import {
 } from '@/features/search/lib/searchSnapshotCache';
 import {
   applyClientServerConfig,
+  CLIENT_SERVER_CONFIG_MAX_AGE_MS,
   DEFAULT_RUNTIME_CONFIG,
   fetchClientServerConfig,
   getClientAuthRuntimeConfig,
   getCustomCategoryLabel,
+  invalidateClientServerConfig,
   syncClientConfigAfterSave,
 } from '@/lib/runtime-config';
 
@@ -39,11 +41,55 @@ function seedSnapshot() {
 }
 
 describe('runtime config', () => {
+  beforeEach(() => {
+    invalidateClientServerConfig();
+    document.cookie = 'auth_meta=; Max-Age=0';
+  });
   afterEach(() => {
     global.fetch = originalFetch;
     jest.restoreAllMocks();
     delete window.RUNTIME_CONFIG;
     delete window.__runtimeConfigReady;
+  });
+
+  it('完成结果在五分钟内复用，过期重新获取', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    global.fetch = jest.fn().mockResolvedValue(response('站点'));
+    const first = await fetchClientServerConfig();
+    expect(await fetchClientServerConfig()).toBe(first);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(1000 + CLIENT_SERVER_CONFIG_MAX_AGE_MS);
+    await fetchClientServerConfig();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('账号变化隔离缓存，旧账号迟到响应不交付新账号配置', async () => {
+    document.cookie = `auth_meta=${encodeURIComponent(JSON.stringify({ username: 'alice' }))}`;
+    const old = deferredResponse();
+    global.fetch = jest
+      .fn()
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValue(response('新账号'));
+    const before = fetchClientServerConfig();
+    const rejected = expect(before).rejects.toThrow('session changed');
+    document.cookie = `auth_meta=${encodeURIComponent(JSON.stringify({ username: 'bob' }))}`;
+    expect(await fetchClientServerConfig()).toMatchObject({
+      SiteName: '新账号',
+    });
+    old.resolve(response('旧账号'));
+    await rejected;
+  });
+
+  it('失败不缓存，失效后的读取重新请求', async () => {
+    global.fetch = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(response('恢复'));
+    await expect(fetchClientServerConfig()).rejects.toThrow('offline');
+    await fetchClientServerConfig();
+    invalidateClientServerConfig();
+    await fetchClientServerConfig();
+    expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
   it.each([true, false])(
@@ -60,7 +106,7 @@ describe('runtime config', () => {
       seedSnapshot();
       const synced = syncClientConfigAfterSave();
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(fetchMock).toHaveBeenLastCalledWith('/api/server-config', {
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/server-config?fresh=1', {
         method: 'GET',
         cache: 'no-store',
       });

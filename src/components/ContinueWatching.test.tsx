@@ -86,6 +86,33 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+it('刚查询的服务端种子省去重复请求，后续状态事件仍更新计数', async () => {
+  render(
+    <ContinueWatching
+      initialRecords={records}
+      initialUpdateCount={1}
+      initialFetchedAt={Date.now()}
+    />,
+  );
+  await flushCount();
+  expect(mockPage).not.toHaveBeenCalled();
+  emit('playRecordStatesUpdated');
+  await flushCount();
+  expect(mockPage).toHaveBeenCalledTimes(1);
+});
+
+it('预取或后退恢复的旧种子重新查询记录与计数', async () => {
+  render(
+    <ContinueWatching
+      initialRecords={records}
+      initialUpdateCount={1}
+      initialFetchedAt={Date.now() - 60_000}
+    />,
+  );
+  await flushCount();
+  expect(mockPage).toHaveBeenCalledTimes(2);
+});
+
 it('服务端种子保留首页更新数，不采用已清零的消息摘要', () => {
   render(
     <ContinueWatching

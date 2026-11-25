@@ -1740,6 +1740,13 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (normalized === "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'")
+      return [[{ Field: 'value_bytes' }], []];
+    if (
+      normalized ===
+      "SHOW INDEX FROM shared_cache WHERE Key_name = 'idx_shared_cache_budget'"
+    )
+      return [[{ Key_name: 'idx_shared_cache_budget' }], []];
     if (normalized === "SHOW COLUMNS FROM list_likes LIKE 'list_name'")
       return [[{ Field: 'list_name' }], []];
     if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")

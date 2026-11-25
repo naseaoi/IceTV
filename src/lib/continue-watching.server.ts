@@ -91,6 +91,7 @@ export async function getContinueWatchingPageData(
 }
 
 export interface ContinueWatchingInitialData {
+  fetchedAt?: number;
   records: Record<string, PlayRecord> | null;
   updateCount: number;
 }
@@ -108,6 +109,7 @@ export async function getContinueWatchingInitialData(): Promise<ContinueWatching
   }
 
   try {
+    const fetchedAt = Date.now();
     const [page, trackingPage] = await Promise.all([
       db.getPlayRecordPage(session.username, CONTINUE_WATCHING_LIMIT),
       db.getPlayRecordPage(
@@ -119,6 +121,7 @@ export async function getContinueWatchingInitialData(): Promise<ContinueWatching
       ),
     ]);
     return {
+      fetchedAt,
       records: toPlayRecordList(page.items),
       updateCount: trackingPage.total,
     };

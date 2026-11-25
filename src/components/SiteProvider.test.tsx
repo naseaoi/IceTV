@@ -2,7 +2,22 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 
 import { SiteProvider, useSite } from '@/components/SiteProvider';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { syncClientConfigAfterSave } from '@/lib/runtime-config';
+import {
+  invalidateClientServerConfig,
+  SERVER_CONFIG_INVALIDATION_SOURCE,
+  syncClientConfigAfterSave,
+} from '@/lib/runtime-config';
+
+jest.mock('@/components/AuthProvider', () => ({
+  useAuthSession: () => {
+    const auth = getAuthInfoFromBrowserCookie();
+    return {
+      session: auth
+        ? { status: 'authenticated', ...auth }
+        : { status: 'guest' },
+    };
+  },
+}));
 
 jest.mock('@/lib/auth.client', () => ({
   getAuthInfoFromBrowserCookie: jest.fn(),
@@ -31,6 +46,7 @@ function respond(data: Record<string, unknown>) {
 describe('SiteProvider', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    invalidateClientServerConfig();
     global.fetch = mockFetch;
     window.__runtimeConfigReady = false;
   });
@@ -111,5 +127,111 @@ describe('SiteProvider', () => {
     expect(
       document.querySelector<HTMLLinkElement>("link[rel='icon']")?.href,
     ).toContain('/favicon.ico');
+  });
+
+  it('可见页在五分钟内复用成功结果，过期自动刷新', async () => {
+    jest.useFakeTimers();
+    try {
+      mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'owner' });
+      mockFetch.mockResolvedValue(respond({ SiteName: '初始站点' }));
+      const view = render(
+        <SiteProvider {...baseProps}>
+          <SiteDetails />
+        </SiteProvider>,
+      );
+      await act(async () => {});
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        jest.advanceTimersByTime(240_000);
+        window.dispatchEvent(new Event('focus'));
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      mockFetch.mockResolvedValue(respond({ SiteName: '远程保存' }));
+      await act(async () => {
+        jest.advanceTimersByTime(60_000);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(document.title).toBe('远程保存');
+      view.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('收到跨标签失效通知立即刷新，隐藏时等恢复可见', async () => {
+    const original = global.BroadcastChannel;
+    let receive!: (event: { data: { type: string; source?: number } }) => void;
+    const close = jest.fn();
+    Object.defineProperty(global, 'BroadcastChannel', {
+      configurable: true,
+      value: class {
+        set onmessage(callback: typeof receive) {
+          receive = callback;
+        }
+        close = close;
+      },
+    });
+    try {
+      mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'owner' });
+      mockFetch.mockResolvedValue(respond({ SiteName: '初始站点' }));
+      const view = render(
+        <SiteProvider {...baseProps}>
+          <SiteDetails />
+        </SiteProvider>,
+      );
+      await waitFor(() => expect(document.title).toBe('初始站点'));
+      await act(async () =>
+        receive({
+          data: {
+            type: 'invalidate',
+            source: SERVER_CONFIG_INVALIDATION_SOURCE,
+          },
+        }),
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const visible = jest
+        .spyOn(document, 'visibilityState', 'get')
+        .mockReturnValue('hidden');
+      await act(async () => receive({ data: { type: 'invalidate' } }));
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      visible.mockReturnValue('visible');
+      mockFetch.mockResolvedValue(respond({ SiteName: '其他标签保存' }));
+      await act(async () =>
+        document.dispatchEvent(new Event('visibilitychange')),
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(document.title).toBe('其他标签保存');
+      view.unmount();
+      expect(close).toHaveBeenCalled();
+      visible.mockRestore();
+    } finally {
+      Object.defineProperty(global, 'BroadcastChannel', {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it('退出账号立即清除私有运行配置并重新读取游客配置', async () => {
+    mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'owner' });
+    mockFetch.mockResolvedValueOnce(respond({ EnableLiveEntry: true }));
+    const view = render(
+      <SiteProvider {...baseProps}>
+        <SiteDetails />
+      </SiteProvider>,
+    );
+    await waitFor(() =>
+      expect(window.RUNTIME_CONFIG?.ENABLE_LIVE_ENTRY).toBe(true),
+    );
+    mockGetAuthInfo.mockReturnValue(null);
+    mockFetch.mockResolvedValueOnce(respond({ EnableLiveEntry: false }));
+    view.rerender(
+      <SiteProvider {...baseProps}>
+        <SiteDetails />
+      </SiteProvider>,
+    );
+    expect(window.RUNTIME_CONFIG?.ENABLE_LIVE_ENTRY).toBe(false);
+    await act(async () => {});
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
