@@ -152,9 +152,13 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     value: T,
     now: number,
     expiry?: { freshUntil: number; staleUntil: number },
+    knownWeight?: number,
   ): boolean {
     cleanupExpired(now);
-    const weight = resolveWeight(value);
+    const weight =
+      knownWeight === undefined || estimateWeight
+        ? resolveWeight(value)
+        : normalizeWeight(knownWeight);
 
     if (maxSize <= 0 || weight > maxWeight) {
       counters.oversizedSkips += 1;
@@ -241,11 +245,17 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     invalidate(key: string) {
       remove(key);
     },
-    set(key: string, value: T) {
-      write(key, value, Date.now());
+    set(key: string, value: T, knownWeight?: number) {
+      write(key, value, Date.now(), undefined, knownWeight);
     },
-    hydrate(key: string, value: T, freshUntil: number, staleUntil: number) {
-      write(key, value, Date.now(), { freshUntil, staleUntil });
+    hydrate(
+      key: string,
+      value: T,
+      freshUntil: number,
+      staleUntil: number,
+      knownWeight?: number,
+    ) {
+      write(key, value, Date.now(), { freshUntil, staleUntil }, knownWeight);
     },
     peek(key: string): { value: T; fresh: boolean } | null {
       const now = Date.now();

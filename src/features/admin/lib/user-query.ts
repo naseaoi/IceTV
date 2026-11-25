@@ -8,32 +8,31 @@ export const ADMIN_USER_SORTS = [
   'activeDesc',
   'activeAsc',
 ] as const;
-export type AdminUserFilterValue =
+const ADMIN_USER_ROLES = ['all', 'admin', 'user', 'banned'] as const;
+export type AdminUserLogin =
   | 'all'
-  | 'owner'
-  | 'admin'
-  | 'user'
-  | 'banned'
+  | 'none'
+  | 'any'
   | `provider:${OAuthProvider}`;
-const ADMIN_USER_FILTERS: readonly string[] = [
+const ADMIN_USER_LOGINS: readonly string[] = [
   'all',
-  'owner',
-  'admin',
-  'user',
-  'banned',
+  'none',
+  'any',
   ...OAUTH_PROVIDERS.map((provider) => `provider:${provider}`),
 ];
 export type AdminUserFilter = {
   q?: string;
-  filter?: AdminUserFilterValue;
+  role?: (typeof ADMIN_USER_ROLES)[number];
+  login?: AdminUserLogin;
   group?: string;
+  ungrouped?: boolean;
 };
 
-export function adminUserFilterProvider(
-  filter: AdminUserFilter['filter'],
+export function adminUserLoginProvider(
+  login: AdminUserFilter['login'],
 ): OAuthProvider | null {
-  return filter?.startsWith('provider:')
-    ? (filter.slice('provider:'.length) as OAuthProvider)
+  return login?.startsWith('provider:')
+    ? (login.slice('provider:'.length) as OAuthProvider)
     : null;
 }
 export type AdminUserQuery = AdminUserFilter & {
@@ -63,8 +62,10 @@ export function parseAdminUserQuery(
 ): AdminUserQuery {
   const {
     q = '',
-    filter = 'all',
+    role = 'all',
+    login = 'all',
     group = '',
+    ungrouped = false,
     sort = 'priority',
     cursor,
     limit = ADMIN_USER_PAGE_SIZE,
@@ -74,7 +75,13 @@ export function parseAdminUserQuery(
     q.length > 200 ||
     typeof group !== 'string' ||
     group.length > 200 ||
-    !ADMIN_USER_FILTERS.includes(filter as string) ||
+    'filter' in value ||
+    (typeof ungrouped !== 'boolean' &&
+      ungrouped !== 'true' &&
+      ungrouped !== 'false') ||
+    ((ungrouped === true || ungrouped === 'true') && group !== '') ||
+    !ADMIN_USER_ROLES.includes(role as (typeof ADMIN_USER_ROLES)[number]) ||
+    !ADMIN_USER_LOGINS.includes(login as string) ||
     !ADMIN_USER_SORTS.includes(sort as (typeof ADMIN_USER_SORTS)[number]) ||
     (cursor !== undefined &&
       (typeof cursor !== 'string' || cursor.length > 2048)) ||
@@ -85,8 +92,10 @@ export function parseAdminUserQuery(
     throw new Error('用户查询参数错误');
   return {
     q: q.normalize('NFKC').trim().toLowerCase(),
-    filter: filter as AdminUserFilter['filter'],
+    role: role as AdminUserFilter['role'],
+    login: login as AdminUserFilter['login'],
     group,
+    ungrouped: ungrouped === true || ungrouped === 'true',
     sort: sort as AdminUserQuery['sort'],
     cursor: cursor as string | undefined,
     limit: Number(limit),

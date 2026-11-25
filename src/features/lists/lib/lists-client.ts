@@ -9,7 +9,12 @@ import type {
   PlazaListSummary,
   PlazaPage,
   PlazaSort,
+  SavedListSummary,
 } from '@/features/lists/types';
+import {
+  readListCountCookie,
+  writeListCountCookie,
+} from '@/lib/list-count-cookies';
 import { socialRequest } from '@/lib/profile.client';
 
 export type {
@@ -56,6 +61,21 @@ export async function fetchMyLists(
     signal,
   });
   lists.forEach(remember);
+  writeListCountCookie('list_count', lists.length);
+  return lists;
+}
+export async function fetchSavedLists(
+  signal?: AbortSignal,
+): Promise<SavedListSummary[]> {
+  const { lists } = await request<{ lists: SavedListSummary[] }>(
+    '?scope=saved',
+    { signal },
+  );
+  for (const list of lists) {
+    if (list.status === 'available') remember(list);
+    else summaryCache.delete(list.id);
+  }
+  writeListCountCookie('saved_list_count', lists.length);
   return lists;
 }
 export async function fetchProfileLists(
@@ -91,9 +111,12 @@ export async function setListLiked(
   return state;
 }
 export async function createList(input: CreateListInput): Promise<ListSummary> {
-  return remember(
+  const list = remember(
     (await request<{ list: ListSummary }>('', mutation('POST', input))).list,
   );
+  const count = readListCountCookie('list_count');
+  if (count !== null) writeListCountCookie('list_count', count + 1);
+  return list;
 }
 export async function fetchList(
   id: string,
@@ -119,6 +142,8 @@ export async function updateList(
 export async function deleteList(id: string): Promise<void> {
   await request(pathFor(id), { method: 'DELETE' });
   summaryCache.delete(id);
+  const count = readListCountCookie('list_count');
+  if (count !== null) writeListCountCookie('list_count', count - 1);
 }
 export async function addListItem(
   id: string,

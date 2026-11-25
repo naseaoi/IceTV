@@ -10,6 +10,178 @@ import {
   validateProxyUrlForRequest,
 } from '../url-guard';
 
+jest.mock('@/lib/upstream-proxy-pool.server', () => ({
+  ...jest.requireActual('@/lib/upstream-proxy-pool.server'),
+}));
+
+const upstreamPool = jest.requireMock<
+  typeof import('../upstream-proxy-pool.server')
+>('@/lib/upstream-proxy-pool.server');
+
+describe('upstream route failover', () => {
+  const originalPool = process.env.UPSTREAM_PROXY_POOL;
+  const proxy = 'http://proxy.example:8080';
+  const url = 'https://example.com/resource';
+  const response = { status: 200, body: null } as Response;
+
+  beforeEach(() => {
+    delete process.env.UPSTREAM_PROXY_POOL;
+    upstreamPool.getUpstreamRoutes('example.com');
+    process.env.UPSTREAM_PROXY_POOL = `direct,${proxy}`;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    if (originalPool === undefined) delete process.env.UPSTREAM_PROXY_POOL;
+    else process.env.UPSTREAM_PROXY_POOL = originalPool;
+    upstreamPool.getUpstreamRoutes('example.com');
+  });
+
+  it.each([
+    'UND_ERR_CONNECT_TIMEOUT',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ENOTFOUND',
+  ])(
+    'advances from direct to proxy on a pre-response network failure (%s)',
+    async (code) => {
+      const error = Object.assign(new TypeError('fetch failed'), {
+        cause: { code },
+      });
+      const fetchRoute = jest
+        .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue(response);
+      const failed = jest.spyOn(upstreamPool, 'reportUpstreamRouteFailure');
+      await expect(
+        fetchWithUrlGuard(url, { skipInitialValidation: true }),
+      ).resolves.toBe(response);
+      expect(fetchRoute.mock.calls.map(([route]) => route.id)).toEqual([
+        'direct',
+        proxy,
+      ]);
+      expect(failed).toHaveBeenCalledWith({ id: 'direct' }, 'example.com');
+    },
+  );
+
+  it('returns HTTP 403 from direct without switching exits', async () => {
+    const forbidden = { status: 403, body: null } as Response;
+    const fetchRoute = jest
+      .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+      .mockResolvedValue(forbidden);
+    const failed = jest.spyOn(upstreamPool, 'reportUpstreamRouteFailure');
+    await expect(
+      fetchWithUrlGuard(url, { skipInitialValidation: true }),
+    ).resolves.toBe(forbidden);
+    expect(fetchRoute).toHaveBeenCalledTimes(1);
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it('keeps body read failures on the delivered response', async () => {
+    const error = new TypeError('fetch failed');
+    const delivered = {
+      status: 200,
+      text: jest.fn().mockRejectedValue(error),
+    } as unknown as Response;
+    const fetchRoute = jest
+      .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+      .mockResolvedValue(delivered);
+    const result = await fetchWithUrlGuard(url, {
+      skipInitialValidation: true,
+    });
+    await expect(result.text()).rejects.toBe(error);
+    expect(fetchRoute).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps caller cancellation out of retry and route health', async () => {
+    const controller = new AbortController();
+    const error = new TypeError('fetch failed');
+    const fetchRoute = jest
+      .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+      .mockImplementation(async () => {
+        controller.abort();
+        throw error;
+      });
+    const failed = jest.spyOn(upstreamPool, 'reportUpstreamRouteFailure');
+    await expect(
+      fetchWithUrlGuard(url, {
+        skipInitialValidation: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(error);
+    expect(fetchRoute).toHaveBeenCalledTimes(1);
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it.each(['direct', proxy])(
+    'sends a request body only once (%s)',
+    async (first) => {
+      process.env.UPSTREAM_PROXY_POOL =
+        first === 'direct' ? `direct,${proxy}` : `${proxy},direct`;
+      const error = new TypeError('fetch failed');
+      const fetchRoute = jest
+        .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue(response);
+      await expect(
+        fetchWithUrlGuard(url, {
+          skipInitialValidation: true,
+          method: 'POST',
+          body: 'payload',
+        }),
+      ).rejects.toBe(error);
+      expect(fetchRoute).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ['string', 'payload'],
+    ['URLSearchParams', new URLSearchParams({ a: '1' })],
+  ])(
+    'retries a replayable %s body after a connect-phase failure',
+    async (_kind, body) => {
+      const error = new TypeError('fetch failed', {
+        cause: Object.assign(new Error('connect timeout'), {
+          code: 'UND_ERR_CONNECT_TIMEOUT',
+        }),
+      });
+      const fetchRoute = jest
+        .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue(response);
+      await expect(
+        fetchWithUrlGuard(url, {
+          skipInitialValidation: true,
+          method: 'POST',
+          body,
+        }),
+      ).resolves.toBe(response);
+      expect(fetchRoute.mock.calls.map(([route]) => route.id)).toEqual([
+        'direct',
+        proxy,
+      ]);
+    },
+  );
+
+  it.each([undefined, '', 'direct'])(
+    'keeps a single direct attempt without a pool (%s)',
+    async (configured) => {
+      if (configured === undefined) delete process.env.UPSTREAM_PROXY_POOL;
+      else process.env.UPSTREAM_PROXY_POOL = configured;
+      const error = new TypeError('fetch failed');
+      const fetchRoute = jest
+        .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue(response);
+      await expect(
+        fetchWithUrlGuard(url, { skipInitialValidation: true }),
+      ).rejects.toBe(error);
+      expect(fetchRoute).toHaveBeenCalledTimes(1);
+      expect(fetchRoute.mock.calls[0][0]).toEqual({ id: 'direct' });
+    },
+  );
+});
+
 describe('url guard', () => {
   const originalFetch = global.fetch;
   const originalDnsCacheTtl = process.env.PROXY_DNS_CACHE_TTL_MS;

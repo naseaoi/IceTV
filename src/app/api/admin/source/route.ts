@@ -28,7 +28,8 @@ type Action =
   | 'batch_set_proxy_mode'
   | 'set_proxy_mode'
   | 'batch_set_admin_only'
-  | 'set_admin_only';
+  | 'set_admin_only'
+  | 'set_nsfw';
 
 interface BaseBody {
   action?: Action;
@@ -82,9 +83,14 @@ export async function POST(request: NextRequest) {
       'set_proxy_mode',
       'batch_set_admin_only',
       'set_admin_only',
+      'set_nsfw',
     ];
     if (!action || !ACTIONS.includes(action)) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+    }
+
+    if (body.nsfw !== undefined && typeof body.nsfw !== 'boolean') {
+      return NextResponse.json({ error: 'nsfw 必须为布尔值' }, { status: 400 });
     }
 
     invalidateConfigCache();
@@ -126,6 +132,7 @@ export async function POST(request: NextRequest) {
           detail: cleanDetail,
           from: 'custom',
           disabled: false,
+          ...(body.nsfw !== undefined ? { nsfw: body.nsfw } : {}),
         });
         break;
       }
@@ -161,6 +168,7 @@ export async function POST(request: NextRequest) {
         entry.name = cleanName;
         entry.api = sourceApi.api;
         entry.detail = cleanDetail;
+        if (body.nsfw !== undefined) entry.nsfw = body.nsfw;
         break;
       }
       case 'disable': {
@@ -392,6 +400,24 @@ export async function POST(request: NextRequest) {
         if (!entry)
           return NextResponse.json({ error: '源不存在' }, { status: 404 });
         entry.proxyMode = proxyMode;
+        break;
+      }
+      case 'set_nsfw': {
+        const { key, nsfw } = body;
+        if (
+          typeof key !== 'string' ||
+          !key.trim() ||
+          typeof nsfw !== 'boolean'
+        ) {
+          return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+        }
+        const entry = adminConfig.SourceConfig.find(
+          (s) => s.key === key.trim(),
+        );
+        if (!entry) {
+          return NextResponse.json({ error: '源不存在' }, { status: 404 });
+        }
+        entry.nsfw = nsfw;
         break;
       }
       case 'set_admin_only': {

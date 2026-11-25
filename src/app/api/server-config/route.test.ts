@@ -4,7 +4,11 @@ import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfigForRead, getPublicConfig } from '@/lib/config';
+import {
+  getConfigForRead,
+  getConfigFresh,
+  getPublicConfig,
+} from '@/lib/config';
 import { db } from '@/lib/db';
 
 jest.mock('@/lib/db', () => ({ db: { getUserAccess: jest.fn() } }));
@@ -16,6 +20,7 @@ jest.mock('@/lib/api-auth', () => ({
 
 jest.mock('@/lib/config', () => ({
   getConfigForRead: jest.fn(),
+  getConfigFresh: jest.fn(),
   getPublicConfig: jest.fn(),
 }));
 
@@ -29,6 +34,12 @@ jest.mock('@/lib/version', () => ({
 }));
 
 installWebPolyfills();
+
+function createRequest(query = '') {
+  return {
+    nextUrl: new URL(`http://localhost/api/server-config${query}`),
+  } as NextRequest;
+}
 
 function createPublicConfig() {
   return {
@@ -68,6 +79,23 @@ describe('server config route', () => {
     });
     (getPublicConfig as jest.Mock).mockResolvedValue(createPublicConfig());
     (getConfigForRead as jest.Mock).mockResolvedValue(createConfig());
+    (getConfigFresh as jest.Mock).mockResolvedValue(createConfig());
+  });
+
+  it.each([
+    ['admin', '?fresh=1', true],
+    ['owner', '?fresh=1', true],
+    ['user', '?fresh=1', false],
+    ['admin', '', false],
+  ])('%s 请求 %s 时是否跳过配置缓存：%s', async (role, query, expectFresh) => {
+    (getOptionalActiveUser as jest.Mock).mockResolvedValue({
+      username: 'user-1',
+      role,
+    });
+    const { GET } = require('./route');
+    await GET(createRequest(query));
+    expect(getConfigFresh).toHaveBeenCalledTimes(expectFresh ? 1 : 0);
+    expect(getConfigForRead).toHaveBeenCalledTimes(expectFresh ? 0 : 1);
   });
 
   it.each([
@@ -95,7 +123,7 @@ describe('server config route', () => {
       });
       (db.getUserAccess as jest.Mock).mockResolvedValue({ role: 'user', tags });
       const { GET } = require('./route');
-      const response = await GET({} as NextRequest);
+      const response = await GET(createRequest());
       expect(await response.json()).toMatchObject({
         EnableLiveEntry: expected,
       });
@@ -112,7 +140,7 @@ describe('server config route', () => {
       EnableUserDanmaku: true,
     });
     const { GET } = require('./route');
-    expect(await (await GET({} as NextRequest)).json()).toMatchObject({
+    expect(await (await GET(createRequest())).json()).toMatchObject({
       EnableUserDanmaku: true,
     });
   });
@@ -120,7 +148,7 @@ describe('server config route', () => {
   it('does not expose custom proxy URLs to authenticated users', async () => {
     const { GET } = require('./route');
 
-    const response = await GET({} as NextRequest);
+    const response = await GET(createRequest());
     const body = await response.json();
 
     expect(body).toMatchObject({
@@ -141,7 +169,7 @@ describe('server config route', () => {
       });
       const { GET } = require('./route');
 
-      const response = await GET({} as NextRequest);
+      const response = await GET(createRequest());
 
       expect(await response.json()).not.toHaveProperty('DisableYellowFilter');
     },
@@ -150,7 +178,7 @@ describe('server config route', () => {
   it('exposes playback fault tolerance settings', async () => {
     const { GET } = require('./route');
 
-    const response = await GET({} as NextRequest);
+    const response = await GET(createRequest());
     const body = await response.json();
 
     expect(body).toMatchObject({

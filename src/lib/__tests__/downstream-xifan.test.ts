@@ -80,12 +80,13 @@ it('通过统一搜索入口读取游客 API 并区分空结果与错误响应',
   ).toBe(false);
 });
 
-it('详情只保留备用线路并生成带集号的懒地址，不提前取播放地址', async () => {
+it('详情优先备用线路并生成带集号的懒地址，不提前取播放地址', async () => {
   const fetchMock = global.fetch as jest.Mock;
   fetchMock.mockResolvedValueOnce(
     response({
       anime,
       sources: [
+        { id: 4, code: 'xfxf1', episodes: [episode] },
         { id: 5, code: 'xfy2', episodes: [episode, { ...episode, id: 999 }] },
         { id: 2, code: 'CS', episodes: [episode] },
       ],
@@ -100,15 +101,63 @@ it('详情只保留备用线路并生成带集号的懒地址，不提前取播�
     path: lazyPath,
   });
   expect(parseLazyEpisodeUrl(`${detail.episodes[0]}/../5`)).toBeNull();
+});
+
+it.each(
+  [[], [{ id: 2, code: 'CS', episodes: [] }]].map((sources) => [sources]),
+)('没有可用备用剧集时使用旧番主线 %j', async (otherSources) => {
+  const fetchMock = global.fetch as jest.Mock;
   fetchMock.mockResolvedValueOnce(
     response({
       anime,
-      sources: [{ id: 5, code: 'xfy2', episodes: [episode] }],
+      sources: [
+        { id: 4, code: 'xfxf1', episodes: [episode] },
+        ...otherSources,
+        { id: 5, code: 'xfy2', episodes: [episode] },
+      ],
     }),
   );
-  await expect(getDetailFromApi(site, '26')).rejects.toThrow(
-    '备用线路暂无剧集',
+  const detail = await getDetailFromApi(site, '26');
+  expect(detail.episodes).toEqual([
+    'icetv-lazy://xifan/anime/26/episode/329/source/5',
+  ]);
+  expect(detail.episodes_titles).toEqual(['第1集']);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it.each(
+  [
+    [],
+    [{ id: 1, code: 'AL', episodes: [episode] }],
+    [{ id: 2, code: 'CS', episodes: [] }],
+    [{ id: 5, code: 'xfy2', episodes: [] }],
+    [{ id: 5, code: 'CS', episodes: [episode] }],
+  ].map((sources) => [sources]),
+)('没有受支持线路的剧集时返回明确错误 %j', async (sources) => {
+  (global.fetch as jest.Mock).mockResolvedValueOnce(
+    response({ anime, sources }),
   );
+  await expect(getDetailFromApi(site, '26')).rejects.toThrow(
+    '稀饭暂无可用线路的剧集',
+  );
+});
+
+it('仅新番主线有剧集时生成该线路的懒地址', async () => {
+  (global.fetch as jest.Mock).mockResolvedValueOnce(
+    response({
+      anime,
+      sources: [
+        { id: 2, code: 'CS', episodes: [] },
+        { id: 5, code: 'xfy2', episodes: [] },
+        { id: 4, code: 'xfxf1', episodes: [episode] },
+      ],
+    }),
+  );
+  const detail = await getDetailFromApi(site, '26');
+  expect(detail.episodes).toEqual([
+    'icetv-lazy://xifan/anime/26/episode/329/source/4',
+  ]);
+  expect(detail.episodes_titles).toEqual(['第1集']);
 });
 
 it('解析选择同一备用线路，拒绝上游自动回落到主线的地址', async () => {
@@ -143,7 +192,7 @@ it('解析选择同一备用线路，拒绝上游自动回落到主线的地址'
     response({ ok: true, url: primary.url, candidates: [primary] }),
   );
   await expect(resolveXifanEpisodeUrlByPath(site, lazyPath)).rejects.toThrow(
-    '备用播放地址不可用',
+    '所选线路的播放地址不可用',
   );
   const count = fetchMock.mock.calls.length;
   await expect(
@@ -153,6 +202,81 @@ it('解析选择同一备用线路，拒绝上游自动回落到主线的地址'
     ),
   ).rejects.toThrow('无效的稀饭集数地址');
   expect(fetchMock).toHaveBeenCalledTimes(count);
+});
+
+it.each([
+  [5, 'xfy2'],
+  [4, 'xfxf1'],
+])(
+  '解析主线 %s/%s 时保留签名，只接受编号与代码一致的候选',
+  async (sourceId, sourceCode) => {
+    const fetchMock = global.fetch as jest.Mock;
+    const path = `/anime/26/episode/329/source/${sourceId}`;
+    const primary = {
+      source_id: sourceId,
+      source_code: sourceCode,
+      url: `https://play.xfvod.pro:8088/1.mp4?sign=example&t=${Math.floor(Date.now() / 1000) + 3600}`,
+    };
+    const backup = {
+      source_id: 2,
+      source_code: 'CS',
+      url: 'https://dl.playxf.top/1.m3u8',
+    };
+    fetchMock.mockResolvedValueOnce(
+      response({ ok: true, url: backup.url, candidates: [backup, primary] }),
+    );
+    await expect(resolveXifanEpisodeUrlByPath(site, path)).resolves.toBe(
+      primary.url,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.xifanacg.com/functions/v1/issue-web-playback',
+      expect.objectContaining({
+        body: JSON.stringify({
+          action: 'fallback',
+          episode_id: 329,
+          source_id: sourceId,
+        }),
+      }),
+    );
+    for (const candidate of [
+      backup,
+      { ...primary, source_id: 2 },
+      { ...primary, source_code: 'CS' },
+      { ...primary, source_code: sourceCode === 'xfy2' ? 'xfxf1' : 'xfy2' },
+    ]) {
+      fetchMock.mockResolvedValueOnce(
+        response({ ok: true, url: primary.url, candidates: [candidate] }),
+      );
+      await expect(resolveXifanEpisodeUrlByPath(site, path)).rejects.toThrow(
+        '所选线路的播放地址不可用',
+      );
+    }
+  },
+);
+
+it.each([-60, 20])('拒绝已过期或剩余 %s 秒的主线地址', async (remaining) => {
+  (global.fetch as jest.Mock).mockResolvedValueOnce(
+    response({
+      ok: true,
+      candidates: [
+        {
+          source_id: 5,
+          source_code: 'xfy2',
+          url: `https://play.xfvod.pro:8088/1.mp4?sign=example&t=${Math.floor(Date.now() / 1000) + remaining}`,
+        },
+      ],
+    }),
+  );
+  await expect(
+    resolveXifanEpisodeUrlByPath(site, '/anime/26/episode/329/source/5'),
+  ).rejects.toThrow('播放地址即将过期');
+});
+
+it('未接入的线路在回源前被拒绝', async () => {
+  await expect(
+    resolveXifanEpisodeUrlByPath(site, '/anime/26/episode/329/source/1'),
+  ).rejects.toThrow('无效的稀饭播放线路');
+  expect(global.fetch).not.toHaveBeenCalled();
 });
 
 it.each([

@@ -14,7 +14,10 @@ import {
   libraryStatements,
   validateLibraryQuery,
 } from '@/features/favorites/lib/library-storage';
-import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
+import {
+  assertMyReviewWhitespaceFiltering,
+  videoReview,
+} from '@/lib/__tests__/__fixtures__/video-review-contract';
 import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
 import { MySqlStorage } from '@/lib/mysql.db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
@@ -46,6 +49,18 @@ it.each([0, -1, 1.5, NaN, Infinity, FAVORITE_RENDER_CHUNK + 1])(
     );
   },
 );
+
+it('收藏旧混合筛选值与非法评价维度明确拒绝，省略新维度仍默认全部评价', () => {
+  expect(() =>
+    validateLibraryQuery({ ...query, filter: 'reviewed' as never }, 'demo'),
+  ).toThrow();
+  expect(() =>
+    validateLibraryQuery({ ...query, review: 'invalid' as never }, 'demo'),
+  ).toThrow();
+  expect(libraryStatements('sqlite', 'demo', query)).toEqual(
+    libraryStatements('sqlite', 'demo', { ...query, review: 'all' }),
+  );
+});
 
 it.each(['sqlite', 'mysql'] as const)(
   '%s 查询按条数多读取一行判断续页',
@@ -80,6 +95,169 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           storage as unknown as { pool: { end(): Promise<void> } }
         ).pool.end();
       else (storage as unknown as InternalSqlite).db.close();
+    });
+
+    it('正文逐字符空白判定与 JS trim 一致，计数与交集分页一致', async () => {
+      await assertMyReviewWhitespaceFiltering(storage, username);
+    });
+
+    it('我的评价按可见性与内容交集分页，分面计数保留内容条件，游标绑定全部条件', async () => {
+      const reviews: VideoReview[] = [];
+      const whitespace = String.fromCharCode(9, 10, 13, 32, 160, 12288, 65279);
+      for (const isPublic of [true, false]) {
+        for (const kind of ['rating', 'text', 'both', 'empty']) {
+          for (let i = 0; i < (kind === 'empty' ? 1 : 24); i++) {
+            const title = `Review ${isPublic}-${kind}-${String(i).padStart(2, '0')}`;
+            const entry = {
+              ...videoReview,
+              title,
+              title_norm: title.toLowerCase(),
+              is_public: isPublic,
+              rating: kind === 'text' || kind === 'empty' ? null : 8,
+              content:
+                kind === 'rating' || kind === 'empty'
+                  ? i % 2
+                    ? ''
+                    : whitespace
+                  : '正文',
+            };
+            reviews.push(entry);
+            await storage.setVideoReview(username, entry);
+          }
+        }
+      }
+      for (const content of ['all', 'rating', 'text', 'both'] as const) {
+        const eligible = reviews.filter(
+          (entry) =>
+            content === 'all' ||
+            (content === 'rating' &&
+              entry.rating !== null &&
+              !entry.content.trim()) ||
+            (content === 'text' &&
+              entry.rating === null &&
+              !!entry.content.trim()) ||
+            (content === 'both' &&
+              entry.rating !== null &&
+              !!entry.content.trim()),
+        );
+        for (const filter of ['all', 'public', 'private'] as const) {
+          for (const sort of ['updated', 'high', 'low'] as const) {
+            const seen: string[] = [];
+            let cursor: string | undefined;
+            do {
+              const page = await storage.getMyVideoReviewPage(username, {
+                content,
+                filter,
+                sort,
+                cursor,
+              });
+              expect(page.total).toBe(reviews.length);
+              expect(page.counts).toEqual({
+                all: eligible.length,
+                public: eligible.filter((entry) => entry.is_public).length,
+                private: eligible.filter((entry) => !entry.is_public).length,
+              });
+              seen.push(...page.items.map((entry) => entry.title_norm));
+              cursor = page.nextCursor ?? undefined;
+            } while (cursor);
+            const expected = eligible.filter(
+              (entry) =>
+                filter === 'all' || entry.is_public === (filter === 'public'),
+            );
+            expect(seen.sort()).toEqual(
+              expected.map((entry) => entry.title_norm).sort(),
+            );
+          }
+        }
+      }
+      const first = await storage.getMyVideoReviewPage(username, {
+        content: 'rating',
+        filter: 'private',
+      });
+      expect(first.nextCursor).not.toBeNull();
+      for (const changed of [
+        { q: 'Review' },
+        { content: 'both' as const },
+        { filter: 'public' as const },
+        { sort: 'high' as const },
+      ])
+        await expect(
+          storage.getMyVideoReviewPage(username, {
+            content: 'rating',
+            filter: 'private',
+            ...changed,
+            cursor: first.nextCursor!,
+          }),
+        ).rejects.toThrow('分页游标');
+      const searched = await storage.getMyVideoReviewPage(username, {
+        q: 'true',
+        filter: 'private',
+        content: 'text',
+      });
+      expect(searched.items).toEqual([]);
+      expect(searched.counts).toEqual({ all: 24, public: 24, private: 0 });
+      await expect(
+        storage.getMyVideoReviewPage(username, {
+          cursor: Buffer.from(
+            JSON.stringify([2000, '2000', 'old', '2026']),
+          ).toString('base64url'),
+        }),
+      ).rejects.toThrow('分页游标');
+    });
+
+    it('全量批量操作与列表共用观看状态及评价条件，并保留排除项', async () => {
+      for (const id of ['reviewed', 'unreviewed', 'excluded', 'planned']) {
+        await storage.setFavorite(username, `source+${id}`, {
+          ...favorite,
+          title: id,
+          watch_status: id === 'planned' ? 'planned' : 'completed',
+        });
+      }
+      await storage.setVideoReview(username, {
+        ...videoReview,
+        title: 'reviewed',
+        title_norm: 'reviewed',
+        rating: null,
+      });
+      const page = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        filter: 'completed',
+        review: 'unreviewed',
+      });
+      expect(page.items.map((item) => item.key).sort()).toEqual([
+        'source+excluded',
+        'source+unreviewed',
+      ]);
+      expect(page.counts).toEqual({
+        all: 3,
+        planned: 1,
+        watching: 0,
+        completed: 2,
+      });
+      expect(page.libraryTotal).toBe(4);
+      expect(
+        await storage.batchFavorites(username, {
+          action: 'remove',
+          target: {
+            match: { q: '', filter: 'completed', review: 'unreviewed' },
+            exclude: ['source+excluded'],
+          },
+        }),
+      ).toEqual({ affected: 1 });
+      expect(
+        (await storage.getFavoriteLibraryPage(username, query)).items
+          .map((item) => item.key)
+          .sort(),
+      ).toEqual(['source+excluded', 'source+planned', 'source+reviewed']);
+      await expect(
+        storage.batchFavorites(username, {
+          action: 'remove',
+          target: {
+            match: { q: '', filter: 'all', review: 'invalid' as never },
+            exclude: [],
+          },
+        }),
+      ).rejects.toThrow();
     });
 
     it('指定条数截断并允许变更条数续页，计数包含直播且排除无效投影', async () => {
@@ -199,85 +377,91 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           'planned',
           'watching',
           'completed',
-          'reviewed',
         ] as const) {
-          const options = { query: '', filter, sort };
-          const result: FavoriteLibraryPage['items'] = [];
-          let cursor: string | null = null;
-          do {
-            const page: FavoriteLibraryPage =
-              await storage.getFavoriteLibraryPage(username, {
-                ...options,
-                cursor,
-              });
-            expect(page.counts).toEqual({
-              all: 117,
-              planned: 39,
-              watching: 58,
-              completed: 20,
-              reviewed: 59,
-            });
-            result.push(...page.items);
-            cursor = page.nextCursor;
-          } while (cursor);
-          const expected = Object.keys(favorites).filter(
-            (key) =>
-              filter === 'all' ||
-              (filter === 'reviewed'
-                ? Number(key.split('+')[1]) % 2 === 0
-                : statusFor(key) === filter),
-          );
-          // 旧内存排序没有唯一键兜底，比较各排序分组后显式加相同的二进制 key 次序。
-          const value = (key: string): number | null =>
-            sort === 'saved'
-              ? favorites[key].save_time
-              : sort === 'played'
-                ? (records[key]?.save_time ?? null)
-                : sort === 'watched'
-                  ? ratingFor(key) !== null
-                    ? (records[key]?.save_time ?? videoReview.updated_at)
-                    : null
-                  : sort === 'year'
-                    ? favorites[key].year === 'unknown'
-                      ? null
-                      : 2026
-                    : ratingFor(key);
-          const keys = expected.sort((a, b) => {
-            const av = value(a),
-              bv = value(b);
-            return (
-              (av === null
-                ? bv === null
-                  ? 0
-                  : 1
-                : bv === null
-                  ? -1
-                  : bv - av) ||
-              favorites[b].save_time - favorites[a].save_time ||
-              (a < b ? 1 : a > b ? -1 : 0)
+          for (const review of ['all', 'reviewed', 'unreviewed'] as const) {
+            const options = { query: '', filter, review, sort };
+            const eligible = Object.keys(favorites).filter(
+              (key) =>
+                review === 'all' ||
+                (Number(key.split('+')[1]) % 2 === 0) ===
+                  (review === 'reviewed'),
             );
-          });
-          expect(result.map((item) => item.key)).toEqual(keys);
-          expect(new Set(result.map((item) => item.key)).size).toBe(
-            keys.length,
-          );
-          for (const item of result) {
-            expect(item.myRating).toBe(ratingFor(item.key));
-            expect(item.playRecord).toEqual(records[item.key]);
+            const result: FavoriteLibraryPage['items'] = [];
+            let cursor: string | null = null;
+            do {
+              const page: FavoriteLibraryPage =
+                await storage.getFavoriteLibraryPage(username, {
+                  ...options,
+                  cursor,
+                });
+              expect(page.counts).toEqual({
+                all: eligible.length,
+                planned: eligible.filter((key) => statusFor(key) === 'planned')
+                  .length,
+                watching: eligible.filter(
+                  (key) => statusFor(key) === 'watching',
+                ).length,
+                completed: eligible.filter(
+                  (key) => statusFor(key) === 'completed',
+                ).length,
+              });
+              result.push(...page.items);
+              cursor = page.nextCursor;
+            } while (cursor);
+            const expected = eligible.filter(
+              (key) => filter === 'all' || statusFor(key) === filter,
+            );
+            // 旧内存排序没有唯一键兜底，比较各排序分组后显式加相同的二进制 key 次序。
+            const value = (key: string): number | null =>
+              sort === 'saved'
+                ? favorites[key].save_time
+                : sort === 'played'
+                  ? (records[key]?.save_time ?? null)
+                  : sort === 'watched'
+                    ? ratingFor(key) !== null
+                      ? (records[key]?.save_time ?? videoReview.updated_at)
+                      : null
+                    : sort === 'year'
+                      ? favorites[key].year === 'unknown'
+                        ? null
+                        : 2026
+                      : ratingFor(key);
+            const keys = expected.sort((a, b) => {
+              const av = value(a),
+                bv = value(b);
+              return (
+                (av === null
+                  ? bv === null
+                    ? 0
+                    : 1
+                  : bv === null
+                    ? -1
+                    : bv - av) ||
+                favorites[b].save_time - favorites[a].save_time ||
+                (a < b ? 1 : a > b ? -1 : 0)
+              );
+            });
+            expect(result.map((item) => item.key)).toEqual(keys);
+            expect(new Set(result.map((item) => item.key)).size).toBe(
+              keys.length,
+            );
+            for (const item of result) {
+              expect(item.myRating).toBe(ratingFor(item.key));
+              expect(item.playRecord).toEqual(records[item.key]);
+            }
           }
         }
       }
       const search = await storage.getFavoriteLibraryPage(username, {
         ...query,
         query: '别 名',
-        filter: 'reviewed',
+        review: 'reviewed',
       });
       expect(search.counts).toEqual({
-        all: 78,
+        all: 39,
         planned: 0,
-        watching: 58,
+        watching: 19,
         completed: 20,
-        reviewed: 39,
       });
       expect(search.total).toBe(39);
       expect(search.libraryTotal).toBe(117);
@@ -286,6 +470,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         { query: 'other' },
         { sort: 'rating' as const },
         { filter: 'watching' as const },
+        { review: 'unreviewed' as const },
       ]) {
         await expect(
           storage.getFavoriteLibraryPage(username, {
@@ -329,7 +514,14 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       });
       expect(page.total).toBe(1);
       expect(page.items[0].myRating).toBeNull();
-      expect(page.counts.reviewed).toBe(1);
+      expect(
+        (
+          await storage.getFavoriteLibraryPage(username, {
+            ...query,
+            review: 'reviewed',
+          })
+        ).counts.all,
+      ).toBe(1);
       const original = await storage.getFavorite(username, 'source+1');
       const changed = { ...favorite, title: 'changed', save_time: 9000 };
       expect(

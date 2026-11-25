@@ -1,6 +1,7 @@
 ﻿import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
 import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
 
+import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import {
   PLAYER_PANEL_SURFACE_CLASS,
@@ -43,6 +44,8 @@ interface LiveChannelSidebarProps {
   handleChannelChange: (channel: LiveChannel) => void;
   handleSourceChange: (source: LiveSource) => void;
 }
+
+const EPG_STATE_CLASS = 'min-h-0 flex-1 px-4 py-6 text-center';
 
 const tabs: { key: LivePanelTab; label: string }[] = [
   { key: 'channels', label: '频道' },
@@ -202,17 +205,14 @@ function EpgTab({
       </div>
 
       {isEpgLoading ? (
-        <div className='flex min-h-0 flex-1 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-          <Spinner className='mr-3 h-5 w-5 text-brand-500' />
-          加载节目单...
-        </div>
+        <ListLoadingState label='加载节目单...' className={EPG_STATE_CLASS} />
       ) : epgError ? (
         <LoadErrorState message={epgError} onRetry={() => retryEpg?.()} />
       ) : programs.length === 0 ? (
-        <EmptyPanel
-          icon={<Clock className='h-8 w-8 text-gray-400 dark:text-gray-600' />}
-          title='暂无节目单'
-          message='当前频道未提供节目单数据'
+        <ListEmptyState
+          icon={<Clock />}
+          label='暂无节目单'
+          className={EPG_STATE_CLASS}
         />
       ) : (
         <div

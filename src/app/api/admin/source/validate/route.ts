@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  isSpecialSearchSource,
-  validateSourceSearch,
-} from '@/features/admin/lib/source-search-validation.server';
+import { validateSourceSearch } from '@/features/admin/lib/source-search-validation.server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { runWithConcurrency } from '@/lib/concurrency';
 import { getConfigForRead } from '@/lib/config';
@@ -156,11 +153,7 @@ export async function GET(request: NextRequest) {
           abortState.cleanup();
           const abortedByParent =
             upstreamController.signal.aborted && !abortState.isTimeout();
-          if (
-            !resourceLimited &&
-            !abortedByParent &&
-            !isSpecialSearchSource(site)
-          ) {
+          if (!resourceLimited && !abortedByParent) {
             recordSourceSearchOutcome(
               site.key,
               outcome,

@@ -1,9 +1,14 @@
 'use client';
 
-import { X } from 'lucide-react';
+import { Users, X } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback } from 'react';
 
+import {
+  ListEmptySkeleton,
+  ListEmptyState,
+  ListLoadingState,
+} from '@/components/ListState';
 import ModalShell from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import SkeletonText from '@/components/SkeletonText';
@@ -16,8 +21,6 @@ import { FOLLOW_PAGE_SIZE } from '@/lib/user-profile';
 const FOLLOW_ROW_CLASS = 'flex items-center gap-3 rounded-xl p-3';
 const FOLLOW_AVATAR_CLASS = 'h-8 w-8';
 const FOLLOW_EMPTY_CLASS = 'py-8 text-center text-sm';
-// 计数未知时的骨架条数
-const FOLLOW_SKELETON_FALLBACK = 3;
 
 export const profileButtonClass =
   'rounded-xl bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 disabled:opacity-50 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/15';
@@ -26,12 +29,15 @@ export function PageFooter({
   error,
   cursor,
   loadMore,
+  retry,
 }: {
   loading: boolean;
   error: string;
   cursor: string | null;
   loadMore: () => Promise<void>;
+  retry: () => Promise<void>;
 }) {
+  if (!loading && !cursor && !error) return null;
   return (
     <div className='py-6 text-center'>
       {error && (
@@ -46,7 +52,7 @@ export function PageFooter({
           <button
             type='button'
             className={profileButtonClass}
-            onClick={() => void loadMore()}
+            onClick={() => void (error ? retry() : loadMore())}
           >
             {error ? '重试' : '加载更多'}
           </button>
@@ -85,13 +91,10 @@ export function FollowList({
 }
 
 function FollowListSkeleton({ count }: { count: number | null }) {
-  if (count === 0)
-    return (
-      <div aria-hidden='true' className={FOLLOW_EMPTY_CLASS}>
-        &nbsp;
-      </div>
-    );
-  const rows = Math.min(count ?? FOLLOW_SKELETON_FALLBACK, FOLLOW_PAGE_SIZE);
+  if (count === 0) return <ListEmptySkeleton className={FOLLOW_EMPTY_CLASS} />;
+  if (count === null)
+    return <ListLoadingState className={FOLLOW_EMPTY_CLASS} />;
+  const rows = Math.min(count, FOLLOW_PAGE_SIZE);
   return (
     <div role='status' aria-label='加载中'>
       {Array.from({ length: rows }, (_, index) => (
@@ -154,7 +157,11 @@ function FollowListContent({
         ))}
         {initialLoading && <FollowListSkeleton count={count} />}
         {!page.loading && !page.error && page.items.length === 0 && (
-          <p className={`${FOLLOW_EMPTY_CLASS} text-gray-500`}>暂无用户</p>
+          <ListEmptyState
+            icon={<Users />}
+            label='暂无用户'
+            className={FOLLOW_EMPTY_CLASS}
+          />
         )}
         <PageFooter {...page} loading={page.loading && !initialLoading} />
       </div>

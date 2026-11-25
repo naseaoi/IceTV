@@ -16,6 +16,110 @@ const makeCode = (
   ...extra,
 });
 
+export function inviteCodeFilterContract(createStorage: () => IStorage) {
+  let storage: IStorage;
+  beforeEach(async () => {
+    storage = createStorage();
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+  });
+
+  it('未使用只匹配零用量有效码，计数、分页与到期边界一致', async () => {
+    const now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      await storage.createInviteCodes([
+        makeCode('UNUSED-A', { maxUses: 1 }),
+        makeCode('UNUSED-B'),
+        makeCode('PARTIAL', { maxUses: 2, usedCount: 1 }),
+        makeCode('UNLIMITED-USED', { usedCount: 1 }),
+        makeCode('EXPIRED', { expiresAt: now - 1 }),
+        makeCode('EXPIRES-NOW', { expiresAt: now }),
+        makeCode('EXHAUSTED', { maxUses: 1, usedCount: 1 }),
+      ]);
+      const first = await storage.queryInviteCodes({
+        filter: 'unused',
+        limit: 1,
+      });
+      expect(first).toMatchObject({
+        total: 2,
+        activeCount: 4,
+        inactiveCount: 3,
+      });
+      expect(first.items.map((item) => item.code)).toEqual(['UNUSED-B']);
+      expect(first.nextCursor).toEqual(expect.any(String));
+      const second = await storage.queryInviteCodes({
+        filter: 'unused',
+        limit: 1,
+        cursor: first.nextCursor!,
+      });
+      expect(second).toMatchObject({
+        total: 2,
+        activeCount: 4,
+        inactiveCount: 3,
+        nextCursor: null,
+      });
+      expect(second.items.map((item) => item.code)).toEqual(['UNUSED-A']);
+      await expect(
+        storage.queryInviteCodes({
+          filter: 'active',
+          cursor: first.nextCursor!,
+        }),
+      ).rejects.toThrow('邀请码游标无效');
+      const active = await storage.queryInviteCodes({ filter: 'active' });
+      expect(active.total).toBe(4);
+      expect(active.items.map((item) => item.code).sort()).toEqual([
+        'PARTIAL',
+        'UNLIMITED-USED',
+        'UNUSED-A',
+        'UNUSED-B',
+      ]);
+      await expect(
+        storage.queryInviteCodes({
+          filter: 'unused',
+          cursor: Buffer.from(
+            JSON.stringify(['active', 1, 'UNUSED-B']),
+          ).toString('base64url'),
+        }),
+      ).rejects.toThrow('邀请码游标无效');
+      expect(await storage.queryInviteCodes({ filter: 'all' })).toMatchObject({
+        total: 7,
+      });
+      expect(
+        await storage.queryInviteCodes({ filter: 'expired' }),
+      ).toMatchObject({
+        total: 2,
+      });
+      expect(
+        await storage.queryInviteCodes({ filter: 'exhausted' }),
+      ).toMatchObject({
+        total: 1,
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('首次占用后退出未使用筛选，回滚恢复，空结果总数和游标归零', async () => {
+    expect(await storage.queryInviteCodes({ filter: 'unused' })).toMatchObject({
+      items: [],
+      total: 0,
+      nextCursor: null,
+    });
+    await storage.createInviteCode(makeCode('UNUSED', { maxUses: 2 }));
+    expect(await storage.reserveInviteCodeUse('UNUSED')).toBe(true);
+    expect(await storage.queryInviteCodes({ filter: 'unused' })).toMatchObject({
+      items: [],
+      total: 0,
+      activeCount: 1,
+      nextCursor: null,
+    });
+    await storage.releaseInviteCodeUse('UNUSED');
+    const restored = await storage.queryInviteCodes({ filter: 'unused' });
+    expect(restored.total).toBe(1);
+    expect(restored.items).toMatchObject([{ code: 'UNUSED', usedCount: 0 }]);
+  });
+}
+
 export function inviteCodeBatchContract(
   createStorage: () => IStorage,
   reset: (storage: IStorage) => Promise<void> = async () => {},

@@ -33,7 +33,10 @@ const site = (key: string, disabled = false) => ({
 
 beforeEach(() => {
   jest.resetAllMocks();
-  configMock.mockResolvedValue({ SourceConfig: [] });
+  configMock.mockResolvedValue({
+    SiteConfig: { DisableYellowFilter: false },
+    SourceConfig: [],
+  });
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
@@ -63,6 +66,7 @@ it('rotates distinct keyword pairs by UTC day and covers the entire list', () =>
 it('probes only enabled sources with both daily keywords then drains the health buffer', async () => {
   const enabled = [site('a'), site('b')];
   configMock.mockResolvedValue({
+    SiteConfig: { DisableYellowFilter: false },
     SourceConfig: [...enabled, site('disabled', true)],
   });
   await probeConfiguredSources(now);
@@ -86,7 +90,10 @@ it('bounds concurrency and keeps processing after one source rejects', async () 
     { length: SOURCE_HEALTH_PROBE_CONCURRENCY + 3 },
     (_, i) => site(`s${i}`),
   );
-  configMock.mockResolvedValue({ SourceConfig: sources });
+  configMock.mockResolvedValue({
+    SiteConfig: { DisableYellowFilter: false },
+    SourceConfig: sources,
+  });
   let active = 0;
   let peak = 0;
   probeMock.mockImplementation(async (source) => {
@@ -114,7 +121,10 @@ it('still flushes when configuration fails and contains storage errors', async (
 });
 
 it('flushes even when no sources are enabled', async () => {
-  configMock.mockResolvedValue({ SourceConfig: [site('disabled', true)] });
+  configMock.mockResolvedValue({
+    SiteConfig: { DisableYellowFilter: false },
+    SourceConfig: [site('disabled', true)],
+  });
   await probeConfiguredSources(now);
   expect(probeMock).not.toHaveBeenCalled();
   expect(flushMock).toHaveBeenCalledTimes(2);

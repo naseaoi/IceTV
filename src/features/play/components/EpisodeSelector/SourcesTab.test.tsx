@@ -57,6 +57,18 @@ function createEntry(
 }
 
 describe('SourcesTab source sorting', () => {
+  it('换源查找先显示状态提示，完成后显示空状态', () => {
+    const props = { availableSources: [], sourceSearchError: null };
+    const { rerender } = render(<SourcesTab {...props} sourceSearchLoading />);
+    expect(
+      screen.getByRole('status', { name: '搜索中...' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('暂无可用的换源')).toBeNull();
+    rerender(<SourcesTab {...props} sourceSearchLoading={false} />);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('暂无可用的换源')).toBeInTheDocument();
+  });
+
   it('换源测速一次并发 2 个源站', () => {
     expect(VIDEO_INFO_BATCH_SIZE).toBe(2);
   });

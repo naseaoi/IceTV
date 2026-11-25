@@ -6,19 +6,21 @@ import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
+import { ListEmptyState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import PageLayout from '@/components/PageLayout';
 import SearchBox from '@/components/SearchBox';
-import SearchResultFilter from '@/components/SearchResultFilter';
 import Spinner from '@/components/Spinner';
 import VideoCard from '@/components/VideoCard';
 import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { SearchResultsLoading } from '@/features/search/components/SearchPageSkeleton';
+import SearchResultFilter from '@/features/search/components/SearchResultFilter';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
   FilterState,
+  reconcileSearchFilter,
   useSearchAggregation,
 } from '@/features/search/hooks/useSearchAggregation';
 import {
@@ -35,6 +37,7 @@ import {
   SEARCH_MOBILE_BAR_CLASS,
   SEARCH_MOBILE_BAR_ROW_CLASS,
   SEARCH_MOBILE_FILTER_ROW_CLASS,
+  SEARCH_RESULT_STATE_CLASS,
   SEARCH_RESULTS_CONTAINER_CLASS,
 } from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
@@ -77,10 +80,11 @@ function SearchStatus({
 
 function SearchEmptyState({ text }: { text: string }) {
   return (
-    <div className='flex flex-col items-center justify-center gap-3 py-24 text-gray-400 dark:text-gray-500'>
-      <SearchX aria-hidden='true' className='h-10 w-10 stroke-[1.5]' />
-      <p className='text-sm'>{text}</p>
-    </div>
+    <ListEmptyState
+      icon={<SearchX />}
+      label={text}
+      className={SEARCH_RESULT_STATE_CLASS}
+    />
   );
 }
 
@@ -214,6 +218,33 @@ function AuthenticatedSearchPageClient() {
     !allSourcesFailed;
 
   const aggregate = viewMode === 'agg';
+  const changeAggregate = (next: boolean) => {
+    if (next)
+      setFilterAgg(
+        reconcileSearchFilter(filterAgg, filterOptions.categoriesAgg),
+      );
+    else
+      setFilterAll(
+        reconcileSearchFilter(filterAll, filterOptions.categoriesAll),
+      );
+    setViewMode(next ? 'agg' : 'all');
+  };
+  useEffect(() => {
+    if (isMatchingLoading) return;
+    const current = aggregate ? filterAgg : filterAll;
+    const next = reconcileSearchFilter(
+      current,
+      aggregate ? filterOptions.categoriesAgg : filterOptions.categoriesAll,
+    );
+    if (
+      next.source !== current.source ||
+      next.title !== current.title ||
+      next.year !== current.year
+    ) {
+      if (aggregate) setFilterAgg(next);
+      else setFilterAll(next);
+    }
+  }, [aggregate, filterAgg, filterAll, filterOptions, isMatchingLoading]);
   const resultCount = aggregate
     ? filteredAggResults.length
     : filteredAllResults.length;
@@ -276,7 +307,7 @@ function AuthenticatedSearchPageClient() {
               values={filterValues}
               onChange={(v) => setFilterValues(v as FilterState)}
               aggregate={aggregate}
-              onAggregateChange={(next) => setViewMode(next ? 'agg' : 'all')}
+              onAggregateChange={changeAggregate}
             />
           </div>
         )}
@@ -309,7 +340,7 @@ function AuthenticatedSearchPageClient() {
                     type='checkbox'
                     className='peer sr-only'
                     checked={aggregate}
-                    onChange={() => setViewMode(aggregate ? 'all' : 'agg')}
+                    onChange={() => changeAggregate(!aggregate)}
                   />
                   <span className='block h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-500 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40 dark:bg-gray-600' />
                   <span className='absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4' />

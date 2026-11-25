@@ -1,4 +1,8 @@
-import { hasPlayRecordUpdate, selectPlayRecordPage } from '@/lib/play-records';
+import {
+  hasPlayRecordUpdate,
+  hasUnreadPlayRecordMessage,
+  selectPlayRecordPage,
+} from '@/lib/play-records';
 import type { IStorage, PlayRecord } from '@/lib/types';
 
 export async function assertUpdatedPlayRecordPage(
@@ -17,7 +21,11 @@ export async function assertUpdatedPlayRecordPage(
     save_time: 100,
   };
   const records: Record<string, PlayRecord> = {
-    'source+a': { ...record, update_detected_at: 900 },
+    'source+a': {
+      ...record,
+      update_detected_at: 900,
+      update_message_read_episodes: 12,
+    },
     'source+b': { ...record, update_detected_at: 1 },
     'source+c': {
       ...record,
@@ -25,6 +33,7 @@ export async function assertUpdatedPlayRecordPage(
       group_index: 1,
       group_total: 3,
       update_baseline_group_total: 2,
+      update_message_read_group_total: 3,
     },
     'source+disabled': { ...record, tracking_enabled: false },
     'source+ended': { ...record, series_status: 'ended' },
@@ -49,7 +58,10 @@ export async function assertUpdatedPlayRecordPage(
   const expectedTotal =
     Object.values(records).filter(hasPlayRecordUpdate).length;
   const unread = await storage.getUnreadTrackingPlayRecordPage('page-user', 1);
-  expect(unread.total).toBe(expectedTotal);
+  expect(unread.total).toBe(
+    Object.values(records).filter(hasUnreadPlayRecordMessage).length,
+  );
+  expect(unread.total).toBe(expectedTotal - 2);
   let cursor: string | null = null;
   const keys: string[] = [];
   do {
@@ -65,7 +77,7 @@ export async function assertUpdatedPlayRecordPage(
       'updated',
     );
     expect(page).toEqual(expected);
-    expect(page.total).toBe(unread.total);
+    expect(page.total).toBe(expectedTotal);
     keys.push(...Object.keys(page.items));
     cursor = page.nextCursor;
   } while (cursor);

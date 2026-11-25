@@ -75,6 +75,7 @@ function binding(username: string, query: FavoriteLibraryQuery): string {
         username,
         normalizeWorkTitle(query.query),
         query.filter,
+        query.review ?? 'all',
         query.sort,
         query.profileScope,
       ]),
@@ -101,9 +102,8 @@ export function validateLibraryQuery(
   if (
     typeof query.query !== 'string' ||
     query.query.length > 500 ||
-    !['all', 'planned', 'watching', 'completed', 'reviewed'].includes(
-      query.filter,
-    ) ||
+    !['all', 'planned', 'watching', 'completed'].includes(query.filter) ||
+    !['all', 'reviewed', 'unreviewed'].includes(query.review ?? 'all') ||
     !['saved', 'played', 'watched', 'rating', 'year'].includes(query.sort) ||
     (query.limit !== undefined &&
       (!Number.isInteger(query.limit) ||
@@ -151,7 +151,6 @@ export interface LibraryCountsRow {
   planned: number;
   watching: number;
   completed: number;
-  reviewed: number;
   library_total: number;
 }
 
@@ -244,7 +243,13 @@ export function libraryStatements(
   const search = normalizedQuery
     ? ` AND INSTR(${dialect === 'mysql' ? 'BINARY f.search_text' : 'f.search_text'}, ?) > 0`
     : '';
-  const where = `WHERE f.username = ? AND f.library_valid = 1${search}${query.profileScope ? ` AND ${profileFavoriteOriginSql(dialect, 'f.favorite_json')}` : ''}`;
+  const reviewFilter =
+    query.review === 'reviewed'
+      ? ` AND ${reviewed}`
+      : query.review === 'unreviewed'
+        ? ` AND NOT ${reviewed}`
+        : '';
+  const where = `WHERE f.username = ? AND f.library_valid = 1${search}${reviewFilter}${query.profileScope ? ` AND ${profileFavoriteOriginSql(dialect, 'f.favorite_json')}` : ''}`;
   const params: (string | number)[] = [
     username,
     ...(normalizedQuery ? [normalizedQuery] : []),
@@ -254,7 +259,6 @@ export function libraryStatements(
     planned: ` AND (${status}) = 'planned'`,
     watching: ` AND (${status}) = 'watching'`,
     completed: ` AND (${status}) = 'completed'`,
-    reviewed: ` AND ${reviewed}`,
   }[query.filter];
   const after = cursor
     ? ` AND (${missing} > ? OR (${missing} = ? AND (${value} < ? OR (${value} = ? AND (f.saved_at < ? OR (f.saved_at = ? AND ${key} < ?))))))`
@@ -269,7 +273,6 @@ export function libraryStatements(
       COALESCE(SUM(CASE WHEN (${status}) = 'planned' THEN 1 ELSE 0 END), 0) AS planned,
       COALESCE(SUM(CASE WHEN (${status}) = 'watching' THEN 1 ELSE 0 END), 0) AS watching,
       COALESCE(SUM(CASE WHEN (${status}) = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
-      COALESCE(SUM(CASE WHEN ${reviewed} THEN 1 ELSE 0 END), 0) AS reviewed,
       (SELECT COUNT(*) FROM favorites WHERE username = ? AND library_valid = 1) AS library_total ${from} ${where}`,
     countParams: [username, ...params],
     page: `${selection}${after}
@@ -302,7 +305,6 @@ export function buildLibraryPage(
     planned: Number(countsRow.planned),
     watching: Number(countsRow.watching),
     completed: Number(countsRow.completed),
-    reviewed: Number(countsRow.reviewed),
   };
   const pageSize = query.limit ?? FAVORITE_RENDER_CHUNK;
   const page = rows.slice(0, pageSize);

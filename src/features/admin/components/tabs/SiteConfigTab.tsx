@@ -165,7 +165,6 @@ const SiteConfigComponent = ({
 }) => {
   const { withLoading } = useLoadingState();
   const [error, setError] = useState('');
-  const [savedNotice, setSavedNotice] = useState('');
   const [siteSettings, setSiteSettings] = useState<SiteConfig>(
     DEFAULT_SITE_SETTINGS,
   );
@@ -257,7 +256,6 @@ const SiteConfigComponent = ({
     }
 
     setError('');
-    setSavedNotice('');
     savingRef.current = true;
     onSavingChange?.(true);
 
@@ -298,7 +296,6 @@ const SiteConfigComponent = ({
         setBaselineSiteSettings(normalizedSiteSettings);
         setPendingIconFile(null);
         revokeIconPreviewObjectUrl();
-        setSavedNotice('刷新页面后生效');
         await refreshConfig();
       });
     } catch (err) {
@@ -366,11 +363,6 @@ const SiteConfigComponent = ({
       {error && (
         <p role='alert' className='text-sm text-red-600'>
           {error}
-        </p>
-      )}
-      {savedNotice && (
-        <p role='status' className='text-sm text-gray-500'>
-          {savedNotice}
         </p>
       )}
       <AdminSettingsGroup title='基本信息'>

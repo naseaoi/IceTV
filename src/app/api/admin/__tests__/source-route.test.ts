@@ -96,6 +96,38 @@ describe('admin source route admin-only visibility', () => {
     expect(saveConfig).toHaveBeenCalledTimes(2);
   });
 
+  it.each([true, false])('saves an explicit adult flag (%s)', async (nsfw) => {
+    const config = createConfig();
+    (getConfig as jest.Mock).mockResolvedValue(config);
+    const response = await getHandler()(
+      createRequest({ action: 'set_nsfw', key: 'b', nsfw }),
+    );
+    expect(response.status).toBe(200);
+    expect(config.SourceConfig[1].nsfw).toBe(nsfw);
+    expect(saveConfig).toHaveBeenCalledWith(config, expect.anything());
+  });
+
+  it('rejects invalid adult flag requests without saving', async () => {
+    (getConfig as jest.Mock).mockResolvedValue(createConfig());
+    for (const body of [
+      { action: 'set_nsfw', key: 'a' },
+      { action: 'set_nsfw', key: 'a', nsfw: 'true' },
+      { action: 'set_nsfw', key: ['a'], nsfw: true },
+      { action: 'add', nsfw: 1 },
+      { action: 'edit', nsfw: null },
+    ]) {
+      expect((await getHandler()(createRequest(body))).status).toBe(400);
+    }
+    expect(
+      (
+        await getHandler()(
+          createRequest({ action: 'set_nsfw', key: 'missing', nsfw: true }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
   it('applies the batch flag only to the selected sources', async () => {
     const config = createConfig();
     (getConfig as jest.Mock).mockResolvedValue(config);

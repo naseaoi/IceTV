@@ -1,4 +1,4 @@
-import { ExternalLink, Star } from 'lucide-react';
+import { ExternalLink, PencilLine, Star } from 'lucide-react';
 import React, {
   useCallback,
   useEffect,
@@ -222,23 +222,25 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           {onOpenReview && (
             <button
               type='button'
-              aria-label={myReview ? '编辑我的评价' : '评分'}
-              className={`inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-xs transition-colors ${
-                // 无底色时左移内边距，让星标与上方文字左缘对齐
-                myReview
-                  ? '-ml-2.5 text-gray-600 hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.07] dark:hover:text-white'
-                  : 'bg-gray-900/[0.05] font-medium text-gray-700 hover:bg-gray-900/[0.09] dark:bg-white/[0.07] dark:text-gray-200 dark:hover:bg-white/[0.12]'
-              }`}
+              aria-label={myReview ? '编辑我的评价' : '写评价'}
+              // 无底色胶囊左移内边距，让图标与上方文字左缘对齐
+              className='-ml-2.5 inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.07] dark:hover:text-white'
               onClick={onOpenReview}
             >
-              {/* 高度取文字行高，星标多出部分向上溢出，星尖与文字基线齐平且文字与相邻按钮同高 */}
+              {/* 高度取文字行高，图标多出部分向上溢出，图标底与文字基线齐平且文字与相邻按钮同高 */}
               <span className='inline-flex h-3 items-end gap-1 leading-none'>
-                <Star
-                  aria-hidden='true'
-                  className={`h-3.5 w-3.5 text-amber-500 ${
-                    myReview?.rating ? 'fill-current' : ''
-                  }`.trim()}
-                />
+                {/* 琥珀色只用于分数展示，未评分时用中性色操作图标 */}
+                {myReview?.rating ? (
+                  <Star
+                    aria-hidden='true'
+                    className='h-3.5 w-3.5 fill-current text-amber-500'
+                  />
+                ) : (
+                  <PencilLine
+                    aria-hidden='true'
+                    className='h-3.5 w-3.5 text-gray-500 dark:text-gray-400'
+                  />
+                )}
                 {myReview?.rating ? (
                   <>
                     我的
@@ -249,7 +251,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
                 ) : myReview ? (
                   '已评价'
                 ) : (
-                  '评分'
+                  '写评价'
                 )}
               </span>
             </button>

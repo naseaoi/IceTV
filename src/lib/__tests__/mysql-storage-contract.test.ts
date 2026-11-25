@@ -3,6 +3,7 @@ import {
   type InviteCode,
   MAX_INVITE_CODES,
 } from '@/features/admin/services/inviteCodes';
+import { adminUserStatements } from '@/features/admin/services/userQueryStorage';
 import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
 import { favoriteProjection } from '@/features/favorites/lib/library-storage';
 import { assertAnnualRecapStorage } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
@@ -24,7 +25,11 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { assertWatchLevelContract } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
-import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
+import {
+  hasPlayRecordUpdate,
+  hasUnreadPlayRecordMessage,
+  isTrackingEnabled,
+} from '@/lib/play-records';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
@@ -359,6 +364,7 @@ function selectUnreadTrackingRows(
   username: string,
   cursorTime?: number,
   cursorKey?: string,
+  messagesOnly = true,
 ) {
   return Array.from(state.playRecords.get(username)?.entries() || [])
     .map(([key, json]) => ({
@@ -366,7 +372,11 @@ function selectUnreadTrackingRows(
       record_json: json,
       record: JSON.parse(json) as PlayRecord,
     }))
-    .filter(({ record }) => hasPlayRecordUpdate(record))
+    .filter(({ record }) =>
+      messagesOnly
+        ? hasUnreadPlayRecordMessage(record)
+        : hasPlayRecordUpdate(record),
+    )
     .filter(({ record, record_key }) => {
       if (cursorTime === undefined || !cursorKey) return true;
       const createdAt = trackingCreatedAt(record);
@@ -1326,11 +1336,12 @@ function createFakePool() {
         'UPDATE favorites AS f SET favorite_json = JSON_SET(',
       )
     ) {
-      const [value, username, key] = params as [
-        string | number,
-        string,
-        string,
-      ];
+      const readingMessage = normalized.includes(
+        "'$.update_message_read_episodes'",
+      );
+      const [value, username, key] = (
+        readingMessage ? [params[0], params[2], params[3]] : params
+      ) as [string | number, string, string];
       const favorites = currentState.favorites.get(username);
       const json = favorites?.get(key);
       if (!json) return [{ affectedRows: 0 }, []];
@@ -1347,11 +1358,13 @@ function createFakePool() {
         if (
           !message ||
           currentState.playRecords.get(username)?.has(key) ||
-          message.fromEpisodes >= Number(value) ||
-          message.toEpisodes < Number(value)
+          message.fromEpisodes >= Number(value)
         )
           return [{ affectedRows: 0 }, []];
-        favorite.update_baseline_episodes = Number(value);
+        favorite.update_message_read_episodes = Math.min(
+          favorite.total_episodes,
+          Number(value),
+        );
       }
       favorites!.set(key, JSON.stringify(favorite));
       return [{ affectedRows: 1 }, []];
@@ -1727,6 +1740,15 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (normalized === "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'")
+      return [[{ Field: 'value_bytes' }], []];
+    if (
+      normalized ===
+      "SHOW INDEX FROM shared_cache WHERE Key_name = 'idx_shared_cache_budget'"
+    )
+      return [[{ Key_name: 'idx_shared_cache_budget' }], []];
+    if (normalized === "SHOW COLUMNS FROM list_likes LIKE 'list_name'")
+      return [[{ Field: 'list_name' }], []];
     if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")
       return [[{ Field: 'like_count' }], []];
     if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'view_count'")
@@ -2166,7 +2188,12 @@ function createFakePool() {
             entry_key: key,
             entry_json: json,
             origin: 'favorite',
-            has_update: buildFavoriteUpdateMessage(key, favorite) ? 1 : 0,
+            has_update: buildFavoriteUpdateMessage(key, {
+              ...favorite,
+              update_message_read_episodes: undefined,
+            })
+              ? 1
+              : 0,
             activity: favorite.save_time,
           });
       }
@@ -2601,6 +2628,7 @@ function createFakePool() {
         params[0] as string,
         hasCursor && !saveTimeOrder ? (params[1] as number) : undefined,
         hasCursor && !saveTimeOrder ? (params[3] as string) : undefined,
+        !saveTimeOrder,
       );
       if (saveTimeOrder) {
         rows = rows
@@ -2627,7 +2655,13 @@ function createFakePool() {
       normalized.startsWith('SELECT COUNT(*) AS count FROM play_records') &&
       normalized.includes(TRACKING_SQL_MARKER)
     ) {
-      const rows = selectUnreadTrackingRows(currentState, params[0] as string);
+      const rows = selectUnreadTrackingRows(
+        currentState,
+        params[0] as string,
+        undefined,
+        undefined,
+        normalized.includes("'$.update_message_read_episodes'"),
+      );
       return [[{ count: rows.length }], []];
     }
 
@@ -3327,6 +3361,65 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it.each(['none', 'any', 'provider:linuxdo'] as const)(
+    'builds composable admin user predicates for login=%s',
+    (login) => {
+      const sql = adminUserStatements('mysql', {
+        ownerUsername: 'owner',
+        operatorUsername: 'operator',
+        role: 'banned',
+        login,
+        group: 'VIP',
+        q: 'alice',
+      });
+      const predicate =
+        login === 'none'
+          ? 'NOT EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.username = ranked.username)'
+          : login === 'any'
+            ? 'EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.username = ranked.username)'
+            : 'EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.username = ranked.username AND oi.provider = ?)';
+      for (const statement of [sql.rows, sql.count]) {
+        expect(statement).toContain('WHERE x.banned = ?');
+        expect(statement).toContain(`AND banned = ? AND ${predicate}`);
+        expect(statement).toContain("CASE WHEN n.username = ? THEN 'owner'");
+        expect(statement.match(/\?/g)).toHaveLength(sql.params.length);
+      }
+      expect(sql.params).toEqual([
+        1,
+        'owner',
+        'owner',
+        'owner',
+        'owner',
+        'operator',
+        'alice',
+        'alice',
+        'alice',
+        1,
+        ...(login === 'provider:linuxdo' ? ['linuxdo'] : []),
+        'VIP',
+      ]);
+      expect(sql.countParams).toEqual(sql.params);
+    },
+  );
+
+  it.each(['sqlite', 'mysql'] as const)(
+    'uses NOT EXISTS for ungrouped rows and counts (%s)',
+    (dialect) => {
+      const sql = adminUserStatements(dialect, {
+        ownerUsername: 'owner',
+        operatorUsername: 'operator',
+        ungrouped: true,
+      });
+      for (const statement of [sql.rows, sql.count]) {
+        expect(statement).toContain(
+          'NOT EXISTS (SELECT 1 FROM user_group_members g WHERE g.username = ranked.username)',
+        );
+        expect(statement.match(/\?/g)).toHaveLength(sql.params.length);
+      }
+      expect(sql.countParams).toEqual(sql.params);
+    },
+  );
+
   it('rolls back the complete health search batch on a later row failure', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const row = {
@@ -3989,7 +4082,7 @@ describe('mysql storage contract', () => {
     ).resolves.toEqual(concurrentFavorite);
   });
 
-  // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate
+  // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasUnreadPlayRecordMessage
   // 断言范围是筛选与排序语义，不覆盖真实 SQL 谓词（MySQL 比 'false' 字符串、SQLite 比数字 0 的分歧测不出来）
   it('作品状态与显式开关的组合决定追更查询并保留导出字段', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');

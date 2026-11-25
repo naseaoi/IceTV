@@ -23,12 +23,8 @@ export interface AdminConfig {
     SiteInterfaceCacheTime: number;
     VodPageTimeoutSeconds: number;
     VodFragmentTimeoutSeconds: number;
-    PlaybackHistoryPageSize: number;
-    SearchHistoryLimit: number;
     SearchRequestTimeoutSeconds: number;
     SourceFailureCooldownSeconds: number;
-    ContinueWatchingLimit: number;
-    CoverImageCacheSize: number;
     SourceCoverProxyMode?: 'auto' | 'browser' | 'server';
     LivePrecheckTimeoutSeconds: number;
     ProxyRequestTimeoutSeconds: number;
@@ -89,6 +85,7 @@ export interface AdminConfig {
     proxyMode?: 'server' | 'browser' | 'auto';
     // 仅站长与管理员可见，普通用户的搜索、详情与播放都不提供该源
     adminOnly?: boolean;
+    nsfw?: boolean;
   }[];
   CustomCategories: {
     name?: string;

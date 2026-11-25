@@ -1,3 +1,5 @@
+import { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
@@ -26,10 +28,6 @@ export interface RuntimeConfig {
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
   VOD_FRAGMENT_TIMEOUT_SECONDS: number;
-  PLAYBACK_HISTORY_PAGE_SIZE: number;
-  SEARCH_HISTORY_LIMIT: number;
-  CONTINUE_WATCHING_LIMIT: number;
-  COVER_IMAGE_CACHE_SIZE: number;
   IMAGE_PROXY_TIMEOUT_SECONDS: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
 }
@@ -56,10 +54,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
   VOD_FRAGMENT_TIMEOUT_SECONDS: 10,
-  PLAYBACK_HISTORY_PAGE_SIZE: 10,
-  SEARCH_HISTORY_LIMIT: 20,
-  CONTINUE_WATCHING_LIMIT: 10,
-  COVER_IMAGE_CACHE_SIZE: 500,
   IMAGE_PROXY_TIMEOUT_SECONDS: 15,
   SOURCE_COVER_PROXY_MODE: 'auto',
 };
@@ -97,10 +91,6 @@ export type ServerConfigPayload = {
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
   VodFragmentTimeoutSeconds?: number;
-  PlaybackHistoryPageSize?: number;
-  SearchHistoryLimit?: number;
-  ContinueWatchingLimit?: number;
-  CoverImageCacheSize?: number;
   ImageProxyTimeoutSeconds?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
 };
@@ -179,16 +169,6 @@ function runtimeConfigFromServerConfig(
     VOD_FRAGMENT_TIMEOUT_SECONDS:
       data.VodFragmentTimeoutSeconds ??
       DEFAULT_RUNTIME_CONFIG.VOD_FRAGMENT_TIMEOUT_SECONDS,
-    PLAYBACK_HISTORY_PAGE_SIZE:
-      data.PlaybackHistoryPageSize ??
-      DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,
-    SEARCH_HISTORY_LIMIT:
-      data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
-    CONTINUE_WATCHING_LIMIT:
-      data.ContinueWatchingLimit ??
-      DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
-    COVER_IMAGE_CACHE_SIZE:
-      data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
     IMAGE_PROXY_TIMEOUT_SECONDS:
       data.ImageProxyTimeoutSeconds ??
       DEFAULT_RUNTIME_CONFIG.IMAGE_PROXY_TIMEOUT_SECONDS,
@@ -198,26 +178,100 @@ function runtimeConfigFromServerConfig(
   };
 }
 
-let serverConfigRequest: Promise<ServerConfigPayload> | null = null;
+export const SERVER_CONFIG_UPDATED_EVENT = 'server-config-updated';
 
-export async function fetchClientServerConfig(): Promise<ServerConfigPayload> {
-  if (!serverConfigRequest) {
-    serverConfigRequest = fetch('/api/server-config', {
-      method: 'GET',
-      cache: 'no-cache',
-    })
+export const CLIENT_SERVER_CONFIG_MAX_AGE_MS = 5 * 60_000;
+export const SERVER_CONFIG_INVALIDATION_CHANNEL =
+  'icetv:server-config-invalidated';
+export const SERVER_CONFIG_INVALIDATION_SOURCE = Math.random();
+
+let serverConfigRequest: Promise<ServerConfigPayload> | null = null;
+let serverConfigRequestPending = false;
+let serverConfigExpiresAt = 0;
+let serverConfigScope = '';
+
+function currentConfigScope(): string {
+  const auth = getAuthInfoFromBrowserCookie();
+  return JSON.stringify([auth?.username, auth?.role]);
+}
+
+export function invalidateClientServerConfig(): void {
+  serverConfigRequest = null;
+  serverConfigRequestPending = false;
+  serverConfigExpiresAt = 0;
+}
+
+export async function fetchClientServerConfig({
+  forceFresh = false,
+}: { forceFresh?: boolean } = {}): Promise<ServerConfigPayload> {
+  const scope = currentConfigScope();
+  if (scope !== serverConfigScope) {
+    invalidateClientServerConfig();
+    serverConfigScope = scope;
+  }
+  if (
+    forceFresh ||
+    !serverConfigRequest ||
+    (!serverConfigRequestPending && Date.now() >= serverConfigExpiresAt)
+  ) {
+    serverConfigExpiresAt = 0;
+    const request: Promise<ServerConfigPayload> = fetch(
+      forceFresh ? '/api/server-config?fresh=1' : '/api/server-config',
+      { method: 'GET', cache: 'no-store' },
+    )
       .then((response) => {
         if (!response.ok) {
           throw new Error(`server-config: ${response.status}`);
         }
         return response.json() as Promise<ServerConfigPayload>;
       })
+      .then(
+        // 保存前的请求即使晚到，也只向调用方交付最新请求的结果。
+        (data) => {
+          if (scope !== currentConfigScope() || !serverConfigRequest) {
+            throw new Error('server-config: session changed');
+          }
+          if (serverConfigRequest !== request) return serverConfigRequest;
+          serverConfigExpiresAt = Date.now() + CLIENT_SERVER_CONFIG_MAX_AGE_MS;
+          return data;
+        },
+        (error) => {
+          if (
+            scope === currentConfigScope() &&
+            serverConfigRequest &&
+            serverConfigRequest !== request
+          )
+            return serverConfigRequest;
+          throw error;
+        },
+      )
       .finally(() => {
-        serverConfigRequest = null;
+        if (serverConfigRequest === request) serverConfigRequestPending = false;
       });
+    serverConfigRequest = request;
+    serverConfigRequestPending = true;
   }
 
   return serverConfigRequest;
+}
+
+export async function syncClientConfigAfterSave(): Promise<void> {
+  clearSearchSnapshotCache();
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel(SERVER_CONFIG_INVALIDATION_CHANNEL);
+    channel.postMessage({
+      type: 'invalidate',
+      source: SERVER_CONFIG_INVALIDATION_SOURCE,
+    });
+    channel.close();
+  }
+  try {
+    applyClientServerConfig(
+      await fetchClientServerConfig({ forceFresh: true }),
+    );
+  } catch (error) {
+    console.warn('刷新客户端运行配置失败:', error);
+  }
 }
 
 export function applyClientServerConfig(
@@ -230,6 +284,9 @@ export function applyClientServerConfig(
     window.__runtimeConfigReady = true;
     window.dispatchEvent(
       new CustomEvent('runtime-config-updated', { detail: nextConfig }),
+    );
+    window.dispatchEvent(
+      new CustomEvent(SERVER_CONFIG_UPDATED_EVENT, { detail: data }),
     );
   }
 

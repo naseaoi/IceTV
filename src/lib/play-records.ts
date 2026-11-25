@@ -215,6 +215,42 @@ export function hasPlayRecordUpdate(record: PlayRecord): boolean {
   return totalEpisodes > baseline && currentEpisode < totalEpisodes;
 }
 
+export function getPlayRecordMessageReadThrough(record: PlayRecord): number {
+  const value = isGroupedPlayRecordScale(record)
+    ? record.update_message_read_group_total
+    : record.update_message_read_episodes;
+  const baseline = getPlayRecordUpdateBaseline(record);
+  return Math.max(baseline, Number.isFinite(value) ? Number(value) : baseline);
+}
+
+export function hasUnreadPlayRecordMessage(record: PlayRecord): boolean {
+  return (
+    hasPlayRecordUpdate(record) &&
+    getPlayRecordEpisodeDisplay(record).totalEpisodes >
+      getPlayRecordMessageReadThrough(record)
+  );
+}
+
+export function markPlayRecordMessageRead(
+  record: PlayRecord,
+  readThroughEpisodes?: number,
+): PlayRecord {
+  const { totalEpisodes } = getPlayRecordEpisodeDisplay(record);
+  const requested = Number.isFinite(readThroughEpisodes)
+    ? Number(readThroughEpisodes)
+    : totalEpisodes;
+  const readThrough = Math.min(
+    totalEpisodes,
+    Math.max(0, getPlayRecordMessageReadThrough(record), requested),
+  );
+  return {
+    ...record,
+    ...(isGroupedPlayRecordScale(record)
+      ? { update_message_read_group_total: readThrough }
+      : { update_message_read_episodes: readThrough }),
+  };
+}
+
 export function markPlayRecordUpdateRead(
   record: PlayRecord,
   readThroughEpisodes?: number,
@@ -271,8 +307,20 @@ export function mergePlayRecordUpdateBaseline(
     Number.isFinite(previousTotal) &&
     totalEpisodes > Number(previousTotal);
 
+  const resetMessageRead =
+    groupChanged ||
+    currentEpisode >= totalEpisodes ||
+    !previous ||
+    isGroupedPlayRecordScale(previous) !== isGrouped;
+
   return {
     ...next,
+    update_message_read_episodes: resetMessageRead
+      ? undefined
+      : previous.update_message_read_episodes,
+    update_message_read_group_total: resetMessageRead
+      ? undefined
+      : previous.update_message_read_group_total,
     tracking_enabled: next.tracking_enabled ?? previous?.tracking_enabled,
     series_status: next.series_status ?? previous?.series_status,
     update_detected_at: totalIncreased ? now : previous?.update_detected_at,

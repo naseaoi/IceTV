@@ -62,6 +62,7 @@ import {
   aggregateSourceUsage,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
+import { SEARCH_HISTORY_LIMIT } from '@/features/search/lib/searchQuery';
 import {
   ViewingHappinessPlans,
   viewingHappinessSchema,
@@ -104,6 +105,11 @@ import {
 } from '@/lib/play-record-title';
 import { SHELVED_PLAY_RECORD_AGE_MS } from '@/lib/play-records';
 import { ReviewSocialStorage, socialSchema } from '@/lib/review-social-storage';
+import {
+  type SharedCacheMetadata,
+  pruneSharedCacheBatches,
+  SHARED_CACHE_MAX_ENTRIES,
+} from '@/lib/shared-cache-maintenance';
 import {
   canManageUserAccess,
   removedAccessReferences,
@@ -212,10 +218,10 @@ import {
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 
-const SEARCH_HISTORY_LIMIT = 20;
 const REVIEW_SQL = reviewSql('mysql');
 const {
   createdAt: MYSQL_TRACKING_CREATED_AT,
+  updatedWhere: MYSQL_UPDATED_TRACKING_WHERE,
   unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(MYSQL_TRACKING_DIALECT);
 const PLAY_RECORD_BATCH_SIZE = 200;
@@ -662,6 +668,7 @@ export class MySqlStorage implements IStorage {
       `CREATE TABLE IF NOT EXISTS shared_cache (
         cache_key VARCHAR(191) NOT NULL PRIMARY KEY,
         value_text LONGTEXT NOT NULL,
+        value_bytes BIGINT NULL,
         fresh_until BIGINT NOT NULL,
         stale_until BIGINT NOT NULL,
         lease_token VARCHAR(64) NULL,
@@ -674,6 +681,31 @@ export class MySqlStorage implements IStorage {
 
     for (const statement of statements) {
       await this.pool.execute(statement);
+    }
+    const [cacheColumns] = await this.pool.query<RowDataPacket[]>(
+      "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'",
+    );
+    if (!cacheColumns.length) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE shared_cache ADD COLUMN value_bytes BIGINT NULL',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    const [cacheIndexes] = await this.pool.query<RowDataPacket[]>(
+      "SHOW INDEX FROM shared_cache WHERE Key_name = 'idx_shared_cache_budget'",
+    );
+    if (!cacheIndexes.length) {
+      try {
+        await this.pool.execute(
+          'CREATE INDEX idx_shared_cache_budget ON shared_cache (updated_at, cache_key, lease_until, value_bytes)',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
+      }
     }
     const [userColumns] = await this.pool.query<RowDataPacket[]>(
       "SHOW COLUMNS FROM users LIKE 'password_set'",
@@ -707,6 +739,22 @@ export class MySqlStorage implements IStorage {
         }
       }
     }
+    const [likeColumns] = await this.pool.query<RowDataPacket[]>(
+      "SHOW COLUMNS FROM list_likes LIKE 'list_name'",
+    );
+    if (!likeColumns.length) {
+      try {
+        await this.pool.execute(
+          "ALTER TABLE list_likes ADD COLUMN list_name VARCHAR(30) NOT NULL DEFAULT ''",
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    await this.pool.execute(
+      "UPDATE list_likes k JOIN user_lists l ON l.id = k.list_id SET k.list_name = l.name WHERE k.list_name = ''",
+    );
     await new MysqlConfigStateStore(this.pool).migrateSchema();
 
     for (const [name, size] of [
@@ -1456,7 +1504,7 @@ export class MySqlStorage implements IStorage {
     const hasCursor = cursorTime !== undefined && !!cursorKey;
     const updatedWhere =
       filter === 'updated'
-        ? ` AND ${MYSQL_UNREAD_TRACKING_WHERE}`
+        ? ` AND ${MYSQL_UPDATED_TRACKING_WHERE}`
         : filter === 'shelved'
           ? ` AND ${buildShelvedPlayRecordWhere(MYSQL_TRACKING_DIALECT)}`
           : '';
@@ -1602,9 +1650,9 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     await this.pool.execute(favoriteReadStatement('mysql'), [
       episodes,
+      episodes,
       normalizeUsername(userName),
       key,
-      episodes,
       episodes,
     ]);
   }
@@ -2003,10 +2051,12 @@ export class MySqlStorage implements IStorage {
   ): ReturnType<IStorage['countPlazaLists']> {
     return this.runListPlan(new ListPlans('mysql').countPlazaLists(...args));
   }
-  async getListItemCount(
-    ...args: Parameters<IStorage['getListItemCount']>
-  ): ReturnType<IStorage['getListItemCount']> {
-    return this.runListPlan(new ListPlans('mysql').getListItemCount(...args));
+  async getListHeaderPreview(
+    ...args: Parameters<IStorage['getListHeaderPreview']>
+  ): ReturnType<IStorage['getListHeaderPreview']> {
+    return this.runListPlan(
+      new ListPlans('mysql').getListHeaderPreview(...args),
+    );
   }
   async setListLike(
     ...args: Parameters<IStorage['setListLike']>
@@ -2027,6 +2077,16 @@ export class MySqlStorage implements IStorage {
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
     return this.runListPlan(new ListPlans('mysql').getLists(...args));
+  }
+  async getSavedLists(
+    ...args: Parameters<IStorage['getSavedLists']>
+  ): ReturnType<IStorage['getSavedLists']> {
+    return this.runListPlan(new ListPlans('mysql').getSavedLists(...args));
+  }
+  async countSavedLists(
+    ...args: Parameters<IStorage['countSavedLists']>
+  ): ReturnType<IStorage['countSavedLists']> {
+    return this.runListPlan(new ListPlans('mysql').countSavedLists(...args));
   }
   async countUserLists(
     ...args: Parameters<IStorage['countUserLists']>
@@ -3627,9 +3687,9 @@ export class MySqlStorage implements IStorage {
 
     const [inserted] = await this.pool.execute(
       `INSERT IGNORE INTO shared_cache (
-         cache_key, value_text, fresh_until, stale_until,
+         cache_key, value_text, value_bytes, fresh_until, stale_until,
          lease_token, lease_until, updated_at
-       ) VALUES (?, '', 0, 0, ?, ?, ?)`,
+       ) VALUES (?, '', 0, 0, 0, ?, ?, ?)`,
       [key, token, leaseUntil, now],
     );
     return 'affectedRows' in inserted && inserted.affectedRows > 0;
@@ -3646,10 +3706,18 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const [result] = await this.pool.execute(
       `UPDATE shared_cache
-       SET value_text = ?, fresh_until = ?, stale_until = ?,
+       SET value_text = ?, value_bytes = ?, fresh_until = ?, stale_until = ?,
            lease_token = NULL, lease_until = 0, updated_at = ?
        WHERE cache_key = ? AND lease_token = ?`,
-      [value, freshUntil, staleUntil, now, key, token],
+      [
+        value,
+        Buffer.byteLength(value),
+        freshUntil,
+        staleUntil,
+        now,
+        key,
+        token,
+      ],
     );
     return 'affectedRows' in result && result.affectedRows > 0;
   }
@@ -3686,23 +3754,40 @@ export class MySqlStorage implements IStorage {
 
   async pruneSharedCache(now: number, limit: number): Promise<void> {
     await this.ensureInitialized();
-    const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
-    await this.pool.query(
-      `DELETE FROM shared_cache
-       WHERE stale_until <= ? AND lease_until <= ?
-       ORDER BY updated_at ASC LIMIT ${safeLimit}`,
-      [now, now],
-    );
-    await this.pool.query(
-      `DELETE FROM shared_cache WHERE cache_key IN (
-      SELECT cache_key FROM (
-        SELECT cache_key,
-          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
-          SUM(OCTET_LENGTH(value_text)) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
-        FROM shared_cache WHERE lease_until <= ?
-      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
-    )`,
-      [now],
+    await pruneSharedCacheBatches(
+      limit,
+      async (batchSize) => {
+        const [result] = await this.pool.query(
+          `DELETE FROM shared_cache WHERE stale_until <= ? AND lease_until <= ?
+           ORDER BY stale_until ASC LIMIT ${batchSize}`,
+          [now, now],
+        );
+        return 'affectedRows' in result ? result.affectedRows : 0;
+      },
+      async () => {
+        const [rows] = await this.pool.query<RowDataPacket[]>(
+          `SELECT cache_key, updated_at, value_bytes FROM shared_cache FORCE INDEX (idx_shared_cache_budget)
+           WHERE lease_until <= ? ORDER BY updated_at DESC, cache_key DESC LIMIT ?`,
+          [now, SHARED_CACHE_MAX_ENTRIES + 1],
+        );
+        return rows as SharedCacheMetadata[];
+      },
+      async (boundary, batchSize) => {
+        const [result] = await this.pool.query(
+          `DELETE FROM shared_cache
+           WHERE lease_until <= ? AND (updated_at < ? OR (updated_at = ? AND cache_key <= ?))
+           ORDER BY updated_at ASC, cache_key ASC LIMIT ${batchSize}`,
+          [now, boundary.updated_at, boundary.updated_at, boundary.cache_key],
+        );
+        return 'affectedRows' in result ? result.affectedRows : 0;
+      },
+      async (keys) => {
+        await this.pool.execute(
+          `UPDATE shared_cache SET value_bytes = OCTET_LENGTH(value_text)
+           WHERE cache_key IN (${keys.map(() => '?').join(',')}) AND value_bytes IS NULL`,
+          keys,
+        );
+      },
     );
   }
 

@@ -2,6 +2,10 @@ import 'server-only';
 
 import type { NextRequest, NextResponse } from 'next/server';
 
+import { getProxySourceKey } from '@/app/api/proxy/utils';
+import { getConfigForRead } from '@/lib/config';
+import { isAdultSourceBlocked } from '@/lib/yellow';
+
 import { generateSignature, verifySignature } from './auth.server';
 import { getAuthSigningSecret } from './signing-secret.server';
 
@@ -123,6 +127,22 @@ export async function resolveProxyAuthorization(
   targetUrl: string,
 ): Promise<ProxyAuthorizationResult> {
   const { searchParams } = new URL(request.url);
+  const sourceKey = getProxySourceKey(searchParams);
+  if (sourceKey && searchParams.get('icetv-live') !== '1') {
+    const config = await getConfigForRead();
+    if (
+      isAdultSourceBlocked(
+        config.SourceConfig.find((source) => source.key === sourceKey),
+        config.SiteConfig.DisableYellowFilter,
+      )
+    ) {
+      const { NextResponse } = await import('next/server');
+      return {
+        authorized: false,
+        response: NextResponse.json({ error: '该来源不可用' }, { status: 403 }),
+      };
+    }
+  }
   if (await verifyProxySignature(searchParams, purpose, targetUrl)) {
     return {
       authorized: true,

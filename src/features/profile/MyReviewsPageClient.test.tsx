@@ -10,7 +10,10 @@ import type { ReactNode } from 'react';
 import MyReviewsPageClient from '@/features/profile/MyReviewsPageClient';
 import { PROFILE_REQUIRED_EVENT } from '@/lib/profile.client';
 import type { VideoReview } from '@/lib/types';
-import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
+import {
+  matchesMyReviewContent,
+  VIDEO_REVIEWS_UPDATED_EVENT,
+} from '@/lib/video-reviews';
 import {
   deleteVideoReview,
   fetchMyVideoReviews,
@@ -69,11 +72,12 @@ beforeEach(() => {
   ];
   jest.mocked(fetchMyVideoReviews).mockImplementation(async (query = {}) => {
     const searched = records.filter(
-      (item) => !query.q || `${item.title} ${item.content}`.includes(query.q),
+      (item) =>
+        (!query.q || `${item.title} ${item.content}`.includes(query.q)) &&
+        matchesMyReviewContent(item, query.content ?? 'all'),
     );
     const items = searched.filter(
       (item) =>
-        (query.filter !== 'text' || item.rating === null) &&
         (query.filter !== 'public' || item.is_public) &&
         (query.filter !== 'private' || !item.is_public),
     );
@@ -85,7 +89,6 @@ beforeEach(() => {
         all: searched.length,
         public: searched.filter((item) => item.is_public).length,
         private: searched.filter((item) => !item.is_public).length,
-        text: searched.filter((item) => item.rating === null).length,
       },
     };
   });
@@ -104,10 +107,11 @@ it('显示私密评价并用源标识跳转，筛选仅文字与搜索', async (
     '/play?title=%E4%B8%89%E4%BD%93&year=2023&source=a&id=1',
   );
   expect(screen.getByText('私密', { selector: 'span' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /^仅文字/ }));
+  fireEvent.click(screen.getByRole('button', { name: '内容' }));
+  fireEvent.click(screen.getByRole('option', { name: '仅文字' }));
   await waitFor(() =>
     expect(fetchMyVideoReviews).toHaveBeenLastCalledWith(
-      expect.objectContaining({ filter: 'text' }),
+      expect.objectContaining({ content: 'text' }),
       expect.any(AbortSignal),
     ),
   );
@@ -125,7 +129,7 @@ it('显示私密评价并用源标识跳转，筛选仅文字与搜索', async (
   });
   expect(await screen.findByText('暂无符合条件的评价')).toBeInTheDocument();
 });
-it('切换筛选重新查询期间保留胶囊计数', async () => {
+it('切换条件时计数等待当前条件结果', async () => {
   render(<MyReviewsPageClient />);
   await screen.findByRole('link', { name: '播放三体' });
 
@@ -141,15 +145,12 @@ it('切换筛选重新查询期间保留胶囊计数', async () => {
   );
   fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
 
-  expect(screen.getByRole('button', { name: /^全部/ })).toHaveTextContent(
-    '全部2',
-  );
-  expect(screen.getByRole('button', { name: /^私密/ })).toHaveTextContent(
-    '私密1',
-  );
+  expect(
+    screen.getByRole('button', { name: /^全部/ }).querySelector('.skeleton'),
+  ).not.toBeNull();
   await act(async () => resolvePage());
 });
-it('切换筛选保留旧列表直到新结果到达，计数为 0 时直接显示空状态', async () => {
+it('切换筛选仅保留不可操作的旧列表占位', async () => {
   const { container } = render(<MyReviewsPageClient />);
   await screen.findByRole('link', { name: '播放三体' });
   const implementation = jest
@@ -163,7 +164,6 @@ it('切换筛选保留旧列表直到新结果到达，计数为 0 时直接显�
       }),
   );
   fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
-  expect(container.querySelector('.skeleton')).toBeNull();
   expect(screen.getByRole('link', { name: '播放三体' })).toBeInTheDocument();
   expect(container.querySelector('[aria-busy="true"]')).toHaveAttribute(
     'inert',
@@ -171,25 +171,35 @@ it('切换筛选保留旧列表直到新结果到达，计数为 0 时直接显�
   await act(async () => resolvePage());
   expect(screen.queryByRole('link', { name: '播放三体' })).toBeNull();
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
-
-  records = [review];
-  act(() => {
-    window.dispatchEvent(new Event(VIDEO_REVIEWS_UPDATED_EVENT));
-  });
-  fireEvent.click(screen.getByRole('button', { name: /^全部/ }));
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: /^私密/ })).toHaveTextContent(
-      '私密0',
-    ),
-  );
-  jest
-    .mocked(fetchMyVideoReviews)
-    .mockReturnValueOnce(new Promise(() => undefined));
-  fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
-  expect(screen.getByText('暂无符合条件的评价')).toBeInTheDocument();
-  expect(container.querySelector('.skeleton')).toBeNull();
-  expect(screen.queryByText(/条评价/)).toBeNull();
 });
+it('全部评价下切换排序保留工具栏与不可操作的旧列表', async () => {
+  const { container } = render(<MyReviewsPageClient />);
+  await screen.findByRole('link', { name: '播放三体' });
+  const search = screen.getByRole('searchbox', { name: '搜索我的评价' });
+  const implementation = jest
+    .mocked(fetchMyVideoReviews)
+    .getMockImplementation()!;
+  let resolvePage!: () => void;
+  jest.mocked(fetchMyVideoReviews).mockImplementationOnce(
+    (query) =>
+      new Promise((resolve) => {
+        resolvePage = () => resolve(implementation(query));
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '排序' }));
+  fireEvent.click(screen.getByRole('option', { name: '评分从高到低' }));
+  expect(screen.getByRole('searchbox', { name: '搜索我的评价' })).toBe(search);
+  expect(screen.getByRole('link', { name: '播放三体' })).toBeInTheDocument();
+  expect(container.querySelector('[aria-busy="true"]')).toHaveAttribute(
+    'inert',
+  );
+  expect(
+    screen.getByRole('button', { name: /^全部/ }).querySelector('.skeleton'),
+  ).not.toBeNull();
+  await act(async () => resolvePage());
+  expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+});
+
 it('loads the next server page without replacing the first page', async () => {
   jest
     .mocked(fetchMyVideoReviews)
@@ -197,13 +207,13 @@ it('loads the next server page without replacing the first page', async () => {
       items: [review],
       nextCursor: 'next-page',
       total: 2,
-      counts: { all: 2, public: 2, private: 0, text: 0 },
+      counts: { all: 2, public: 2, private: 0 },
     })
     .mockResolvedValueOnce({
       items: [{ ...review, title_norm: '另一部', title: '另一部' }],
       nextCursor: null,
       total: 2,
-      counts: { all: 2, public: 2, private: 0, text: 0 },
+      counts: { all: 2, public: 2, private: 0 },
     });
   render(<MyReviewsPageClient />);
   await screen.findByRole('link', { name: '播放三体' });
@@ -367,7 +377,8 @@ it('取消编辑保持原评价，文字筛选中添加评分后移出卡片', a
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(screen.getAllByText('值得一看')).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button', { name: /^仅文字/ }));
+  fireEvent.click(screen.getByRole('button', { name: '内容' }));
+  fireEvent.click(screen.getByRole('option', { name: '仅文字' }));
   await waitFor(() =>
     expect(
       screen.queryByRole('link', { name: '播放三体' }),
@@ -386,15 +397,14 @@ it('取消编辑保持原评价，文字筛选中添加评分后移出卡片', a
   expect(
     screen.queryByRole('link', { name: '播放私密电影' }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^仅文字/ })).toHaveTextContent(
-    '0',
-  );
+  expect(screen.getByRole('button', { name: /^全部/ })).toHaveTextContent('0');
 });
 
 it('切回看过的筛选先显示快照，评价更新后快照失效', async () => {
   const { container } = render(<MyReviewsPageClient />);
   await screen.findByRole('link', { name: '播放三体' });
-  fireEvent.click(screen.getByRole('button', { name: /^仅文字/ }));
+  fireEvent.click(screen.getByRole('button', { name: '内容' }));
+  fireEvent.click(screen.getByRole('option', { name: '仅文字' }));
   await screen.findByRole('link', { name: '播放私密电影' });
   await waitFor(() =>
     expect(screen.queryByRole('link', { name: '播放三体' })).toBeNull(),
@@ -403,7 +413,8 @@ it('切回看过的筛选先显示快照，评价更新后快照失效', async (
   jest
     .mocked(fetchMyVideoReviews)
     .mockReturnValueOnce(new Promise(() => undefined));
-  fireEvent.click(screen.getByRole('button', { name: /^全部/ }));
+  fireEvent.click(screen.getByRole('button', { name: '内容' }));
+  fireEvent.click(screen.getByRole('option', { name: '全部内容' }));
   expect(screen.getByRole('link', { name: '播放三体' })).toBeInTheDocument();
   expect(container.querySelector('.skeleton')).toBeNull();
 
@@ -417,7 +428,8 @@ it('切回看过的筛选先显示快照，评价更新后快照失效', async (
   jest
     .mocked(fetchMyVideoReviews)
     .mockReturnValueOnce(new Promise(() => undefined));
-  fireEvent.click(screen.getByRole('button', { name: /^仅文字/ }));
+  fireEvent.click(screen.getByRole('button', { name: '内容' }));
+  fireEvent.click(screen.getByRole('option', { name: '仅文字' }));
   // 快照已失效：仍显示旧列表等待新结果，而不是快照里的仅文字结果
   expect(screen.getByRole('link', { name: '播放三体' })).toBeInTheDocument();
   expect(container.querySelector('[aria-busy="true"]')).toHaveAttribute(
@@ -486,4 +498,106 @@ it('刷新失败保留评价并通过错误横幅重新加载', async () => {
   fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   expect(fetchMyVideoReviews).toHaveBeenCalledTimes(3);
+});
+
+it('切换条件首页失败时隐藏旧评价与续页入口，重新加载请求当前首页', async () => {
+  jest.mocked(fetchMyVideoReviews).mockResolvedValueOnce({
+    items: [review],
+    nextCursor: 'old-next',
+    total: 1,
+    counts: { all: 1, public: 1, private: 0 },
+  });
+  render(<MyReviewsPageClient />);
+  await screen.findByRole('link', { name: '播放三体' });
+  jest.mocked(fetchMyVideoReviews).mockRejectedValueOnce(new Error('failed'));
+  fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('评价加载失败');
+  expect(
+    screen.queryByRole('link', { name: '播放三体' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: '加载更多' }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
+  await waitFor(() =>
+    expect(fetchMyVideoReviews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ filter: 'private', cursor: undefined }),
+      expect.any(AbortSignal),
+    ),
+  );
+});
+
+it.each([
+  ['仅评分', '', '补充正文'],
+  ['评分和文字', '原有正文', ''],
+])(
+  '公开与%s组合下编辑后移出不再匹配的记录，并更新各可见性计数',
+  async (label, before, after) => {
+    records = [
+      { ...review, content: before },
+      {
+        ...review,
+        title: '私密电影',
+        title_norm: '私密电影',
+        content: before,
+        is_public: false,
+      },
+    ];
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ review: { ...records[0], content: after } }),
+    });
+    render(<MyReviewsPageClient />);
+    await screen.findByRole('link', { name: '播放三体' });
+    fireEvent.click(screen.getByRole('button', { name: '内容' }));
+    fireEvent.click(screen.getByRole('option', { name: label }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^全部/ })).toHaveTextContent(
+        '2',
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^公开/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole('link', { name: '播放私密电影' })).toBeNull(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '编辑对三体的评价' }));
+    fireEvent.change(screen.getByLabelText('评价全文'), {
+      target: { value: after },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    });
+    expect(screen.queryByRole('link', { name: '播放三体' })).toBeNull();
+    expect(screen.getByRole('button', { name: /^全部/ })).toHaveTextContent(
+      '1',
+    );
+    expect(screen.getByRole('button', { name: /^公开/ })).toHaveTextContent(
+      '0',
+    );
+    expect(screen.getByRole('button', { name: /^私密/ })).toHaveTextContent(
+      '1',
+    );
+  },
+);
+
+it('双维条件下删除后保持当前条件并更新分面计数', async () => {
+  render(<MyReviewsPageClient />);
+  await screen.findByRole('link', { name: '播放三体' });
+  fireEvent.click(screen.getByRole('button', { name: '内容' }));
+  fireEvent.click(screen.getByRole('option', { name: '仅文字' }));
+  fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
+  await waitFor(() =>
+    expect(screen.queryByRole('link', { name: '播放三体' })).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '删除对私密电影的评价' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+  });
+  expect(screen.queryByRole('link', { name: '播放私密电影' })).toBeNull();
+  expect(screen.getByRole('button', { name: /^全部/ })).toHaveTextContent('0');
+  expect(screen.getByRole('button', { name: /^私密/ })).toHaveTextContent('0');
+  expect(fetchMyVideoReviews).toHaveBeenLastCalledWith(
+    expect.objectContaining({ filter: 'private', content: 'text' }),
+    expect.any(AbortSignal),
+  );
 });

@@ -18,9 +18,13 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { SearchX, Tv } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
@@ -29,6 +33,7 @@ import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActi
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { showError } from '@/features/admin/lib/notifications';
 import { LiveDataSource } from '@/features/admin/types/internal';
 import { showToast } from '@/lib/toast';
@@ -51,16 +56,22 @@ const LiveSourceConfig = ({
   });
   const [liveSources, setLiveSources] = useState<LiveDataSource[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'enabled' | 'disabled'
+  >('all');
   const normalizedQuery = filterQuery.trim().toLowerCase();
-  const isFiltering = normalizedQuery.length > 0;
+  const isFiltering = normalizedQuery.length > 0 || statusFilter !== 'all';
   const visibleRows = useMemo(
     () =>
-      liveSources.filter((item) =>
-        [item.name, item.key, item.url].some((value) =>
-          value?.toLowerCase().includes(normalizedQuery),
-        ),
+      liveSources.filter(
+        (item) =>
+          (statusFilter === 'all' ||
+            (statusFilter === 'disabled' ? item.disabled : !item.disabled)) &&
+          [item.name, item.key, item.url].some((value) =>
+            value?.toLowerCase().includes(normalizedQuery),
+          ),
       ),
-    [liveSources, normalizedQuery],
+    [liveSources, normalizedQuery, statusFilter],
   );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingLiveSource, setEditingLiveSource] =
@@ -245,14 +256,34 @@ const LiveSourceConfig = ({
           {actionError}
         </p>
       )}
-      <div className='flex items-center justify-between gap-3'>
-        <AdminSearchField
-          value={filterQuery}
-          onChange={setFilterQuery}
-          label='搜索直播源'
-          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
-        />
-        <div className='flex shrink-0 items-center gap-2'>
+      <AdminListToolbar
+        search={
+          <AdminSearchField
+            value={filterQuery}
+            onChange={setFilterQuery}
+            label='搜索直播源'
+          />
+        }
+        filters={
+          <>
+            <Select
+              variant='pill'
+              align='end'
+              value={statusFilter}
+              onChange={(value) =>
+                setStatusFilter(value as 'all' | 'enabled' | 'disabled')
+              }
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'enabled', label: '已启用' },
+                { value: 'disabled', label: '已禁用' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='筛选直播源状态'
+            />
+          </>
+        }
+        actions={
           <button
             onClick={() => {
               setFormError('');
@@ -263,8 +294,8 @@ const LiveSourceConfig = ({
           >
             添加直播源
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <LiveSourceAddForm
         error={formError}
@@ -318,8 +349,12 @@ const LiveSourceConfig = ({
               className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
               {visibleRows.length === 0 && (
-                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {isFiltering ? '没有匹配的直播源' : '暂无直播源'}
+                <li>
+                  <ListEmptyState
+                    className={ADMIN_LIST_EMPTY_CLASS}
+                    icon={isFiltering ? <SearchX /> : <Tv />}
+                    label={isFiltering ? '没有匹配的直播源' : '暂无直播源'}
+                  />
                 </li>
               )}
               {visibleRows.map((liveSource) => (

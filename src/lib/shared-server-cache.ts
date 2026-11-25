@@ -10,6 +10,10 @@ import {
   resolveCacheEntryTtl,
 } from '@/lib/server-cache';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
+import {
+  SHARED_CACHE_MAX_ENTRY_BYTES as MAX_ENTRY_BYTES,
+  SHARED_CACHE_PRUNE_BATCH_SIZE,
+} from '@/lib/shared-cache-maintenance';
 import type { SharedCacheRecord } from '@/lib/types';
 
 export interface SharedServerCacheOptions<T> extends SwrCacheOptions<T> {
@@ -21,7 +25,6 @@ export interface SharedServerCacheOptions<T> extends SwrCacheOptions<T> {
   enabled?: boolean;
 }
 
-const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 const schedulePrune = createThrottledMaintenance(60_000);
 
 export function createSharedServerCache<T>(
@@ -43,6 +46,17 @@ export function createSharedServerCache<T>(
     unavailable: 0,
   };
 
+  function reusableJsonWeight(value: T, bytes: number | undefined) {
+    // 字符串、字节数组与自定义编解码沿用内存缓存自身的估重口径。
+    return !options.serialize &&
+      !options.deserialize &&
+      value !== null &&
+      typeof value !== 'string' &&
+      !(value instanceof Uint8Array)
+      ? bytes
+      : undefined;
+  }
+
   function readRecord(
     key: string,
     record: SharedCacheRecord | null,
@@ -51,7 +65,13 @@ export function createSharedServerCache<T>(
     try {
       const value = deserialize(record.value);
       if (options.shouldCache && !options.shouldCache(value)) return null;
-      local.hydrate(key, value, record.freshUntil, record.staleUntil);
+      local.hydrate(
+        key,
+        value,
+        record.freshUntil,
+        record.staleUntil,
+        reusableJsonWeight(value, Buffer.byteLength(record.value)),
+      );
       return { value, fresh: record.freshUntil > Date.now() };
     } catch {
       return null;
@@ -92,12 +112,17 @@ export function createSharedServerCache<T>(
     try {
       const value = await loader();
       if (options.shouldCache && !options.shouldCache(value)) return value;
-      if (generation === expectedGeneration) local.set(key, value);
       const serialized = serialize(value);
+      const serializedBytes =
+        typeof serialized === 'string'
+          ? Buffer.byteLength(serialized)
+          : undefined;
+      if (generation === expectedGeneration)
+        local.set(key, value, reusableJsonWeight(value, serializedBytes));
       if (
         !ownsLease ||
-        typeof serialized !== 'string' ||
-        Buffer.byteLength(serialized) >
+        serializedBytes === undefined ||
+        serializedBytes >
           Math.min(MAX_ENTRY_BYTES, options.maxWeightBytes ?? MAX_ENTRY_BYTES)
       )
         return value;
@@ -111,7 +136,9 @@ export function createSharedServerCache<T>(
         now + ttl.freshMs + ttl.staleMs,
         now,
       );
-      schedulePrune(() => db.pruneSharedCache(Date.now(), 100));
+      schedulePrune(() =>
+        db.pruneSharedCache(Date.now(), SHARED_CACHE_PRUNE_BATCH_SIZE),
+      );
       return value;
     } finally {
       clearInterval(heartbeat);

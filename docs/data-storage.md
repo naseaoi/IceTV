@@ -6,6 +6,7 @@
 
 - 写入原地修改 `getConfig()` 返回的对象再 `saveConfig()`。版本号绑定在该对象身份上，展开或 `JSON` 克隆后保存会丢失版本，绕过读取时的冲突检测，覆盖期间的并发修改。
 - 缓存 TTL 默认 60 秒，可由 `CONFIG_CACHE_TTL_MS` 覆盖；写路径一律先 `invalidateConfigCache()`，不依赖 TTL 长短。
+- 服务端保存配置后本实例立即使用新值，其他实例在各自缓存 TTL 到期后读取新值。`/api/server-config` 默认读 TTL 缓存；管理员保存后的强制刷新（含其他标签页收到的失效广播）带 `fresh=1`，服务端仅对 admin / owner 改走 `getConfigFresh()`，避免跨实例或开发执行路径的旧快照被客户端再次缓存 5 分钟。普通请求不能改成 `getConfigFresh()`：它会清空进程内配置缓存并重读数据库，这是访问量最高的接口之一。客户端的复用、保存广播与可见性刷新规则见[前端界面](frontend.md#布局与导航)。进行中的请求与播放沿用已读取的值；已发出的浏览器缓存响应（如豆瓣接口）按响应发出时的缓存时长过期。
 - 订阅地址、自动更新、检查时间与原文的真相源是 `config_subscription`。`failure_since` 记录当前这段定时更新失败的起点：持续失败时保留，定时或手动拉取成功、更换订阅地址时清空，与配置和订阅快照一起走 CAS 写入；配置冲突不算订阅失败。MySQL 的加列迁移须在业务迁移事务之前执行，DDL 会隐式提交事务。直播频道数的真相源是 `live_source_state`。运行时配置 JSON 不保存这些字段，后台响应按需组装。
 - 订阅更新与源配置修改经同一配置 CAS 事务提交，并复核订阅快照；直播刷新仅更新状态表，按当前源地址复核，删除源同事务清理状态。
 
@@ -15,15 +16,17 @@
 
 - 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移，用户组定义 `Tags` 留在配置。普通用户的 Guard 每请求读取一次权限与有序组成员（两后端共用 LEFT JOIN 语义），通过 `ActiveUserInfo.userAccess` 将本次快照传给 `getAvailableApiSites()` 第三参；快照仅在当前请求内复用，其他请求重新读取角色、封禁与账号存在性。站长鉴权由环境账号决定，源过滤仍从存储读取其个人源与组权限。
 - `enabledApis` 为空数组时存为 `NULL`，含义是**不限制**而非禁止全部；没有有效个人源或组源列表时返回全部启用源。删除用户最后一个授权源会让其回落为全部可用。
-- 视频源 `adminOnly` 存在配置 JSON 的 `SourceConfig` 里，由 `getAvailableApiSites()` 统一过滤：普通用户和没有 `user_access` 行的用户名看不到，管理员与站长不受影响，再与 `enabledApis` / 用户组取交集。个人 `enabledApis` 非空时整体覆盖用户组（不与组取交集），多个组取并集；该优先级只在 `resolveSourceAccessRule()`（`src/lib/source-access.ts`）实现，后台用户列表的生效源数量同用此函数。不传用户名的内部调用（定时任务）返回全部启用源。用户侧读取源列表一律经该函数，不直接遍历 `SourceConfig`。
+- 视频源 `adminOnly` 存在配置 JSON 的 `SourceConfig` 里，由 `getAvailableApiSites()` 统一过滤：普通用户和没有 `user_access` 行的用户名看不到，管理员与站长不受影响，再与 `enabledApis` / 用户组取交集。个人 `enabledApis` 非空时整体覆盖用户组（不与组取交集），多个组取并集；该优先级只在 `resolveSourceAccessRule()`（`src/lib/source-access.ts`）实现，后台用户列表的生效源数量同用此函数。不传用户名的内部调用（定时任务）返回通过 NSFW 策略的全部启用源。用户侧读取源列表一律经该函数，不直接遍历 `SourceConfig`。
+- 视频源成人标记与订阅合并规则见[成人源与 NSFW](sources-search.md#成人源与-nsfw)。标记保存在配置 JSON，配置备份保留原字段，手动取消标记保存显式 `false`。
 - 新用户默认用户组 `UserConfig.DefaultUserGroup` 存在配置 JSON；`configSelfCheck()` 在其不对应任何 `Tags` 时清除，删组无需另行处理。注册与后台添加用户经 `registerUser()` 的 `userGroups` 参数在建号事务内写入组成员。
 - 每个 `users` 行必须有 `user_access` 行；建号同事务写入，初始化时补齐。站长角色和封禁豁免由环境变量决定，表仅保存其源权限和用户组。
 - 用户权限更新与批量操作在存储事务内复核角色；配置 CAS 同事务清理被删除组和源的用户引用，避免配置冲突后留下部分写入。
 - 后台用户操作复用 `src/features/admin/services/userActions.ts`，不在 `route.ts` 里重新展开权限与用户组逻辑。后台用户列表走 `/api/admin/user` 的 SQL 游标分页，全部匹配批量操作提交筛选与排除项；`/api/admin/config` 仅返回用户总数。
+- 用户筛选的 `role=banned` 跨管理员与普通用户匹配封禁账号，`role=admin|user` 包含各自角色的全部封禁状态；站长始终豁免封禁。具体用户组用 `group` 原名，未分组用独立的 `ungrouped=true`，两者互斥；未分组按 `user_group_members` 无记录判定，包含没有组成员记录的站长。列表、计数、游标范围与全部匹配选择共用这些条件。
 
 ## 邀请码
 
-- 邀请码定义与用量的唯一真相源是 `invite_codes`，配置 JSON 仅保留注册开关。后台列表走 `/api/admin/invite-codes` 的 SQL 游标分页，注册摘要走 COUNT。
+- 邀请码定义与用量的唯一真相源是 `invite_codes`，配置 JSON 仅保留注册开关。后台列表走 `/api/admin/invite-codes` 的 SQL 游标分页，注册摘要走 COUNT。「未使用」指用量为 0 且仍有效的码，用于继续发放；已过期的零用量码归入「已过期」。列表与计数共用筛选条件，游标绑定筛选。
 - 批量创建在单个事务内按有效码剩余容量截断（总上限 200），校验选中批次的冲突并整体写入，响应仅返回实际写入的码；容量耗尽时报错，冲突或插入失败时选中批次全部不写入。SQLite 即时事务与 MySQL 配置行锁保证并发创建按最新余量截断；单条创建复用同一路径。
 - 失效码不会随激活自动删除：后台“清理失效”删除全部已过期与已用尽的码；定时 `metadata` 任务删除过期超过 30 天的码（`src/lib/cron/invite-code-retention.ts`）。表中没有用尽时间，未过期的已用尽码等到期后再按同一保留期清理。
 - 名额占用走 `reserveInviteCodeUse()`，以数据库内的有效期与次数上限做条件 UPDATE，按受影响行数判成败；注册后续步骤失败调用 `releaseInviteCode()` 回滚。
@@ -45,7 +48,7 @@
 
 `deleteUser` 与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。表内有多个用户名列时（如 `user_follows`）每一列都要覆盖。
 
-片单删除覆盖 `user_lists`、`user_list_items` 与 `list_likes`：删号与非活跃清理在同一事务清除该用户的点赞及其片单下的全部点赞，重算受影响片单的 `like_count` 后清条目和片单。SQLite 大小写迁移收集 `user_lists.username` 与 `list_likes.username`，转移片单归属、合并重复点赞并重算受影响计数；条目通过不变的 `list_id` 保留，片单与条目均不依赖收藏键。
+片单删除清理 `user_lists`、`user_list_items`，保留 `list_likes` 中其他用户的收藏；删号与非活跃清理同事务只清除该账号作为收藏者的行，重算受影响的现存片单 `like_count` 后清除本人条目和片单。`list_likes.list_name` 为 `VARCHAR(30)` 名称快照，两后端初始化时幂等加列并以当前片单名回填空快照；已写入的快照保持原值，更新规则见[片单](reviews-favorites.md#片单)。该表允许片单已删除的孤儿行，按作者统计须 JOIN 现存 `user_lists`。SQLite 大小写迁移收集 `user_lists.username` 与 `list_likes.username`，转移片单归属、合并重复收藏并重算受影响计数；规范账号已有收藏优先保留，失效收藏同样迁移，条目通过不变的 `list_id` 保留，片单与条目均不依赖作品收藏键。
 
 随用户数据增长的列表在 SQL 层按游标分页（排序键 + 唯一键打破平局），不要全量查询后在内存切页。
 
@@ -76,7 +79,7 @@
 - OAuth 凭证保存在 `UserConfig.LinuxDo`；后台配置响应复制后将 `ClientSecret` 置空，共享冻结配置保持原值。数据库备份包含凭证，备份文件按密钥管理。部署与注册通道语义见[LinuxDo 登录](deployment.md#linuxdo-登录)。
 
 - `oauth_identities` 是外部身份归属的唯一真相源；主键 `(provider, provider_user_id)`，唯一键 `(provider, username)`，用户名按本站规则归一化。LinuxDo 用户名仅用于显示，登录归属按不可变 ID 查询，同名本站账号始终独立。
-- 后台用户列表的登录渠道标记由 `oauth_identities` 按用户名聚合，只保留 `OAUTH_PROVIDERS`（`src/lib/oauth-identity.ts`）中的取值；按渠道筛选同样以 `OAUTH_PROVIDERS` 生成选项与校验参数（`provider:<渠道>`），服务端按 `oauth_identities` 过滤。新增渠道须先加入该列表，`UserTable` 的图标与名称映射随类型强制补齐，否则该渠道的账号不显示标记，筛选项也缺少名称。
+- 后台用户列表的登录渠道标记由 `oauth_identities` 按用户名聚合，只保留 `OAUTH_PROVIDERS`（`src/lib/oauth-identity.ts`）中的取值；按渠道筛选同样以 `OAUTH_PROVIDERS` 生成选项与校验参数（`login=provider:<渠道>`），服务端按 `oauth_identities` 过滤；第三方绑定状态与 `users.password_set` 独立，已绑定与未绑定筛选均不代表密码是否可用。新增渠道须先加入该列表，`UserTable` 的图标与名称映射随类型强制补齐，否则该渠道的账号不显示标记，筛选项也缺少名称。
 - `registerUser()` 的身份参数与账号、权限、资料和活跃记录同事务写入；身份冲突时整笔回滚。自动建号写随机密码哈希并记录 `auto_created`，存储条件删除也拒绝解绑。
 - 是否设过可用密码是账号级状态 `users.password_set`，与绑定了几个、哪种外部身份无关；密码登录始终使用本站用户名。第三方自动建号写为未设置，普通注册写为已设置。未设置时首次设密免旧密码，之后修改校验旧密码；密码与状态同事务更新，管理员重置同样标记已设置。加列迁移时，存在 `auto_created` 身份的存量账号一次性标为未设置（只有随机密码，无法提供旧密码）。
 - 删除用户及不活跃清理同事务清理身份；SQLite 大小写合并保留已有规范用户名的绑定，冲突旧绑定移除，其余迁移到规范用户名。两后端共享身份契约，MySQL 同时执行 fake pool 与真实数据库用例。
@@ -85,6 +88,7 @@
 ## 用户发送的弹幕
 
 - `user_danmaku` 保存登录用户发送的弹幕，独立于第三方弹幕缓存和用户弹幕开关、集映射表；`episode_key` 按共享约定逐字匹配，`time_ms` 是减去校准偏移后的弹幕集时间轴毫秒数。
+- 本人弹幕管理复用 `userDanmakuPageSql()`，在 `LIMIT` 前同时约束 `episode_key` 与规范用户名，按 `created_at DESC, id DESC` 分页；播放读取仍按单集全站预算截取，两者窗口独立。
 - 删除用户（含不活跃清理）在事务内同步处理该表；SQLite 大小写迁移收集本表用户名并合并归属，包括仅有弹幕数据的站长账号。
 - 发送限额使用共享资源表的独立 `user-danmaku-send` 命名空间，按规范用户名每分钟 10 条；该额度属于临时资源状态。站点关闭用户弹幕后仍可删除本人弹幕，管理员仍可清理存量内容。
 
@@ -101,7 +105,7 @@
 - 历史只在播放上报不带历史 id 时按 `(username, source, video_id)` 新建或取回；带 id 的上报只更新，命中 0 行即返回 `historyId: null`，**不得改成 upsert**，否则用户删除后仍在播放的页面会把记录写回。旧数据迁移同理只跑一次：完成标记是 `storage_migrations` 中的 `watch_history_v1`，与迁移写入同一事务提交；不能在启动时按缺失补建。
 - `playback_watch_buckets.watch_ms` 是会话在一个 15 分钟 UTC 对齐桶内的**累计值**，写入取 `MAX`，重试与乱序不会重复累计；改成增量相加会在重发时翻倍。`measurement_version = 2` 的会话 `watch_seconds` 由服务端按桶汇总，`1` 为旧口径（客户端估算、无桶，只能按起播时间归属）。
 - 年度报告观看时长只读统计会话与时间桶，不读取观看历史；v2 按真实桶归属时区日期，v1 将 `watch_seconds` 从 `started_at` 起连续摊开成合成桶，并单列估算时长。评价按 `created_at` 归属年份，编辑旧评价不计入当年。「看过的作品数」来自观看统计；完结数独立按 `work_completions.celebrated_at` 统计首次庆祝，首次观看按作品身份合并跨年正时长会话，自然日跨度按请求时区计算。会话已被保留策略清空时仍计完结标记，最长与最快记录仅从有首次观看时间的作品选择。
-- 年度活动通过 `getAnnualActivity(username, start, end)` 读取同一时区年区间的元数据：片单创建、所有现存片单的年内添加与获赞、观后信写入与送达、关注创建；不读取信件正文。观后信当前评分沿用精确年份优先、空年份兜底且精确空评分阻断回退。年度首位作品的关注看过人数复用 `getFollowOpinions().watchedCount`，按当前关注关系与收藏状态公开权限统计，不限年内观看。
+- 年度活动通过 `getAnnualActivity(username, start, end)` 读取同一时区年区间的元数据：片单创建、所有现存片单的年内添加与被收藏、观后信写入与送达、关注创建；不读取信件正文。观后信当前评分沿用精确年份优先、空年份兜底且精确空评分阻断回退。年度首位作品的关注看过人数复用 `getFollowOpinions().watchedCount`，按当前关注关系与收藏状态公开权限统计，不限年内观看。
 - 周期统计原有总时长、分桶、活跃天数与常看时长仍按会话起播日期归属；新增 `hours` 使用年度报告共用的真实桶 / 旧会话估算口径，二者跨周期时总数可能不同。`currentStreak` 独立于选中的历史周期，按当前用户时区的真实观看日期从今天或昨天倒推，最多 366 天。常看集数按归一化作品身份下的不同 `episode_index` 去重，不等同于会话数。
 - 个人近 90 天与后台源用量按会话 `started_at` 半开区间归属，正时长会话参与；作品数共用归一化标题 + 年份身份。个人查询走 `(username, started_at)` 索引；全站查询缺少用户名索引前缀，使用数据库共享缓存（5 分钟新鲜期、额外 5 分钟旧值期）合并同窗口读取。源名称在响应时优先取配置，配置缺失取区间内最近起播会话名称。
 - `CRON_PLAYBACK_STATS_RETENTION_DAYS` 只清统计（会话及其桶）。历史没有保留期限，只随用户删除或删除账户消失。
@@ -138,6 +142,8 @@
 `getOrLoad()` 在本地或数据库命中最长保留期内的旧值时立即返回，持租约者后台刷新；后台失败保留旧值原有的绝对过期时间。只有没有可用值的请求等待回源及共享写入。显式 `refresh()` 等待在途刷新完成。`setSharedCache()` 按 token 写入成功时同条语句清空租约，调用方依据返回值跳过重复释放；失败、不缓存或超过大小上限时仍按 token 释放，保留空占位行清理。租约续期、持有 token 校验及失效代次规则同样适用于后台刷新。
 
 共享存储读取返回原始到期字段，消费侧 `readRecord()` 按绝对 `staleUntil` 判定可用性；过期清理仅回收空间，调度与 serverless 边界见[部署指南](deployment.md#多实例与缓存)。
+
+`shared_cache.value_bytes` 与正文同条、同 token 条件写入，记录 UTF-8 字节数；新占位行为 0。两后端初始化幂等加可空列，旧行的 `NULL` 在后台维护中按元数据选出的主键分批精确回填，每批至多 250 条，与删除共用批次和时间预算。SQLite 用 `length(CAST(value_text AS BLOB))`、MySQL 用 `OCTET_LENGTH(value_text)` 取得与 `Buffer.byteLength` 一致的 UTF-8 字节数；更新只作用于仍为 `NULL` 的行，正文、到期时间与租约保持原值。元数据仍含 `NULL` 时只执行条数裁剪，回填完成并重读元数据后恢复字节裁剪，避免升级时因高估体积集中淘汰未过期缓存。容量读取使用 `(updated_at, cache_key, lease_until, value_bytes)` 覆盖索引，只取最新 4097 条无活跃租约记录的元数据确定保留边界；后续批量删除再次校验租约和排序边界，期间已刷新到边界之后的条目保留。过期查询沿用 `(stale_until, lease_until)` 索引并按 `stale_until` 排序。共享 JSON 的序列化结果同时用于内存估重和持久化；自定义估重和自定义序列化保留各自语义。
 
 ## 多维连接租约
 

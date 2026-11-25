@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { useVisibilityPolling } from '@/hooks/useVisibilityPolling';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   readNotifiedMessageAt,
   writeNotifiedMessageAt,
@@ -10,9 +10,9 @@ import {
 import { UserMessageSummary } from '@/lib/message-types';
 import { getMessageSummary } from '@/lib/messages.client';
 
+import { createMessageSummaryPoller } from './message-summary-poller';
 import { buildToastText, RefreshMode } from './message-toast-text';
 
-const POLL_INTERVAL_MS = 30_000;
 const EXTERNAL_REFRESH_DEBOUNCE_MS = 400;
 
 interface MessageSummaryPollingOptions {
@@ -41,8 +41,9 @@ export function useMessageSummaryPolling({
   const onRevisionChangedRef = useRef(onRevisionChanged);
   const onNotifyRef = useRef(onNotify);
   const notifiedAtRef = useRef(0);
-  const requestSequence = useRef(0);
-  const appliedSequence = useRef(0);
+  const pollerRef = useRef<ReturnType<
+    typeof createMessageSummaryPoller
+  > | null>(null);
   const accountRef = useRef(username);
   accountRef.current = username;
 
@@ -72,34 +73,9 @@ export function useMessageSummaryPolling({
     onNotifyRef.current = onNotify;
   }, [onNotify, onRevisionChanged]);
 
-  const refreshSummary = useCallback(
-    async (mode: RefreshMode) => {
-      if (!authenticated || !username) return;
-      const sequence = ++requestSequence.current;
-      try {
-        const nextSummary = await getMessageSummary();
-        if (
-          accountRef.current !== username ||
-          sequence < appliedSequence.current
-        )
-          return;
-        appliedSequence.current = sequence;
-        const previous = summaryRef.current;
-        summaryRef.current = nextSummary;
-        setSummary(nextSummary);
-
-        notifyLatest(nextSummary);
-
-        // local 刷新的列表已本地更新，无需通知重载
-        if (mode !== 'local' && previous?.revision !== nextSummary.revision) {
-          onRevisionChangedRef.current();
-        }
-      } catch (error) {
-        console.warn('刷新消息摘要失败:', error);
-      }
-    },
-    [authenticated, username, notifyLatest],
-  );
+  const refreshSummary = useCallback(async (mode: RefreshMode) => {
+    await pollerRef.current?.refresh(mode);
+  }, []);
 
   const setSummaryDirectly = useCallback((next: UserMessageSummary | null) => {
     summaryRef.current = next;
@@ -110,9 +86,30 @@ export function useMessageSummaryPolling({
     notifiedAtRef.current = 0;
     summaryRef.current = null;
     setSummary(null);
-    if (!authenticated) return;
-    void refreshSummary('mount');
-  }, [authenticated, refreshSummary]);
+    if (!authenticated || !username) return;
+    const poller = createMessageSummaryPoller({
+      username,
+      isCurrentAccount: () =>
+        accountRef.current === username &&
+        getAuthInfoFromBrowserCookie()?.username === username,
+      load: getMessageSummary,
+      onSummary: (nextSummary, mode) => {
+        const previous = summaryRef.current;
+        summaryRef.current = nextSummary;
+        setSummary(nextSummary);
+        notifyLatest(nextSummary);
+        // local 刷新的列表已本地更新，其他标签页仍需重载。
+        if (mode !== 'local' && previous?.revision !== nextSummary.revision) {
+          onRevisionChangedRef.current();
+        }
+      },
+    });
+    pollerRef.current = poller;
+    return () => {
+      poller.stop();
+      pollerRef.current = null;
+    };
+  }, [authenticated, username, notifyLatest]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -125,12 +122,6 @@ export function useMessageSummaryPolling({
       document.removeEventListener('visibilitychange', onFocus);
     };
   }, [notifyLatest]);
-
-  useVisibilityPolling({
-    enabled: authenticated,
-    intervalMs: POLL_INTERVAL_MS,
-    onPoll: useCallback(() => void refreshSummary('poll'), [refreshSummary]),
-  });
 
   useEffect(() => {
     if (!authenticated) return;

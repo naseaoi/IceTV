@@ -38,12 +38,18 @@ it.each([false, true])(
       isOwner,
     });
     const response = await GET(
-      request('http://localhost/api/admin/user?q=ALICE&limit=20'),
+      request(
+        'http://localhost/api/admin/user?q=ALICE&role=banned&login=none&ungrouped=true&limit=20',
+      ),
     );
     expect(response.status).toBe(200);
     expect(db.getAdminUserPage).toHaveBeenCalledWith(
       expect.objectContaining({
         q: 'alice',
+        role: 'banned',
+        login: 'none',
+        group: '',
+        ungrouped: true,
         limit: 20,
         operatorUsername: 'operator',
       }),
@@ -61,13 +67,20 @@ it('preserves guard failure and does not query users', async () => {
   expect(isGuardFailure).toHaveBeenCalled();
   expect(db.getAdminUserPage).not.toHaveBeenCalled();
 });
-it('rejects malformed query before database access', async () => {
+it.each([
+  'limit=9999',
+  'role=owner',
+  'ungrouped=yes',
+  'ungrouped=true&group=VIP',
+  'login=provider:unknown',
+  'filter=all',
+])('rejects malformed query %s before database access', async (query) => {
   (requireAdmin as jest.Mock).mockResolvedValue({
     username: 'operator',
     isOwner: false,
   });
   expect(
-    (await GET(request('http://localhost/api/admin/user?limit=9999'))).status,
+    (await GET(request(`http://localhost/api/admin/user?${query}`))).status,
   ).toBe(400);
   expect(db.getAdminUserPage).not.toHaveBeenCalled();
 });

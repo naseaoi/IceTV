@@ -1,3 +1,8 @@
+import {
+  clearListCountCookie,
+  readListCountCookie,
+  writeListCountCookie,
+} from '@/lib/list-count-cookies';
 import { socialRequest } from '@/lib/profile.client';
 import { DisplayableError } from '@/lib/user-facing-error';
 
@@ -8,6 +13,7 @@ import {
   fetchList,
   fetchMyLists,
   fetchProfileLists,
+  fetchSavedLists,
   peekListSummary,
   removeListItem,
   reorderListItems,
@@ -34,6 +40,33 @@ it('片单列表参数编码、可取消读取', async () => {
     expect.objectContaining({ signal }),
   );
 });
+it('收藏列表保存总数并清除失效片单的详情摘要缓存', async () => {
+  respond({ lists: [{ id: 'saved-hidden', name: '公开名', itemCount: 3 }] });
+  await fetchProfileLists('profile');
+  const lists = [
+    {
+      id: 'saved-visible',
+      status: 'available',
+      name: '可读',
+      itemCount: 2,
+      savedAt: 3,
+    },
+    { id: 'saved-hidden', status: 'private', name: '公开名', savedAt: 2 },
+    { id: 'saved-deleted', status: 'deleted', name: '已删除', savedAt: 1 },
+  ];
+  respond({ lists });
+  const signal = new AbortController().signal;
+  expect(await fetchSavedLists(signal)).toEqual(lists);
+  expect(fetchMock).toHaveBeenLastCalledWith(
+    '/api/lists?scope=saved',
+    expect.objectContaining({ signal, cache: 'no-store' }),
+  );
+  expect(readListCountCookie('saved_list_count')).toBe(3);
+  expect(peekListSummary('saved-visible')?.itemCount).toBe(2);
+  expect(peekListSummary('saved-hidden')).toBeNull();
+  expect(peekListSummary('saved-deleted')).toBeNull();
+});
+
 it('请求函数与路径、方法一一对应', async () => {
   const list = { id: 'list' };
   const item = { title: '作品', year: '', cover: '', source: '', id: null };
@@ -95,4 +128,24 @@ it('读取与写入后记住片单摘要，删除后清除', async () => {
   respond({});
   await deleteList('a');
   expect(peekListSummary('a')).toBeNull();
+});
+
+it('本人列表读取与增删同步已有计数，其他人的列表保持本人计数', async () => {
+  respond({ lists: [{ id: 'one' }, { id: 'two' }] });
+  await fetchMyLists({ title: '作品', year: '' });
+  expect(readListCountCookie('list_count')).toBe(2);
+  respond({ lists: [] });
+  await fetchProfileLists('other');
+  expect(readListCountCookie('list_count')).toBe(2);
+  respond({ list: { id: 'three' } });
+  await createList({ name: '新片单' });
+  expect(readListCountCookie('list_count')).toBe(3);
+  await deleteList('three');
+  expect(readListCountCookie('list_count')).toBe(2);
+  writeListCountCookie('list_count', 0);
+  await deleteList('one');
+  expect(readListCountCookie('list_count')).toBe(0);
+  clearListCountCookie('list_count');
+  await createList({ name: '未知总数' });
+  expect(readListCountCookie('list_count')).toBeNull();
 });

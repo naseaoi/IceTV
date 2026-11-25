@@ -45,7 +45,6 @@ const page = (libraryTotal: number): FavoriteLibraryPage => ({
     planned: libraryTotal,
     watching: 0,
     completed: 0,
-    reviewed: 0,
   },
   total: libraryTotal,
   libraryTotal,
@@ -72,6 +71,7 @@ it('收藏栏走收藏库查询，总数与计数都取 libraryTotal', async () 
     format: 'library',
     q: '',
     filter: 'all',
+    review: 'all',
     sort: 'saved',
     limit: '20',
   });

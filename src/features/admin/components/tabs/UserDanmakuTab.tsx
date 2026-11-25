@@ -1,11 +1,13 @@
 'use client';
 
-import { Trash2 } from 'lucide-react';
+import { MessageSquareText, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Spinner from '@/components/Spinner';
 import { AdminUserDanmakuRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { ADMIN_PANEL_CLASS } from '@/features/admin/components/AdminSettings';
 import { adminDelete, adminGet } from '@/features/admin/lib/api';
@@ -13,15 +15,17 @@ import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
+import { rememberAdminListCount } from '@/features/admin/lib/list-counts';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { showError } from '@/features/admin/lib/notifications';
 import {
   formatUserDanmakuEpisode,
   formatUserDanmakuTime,
   USER_DANMAKU_ACTION_CLASS,
+  USER_DANMAKU_HEADER_CLASS,
   USER_DANMAKU_META_CLASS,
   USER_DANMAKU_ROW_CLASS,
   USER_DANMAKU_TEXT_CLASS,
-  USER_DANMAKU_TOOLBAR_CLASS,
 } from '@/features/admin/lib/user-danmaku-layout';
 import { formatRelativeTime } from '@/lib/relative-time';
 import {
@@ -61,6 +65,7 @@ export default function UserDanmakuTab() {
         '加载弹幕失败',
       );
       if (id !== requestId.current) return;
+      if (!q && !cursor) rememberAdminListCount('danmaku', page.items.length);
       setItems((previous) => {
         const rows = cursor ? [...previous, ...page.items] : page.items;
         const unique = new Map<string, AdminUserDanmakuItem>();
@@ -121,6 +126,7 @@ export default function UserDanmakuTab() {
       for (let i = 0; i < ids.length; i += ADMIN_USER_DANMAKU_DELETE_LIMIT) {
         const batch = ids.slice(i, i + ADMIN_USER_DANMAKU_DELETE_LIMIT);
         await adminDelete(ENDPOINT, { ids: batch }, '删除弹幕失败');
+        rememberAdminListCount('danmaku', undefined);
         deleted += batch.length;
         for (const id of batch) deletedIds.current.add(id);
         setItems((previous) =>
@@ -152,39 +158,45 @@ export default function UserDanmakuTab() {
           {loadError}
         </p>
       )}
-      <div className={USER_DANMAKU_TOOLBAR_CLASS}>
-        <div className='flex h-9 items-center gap-3'>
-          <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300'>
-            <input
-              type='checkbox'
-              checked={allSelected}
-              disabled={items.length === 0}
-              onChange={toggleAll}
-              className={checkboxStyles}
-            />
-            {selected.size > 0 ? `已选 ${selected.size} 条` : '全选'}
-          </label>
+      <AdminListToolbar
+        search={
+          <AdminSearchField
+            value={search}
+            onChange={setSearch}
+            label='搜索弹幕内容或用户名'
+          />
+        }
+      />
+
+      <div aria-busy={loading} className={ADMIN_PANEL_CLASS}>
+        <div className={USER_DANMAKU_HEADER_CLASS}>
+          <input
+            type='checkbox'
+            aria-label='全选'
+            checked={allSelected}
+            disabled={items.length === 0}
+            onChange={toggleAll}
+            className={checkboxStyles}
+          />
+          <span className='tabular-nums'>
+            {selected.size > 0
+              ? `已选 ${selected.size} 条`
+              : nextCursor
+                ? `已显示 ${items.length} 条`
+                : `共 ${items.length} 条`}
+          </span>
           {selected.size > 0 && (
             <button
               type='button'
               disabled={deleting}
               onClick={() => setPendingDelete([...selected])}
-              className={`${buttonStyles.roundedDanger} inline-flex items-center gap-1`}
+              className={`${buttonStyles.roundedDanger} ml-auto inline-flex items-center gap-1`}
             >
               <Trash2 aria-hidden='true' className='h-3.5 w-3.5' />
               删除所选
             </button>
           )}
         </div>
-        <AdminSearchField
-          value={search}
-          onChange={setSearch}
-          label='搜索弹幕内容或用户名'
-          className='w-full sm:w-72'
-        />
-      </div>
-
-      <div aria-busy={loading} className={ADMIN_PANEL_CLASS}>
         {items.length > 0 && (
           <ul
             aria-label='用户弹幕'
@@ -229,7 +241,13 @@ export default function UserDanmakuTab() {
             ))}
           </ul>
         )}
-        {loading && items.length === 0 && <AdminUserDanmakuRowsSkeleton />}
+        {loading &&
+          items.length === 0 &&
+          (query ? (
+            <SearchingState className={ADMIN_LIST_EMPTY_CLASS} />
+          ) : (
+            <AdminUserDanmakuRowsSkeleton />
+          ))}
         {loading && items.length > 0 && (
           <div
             role='status'
@@ -240,9 +258,11 @@ export default function UserDanmakuTab() {
           </div>
         )}
         {!loading && !failed && items.length === 0 && (
-          <p className='py-12 text-center text-sm text-gray-500 dark:text-gray-400'>
-            {query ? '没有匹配的弹幕' : '还没有用户发送弹幕'}
-          </p>
+          <ListEmptyState
+            className={ADMIN_LIST_EMPTY_CLASS}
+            icon={query ? <SearchX /> : <MessageSquareText />}
+            label={query ? '没有匹配的弹幕' : '还没有用户发送弹幕'}
+          />
         )}
         {!loading && (failed || nextCursor) && (
           <div className='flex justify-center border-t border-gray-200 p-4 dark:border-white/[0.06]'>

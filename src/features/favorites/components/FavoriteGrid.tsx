@@ -1,10 +1,11 @@
 'use client';
 
-import { Check } from 'lucide-react';
+import { Check, Heart } from 'lucide-react';
 import Link from 'next/link';
 
 import { useMediaCardMenu } from '@/components/card-actions/useMediaCardMenu';
 import CoverImage from '@/components/CoverImage';
+import { ListEmptySkeleton, ListEmptyState } from '@/components/ListState';
 import {
   POSTER_BADGE_NEUTRAL_CLASS,
   POSTER_CARD_COVER_CLASS,
@@ -22,6 +23,8 @@ import type { FavoriteItem } from '@/features/favorites/types';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
+
+const FAVORITE_EMPTY_CLASS = 'py-5 text-center';
 
 export function FavoriteGrid({
   items,
@@ -41,11 +44,12 @@ export function FavoriteGrid({
 }) {
   if (items.length === 0) {
     return (
-      <div
-        data-favorite-empty-state
-        className='py-5 text-center text-gray-500 dark:text-gray-400'
-      >
-        {emptyText}
+      <div data-favorite-empty-state>
+        <ListEmptyState
+          icon={<Heart />}
+          label={emptyText}
+          className={FAVORITE_EMPTY_CLASS}
+        />
       </div>
     );
   }
@@ -196,6 +200,8 @@ export function ReadOnlyFavoriteGridSkeleton({
   count: number;
   gridClassName?: string;
 }) {
+  if (count === 0)
+    return <ListEmptySkeleton className={FAVORITE_EMPTY_CLASS} />;
   return (
     <div className={gridClassName} role='status' aria-label='加载中'>
       {Array.from({ length: count }, (_, index) => (

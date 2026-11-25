@@ -24,6 +24,7 @@ import {
   normalizeUserDanmakuColor,
   normalizeUserDanmakuMode,
   normalizeUserDanmakuText,
+  USER_DANMAKU_PAGE_SIZE,
   userDanmakuReadLimit,
 } from '@/lib/user-danmaku';
 import type {
@@ -235,6 +236,37 @@ export async function handleUserDanmaku(request: NextRequest) {
     };
     await db.addUserDanmaku(row);
     return json({ item: item(row, username) });
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function handleMyUserDanmaku(request: NextRequest) {
+  try {
+    const guard = await requireActiveUser(request, {
+      unauthorizedMessage: '请先登录',
+    });
+    if (isGuardFailure(guard)) return guard.response;
+    const username = normalizeUsername(guard.username);
+    const params = request.nextUrl.searchParams;
+    const key = params.get('key');
+    if (!isValidUserDanmakuKey(key)) throw new InputError('弹幕集标识无效');
+    const rows = await db.getUserDanmakuPage({
+      episodeKey: key,
+      username,
+      cursor: decodeCursor(params.get('cursor')),
+    });
+    const page = rows.slice(0, USER_DANMAKU_PAGE_SIZE);
+    const last = page[page.length - 1];
+    return json({
+      items: page.map((row) => item(row, username)),
+      nextCursor:
+        rows.length > USER_DANMAKU_PAGE_SIZE
+          ? Buffer.from(
+              JSON.stringify({ id: last.id, createdAt: last.createdAt }),
+            ).toString('base64url')
+          : null,
+    });
   } catch (error) {
     return failure(error);
   }

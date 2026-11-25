@@ -18,13 +18,13 @@ import {
   type ContinueWatchingCounts,
   useContinueWatchingItems,
 } from '@/features/continue-watching/hooks/useContinueWatchingItems';
+import { useTrackingStrip } from '@/features/continue-watching/hooks/useTrackingStrip';
 import {
   type ContinueWatchingFilter,
-  type ContinueWatchingView,
   CONTINUE_WATCHING_PAGE_SIZE,
   parseContinueWatchingFilter,
-  parseContinueWatchingView,
 } from '@/features/continue-watching/lib/layout';
+import type { TrackingStripSeed } from '@/features/continue-watching/lib/tracking-calendar';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { replaceSearchParamInUrl } from '@/lib/url-search-param';
@@ -35,20 +35,20 @@ import {
   ContinueWatchingPageFrame,
   ContinueWatchingToolbarSkeleton,
 } from './ContinueWatchingPageFrame';
-import { ContinueWatchingViewSwitch } from './ContinueWatchingViewSwitch';
-import { TrackingCalendar } from './TrackingCalendar';
+import { TrackingStrip } from './TrackingStrip';
 
 export function ContinueWatchingPageClient({
   initialSkeletonCount = 0,
   initialCounts,
+  initialTracking,
 }: {
   initialSkeletonCount?: number;
   initialCounts?: ContinueWatchingCounts;
+  initialTracking: TrackingStripSeed;
 }) {
   // 筛选以地址栏为准：前进后退恢复的是缓存的页面参数，组件内状态会与地址不一致
   const searchParams = useSearchParams();
   const filter = parseContinueWatchingFilter(searchParams?.get('filter'));
-  const view = parseContinueWatchingView(searchParams?.get('view'));
   const {
     items,
     counts,
@@ -67,11 +67,12 @@ export function ContinueWatchingPageClient({
     initialSkeletonCount,
     initialCounts,
   });
+  const trackingItems = useTrackingStrip(initialTracking);
   const [editing, setEditing] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // 消息通知静音时追更未读数被置零，计数以筛选接口的结果为准
+  // 更新计数与筛选同口径，消息已读和通知静音均保留尚未观看的更新。
   const updatedCount = counts.updated;
   const showUpdatedChip = filter === 'updated' || (updatedCount ?? 0) > 0;
   const shelvedCount = counts.shelved;
@@ -107,15 +108,6 @@ export function ContinueWatchingPageClient({
     replaceSearchParamInUrl('filter', next === 'all' ? null : next);
   };
 
-  const changeView = (next: ContinueWatchingView) => {
-    if (next === view) return;
-    exitEditing();
-    replaceSearchParamInUrl('view', next === 'grid' ? null : next);
-  };
-  const viewSwitch = (
-    <ContinueWatchingViewSwitch view={view} onChange={changeView} />
-  );
-
   const toggleSelected = (key: string) => {
     setSelectedKeys((current) => {
       const next = new Set(current);
@@ -131,106 +123,93 @@ export function ContinueWatchingPageClient({
     exitEditing();
   };
 
-  const toolbar =
-    view === 'calendar' ? (
-      <div className='ml-auto flex h-9 items-center'>{viewSwitch}</div>
-    ) : editing ? (
-      <>
-        <span className='text-sm text-gray-500 dark:text-gray-400'>
-          已选{' '}
-          <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
-            {selectedKeys.size}
-          </span>{' '}
-          项
-        </span>
-        <div className='ml-auto flex items-center gap-1'>
-          <button
-            type='button'
-            onClick={() =>
-              setSelectedKeys(
-                allSelected
-                  ? new Set()
-                  : new Set(items.map((item) => item.key)),
-              )
-            }
-            className={LIBRARY_TOOLBAR_BUTTON_CLASS}
-          >
-            {allSelected ? '取消全选' : '全选'}
-          </button>
-          <button
-            type='button'
-            disabled={selectedKeys.size === 0}
-            onClick={() => setConfirmOpen(true)}
-            className={LIBRARY_DANGER_BUTTON_CLASS}
-          >
-            删除
-          </button>
-          <button
-            type='button'
-            onClick={exitEditing}
-            className={LIBRARY_TOOLBAR_BUTTON_CLASS}
-          >
-            完成
-          </button>
-        </div>
-      </>
-    ) : loading && items.length === 0 ? (
-      <ContinueWatchingToolbarSkeleton
-        count={skeletonCount}
-        trailing={viewSwitch}
-      />
-    ) : (
-      <>
-        <div
-          role='group'
-          aria-label='筛选'
-          className='flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+  const toolbar = editing ? (
+    <>
+      <span className='text-sm text-gray-500 dark:text-gray-400'>
+        已选{' '}
+        <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
+          {selectedKeys.size}
+        </span>{' '}
+        项
+      </span>
+      <div className='ml-auto flex items-center gap-1'>
+        <button
+          type='button'
+          onClick={() =>
+            setSelectedKeys(
+              allSelected ? new Set() : new Set(items.map((item) => item.key)),
+            )
+          }
+          className={LIBRARY_TOOLBAR_BUTTON_CLASS}
         >
+          {allSelected ? '取消全选' : '全选'}
+        </button>
+        <button
+          type='button'
+          disabled={selectedKeys.size === 0}
+          onClick={() => setConfirmOpen(true)}
+          className={LIBRARY_DANGER_BUTTON_CLASS}
+        >
+          删除
+        </button>
+        <button
+          type='button'
+          onClick={exitEditing}
+          className={LIBRARY_TOOLBAR_BUTTON_CLASS}
+        >
+          完成
+        </button>
+      </div>
+    </>
+  ) : loading && items.length === 0 ? (
+    <ContinueWatchingToolbarSkeleton count={skeletonCount} />
+  ) : (
+    <>
+      <div
+        role='group'
+        aria-label='筛选'
+        className='flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+      >
+        <LibraryFilterChip
+          label='全部'
+          count={counts.all ?? 0}
+          loading={counts.all === null}
+          active={filter === 'all'}
+          onClick={() => changeFilter('all')}
+        />
+        {showUpdatedChip && (
           <LibraryFilterChip
-            label='全部'
-            count={counts.all ?? 0}
-            loading={counts.all === null}
-            active={filter === 'all'}
-            onClick={() => changeFilter('all')}
+            label='有更新'
+            count={updatedCount ?? 0}
+            loading={updatedCount === null}
+            active={filter === 'updated'}
+            onClick={() => changeFilter('updated')}
           />
-          {showUpdatedChip && (
-            <LibraryFilterChip
-              label='有更新'
-              count={updatedCount ?? 0}
-              loading={updatedCount === null}
-              active={filter === 'updated'}
-              onClick={() => changeFilter('updated')}
-            />
-          )}
-          {showShelvedChip && (
-            <LibraryFilterChip
-              label='搁置中'
-              count={shelvedCount ?? 0}
-              loading={shelvedCount === null}
-              active={filter === 'shelved'}
-              onClick={() => changeFilter('shelved')}
-            />
-          )}
-        </div>
-        <div className='ml-auto flex shrink-0 items-center gap-2'>
-          {items.length > 0 && (
-            <button
-              type='button'
-              onClick={() => setEditing(true)}
-              className={LIBRARY_TOOLBAR_BUTTON_CLASS}
-            >
-              编辑
-            </button>
-          )}
-          {viewSwitch}
-        </div>
-      </>
-    );
+        )}
+        {showShelvedChip && (
+          <LibraryFilterChip
+            label='搁置中'
+            count={shelvedCount ?? 0}
+            loading={shelvedCount === null}
+            active={filter === 'shelved'}
+            onClick={() => changeFilter('shelved')}
+          />
+        )}
+      </div>
+      {items.length > 0 && (
+        <button
+          type='button'
+          onClick={() => setEditing(true)}
+          className={`ml-auto shrink-0 ${LIBRARY_TOOLBAR_BUTTON_CLASS}`}
+        >
+          编辑
+        </button>
+      )}
+    </>
+  );
 
   let content: React.ReactNode;
-  if (view === 'calendar') {
-    content = <TrackingCalendar />;
-  } else if (loading && items.length === 0) {
+  if (loading && items.length === 0) {
     content = <ContinueWatchingGridSkeleton count={skeletonCount} />;
   } else if (error && items.length === 0) {
     content = <LoadErrorState message={error} onRetry={retry} />;
@@ -311,6 +290,8 @@ export function ContinueWatchingPageClient({
 
   return (
     <ContinueWatchingPageFrame toolbar={toolbar}>
+      {/* 追更只在全部记录下展示，筛选「有更新」时与列表重复 */}
+      {filter === 'all' && <TrackingStrip items={trackingItems} />}
       <div
         aria-busy={refreshing || undefined}
         inert={refreshing || undefined}

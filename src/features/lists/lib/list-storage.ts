@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 
 import type {
   CreateListInput,
+  ListHeaderPreview,
   ListItem,
   ListItemInput,
   ListLikeState,
@@ -10,10 +11,12 @@ import type {
   ListVisibility,
   PlazaPage,
   PlazaSort,
+  SavedListSummary,
 } from '@/features/lists/types';
-import { PLAZA_PAGE_SIZE } from '@/features/lists/types';
+import { PLAZA_PAGE_SIZE, SAVED_LIST_LIMIT } from '@/features/lists/types';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
+import type { PublicUserRef } from '@/lib/types';
 import { normalizeUsername } from '@/lib/username';
 import { watchLevelForMs } from '@/lib/watch-level';
 
@@ -54,7 +57,10 @@ export interface ListStatement {
 export type ListPlan<T> = Generator<ListStatement, T, ListRow[]>;
 export interface ListStore {
   countPlazaLists(viewer: string | null): Promise<number>;
-  getListItemCount(id: string, viewer: string | null): Promise<number | null>;
+  getListHeaderPreview(
+    id: string,
+    viewer: string | null,
+  ): Promise<ListHeaderPreview | null>;
   setListLike(
     username: string,
     id: string,
@@ -71,6 +77,8 @@ export interface ListStore {
     viewer: string,
     work?: { title: string; year: string },
   ): Promise<ListSummary[]>;
+  getSavedLists(username: string): Promise<SavedListSummary[]>;
+  countSavedLists(username: string): Promise<number>;
   countUserLists(username: string): Promise<number>;
   getList(
     id: string,
@@ -112,7 +120,7 @@ export function listSchema(dialect: 'sqlite' | 'mysql'): string[] {
   return [
     `CREATE TABLE IF NOT EXISTS user_lists (id VARCHAR(36) PRIMARY KEY, username VARCHAR(191) NOT NULL, name VARCHAR(30) NOT NULL, description VARCHAR(200) NOT NULL, is_public INTEGER NOT NULL, item_count INTEGER NOT NULL, like_count ${dialect === 'mysql' ? 'INT' : 'INTEGER'} NOT NULL DEFAULT 0, view_count ${dialect === 'mysql' ? 'INT' : 'INTEGER'} NOT NULL DEFAULT 0, version INTEGER NOT NULL, created_at ${time} NOT NULL, updated_at ${time} NOT NULL${dialect === 'mysql' ? ', KEY idx_user_lists_owner (username, updated_at, id)' : ''})${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_list_items (id VARCHAR(36) PRIMARY KEY, list_id VARCHAR(36) NOT NULL, title VARCHAR(300) NOT NULL, year VARCHAR(16) NOT NULL, title_norm VARCHAR(300) NOT NULL, cover TEXT NOT NULL, source VARCHAR(191) NOT NULL, source_id VARCHAR(300), search_title VARCHAR(300) NOT NULL, position INTEGER NOT NULL, added_at ${time} NOT NULL, UNIQUE (list_id, title_norm, year)${dialect === 'mysql' ? ', KEY idx_user_list_items_order (list_id, position)' : ''})${suffix}`,
-    `CREATE TABLE IF NOT EXISTS list_likes (list_id VARCHAR(36) NOT NULL, username VARCHAR(191) NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (list_id, username)${dialect === 'mysql' ? ', KEY idx_list_likes_username (username)' : ''})${suffix}`,
+    `CREATE TABLE IF NOT EXISTS list_likes (list_id VARCHAR(36) NOT NULL, username VARCHAR(191) NOT NULL, list_name VARCHAR(30) NOT NULL DEFAULT '', created_at ${time} NOT NULL, PRIMARY KEY (list_id, username)${dialect === 'mysql' ? ', KEY idx_list_likes_username (username)' : ''})${suffix}`,
     ...(dialect === 'sqlite'
       ? [
           'CREATE INDEX IF NOT EXISTS idx_list_likes_username ON list_likes (username)',
@@ -246,6 +254,14 @@ function summary(
       : {}),
   };
 }
+function publicOwner(row: ListRow): PublicUserRef {
+  return {
+    profileId: String(row.profile_id),
+    nickname: row.nickname === null ? null : String(row.nickname),
+    avatarSeed: row.avatar_seed === null ? null : String(row.avatar_seed),
+    level: watchLevelForMs(Number(row.counted_ms ?? 0)),
+  };
+}
 function plazaCursor(
   cursor: string | null,
   sort: PlazaSort,
@@ -281,12 +297,17 @@ export class ListPlans {
     );
     return Number(row.total);
   }
-  *getListItemCount(
+  *getListHeaderPreview(
     id: string,
     viewer: string | null,
-  ): ListPlan<number | null> {
+  ): ListPlan<ListHeaderPreview | null> {
     try {
-      return Number((yield* this.row(id, viewer)).item_count);
+      const row = yield* this.row(id, viewer);
+      return {
+        name: String(row.name),
+        description: String(row.description),
+        itemCount: Number(row.item_count),
+      };
     } catch (error) {
       if (error instanceof ListError && error.status === 404) return null;
       throw error;
@@ -322,34 +343,35 @@ export class ListPlans {
       `SELECT * FROM user_lists WHERE id = ?${this.dialect === 'mysql' ? ' FOR UPDATE' : ''}`,
       id,
     );
-    if (
-      !row ||
-      (row.username !== username &&
-        Number(row.is_public) < VISIBILITY_LEVEL.members)
-    )
-      listNotFound();
-    if (row.username === username) throw new ListError('不能给自己点赞');
+    const readable = row && Number(row.is_public) >= VISIBILITY_LEVEL.members;
     if (liked) {
+      if (row?.username === username) throw new ListError('不能收藏自己的片单');
+      if (!readable) listNotFound();
       const insert =
         this.dialect === 'sqlite' ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
       yield statement(
-        `${insert} INTO list_likes (list_id, username, created_at) VALUES (?, ?, ?)`,
+        `${insert} INTO list_likes (list_id, username, created_at, list_name) VALUES (?, ?, ?, ?)`,
         id,
         username,
         Date.now(),
+        row.name,
       );
-    } else
+    } else {
+      if (!readable && !(yield* this.hasListLike(id, username))) listNotFound();
       yield statement(
         'DELETE FROM list_likes WHERE list_id = ? AND username = ?',
         id,
         username,
       );
+    }
+    if (!row) return { liked: false, likeCount: 0 };
     yield* this.recountLikes(id);
     const [updated] = yield statement(
       'SELECT * FROM user_lists WHERE id = ?',
       id,
     );
-    return { liked, likeCount: Number(updated.like_count) };
+    // 私密片单仅允许撤回自己的收藏，响应保持当前片单内容不可见。
+    return { liked, likeCount: readable ? Number(updated.like_count) : 0 };
   }
   *deleteUserLikes(username: string): ListPlan<void> {
     const affected = yield statement(
@@ -358,10 +380,6 @@ export class ListPlans {
       username,
     );
     yield statement('DELETE FROM list_likes WHERE username = ?', username);
-    yield statement(
-      'DELETE FROM list_likes WHERE list_id IN (SELECT id FROM user_lists WHERE username = ?)',
-      username,
-    );
     for (const row of affected) yield* this.recountLikes(String(row.id));
   }
   *recordListView(id: string): ListPlan<void> {
@@ -393,12 +411,7 @@ export class ListPlans {
           row,
           items.filter((entry) => entry.list_id === row.id),
         ),
-        owner: {
-          profileId: String(row.profile_id),
-          nickname: row.nickname === null ? null : String(row.nickname),
-          avatarSeed: row.avatar_seed === null ? null : String(row.avatar_seed),
-          level: watchLevelForMs(Number(row.counted_ms ?? 0)),
-        },
+        owner: publicOwner(row),
       })),
       nextCursor:
         rows.length > PLAZA_PAGE_SIZE && last
@@ -489,6 +502,40 @@ export class ListPlans {
       ),
     );
   }
+  *getSavedLists(username: string): ListPlan<SavedListSummary[]> {
+    const rows = yield statement(
+      `SELECT l.*, k.list_id AS saved_id, k.list_name AS saved_name, k.created_at AS saved_at, p.profile_id, p.nickname, p.avatar_seed, wt.counted_ms FROM list_likes k LEFT JOIN user_lists l ON l.id = k.list_id LEFT JOIN user_profiles p ON p.username = l.username LEFT JOIN user_watch_totals wt ON wt.username = l.username WHERE k.username = ? ORDER BY k.created_at DESC, k.list_id ASC LIMIT ${SAVED_LIST_LIMIT}`,
+      normalizeUsername(username),
+    );
+    const readable = rows.filter((row) => row.id && Number(row.is_public) >= 1);
+    const items = yield* this.summaryItems(readable);
+    return rows.map((row): SavedListSummary => {
+      const savedAt = Number(row.saved_at);
+      if (!row.id || Number(row.is_public) < 1)
+        return {
+          status: row.id ? 'private' : 'deleted',
+          id: String(row.saved_id),
+          name: String(row.saved_name),
+          savedAt,
+        };
+      return {
+        ...summary(
+          row,
+          items.filter((entry) => entry.list_id === row.id),
+        ),
+        owner: publicOwner(row),
+        status: 'available',
+        savedAt,
+      };
+    });
+  }
+  *countSavedLists(username: string): ListPlan<number> {
+    const [row] = yield statement(
+      'SELECT COUNT(*) AS total FROM list_likes WHERE username = ?',
+      normalizeUsername(username),
+    );
+    return Math.min(Number(row.total), SAVED_LIST_LIMIT);
+  }
   *countUserLists(username: string): ListPlan<number> {
     const [row] = yield statement(
       'SELECT COUNT(*) AS total FROM user_lists WHERE username = ?',
@@ -563,12 +610,21 @@ export class ListPlans {
         : VISIBILITY_LEVEL[patch.visibility],
       id,
     );
+    const visibility =
+      patch.visibility === undefined
+        ? Number(row.is_public)
+        : VISIBILITY_LEVEL[patch.visibility];
+    if (visibility >= VISIBILITY_LEVEL.members)
+      yield statement(
+        'UPDATE list_likes SET list_name = ? WHERE list_id = ?',
+        patch.name ?? row.name,
+        id,
+      );
     yield* this.touch(id);
     return yield* this.result(id, username);
   }
   *deleteList(username: string, id: string): ListPlan<void> {
     yield* this.row(id, username, true);
-    yield statement('DELETE FROM list_likes WHERE list_id = ?', id);
     yield statement('DELETE FROM user_list_items WHERE list_id = ?', id);
     yield statement('DELETE FROM user_lists WHERE id = ?', id);
   }

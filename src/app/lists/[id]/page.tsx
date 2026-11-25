@@ -1,5 +1,5 @@
 import { ListDetailPageClient } from '@/features/lists/components/ListDetailPageClient';
-import { getListDetailSkeletonCount } from '@/features/lists/lib/list-skeleton-counts.server';
+import { getListDetailPreview } from '@/features/lists/lib/list-skeleton-counts.server';
 
 export default async function ListPage({
   params,
@@ -11,7 +11,7 @@ export default async function ListPage({
     <ListDetailPageClient
       key={id}
       listId={id}
-      initialItemCount={await getListDetailSkeletonCount(id)}
+      initialPreview={await getListDetailPreview(id)}
     />
   );
 }

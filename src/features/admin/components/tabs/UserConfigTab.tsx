@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import { AdminUserRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
 import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
@@ -54,8 +55,6 @@ interface UserConfigProps {
 
 type SensitiveUserAction = 'ban' | 'setAdmin' | 'cancelAdmin';
 
-const DEFAULT_INACTIVE_DAYS = 90;
-
 interface PendingSensitiveUserAction {
   action: SensitiveUserAction;
   username: string;
@@ -83,16 +82,25 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     params.delete(ADMIN_USER_SEARCH_PARAM);
     router.replace(`${pathname}?${params}`, { scroll: false });
   }, [presetSearch, searchParams, router, pathname]);
-  const [userFilter, setUserFilter] =
-    useState<AdminUserFilter['filter']>('all');
+  const [userRole, setUserRole] = useState<AdminUserFilter['role']>('all');
+  const [userLogin, setUserLogin] = useState<AdminUserFilter['login']>('all');
   const [userGroupFilter, setUserGroupFilter] = useState('');
   const [userSort, setUserSort] = useState<AdminUserQuery['sort']>('priority');
-  const userList = useAdminUsers({
+  const userFilter: AdminUserFilter = {
     q: userSearch,
-    filter: userFilter,
-    group: userGroupFilter,
-    sort: userSort,
-  });
+    role: userRole,
+    login: userLogin,
+    group: userGroupFilter.startsWith('group:')
+      ? userGroupFilter.slice('group:'.length)
+      : '',
+    ungrouped: userGroupFilter === 'ungrouped',
+  };
+  const isFiltering =
+    !!userSearch.trim() ||
+    userRole !== 'all' ||
+    userLogin !== 'all' ||
+    !!userGroupFilter;
+  const userList = useAdminUsers({ ...userFilter, sort: userSort });
   const refreshUsersAndConfig = async () => {
     setSelectedUsers(new Set());
     setAllMatching(false);
@@ -176,11 +184,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     useState<PendingSensitiveUserAction | null>(null);
   const [showCleanupInactiveModal, setShowCleanupInactiveModal] =
     useModalState(false);
-  const [inactiveDays, setInactiveDays] = useState(DEFAULT_INACTIVE_DAYS);
-  const [inactiveCandidates, setInactiveCandidates] = useState<{
-    count: number;
-    confirmation: string;
-  } | null>(null);
 
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
   const permissionContext = useMemo(
@@ -194,7 +197,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     setAllMatching(false);
     setExcludedUsers(new Set());
     setBatchPreview(null);
-  }, [userSearch, userFilter, userGroupFilter, userSort]);
+  }, [userSearch, userRole, userLogin, userGroupFilter, userSort]);
   const selectedCount = allMatching
     ? Math.max(0, userList.total - excludedUsers.size)
     : selectedUsers.size;
@@ -500,8 +503,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   };
 
   const closeCleanupInactiveModal = () => {
-    setShowCleanupInactiveModal(false);
-    setInactiveCandidates(null);
+    if (!isLoading('cleanupInactiveUsers')) setShowCleanupInactiveModal(false);
   };
 
   const handleSelectUser = useCallback(
@@ -549,7 +551,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     const selection: AdminUserSelection = allMatching
       ? {
           mode: 'all',
-          filter: { q: userSearch, filter: userFilter, group: userGroupFilter },
+          filter: userFilter,
           excluded: [...excludedUsers],
         }
       : { mode: 'explicit', usernames: [...selectedUsers] };
@@ -616,36 +618,20 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   };
 
   const handleOpenCleanupInactive = () => {
-    setInactiveCandidates(null);
     setFormError('');
     setShowCleanupInactiveModal(true);
   };
 
-  const handleScanInactiveUsers = async () => {
-    setFormError('');
-    await withLoading('scanInactiveUsers', async () => {
-      try {
-        setInactiveCandidates(await previewInactiveUsers(inactiveDays));
-      } catch (error) {
-        setFormError(getErrorMessage(error, '筛选不活跃用户失败'));
-        setInactiveCandidates(null);
-      }
-    });
-  };
-
-  const handleConfirmCleanupInactive = async () => {
-    if (!inactiveCandidates || inactiveCandidates.count === 0) return;
-
+  const handleConfirmCleanupInactive = async (
+    inactiveDays: number,
+    confirmation: string,
+  ) => {
     setFormError('');
     await withLoading('cleanupInactiveUsers', async () => {
       try {
-        const result = await deleteInactiveUsers(
-          inactiveDays,
-          inactiveCandidates.confirmation,
-        );
+        const result = await deleteInactiveUsers(inactiveDays, confirmation);
         await userList.refresh();
         setShowCleanupInactiveModal(false);
-        setInactiveCandidates(null);
         if (result.skippedCount > 0)
           showSuccess(
             `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有活跃被跳过`,
@@ -686,90 +672,121 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
           用户列表
         </h2>
-        <div className='mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
-          <div className='flex min-w-0 flex-wrap items-center gap-2'>
-            <AdminSearchField
-              value={userSearch}
-              onChange={setUserSearch}
-              label='搜索用户名、昵称或邀请码'
-              className='w-full sm:w-64'
-            />
-            <Select
-              value={userFilter || 'all'}
-              onChange={(value) =>
-                setUserFilter(value as AdminUserFilter['filter'])
-              }
-              ariaLabel='筛选用户角色或状态'
-              variant='pill'
-              className='shrink-0'
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'owner', label: '站长' },
-                { value: 'admin', label: '管理员' },
-                { value: 'user', label: '普通用户' },
-                { value: 'banned', label: '已封禁' },
-                ...OAUTH_PROVIDERS.map((provider) => ({
-                  value: `provider:${provider}`,
-                  label: `已绑定 ${LOGIN_PROVIDER_BADGES[provider].label}`,
-                })),
-              ]}
-            />
-            {(userGroups.length > 0 || userGroupFilter) && (
-              <Select
-                value={userGroupFilter}
-                onChange={setUserGroupFilter}
-                ariaLabel='筛选用户组'
-                variant='pill'
-                className='shrink-0'
-                options={[
-                  { value: '', label: '全部用户组' },
-                  ...userGroups.map((group) => ({
-                    value: group.name,
-                    label: group.name,
-                  })),
-                ]}
+        <div className='mb-4'>
+          <AdminListToolbar
+            search={
+              <AdminSearchField
+                value={userSearch}
+                onChange={setUserSearch}
+                label='搜索用户名、昵称或邀请码'
               />
-            )}
-            <Select
-              value={userSort || 'priority'}
-              onChange={(value) => setUserSort(value as AdminUserQuery['sort'])}
-              ariaLabel='用户排序'
-              variant='pill'
-              className='shrink-0'
-              options={[
-                { value: 'priority', label: '默认排序' },
-                { value: 'username', label: '用户名' },
-                { value: 'activeDesc', label: '最近活跃' },
-                { value: 'activeAsc', label: '最久未活跃' },
-              ]}
-            />
-          </div>
-          <div className='flex shrink-0 flex-wrap items-center gap-2'>
-            <button
-              onClick={handleOpenCleanupInactive}
-              className={buttonStyles.outline}
-            >
-              清理不活跃
-            </button>
-            <button
-              onClick={() => {
-                setNewUser({
-                  username: '',
-                  password: '',
-                  userGroup: config?.UserConfig?.DefaultUserGroup || '',
-                });
-                setFormError('');
-                setShowAddUserForm(true);
-                if (showChangePasswordForm) {
-                  setShowChangePasswordForm(false);
-                  setChangePasswordUser({ username: '', password: '' });
-                }
-              }}
-              className={buttonStyles.primary}
-            >
-              添加用户
-            </button>
-          </div>
+            }
+            filters={
+              <>
+                <Select
+                  value={userRole || 'all'}
+                  onChange={(value) =>
+                    setUserRole(value as AdminUserFilter['role'])
+                  }
+                  ariaLabel='筛选用户角色'
+                  variant='pill'
+                  align='end'
+                  showSelectedIcon={false}
+                  className='shrink-0'
+                  options={[
+                    { value: 'all', label: '全部角色' },
+                    { value: 'admin', label: '管理员' },
+                    { value: 'user', label: '普通用户' },
+                    { value: 'banned', label: '封禁用户' },
+                  ]}
+                />
+                <Select
+                  value={userLogin || 'all'}
+                  onChange={(value) =>
+                    setUserLogin(value as AdminUserFilter['login'])
+                  }
+                  ariaLabel='筛选登录方式'
+                  variant='pill'
+                  align='end'
+                  showSelectedIcon={false}
+                  className='shrink-0'
+                  options={[
+                    { value: 'all', label: '全部登录方式' },
+                    { value: 'none', label: '未绑定第三方' },
+                    { value: 'any', label: '已绑定第三方' },
+                    ...OAUTH_PROVIDERS.map((provider) => ({
+                      value: `provider:${provider}`,
+                      label: `已绑定 ${LOGIN_PROVIDER_BADGES[provider].label}`,
+                    })),
+                  ]}
+                />
+                {(userGroups.length > 0 || userGroupFilter) && (
+                  <Select
+                    value={userGroupFilter}
+                    onChange={setUserGroupFilter}
+                    ariaLabel='筛选用户组'
+                    variant='pill'
+                    align='end'
+                    showSelectedIcon={false}
+                    className='shrink-0'
+                    options={[
+                      { value: '', label: '全部用户组' },
+                      { value: 'ungrouped', label: '未分组' },
+                      ...userGroups.map((group) => ({
+                        value: `group:${group.name}`,
+                        label: group.name,
+                      })),
+                    ]}
+                  />
+                )}
+                <Select
+                  value={userSort || 'priority'}
+                  onChange={(value) =>
+                    setUserSort(value as AdminUserQuery['sort'])
+                  }
+                  ariaLabel='用户排序'
+                  variant='pill'
+                  align='end'
+                  showSelectedIcon={false}
+                  className='shrink-0'
+                  options={[
+                    { value: 'priority', label: '默认排序' },
+                    { value: 'username', label: '用户名' },
+                    { value: 'activeDesc', label: '最近活跃' },
+                    { value: 'activeAsc', label: '最久未活跃' },
+                  ]}
+                />
+              </>
+            }
+            actions={
+              <>
+                <button
+                  onClick={handleOpenCleanupInactive}
+                  className={buttonStyles.outline}
+                >
+                  清理不活跃
+                </button>
+                <button
+                  onClick={() => {
+                    setNewUser({
+                      username: '',
+                      password: '',
+                      userGroup: config?.UserConfig?.DefaultUserGroup || '',
+                    });
+                    setFormError('');
+                    setShowAddUserForm(true);
+                    if (showChangePasswordForm) {
+                      setShowChangePasswordForm(false);
+                      setChangePasswordUser({ username: '', password: '' });
+                    }
+                  }}
+                  className={buttonStyles.primary}
+                >
+                  添加用户
+                </button>
+              </>
+            }
+          />
         </div>
 
         <AddUserForm
@@ -848,10 +865,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         )}
         {userList.loading && visibleUsers.length === 0 ? (
           <AdminUserRowsSkeleton
-            count={Math.min(config.UserConfig.TotalUsers ?? 50, 50)}
+            count={config.UserConfig.TotalUsers}
+            searching={isFiltering}
           />
         ) : (
           <UserTable
+            isFiltering={isFiltering}
             total={userList.total}
             selectedCount={selectedCount}
             users={visibleUsers}
@@ -1047,15 +1066,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       <CleanupInactiveUsersDialog
         error={formError}
         isOpen={showCleanupInactiveModal}
-        inactiveDays={inactiveDays}
-        candidates={inactiveCandidates}
-        isScanning={isLoading('scanInactiveUsers')}
         isDeleting={isLoading('cleanupInactiveUsers')}
-        onInactiveDaysChange={(next) => {
-          setInactiveDays(next);
-          setInactiveCandidates(null);
-        }}
-        onScan={handleScanInactiveUsers}
+        onPreview={previewInactiveUsers}
         onConfirm={handleConfirmCleanupInactive}
         onClose={closeCleanupInactiveModal}
       />

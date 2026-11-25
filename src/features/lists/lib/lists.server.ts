@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import type {
   CreateListInput,
+  ListItem,
   ListItemInput,
   ListPatch,
+  ListSummary,
+  SavedListSummary,
 } from '@/features/lists/types';
 import {
   getOptionalActiveUser,
@@ -13,9 +16,16 @@ import {
 import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { writeListCountCookieOnResponse } from '@/lib/list-count-cookies';
 import { requireNickname } from '@/lib/user-profile.server';
 import { normalizeUsername } from '@/lib/username';
 
+import {
+  filterListSummaries,
+  getBlockedListSources,
+  visibleListItems,
+  visibleListSummary,
+} from './list-content-policy.server';
 import { ListError, listNotFound } from './list-storage';
 import { listViewCounter } from './list-view-counter';
 
@@ -30,6 +40,27 @@ type Action =
   | 'like';
 function json(value: unknown, status = 200) {
   return NextResponse.json(value, { status, headers: NO_STORE_HEADERS });
+}
+async function visibleMutation(
+  result: { list: ListSummary; item?: ListItem },
+  username: string,
+) {
+  const [list] = await filterListSummaries([result.list], username);
+  if (result.item && (await getBlockedListSources()).has(result.item.source)) {
+    throw new ListError('该来源不可用', 403);
+  }
+  return json({ ...result, list });
+}
+async function checkItemSource(input: unknown) {
+  if (
+    input &&
+    typeof input === 'object' &&
+    'source' in input &&
+    typeof input.source === 'string' &&
+    (await getBlockedListSources()).has(input.source.trim())
+  ) {
+    throw new ListError('该来源不可用', 403);
+  }
 }
 async function body(request: NextRequest): Promise<Record<string, unknown>> {
   try {
@@ -47,6 +78,8 @@ async function detailResponse(
   request: NextRequest,
 ) {
   const detail = await db.getList(id, viewer);
+  detail.items = visibleListItems(detail.items, await getBlockedListSources());
+  detail.list = visibleListSummary(detail.list, detail.items);
   const profile = await db.getUserProfile(detail.username);
   if (!profile) listNotFound();
   if (detail.username !== viewer) {
@@ -117,13 +150,10 @@ export async function handleLists(
       const sort = query.get('sort') ?? 'hot';
       if (sort !== 'hot' && sort !== 'new')
         throw new ListError('排序方式不正确');
-      return json(
-        await db.getPlazaLists(
-          viewer ? normalizeUsername(viewer.username) : null,
-          sort,
-          query.get('cursor'),
-        ),
-      );
+      const username = viewer ? normalizeUsername(viewer.username) : null;
+      const page = await db.getPlazaLists(username, sort, query.get('cursor'));
+      page.lists = await filterListSummaries(page.lists, username);
+      return json(page);
     }
     const params = context ? await context.params : undefined;
     if (
@@ -148,10 +178,46 @@ export async function handleLists(
     if (action === 'like' && ['PUT', 'DELETE'].includes(request.method)) {
       const nicknameFailure = await requireNickname(username);
       if (nicknameFailure) return nicknameFailure;
-      return json(await db.setListLike(username, id, request.method === 'PUT'));
+      const response = json(
+        await db.setListLike(username, id, request.method === 'PUT'),
+      );
+      writeListCountCookieOnResponse(
+        response,
+        'saved_list_count',
+        await db.countSavedLists(username),
+      );
+      return response;
     }
     if (action === 'collection' && request.method === 'GET') {
       const query = request.nextUrl.searchParams;
+      const scope = query.get('scope');
+      if (scope !== null && scope !== 'saved')
+        throw new ListError('片单范围不正确');
+      if (scope === 'saved') {
+        if (['profileId', 'title', 'year'].some((key) => query.has(key)))
+          throw new ListError('收藏片单仅支持读取本人收藏');
+        const saved = await db.getSavedLists(username);
+        const available = await filterListSummaries(
+          saved.filter(
+            (
+              entry,
+            ): entry is Extract<SavedListSummary, { status: 'available' }> =>
+              entry.status === 'available',
+          ),
+          username,
+        );
+        const byId = new Map(available.map((entry) => [entry.id, entry]));
+        const lists = saved.map((entry) =>
+          entry.status === 'available' ? byId.get(entry.id)! : entry,
+        );
+        const response = json({ lists });
+        writeListCountCookieOnResponse(
+          response,
+          'saved_list_count',
+          lists.length,
+        );
+        return response;
+      }
       const profileId = query.get('profileId');
       let owner = username;
       if (profileId !== null) {
@@ -166,52 +232,86 @@ export async function handleLists(
           throw new ListError('请提供作品标题和年份');
         work = { title: query.get('title')!, year: query.get('year')! };
       }
-      return json({ lists: await db.getLists(owner, username, work) });
+      return json({
+        lists: await filterListSummaries(
+          await db.getLists(owner, username, work),
+          username,
+        ),
+      });
     }
     if (action === 'collection' && request.method === 'POST') {
       const input = await body(request);
+      await checkItemSource(input.item);
       await db.ensureUserProfile(username);
-      return json({
-        list: await db.createList(
-          username,
-          input as unknown as CreateListInput,
-        ),
-      });
+      return await visibleMutation(
+        {
+          list: await db.createList(
+            username,
+            input as unknown as CreateListInput,
+          ),
+        },
+        username,
+      );
     }
     if (action === 'detail' && request.method === 'PATCH')
-      return json({
-        list: await db.updateList(
-          username,
-          id,
-          (await body(request)) as ListPatch,
-        ),
-      });
+      return await visibleMutation(
+        {
+          list: await db.updateList(
+            username,
+            id,
+            (await body(request)) as ListPatch,
+          ),
+        },
+        username,
+      );
     if (action === 'detail' && request.method === 'DELETE') {
       await db.deleteList(username, id);
       return json({ ok: true });
     }
-    if (action === 'items' && request.method === 'POST')
-      return json(
-        await db.addListItem(
-          username,
-          id,
-          (await body(request)) as unknown as ListItemInput,
-        ),
+    if (action === 'items' && request.method === 'POST') {
+      const input = await body(request);
+      await checkItemSource(input);
+      return await visibleMutation(
+        await db.addListItem(username, id, input as unknown as ListItemInput),
+        username,
       );
+    }
     if (action === 'item' && request.method === 'DELETE')
-      return json({
-        list: await db.removeListItem(username, id, params!.itemId!),
-      });
+      return await visibleMutation(
+        {
+          list: await db.removeListItem(username, id, params!.itemId!),
+        },
+        username,
+      );
     if (action === 'order' && request.method === 'PUT') {
       const input = await body(request);
-      return json({
-        list: await db.reorderListItems(
-          username,
-          id,
-          input.itemIds as string[],
-          input.version as number,
-        ),
-      });
+      const blocked = await getBlockedListSources();
+      let itemIds = input.itemIds as string[];
+      if (blocked.size > 0 && Array.isArray(itemIds)) {
+        const detail = await db.getList(id, username);
+        const visible = visibleListItems(detail.items, blocked);
+        if (
+          itemIds.length === visible.length &&
+          new Set(itemIds).size === visible.length &&
+          itemIds.every((key) => visible.some((item) => item.id === key))
+        ) {
+          let index = 0;
+          itemIds = detail.items.map((item) =>
+            blocked.has(item.source) ? item.id : itemIds[index++],
+          );
+        }
+      }
+      return await visibleMutation(
+        {
+          list: await db.reorderListItems(
+            username,
+            id,
+            itemIds,
+            input.version as number,
+          ),
+        },
+        username,
+      );
     }
     return json({ error: '请求方法不支持' }, 405);
   } catch (error) {

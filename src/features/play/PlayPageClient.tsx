@@ -1021,6 +1021,7 @@ function AuthenticatedPlayPageClient({
             playbackIntentRef.current,
             activeSource,
             true,
+            activeId,
           );
       }
       sourceSwitchEpisodeAnchorRef.current = null;

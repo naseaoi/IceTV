@@ -31,6 +31,10 @@ jest.mock('@/components/AuthProvider', () => ({
   }),
 }));
 
+jest.mock('@/lib/auth.client', () => ({
+  getAuthInfoFromBrowserCookie: () => ({ username: 'demo' }),
+}));
+
 jest.mock('@/lib/messages.client', () => ({
   getMessageSummary: (...args: unknown[]) => mockGetMessageSummary(...args),
   getMessagePage: (...args: unknown[]) => mockGetMessagePage(...args),

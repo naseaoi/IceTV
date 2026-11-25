@@ -49,9 +49,13 @@ function localCooldown(store: SharedResourceStore, host: string): HostCooldown {
   return state;
 }
 
-function cooldownError(until: number): UpstreamCooldownError {
+function cooldownError(
+  until: number,
+  responseReceived = false,
+): UpstreamCooldownError {
   return new UpstreamCooldownError(
     Math.max(1, Math.ceil((until - Date.now()) / 1000)),
+    responseReceived,
   );
 }
 
@@ -119,5 +123,5 @@ export async function recordUpstreamCooldown(
   } catch {
     // 本地冷却先于写库生效，写失败或超时仍可保护本实例。
   }
-  return cooldownError(state.until);
+  return cooldownError(state.until, true);
 }

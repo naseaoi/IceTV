@@ -111,7 +111,7 @@ async function handleTop250(pageStart: number) {
 
   try {
     const response = await doubanRouteCache.getOrLoad(target, () =>
-      fetchTop250Result(target),
+      fetchTop250Result(target, pageStart),
     );
     return createDoubanJsonResponse(response);
   } catch (error) {
@@ -125,7 +125,10 @@ async function handleTop250(pageStart: number) {
   }
 }
 
-async function fetchTop250Result(target: string): Promise<DoubanResult> {
+async function fetchTop250Result(
+  target: string,
+  pageStart: number,
+): Promise<DoubanResult> {
   const abortState = createTimedAbortController(undefined, 10000);
 
   const fetchOptions = {
@@ -150,12 +153,19 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
       fetchResponse,
       UPSTREAM_METADATA_MAX_BYTES,
     );
+    const listContainer = html.match(
+      /<ol\b[^>]*\bclass\s*=\s*["'][^"']*\bgrid_view\b[^"']*["'][^>]*>([\s\S]*?)<\/ol>/i,
+    );
+    // HTTP 200 也可能是风控页；合法越界分页仍应保留榜单容器。
+    if (!listContainer) {
+      throw new Error('豆瓣 Top250 页面缺少榜单容器');
+    }
     const moviePattern =
       /<div class="item">[\s\S]*?<a[^>]+href="https?:\/\/movie\.douban\.com\/subject\/(\d+)\/"[\s\S]*?<img[^>]+alt="([^"]+)"[^>]*src="([^"]+)"[\s\S]*?<span class="rating_num"[^>]*>([^<]*)<\/span>[\s\S]*?<\/div>/g;
     const movies: DoubanItem[] = [];
     let match;
 
-    while ((match = moviePattern.exec(html)) !== null) {
+    while ((match = moviePattern.exec(listContainer[1])) !== null) {
       const id = match[1];
       const title = match[2];
       const cover = match[3];
@@ -169,6 +179,11 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
         rate,
         year: '',
       });
+    }
+
+    // Top250 使用 start 偏移量分页，250 及以上允许空榜单。
+    if (movies.length === 0 && pageStart < 250) {
+      throw new Error('豆瓣 Top250 页面未解析到影片');
     }
 
     return {

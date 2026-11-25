@@ -90,7 +90,7 @@ describe('buildTrackingSql', () => {
     expect(sql.current).toBe(EXPECTED_SQLITE_CURRENT);
     expect(sql.baseline).toBe(EXPECTED_SQLITE_BASELINE);
     expect(sql.createdAt).toBe(EXPECTED_SQLITE_CREATED_AT);
-    expect(sql.unreadWhere).toBe(EXPECTED_SQLITE_UNREAD_WHERE);
+    expect(sql.updatedWhere).toBe(EXPECTED_SQLITE_UNREAD_WHERE);
   });
 
   it('MySQL 产出符合当前追更契约', () => {
@@ -100,7 +100,7 @@ describe('buildTrackingSql', () => {
     expect(sql.current).toBe(EXPECTED_MYSQL_CURRENT);
     expect(sql.baseline).toBe(EXPECTED_MYSQL_BASELINE);
     expect(sql.createdAt).toBe(EXPECTED_MYSQL_CREATED_AT);
-    expect(sql.unreadWhere).toBe(EXPECTED_MYSQL_UNREAD_WHERE);
+    expect(sql.updatedWhere).toBe(EXPECTED_MYSQL_UNREAD_WHERE);
   });
 
   it('两方言仅在 JSON 取值与布尔判定上不同，逻辑骨架相同', () => {
@@ -113,6 +113,7 @@ describe('buildTrackingSql', () => {
         .replace(/COALESCE\(json_extract[^\n]*/g, 'TRACKING_ENABLED')
         .replace(/COALESCE\(NULLIF[^\n]*/g, 'TRACKING_ENABLED');
 
+    expect(skeleton(sqlite.updatedWhere)).toBe(skeleton(mysql.updatedWhere));
     expect(skeleton(sqlite.unreadWhere)).toBe(skeleton(mysql.unreadWhere));
     expect(skeleton(sqlite.total)).toBe(skeleton(mysql.total));
     expect(skeleton(sqlite.current)).toBe(skeleton(mysql.current));

@@ -6,6 +6,8 @@ import { searchFromApi } from '@/lib/downstream';
 import type { CachedSearchAggregateEntry } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import { getSourceCacheKey } from '@/lib/source-cache-key';
 import {
   type SourceHealthTier,
   SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
@@ -126,10 +128,11 @@ export async function runSearchAggregation({
         `搜索失败 ${site.name}:`,
         error instanceof Error ? error.message : error,
       );
-      // 单页失败已由页缓存短期记住，不再整源冷却
+      // 单页失败已由页缓存短期记住；本站额度不足与上游 429 已由共享出口冷却处理，均不整源冷却
       if (
         !signal?.aborted &&
-        !(error instanceof SearchSourceUnavailableError)
+        !(error instanceof SearchSourceUnavailableError) &&
+        !(error instanceof ResourceLimitError)
       ) {
         markSourceFailureCooldown(site, error, sourceFailureCooldownMs);
       }
@@ -210,7 +213,7 @@ function clearSourceFailureCooldown(site: ApiSite): void {
 }
 
 function getSourceFailureKey(site: ApiSite): string {
-  return site.key || site.api || site.name;
+  return getSourceCacheKey(site);
 }
 
 function getSourceFailureCooldownMs(sourceFailureCooldownMs?: number): number {

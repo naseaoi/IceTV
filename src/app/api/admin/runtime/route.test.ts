@@ -74,6 +74,17 @@ describe('runtime parameter updates', () => {
     expect(DEFAULT_RUNTIME_PARAMS.DanmakuEpisodeLimit).toBe(3000);
   });
 
+  it('normalizes only supported runtime parameters from legacy config', () => {
+    const legacy = {
+      ...DEFAULT_RUNTIME_PARAMS,
+      CoverImageCacheSize: 750,
+      PlaybackHistoryPageSize: 30,
+      SearchHistoryLimit: 100,
+      ContinueWatchingLimit: 25,
+    };
+    expect(normalizeRuntimeParams(legacy)).toEqual(DEFAULT_RUNTIME_PARAMS);
+  });
+
   it('saves the fragment timeout within its range', async () => {
     const response = await POST(request({ VodFragmentTimeoutSeconds: 20 }));
 
@@ -95,6 +106,10 @@ describe('runtime parameter updates', () => {
     {},
     'invalid',
     { UnknownParameter: 1 },
+    { CoverImageCacheSize: 500 },
+    { PlaybackHistoryPageSize: 10 },
+    { SearchHistoryLimit: 20 },
+    { ContinueWatchingLimit: 10 },
     { DanmakuRequestTimeoutSeconds: 0 },
     { DanmakuRequestTimeoutSeconds: 61 },
     { DanmakuRequestTimeoutSeconds: 1.5 },

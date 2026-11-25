@@ -24,6 +24,15 @@ export function installWebPolyfills() {
         this.store[key.toLowerCase()] = String(value);
       }
 
+      delete(key: string) {
+        delete this.store[key.toLowerCase()];
+      }
+
+      append(key: string, value: string) {
+        const current = this.get(key);
+        this.set(key, current === null ? value : `${current}, ${value}`);
+      }
+
       get(key: string) {
         return this.store[key.toLowerCase()] ?? null;
       }

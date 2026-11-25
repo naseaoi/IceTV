@@ -23,10 +23,6 @@ jest.mock('@/components/modals/AlertModal', () => ({
   default: () => null,
 }));
 jest.mock('@/features/admin/lib/api', () => ({ adminPost: jest.fn() }));
-jest.mock('@/lib/runtime-config', () => ({
-  applyClientServerConfig: jest.fn(),
-  fetchClientServerConfig: jest.fn().mockResolvedValue({}),
-}));
 jest.mock('@/hooks/useAlertModal', () => ({
   useAlertModal: () => ({
     alertModal: { isOpen: false, type: 'success', title: '' },
@@ -66,22 +62,16 @@ describe('RuntimeParamsTab', () => {
     expect(within(danmaku).getByLabelText('弹幕上游请求超时')).toHaveValue(12);
     expect(within(danmaku).getByText('站点未开启')).toBeInTheDocument();
     expect(
-      within(danmaku).queryByText(/总开关与连接测试/),
-    ).not.toBeInTheDocument();
-    expect(
       within(screen.getByRole('region', { name: '搜索' })).getByLabelText(
         '出错源跳过时长',
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText('播放源失败冷却')).not.toBeInTheDocument();
     const inputs = [
       ...container.querySelectorAll<HTMLInputElement>('input[name]'),
     ];
     expect(inputs.map((input) => input.name).sort()).toEqual(
       Object.keys(DEFAULT_RUNTIME_PARAMS).sort(),
     );
-    expect(container.querySelector('details')).not.toHaveAttribute('open');
-    expect(screen.getByLabelText('封面加载状态记录上限')).toHaveValue(500);
   });
 
   it('does not save an unchanged form', () => {
@@ -112,20 +102,8 @@ describe('RuntimeParamsTab', () => {
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('omits the introductory note above the parameter groups', () => {
-    const { form } = setup();
-    expect(form.querySelector(':scope > p')).toBeNull();
-    expect(screen.queryByText(/常用参数集中展示/)).not.toBeInTheDocument();
-  });
-
-  it('saves danmaku and folded advanced values together', async () => {
-    const { container, form, refreshConfig, onDirtyChange } = setup();
-    const details = container.querySelector('details') as HTMLDetailsElement;
-    details.open = true;
-    fireEvent.change(screen.getByLabelText('封面加载状态记录上限'), {
-      target: { value: '750' },
-    });
-    details.open = false;
+  it('saves changed values together with unchanged parameters', async () => {
+    const { form, refreshConfig, onDirtyChange } = setup();
     fireEvent.change(screen.getByLabelText('弹幕上游请求超时'), {
       target: { value: '25' },
     });
@@ -140,7 +118,6 @@ describe('RuntimeParamsTab', () => {
       expect.objectContaining({
         DanmakuEpisodeLimit: 3000,
         DanmakuRequestTimeoutSeconds: 25,
-        CoverImageCacheSize: 750,
         SearchDownstreamMaxPage:
           IMPORT_ADMIN_CONFIG.SiteConfig.SearchDownstreamMaxPage,
       }),
@@ -159,14 +136,6 @@ describe('RuntimeParamsTab', () => {
     await waitFor(() => expect(adminPost).toHaveBeenCalledTimes(1));
     expect(refreshConfig).not.toHaveBeenCalled();
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
-  });
-
-  it('opens advanced settings so an invalid input can receive focus', () => {
-    const { container } = setup();
-    const details = container.querySelector('details') as HTMLDetailsElement;
-    fireEvent.invalid(screen.getByLabelText('封面加载状态记录上限'));
-    expect(details.open).toBe(true);
-    expect(adminPost).not.toHaveBeenCalled();
   });
 
   it('exposes integer bounds on the danmaku timeout input', () => {

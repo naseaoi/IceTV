@@ -3,6 +3,7 @@ import {
   CONTINUE_WATCHING_PAGE_SIZE,
   parseContinueWatchingFilter,
 } from '@/features/continue-watching/lib/layout';
+import { getTrackingStripPageData } from '@/features/continue-watching/lib/tracking-calendar.server';
 import { getContinueWatchingPageData } from '@/lib/continue-watching.server';
 
 export default async function ContinueWatchingPage({
@@ -10,9 +11,10 @@ export default async function ContinueWatchingPage({
 }: {
   searchParams: Promise<{ filter?: string | string[] }>;
 }) {
-  const [params, data] = await Promise.all([
+  const [params, data, tracking] = await Promise.all([
     searchParams,
     getContinueWatchingPageData(CONTINUE_WATCHING_PAGE_SIZE),
+    getTrackingStripPageData(),
   ]);
 
   const filter = parseContinueWatchingFilter(params.filter);
@@ -26,6 +28,7 @@ export default async function ContinueWatchingPage({
     <ContinueWatchingPageClient
       initialSkeletonCount={skeletonCount}
       initialCounts={data.counts}
+      initialTracking={tracking}
     />
   );
 }

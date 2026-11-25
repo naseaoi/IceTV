@@ -19,7 +19,10 @@ import {
   buildDoubanSearchSubjectsUrl,
   DoubanUpstreamHost,
 } from './douban-upstream-url';
-import { createTimedAbortController } from './downstream-sources/shared';
+import {
+  createTimedAbortController,
+  isAbortError,
+} from './downstream-sources/shared';
 import { DoubanResult } from './types';
 
 // ================================================================
@@ -142,15 +145,36 @@ interface DoubanCategoriesParams {
   pageStart?: number;
 }
 
+// 本站请求需覆盖服务端 10 秒回源预算加鉴权、额度检查开销。
+const DOUBAN_SERVER_TIMEOUT_MS = 15_000;
+const DOUBAN_UPSTREAM_TIMEOUT_MS = 10_000;
+
 /**
  * 带超时的 fetch 请求
  */
 async function fetchWithTimeout(
   url: string,
-  proxyUrl: string,
+  timeoutMs: number,
+  init?: RequestInit,
 ): Promise<Response> {
-  const timed = createTimedAbortController(undefined, 10000);
+  const timed = createTimedAbortController(
+    init?.signal ?? undefined,
+    timeoutMs,
+  );
+  try {
+    return await fetch(url, { ...init, signal: timed.signal });
+  } catch (error) {
+    // 部分浏览器把超时取消也报告为 AbortError，需与调用方主动取消区分。
+    if (timed.isTimeout() && !init?.signal?.aborted) {
+      throw new Error('timeout');
+    }
+    throw error;
+  } finally {
+    timed.cleanup();
+  }
+}
 
+function fetchDoubanUpstream(url: string, proxyUrl: string): Promise<Response> {
   // 检查是否使用代理
   const finalUrl =
     proxyUrl === 'https://cors-anywhere.com/'
@@ -159,21 +183,14 @@ async function fetchWithTimeout(
         ? `${proxyUrl}${encodeURIComponent(url)}`
         : url;
 
-  const fetchOptions: RequestInit = {
-    signal: timed.signal,
+  return fetchWithTimeout(finalUrl, DOUBAN_UPSTREAM_TIMEOUT_MS, {
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
       Referer: 'https://movie.douban.com/',
       Accept: 'application/json, text/plain, */*',
     },
-  };
-
-  try {
-    return await fetch(finalUrl, fetchOptions);
-  } finally {
-    timed.cleanup();
-  }
+  });
 }
 
 // 镜像站自带跨域支持，不再叠加 CORS 代理
@@ -191,7 +208,7 @@ function isDoubanResult(value: unknown): value is DoubanResult {
 async function fetchDoubanFromServer(
   serverPath: string,
 ): Promise<DoubanResult> {
-  const response = await fetch(serverPath);
+  const response = await fetchWithTimeout(serverPath, DOUBAN_SERVER_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(`HTTP error! Status: ${response.status}`);
   }
@@ -202,11 +219,11 @@ async function fetchDoubanFromServer(
   return data;
 }
 
-// 第三方公益代理优先，本站服务端兜底（仅登录用户可用）；浏览器直连受跨域限制，不参与自动
+// 本站共享缓存可减少回源，Zwei 易受豆瓣风控影响；浏览器直连受跨域限制，不参与自动。
 const AUTO_DOUBAN_DATA_ROUTES = [
-  'cors-proxy-zwei',
-  'cmliussss-cdn-tencent',
   'server',
+  'cmliussss-cdn-tencent',
+  'cors-proxy-zwei',
 ] as const;
 
 function isAuthenticated(): boolean {
@@ -239,32 +256,22 @@ async function fetchDoubanAuto(
   serverPath: string,
   loader: DoubanProxyLoader,
 ): Promise<DoubanResult> {
+  const defaultRoutes = AUTO_DOUBAN_DATA_ROUTES.filter(
+    (route) => route !== 'server' || isAuthenticated(),
+  );
   const routes = orderDoubanRoutes(
-    AUTO_DOUBAN_DATA_ROUTES.filter(
-      (route) => route !== 'server' || isAuthenticated(),
-    ),
+    defaultRoutes,
     readDoubanFallbackRoute('data'),
   );
   let lastError: unknown;
   for (let index = 0; index < routes.length; index += 1) {
     try {
       const result = await fetchDoubanRoute(routes[index], serverPath, loader);
-      recordDoubanRouteResult(
-        'data',
-        routes,
-        AUTO_DOUBAN_DATA_ROUTES[0],
-        index,
-        true,
-      );
+      recordDoubanRouteResult('data', routes, defaultRoutes[0], index, true);
       return result;
     } catch (error) {
-      recordDoubanRouteResult(
-        'data',
-        routes,
-        AUTO_DOUBAN_DATA_ROUTES[0],
-        index,
-        false,
-      );
+      if (isAbortError(error)) throw error;
+      recordDoubanRouteResult('data', routes, defaultRoutes[0], index, false);
       lastError = error;
     }
   }
@@ -332,7 +339,7 @@ async function fetchDoubanCategories(
   );
 
   try {
-    const response = await fetchWithTimeout(
+    const response = await fetchDoubanUpstream(
       target,
       host === 'douban' ? proxyUrl : '',
     );
@@ -351,6 +358,7 @@ async function fetchDoubanCategories(
       list: list,
     };
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`);
   }
 }
@@ -431,7 +439,7 @@ async function fetchDoubanList(
   );
 
   try {
-    const response = await fetchWithTimeout(
+    const response = await fetchDoubanUpstream(
       target,
       host === 'douban' ? proxyUrl : '',
     );
@@ -450,6 +458,7 @@ async function fetchDoubanList(
       list: list,
     };
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(`获取豆瓣列表数据失败: ${(error as Error).message}`);
   }
 }
@@ -517,7 +526,7 @@ async function fetchDoubanRecommends(
     host,
   );
   try {
-    const response = await fetchWithTimeout(
+    const response = await fetchDoubanUpstream(
       target,
       host === 'douban' ? proxyUrl : '',
     );
@@ -535,6 +544,7 @@ async function fetchDoubanRecommends(
       list: list,
     };
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(`获取豆瓣推荐数据失败: ${(error as Error).message}`);
   }
 }

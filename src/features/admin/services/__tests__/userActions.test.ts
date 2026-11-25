@@ -105,7 +105,16 @@ describe('批量用户组服务端选择', () => {
         operatorRole: role,
         body: {
           action: 'batchUpdateUserGroups',
-          selection: { mode: 'all', filter: { q: ' a ' }, excluded: ['BOB'] },
+          selection: {
+            mode: 'all',
+            filter: {
+              q: ' a ',
+              role: 'user',
+              login: 'none',
+              ungrouped: true,
+            },
+            excluded: ['BOB'],
+          },
           userGroups: ['VIP'],
           dryRun: true,
         },
@@ -114,6 +123,9 @@ describe('批量用户组服务端选择', () => {
       expect(db.getAdminUserPage).toHaveBeenCalledWith(
         expect.objectContaining({
           q: 'a',
+          role: 'user',
+          login: 'none',
+          ungrouped: true,
           excluded: ['bob'],
           operatorUsername: 'operator',
         }),

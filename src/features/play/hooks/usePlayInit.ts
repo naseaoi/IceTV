@@ -76,6 +76,10 @@ import {
   readSourcePlaybackStats,
   sortSourcesByPlaybackStats,
 } from '@/lib/source-playback-stats';
+import {
+  readSourceWorkFailures,
+  sourceWorkFailureKey,
+} from '@/lib/source-work-failures';
 import { PlayRecord, SearchResult } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 import {
@@ -200,8 +204,16 @@ async function preferBestSource(
 
   const playbackStats = readSourcePlaybackStats();
   const now = Date.now();
+  const workFailures = readSourceWorkFailures(now);
   const comparePriority = (a: SearchResult, b: SearchResult) =>
-    compareSourceRoutePreference(a, b, selectionContext, playbackStats, now);
+    compareSourceRoutePreference(
+      a,
+      b,
+      selectionContext,
+      playbackStats,
+      now,
+      workFailures,
+    );
   const candidates = preferDirectRouteSources(
     sortSourcesByPlaybackStats(
       sources,
@@ -212,6 +224,7 @@ async function preferBestSource(
     selectionContext,
     playbackStats,
     now,
+    workFailures,
   );
   const collectedResults: SourceProbeResult[] = [];
   const failedSourceKeys = new Set<string>();
@@ -1204,6 +1217,7 @@ export function usePlayInit({
 
       // quick 竞速在服务端已优先直连源，这里不等待选源上下文
       const selectionContextPromise = getSourceSelectionContext();
+      let deferredQuickDetail: SearchResult | undefined;
       if (
         !cachedGroup &&
         !requestedSource &&
@@ -1214,7 +1228,14 @@ export function usePlayInit({
         if (signal.aborted) return;
 
         const quickDetail = quickData?.detail;
-        if (quickDetail?.episodes && quickDetail.episodes.length > 0) {
+        // quick 的服务端竞速看不到浏览器失败记忆，命中时先走完整候选决策。
+        if (
+          quickDetail?.episodes &&
+          quickDetail.episodes.length > 0 &&
+          !readSourceWorkFailures().has(
+            sourceWorkFailureKey(quickDetail.source, quickDetail.id),
+          )
+        ) {
           requestStartupRecords([quickDetail]);
           const quickSources = quickData?.sources || [quickDetail];
           saveDetailSnapshot(quickDetail.source, quickDetail.id, quickDetail);
@@ -1235,6 +1256,7 @@ export function usePlayInit({
           );
           return;
         }
+        if (quickDetail?.episodes?.length) deferredQuickDetail = quickDetail;
       }
 
       let sourcesInfo: SearchResult[];
@@ -1264,6 +1286,10 @@ export function usePlayInit({
         sourcesInfo = query ? await fetchSourcesData(query) : [];
       }
       if (signal.aborted) return;
+      if (deferredQuickDetail) {
+        sourcesInfo = mergeSourceBundle(sourcesInfo, deferredQuickDetail);
+        setAvailableSources(sourcesInfo);
+      }
       if (requestedSource && requestedId) {
         const detailedSource = await fetchSourceDetail(
           requestedSource,
@@ -1328,6 +1354,8 @@ export function usePlayInit({
           sourcesInfo,
           selectionContext,
           readSourcePlaybackStats(),
+          Date.now(),
+          readSourceWorkFailures(),
         )[0];
         if (optimizationEnabled) {
           setLoadingStage('preferring');

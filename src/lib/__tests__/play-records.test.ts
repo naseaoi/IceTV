@@ -1,6 +1,9 @@
 import {
+  getPlayRecordMessageReadThrough,
   hasPlayRecordUpdate,
+  hasUnreadPlayRecordMessage,
   isTrackingEnabled,
+  markPlayRecordMessageRead,
   markPlayRecordUpdateRead,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
@@ -333,4 +336,74 @@ describe('play record selection', () => {
       expect(hasPlayRecordUpdate(merged)).toBe(true);
     },
   );
+});
+
+describe('消息已读水位与更新基线', () => {
+  const base = {
+    index: 1,
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+  } as PlayRecord;
+  it.each([false, true])(
+    '普通/分组刻度 %s：消息已读保留更新，新增集数重新提醒，卡片已读清除两者',
+    (grouped) => {
+      const record = grouped
+        ? {
+            ...base,
+            group_index: 1,
+            group_total: 12,
+            update_baseline_group_total: 10,
+          }
+        : base;
+      const read = markPlayRecordMessageRead(record, 12);
+      expect(hasPlayRecordUpdate(read)).toBe(true);
+      expect(hasUnreadPlayRecordMessage(read)).toBe(false);
+      expect(getPlayRecordMessageReadThrough(read)).toBe(12);
+      const newer = {
+        ...read,
+        ...(grouped ? { group_total: 13 } : { total_episodes: 13 }),
+      };
+      expect(hasUnreadPlayRecordMessage(newer)).toBe(true);
+      expect(getPlayRecordMessageReadThrough(newer)).toBe(12);
+      expect(
+        getPlayRecordMessageReadThrough(markPlayRecordMessageRead(newer, 11)),
+      ).toBe(12);
+      expect(
+        getPlayRecordMessageReadThrough(markPlayRecordMessageRead(newer, 99)),
+      ).toBe(13);
+      const acknowledged = markPlayRecordUpdateRead(newer);
+      expect(hasPlayRecordUpdate(acknowledged)).toBe(false);
+      expect(hasUnreadPlayRecordMessage(acknowledged)).toBe(false);
+    },
+  );
+  it('保存只继承服务端水位，换组、换刻度、看完与首次保存清除水位', () => {
+    const previous = {
+      ...base,
+      group_index: 1,
+      group_total: 12,
+      group_label: '第一季',
+      update_baseline_group_total: 10,
+      update_message_read_group_total: 12,
+      update_message_read_episodes: 12,
+    };
+    expect(
+      mergePlayRecordUpdateBaseline(previous, {
+        ...previous,
+        update_message_read_group_total: 99,
+      }).update_message_read_group_total,
+    ).toBe(12);
+    for (const next of [
+      { ...previous, group_label: '第二季' },
+      { ...previous, group_index: undefined, group_total: undefined },
+      { ...previous, group_index: 12 },
+    ]) {
+      const merged = mergePlayRecordUpdateBaseline(previous, next);
+      expect(merged.update_message_read_group_total).toBeUndefined();
+      expect(merged.update_message_read_episodes).toBeUndefined();
+    }
+    expect(
+      mergePlayRecordUpdateBaseline(null, previous)
+        .update_message_read_group_total,
+    ).toBeUndefined();
+  });
 });

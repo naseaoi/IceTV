@@ -12,14 +12,13 @@ import {
 
 import ContinueCard from '@/components/ContinueCard';
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
-import { useOptionalMessageCenter } from '@/components/messages/MessageCenterProvider';
-import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
 import {
   SECTION_HEADER_CLASS,
   SECTION_LINK_TEXT_CLASS,
   SECTION_TITLE_TEXT_CLASS,
 } from '@/components/section-header';
+import { CONTINUE_WATCHING_LIMIT } from '@/features/continue-watching/lib/layout';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -45,14 +44,13 @@ interface ContinueWatchingProps {
   initialRecords?: Record<string, PlayRecord> | null;
   initialUpdateCount?: number;
   refreshOnMount?: boolean;
+  initialFetchedAt?: number;
 }
 
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 type PlayRecordWithKey = PlayRecord & { key: string };
-
-const DEFAULT_CONTINUE_WATCHING_LIMIT = 10;
 
 function sortPlayRecords(
   allRecords: Record<string, PlayRecord>,
@@ -103,20 +101,21 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
   };
 }
 
+// 刚完成服务端查询时复用同次渲染的数据；预取、后退恢复的旧种子仍重新验证。
+function isFreshInitialData(fetchedAt: number): boolean {
+  const age = Date.now() - fetchedAt;
+  return fetchedAt > 0 && age >= 0 && age < 5_000;
+}
+
 export default function ContinueWatching({
   className,
   initialSkeletonCount = 0,
   initialRecords = null,
   initialUpdateCount,
+  initialFetchedAt = 0,
   refreshOnMount = true,
 }: ContinueWatchingProps) {
-  const runtimeConfig = useRuntimeConfig();
-  const continueWatchingLimit = Math.max(
-    1,
-    Math.floor(
-      runtimeConfig.CONTINUE_WATCHING_LIMIT || DEFAULT_CONTINUE_WATCHING_LIMIT,
-    ),
-  );
+  const continueWatchingLimit = CONTINUE_WATCHING_LIMIT;
   const normalizedInitialSkeletonCount = Math.min(
     initialSkeletonCount,
     continueWatchingLimit,
@@ -137,12 +136,68 @@ export default function ContinueWatching({
   const [skeletonCount, setSkeletonCount] = useState(
     seededRecords ? 0 : normalizedInitialSkeletonCount,
   );
-  const messageCenter = useOptionalMessageCenter();
   const seededUpdateCount =
     initialUpdateCount === undefined
       ? 0
       : Math.max(0, Math.floor(initialUpdateCount));
-  const updateCount = messageCenter?.trackingUnreadCount ?? seededUpdateCount;
+  const [updateCount, setUpdateCount] = useState(seededUpdateCount);
+
+  useEffect(() => {
+    setUpdateCount(seededUpdateCount);
+    if (!refreshOnMount || !getAuthInfoFromBrowserCookie()?.username) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+
+    const refreshCount = () => {
+      clearTimeout(timer);
+      controller?.abort();
+      // 首页种子与 recent 事件只有最近几条，计数只接受完整缓存快照。
+      const snapshot = getCachedPlayRecordsSnapshot();
+      if (snapshot) {
+        setUpdateCount(
+          Object.values(snapshot).filter(hasPlayRecordUpdate).length,
+        );
+        return;
+      }
+
+      timer = setTimeout(async () => {
+        const request = new AbortController();
+        controller = request;
+        try {
+          const page = await getPlayRecordPage(1, null, {
+            filter: 'updated',
+            signal: request.signal,
+          });
+          if (!request.signal.aborted) setUpdateCount(page.total);
+        } catch (error) {
+          if (!request.signal.aborted) {
+            console.error('获取继续观看更新计数失败:', error);
+          }
+        }
+      }, 100);
+    };
+
+    if (
+      !isFreshInitialData(initialFetchedAt) ||
+      initialUpdateCount === undefined ||
+      getCachedPlayRecordsSnapshot()
+    )
+      refreshCount();
+    const unsubscribers = (
+      [
+        'playRecordsUpdated',
+        'recentPlayRecordsUpdated',
+        'playRecordStatesUpdated',
+      ] as const
+    ).map((event) => subscribeToDataUpdates(event, refreshCount));
+
+    return () => {
+      clearTimeout(timer);
+      controller?.abort();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [refreshOnMount, seededUpdateCount, initialFetchedAt, initialUpdateCount]);
 
   const updatePlayRecords = useCallback(
     (allRecords: Record<string, PlayRecord>) => {
@@ -199,7 +254,8 @@ export default function ContinueWatching({
       }
     };
 
-    fetchPlayRecords();
+    if (!seededRecords || !isFreshInitialData(initialFetchedAt))
+      void fetchPlayRecords();
 
     const unsubscribe = subscribeToDataUpdates(
       'playRecordsUpdated',
@@ -231,7 +287,13 @@ export default function ContinueWatching({
       unsubscribeRecent();
       unsubscribeStates();
     };
-  }, [continueWatchingLimit, refreshOnMount, seededRecords, updatePlayRecords]);
+  }, [
+    continueWatchingLimit,
+    refreshOnMount,
+    seededRecords,
+    updatePlayRecords,
+    initialFetchedAt,
+  ]);
 
   if (!loading && playRecords.length === 0) {
     return null;

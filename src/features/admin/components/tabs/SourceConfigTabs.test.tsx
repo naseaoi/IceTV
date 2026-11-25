@@ -222,6 +222,236 @@ describe.each(cases)('$label列表搜索', (testCase) => {
   });
 });
 
+describe.each(cases.filter(({ label }) => label !== '视频源'))(
+  '$label状态筛选',
+  ({ Component, label, first, second, firstId, secondId }) => {
+    const filteredConfig = {
+      ...config,
+      LiveConfig: config.LiveConfig!.map((item, index) => ({
+        ...item,
+        disabled: index === 1,
+      })),
+      CustomCategories: config.CustomCategories.map((item, index) => ({
+        ...item,
+        disabled: index === 1,
+      })),
+    };
+    const choose = (value: string) => {
+      fireEvent.click(screen.getByRole('button', { name: `筛选${label}状态` }));
+      fireEvent.click(screen.getByRole('option', { name: value }));
+    };
+    const visible = () =>
+      within(screen.getByRole('list', { name: `${label}列表` }));
+
+    it('三档状态与关键词取交集，清除搜索保留状态', () => {
+      render(<Component config={filteredConfig} refreshConfig={jest.fn()} />);
+      expect(visible().getAllByRole('listitem')).toHaveLength(2);
+      choose('已启用');
+      expect(visible().getByText(first)).toBeInTheDocument();
+      expect(visible().queryByText(second)).not.toBeInTheDocument();
+      expect(screen.getByText('共 1 个')).toBeInTheDocument();
+      choose('已禁用');
+      expect(visible().getByText(second)).toBeInTheDocument();
+      expect(visible().queryByText(first)).not.toBeInTheDocument();
+
+      const search = screen.getByRole('searchbox', { name: `搜索${label}` });
+      fireEvent.change(search, { target: { value: second.toUpperCase() } });
+      expect(visible().getByText(second)).toBeInTheDocument();
+      fireEvent.change(search, { target: { value: first } });
+      expect(visible().getByText(`没有匹配的${label}`)).toBeInTheDocument();
+      expect(screen.getByText('共 0 个')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+      expect(visible().getByText(second)).toBeInTheDocument();
+      expect(visible().queryByText(first)).not.toBeInTheDocument();
+      choose('全部状态');
+      expect(visible().getAllByRole('listitem')).toHaveLength(2);
+      expect(adminGet).not.toHaveBeenCalled();
+      expect(adminPost).not.toHaveBeenCalled();
+    });
+
+    it('缺省状态视为启用，仅状态筛选无结果时显示查找空状态', () => {
+      render(<Component config={config} refreshConfig={jest.fn()} />);
+      choose('已启用');
+      expect(visible().getAllByRole('listitem')).toHaveLength(2);
+      choose('已禁用');
+      expect(visible().getByText(`没有匹配的${label}`)).toBeInTheDocument();
+    });
+
+    it('状态筛选禁用拖拽并忽略排序事件，全部状态恢复排序', () => {
+      render(<Component config={config} refreshConfig={jest.fn()} />);
+      choose('已启用');
+      for (const handle of visible().getAllByRole('button', {
+        name: /拖动排序/,
+      })) {
+        expect(handle).toHaveAttribute('aria-disabled', 'true');
+        expect(handle).toHaveAttribute('tabindex', '-1');
+      }
+      expect(useSortable).toHaveBeenCalledWith({ id: firstId, disabled: true });
+      expect(useSortable).toHaveBeenCalledWith({
+        id: secondId,
+        disabled: true,
+      });
+      const event = {
+        active: { id: firstId },
+        over: { id: secondId },
+      } as DragEndEvent;
+      act(() => mockOnDragEnd(event));
+      expect(visible().getAllByRole('listitem')[0]).toHaveTextContent(first);
+      expect(
+        screen.queryByRole('button', { name: '保存排序' }),
+      ).not.toBeInTheDocument();
+
+      const search = screen.getByRole('searchbox', { name: `搜索${label}` });
+      fireEvent.change(search, { target: { value: 'a' } });
+      choose('全部状态');
+      expect(
+        visible().getByRole('button', { name: `拖动排序 ${first}` }),
+      ).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+      expect(
+        visible().getByRole('button', { name: `拖动排序 ${first}` }),
+      ).toHaveAttribute('aria-disabled', 'false');
+      act(() => mockOnDragEnd(event));
+      expect(visible().getAllByRole('listitem')[0]).toHaveTextContent(second);
+      expect(
+        screen.getByRole('button', { name: '保存排序' }),
+      ).toBeInTheDocument();
+    });
+  },
+);
+
+describe('视频源状态与线路组合筛选', () => {
+  const filteredConfig = {
+    ...config,
+    SourceConfig: [
+      ...config.SourceConfig,
+      {
+        name: '自动源',
+        key: 'auto',
+        api: 'https://auto.test',
+        from: 'custom',
+        proxyMode: 'auto',
+      },
+      {
+        name: '直连源',
+        key: 'browser',
+        api: 'https://browser.test',
+        from: 'custom',
+        proxyMode: 'browser',
+        disabled: true,
+      },
+      {
+        name: '代理源',
+        key: 'server',
+        api: 'https://server.test',
+        from: 'custom',
+        proxyMode: 'server',
+        disabled: true,
+      },
+    ],
+  } as AdminConfig;
+  const choose = (dimension: string, label: string) => {
+    fireEvent.click(screen.getByRole('button', { name: dimension }));
+    fireEvent.click(screen.getByRole('option', { name: label }));
+  };
+  const visible = () =>
+    within(screen.getByRole('list', { name: '视频源列表' }));
+
+  it.each([
+    ['自动', ['Alpha 视频', 'Beta 视频', '自动源']],
+    ['直连', ['直连源']],
+    ['代理', ['代理源']],
+  ])('按%s线路匹配，缺省线路视为自动', async (label, names) => {
+    await act(async () => {
+      render(
+        <VideoSourceConfig config={filteredConfig} refreshConfig={jest.fn()} />,
+      );
+    });
+    choose('筛选视频源线路', label as string);
+    expect(visible().getAllByRole('listitem')).toHaveLength(names.length);
+    for (const name of names)
+      expect(visible().getByText(name)).toBeInTheDocument();
+    expect(screen.getByText(`共 ${names.length} 个`)).toBeInTheDocument();
+    for (const handle of visible().getAllByRole('button', {
+      name: /拖动排序/,
+    })) {
+      expect(handle).toHaveAttribute('aria-disabled', 'true');
+    }
+    choose('筛选视频源线路', '全部线路');
+    expect(visible().getAllByRole('listitem')).toHaveLength(5);
+    expect(
+      visible().getByRole('button', { name: '拖动排序 Alpha 视频' }),
+    ).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('状态与线路取交集，清除搜索保留条件并锁定拖拽', async () => {
+    await act(async () => {
+      render(
+        <VideoSourceConfig config={filteredConfig} refreshConfig={jest.fn()} />,
+      );
+    });
+    choose('筛选视频源状态', '已禁用');
+    expect(visible().getAllByRole('listitem')).toHaveLength(2);
+    choose('筛选视频源线路', '代理');
+    expect(visible().getAllByRole('listitem')).toHaveLength(1);
+    expect(visible().getByText('代理源')).toBeInTheDocument();
+    const search = screen.getByRole('searchbox', { name: '搜索视频源' });
+    fireEvent.change(search, { target: { value: 'nothing' } });
+    expect(visible().getByText('没有匹配的视频源')).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', { name: '全选当前视频源' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+    expect(visible().getByText('代理源')).toBeInTheDocument();
+    choose('筛选视频源线路', '全部线路');
+    act(() =>
+      mockOnDragEnd({
+        active: { id: 'browser' },
+        over: { id: 'server' },
+      } as DragEndEvent),
+    );
+    expect(visible().getAllByRole('listitem')[0]).toHaveTextContent('直连源');
+    expect(
+      screen.queryByRole('button', { name: '保存排序' }),
+    ).not.toBeInTheDocument();
+    choose('筛选视频源状态', '全部状态');
+    expect(
+      visible().getByRole('button', { name: '拖动排序 直连源' }),
+    ).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('待清理沿用健康等级并与线路取交集', async () => {
+    jest.mocked(adminGet).mockImplementation(async (url) =>
+      url.includes('source-health')
+        ? {
+            items: ['browser', 'server'].map((source) => ({
+              source,
+              tier: 'poor',
+              score: 20,
+              searchAttempts: 0,
+              searchAvailability: null,
+              avgSearchLatencyMs: null,
+              playReporterDays: 0,
+              playSuccessRate: null,
+              lastOkDate: null,
+            })),
+          }
+        : { stats: [] },
+    );
+    await act(async () => {
+      render(
+        <VideoSourceConfig config={filteredConfig} refreshConfig={jest.fn()} />,
+      );
+    });
+    choose('筛选视频源状态', '待清理');
+    choose('筛选视频源线路', '直连');
+    expect(visible().getAllByRole('listitem')).toHaveLength(1);
+    expect(visible().getByText('直连源')).toBeInTheDocument();
+    choose('筛选视频源线路', '自动');
+    expect(visible().getByText('没有匹配的视频源')).toBeInTheDocument();
+  });
+});
+
 it('视频源全选和取消全选只影响可见行，并保留隐藏行的选择', async () => {
   await act(async () => {
     render(<VideoSourceConfig config={config} refreshConfig={jest.fn()} />);
@@ -367,19 +597,60 @@ describe('视频源告警定位', () => {
       ),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '按源站质量筛选' }));
-    fireEvent.click(screen.getByRole('option', { name: '告警中 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '筛选视频源状态' }));
+    fireEvent.click(screen.getByRole('option', { name: '告警中' }));
     expect(screen.getByText('Beta 视频')).toBeInTheDocument();
     expect(screen.queryByText('Alpha 视频')).not.toBeInTheDocument();
   });
 
+  it('告警消失时保留已选条件，退出后隐藏告警选项', async () => {
+    const view = render(
+      <VideoSourceConfig config={config} refreshConfig={jest.fn()} />,
+    );
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: '筛选视频源状态' }));
+    fireEvent.click(screen.getByRole('option', { name: '告警中' }));
+    mockAlerts = [];
+    view.rerender(
+      <VideoSourceConfig config={config} refreshConfig={jest.fn()} />,
+    );
+    expect(screen.getByText('没有匹配的视频源')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '筛选视频源状态' }));
+    expect(screen.getByRole('option', { name: '告警中' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: '全部状态' }));
+    fireEvent.click(screen.getByRole('button', { name: '筛选视频源状态' }));
+    expect(
+      screen.queryByRole('option', { name: '告警中' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('从告警跳转来时清掉筛选、滚到该源并移除定位参数', async () => {
+    const view = render(
+      <VideoSourceConfig config={config} refreshConfig={jest.fn()} />,
+    );
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: '筛选视频源状态' }));
+    fireEvent.click(screen.getByRole('option', { name: '已禁用' }));
+    fireEvent.click(screen.getByRole('button', { name: '筛选视频源线路' }));
+    fireEvent.click(screen.getByRole('option', { name: '代理' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索视频源' }), {
+      target: { value: 'missing' },
+    });
     mockSearchParams = new URLSearchParams(
       'tab=video-source&source=video-second',
     );
-    await act(async () => {
-      render(<VideoSourceConfig config={config} refreshConfig={jest.fn()} />);
-    });
+    view.rerender(
+      <VideoSourceConfig config={config} refreshConfig={jest.fn()} />,
+    );
+    expect(screen.getByRole('searchbox', { name: '搜索视频源' })).toHaveValue(
+      '',
+    );
+    expect(
+      screen.getByRole('button', { name: '筛选视频源状态' }),
+    ).toHaveTextContent('全部状态');
+    expect(
+      screen.getByRole('button', { name: '筛选视频源线路' }),
+    ).toHaveTextContent('全部线路');
     await act(async () => {
       await new Promise((resolve) => requestAnimationFrame(resolve));
     });

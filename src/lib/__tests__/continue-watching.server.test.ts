@@ -5,8 +5,10 @@ import { cookies } from 'next/headers';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import {
   getContinueWatchingInitialData,
+  getContinueWatchingPageData,
   getContinueWatchingSkeletonCount,
 } from '@/lib/continue-watching.server';
+import { selectPlayRecordPage } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
 jest.mock('next/headers', () => ({
@@ -18,13 +20,12 @@ jest.mock('@/lib/auth-session.server', () => ({
 }));
 
 const mockGetPlayRecordPage = jest.fn();
-jest.mock('@/lib/config', () => ({
-  getPublicConfig: async () => ({ ContinueWatchingLimit: 20 }),
-}));
+const mockGetUnreadTrackingPlayRecordPage = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
     getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
-    getUnreadTrackingPlayRecordPage: async () => ({ total: 2 }),
+    getUnreadTrackingPlayRecordPage: (...args: unknown[]) =>
+      mockGetUnreadTrackingPlayRecordPage(...args),
   },
 }));
 
@@ -121,15 +122,17 @@ it('首页 SSR 只传列表摘要，保留主进度和更新计数', async () =>
   }));
   const full = Object.freeze({ ...summary, episode_progress: episodeProgress });
   const items = Object.fromEntries(
-    Array.from({ length: 20 }, (_, index) => [`s+${index}`, full]),
+    Array.from({ length: 10 }, (_, index) => [`s+${index}`, full]),
   );
-  mockGetPlayRecordPage.mockResolvedValue({
-    items,
-    total: 20,
-    nextCursor: null,
-  });
+  mockGetPlayRecordPage.mockImplementation(
+    (_username, _limit, _cursor, _options, filter) => ({
+      items: filter === 'updated' ? {} : items,
+      total: filter === 'updated' ? 2 : 20,
+      nextCursor: null,
+    }),
+  );
   const result = await getContinueWatchingInitialData();
-  expect(mockGetPlayRecordPage).toHaveBeenCalledWith('tester', 20);
+  expect(mockGetPlayRecordPage).toHaveBeenCalledWith('tester', 10);
   expect(result.updateCount).toBe(2);
   expect(result.records).toEqual(
     Object.fromEntries(Object.keys(items).map((key) => [key, summary])),
@@ -137,5 +140,54 @@ it('首页 SSR 只传列表摘要，保留主进度和更新计数', async () =>
   expect(full.episode_progress).toBe(episodeProgress);
   expect(Buffer.byteLength(JSON.stringify(result.records))).toBeLessThan(
     Buffer.byteLength(JSON.stringify(items)),
+  );
+});
+
+it('消息已读后追更页初始计数与首页更新数保持一致，卡片已读才清零', async () => {
+  jest.clearAllMocks();
+  mockCookieStore({ auth: 'valid', cw_page_count: '1' });
+  mockGetServerAuthSession.mockResolvedValue({
+    status: 'authenticated',
+    username: 'tester',
+  });
+  let record: PlayRecord = {
+    title: '作品',
+    source_name: '源站',
+    cover: '',
+    year: '2026',
+    index: 5,
+    total_episodes: 9,
+    update_baseline_episodes: 8,
+    play_time: 120,
+    total_time: 1800,
+    save_time: Date.now(),
+  };
+  mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({ total: 0 });
+  mockGetPlayRecordPage.mockImplementation(
+    (_username, limit, cursor, _options, filter) =>
+      selectPlayRecordPage({ 's+1': record }, limit, cursor, { filter }),
+  );
+
+  const expectCounts = async (updated: number) => {
+    await expect(getContinueWatchingPageData(24)).resolves.toMatchObject({
+      skeletonCount: 1,
+      counts: { all: 1, updated, shelved: 0 },
+    });
+    await expect(getContinueWatchingInitialData()).resolves.toMatchObject({
+      updateCount: updated,
+    });
+  };
+  await expectCounts(1);
+  record = { ...record, update_message_read_episodes: 9 };
+  await expectCounts(1);
+  record = { ...record, update_baseline_episodes: 9 };
+  await expectCounts(0);
+  expect(mockGetUnreadTrackingPlayRecordPage).not.toHaveBeenCalled();
+  expect(mockGetPlayRecordPage).toHaveBeenCalledWith(
+    'tester',
+    1,
+    undefined,
+    undefined,
+    'updated',
   );
 });

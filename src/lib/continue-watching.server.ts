@@ -1,10 +1,10 @@
 import { cookies } from 'next/headers';
 
+import { CONTINUE_WATCHING_LIMIT } from '@/features/continue-watching/lib/layout';
 import { getServerAuthSession } from '@/lib/auth-session.server';
-import { getPublicConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getListSkeletonCount } from '@/lib/list-count-cookies.server';
-import { normalizePlayRecordLimit, toPlayRecordList } from '@/lib/play-records';
+import { toPlayRecordList } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
 const MAX_CONTINUE_WATCHING_SKELETON_COUNT = 8;
@@ -58,7 +58,13 @@ export async function getContinueWatchingPageData(
   try {
     const [page, trackingPage, shelvedPage] = await Promise.all([
       db.getPlayRecordPage(session.username, 1),
-      db.getUnreadTrackingPlayRecordPage(session.username, 1),
+      db.getPlayRecordPage(
+        session.username,
+        1,
+        undefined,
+        undefined,
+        'updated',
+      ),
       db.getPlayRecordPage(
         session.username,
         1,
@@ -85,6 +91,7 @@ export async function getContinueWatchingPageData(
 }
 
 export interface ContinueWatchingInitialData {
+  fetchedAt?: number;
   records: Record<string, PlayRecord> | null;
   updateCount: number;
 }
@@ -102,13 +109,19 @@ export async function getContinueWatchingInitialData(): Promise<ContinueWatching
   }
 
   try {
-    const publicConfig = await getPublicConfig();
-    const limit = normalizePlayRecordLimit(publicConfig.ContinueWatchingLimit);
+    const fetchedAt = Date.now();
     const [page, trackingPage] = await Promise.all([
-      db.getPlayRecordPage(session.username, limit),
-      db.getUnreadTrackingPlayRecordPage(session.username, 1),
+      db.getPlayRecordPage(session.username, CONTINUE_WATCHING_LIMIT),
+      db.getPlayRecordPage(
+        session.username,
+        1,
+        undefined,
+        undefined,
+        'updated',
+      ),
     ]);
     return {
+      fetchedAt,
       records: toPlayRecordList(page.items),
       updateCount: trackingPage.total,
     };

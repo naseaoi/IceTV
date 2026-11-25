@@ -306,11 +306,12 @@ export default function RegistrationTab({
         inviteList={{
           ...inviteList,
           expectedCount:
-            inviteFilter === 'all'
+            inviteList.totals[inviteFilter] ??
+            (inviteFilter === 'all'
               ? userConfig.inviteCodeCount
               : inviteFilter === 'active'
-                ? activeInviteCodeCount
-                : inviteList.totals[inviteFilter],
+                ? userConfig.activeInviteCodeCount
+                : undefined),
         }}
         isCreatingCode={isLoading('createInviteCode')}
         deletingCode={

@@ -52,21 +52,7 @@ export function ContinueWatchingGridSkeleton({ count }: { count: number }) {
   );
 }
 
-// 视图切换两枚 w-9 按钮加 p-0.5 内边距
-const VIEW_SWITCH_SKELETON = (
-  <div
-    aria-hidden='true'
-    className='skeleton h-8 w-[76px] shrink-0 rounded-full'
-  />
-);
-
-export function ContinueWatchingToolbarSkeleton({
-  count,
-  trailing = VIEW_SWITCH_SKELETON,
-}: {
-  count: number;
-  trailing?: ReactNode;
-}) {
+export function ContinueWatchingToolbarSkeleton({ count }: { count: number }) {
   return (
     <>
       <div aria-hidden='true' inert className='flex'>
@@ -78,15 +64,12 @@ export function ContinueWatchingToolbarSkeleton({
           onClick={() => undefined}
         />
       </div>
-      <div className='ml-auto flex shrink-0 items-center gap-2'>
-        {count > 0 && (
-          <div
-            aria-hidden='true'
-            className='skeleton h-9 w-[60px] shrink-0 rounded-full'
-          />
-        )}
-        {trailing}
-      </div>
+      {count > 0 && (
+        <div
+          aria-hidden='true'
+          className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
+        />
+      )}
     </>
   );
 }

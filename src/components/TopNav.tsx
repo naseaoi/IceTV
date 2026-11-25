@@ -107,6 +107,9 @@ export default function TopNav({
       >
         <Link
           href='/'
+          prefetch={false}
+          onMouseEnter={() => prefetchRoute('/')}
+          onFocus={() => prefetchRoute('/')}
           className='flex shrink-0 items-center gap-2.5 transition-opacity hover:opacity-80'
         >
           <span className='h-8 w-8'>

@@ -31,6 +31,7 @@ import {
 } from '@/lib/source-cover-proxy';
 import type { UserAccess } from '@/lib/user-access';
 import { normalizeUsername } from '@/lib/username';
+import { isAdultSourceBlocked } from '@/lib/yellow';
 import { AdminConfig } from '@/types/admin';
 
 export interface ApiSite {
@@ -38,6 +39,7 @@ export interface ApiSite {
   api: string;
   name: string;
   detail?: string;
+  nsfw?: boolean;
 }
 
 interface LiveCfg {
@@ -135,9 +137,15 @@ export function refineConfig(
   apiSitesFromFile.forEach(([key, site]) => {
     if (isCatalogFavoriteSource(key))
       throw new Error('目录收藏标识不能用于播放源');
+    if (site.nsfw !== undefined && typeof site.nsfw !== 'boolean') {
+      throw new Error('视频源 nsfw 必须为布尔值');
+    }
     const existingSource = currentApiSites.get(key);
     if (existingSource) {
-      // 如果已存在，只覆盖 name、api、detail 和 from
+      // 本地显式标记优先，订阅只补齐尚未设置的标记。
+      if (existingSource.nsfw === undefined && site.nsfw !== undefined) {
+        existingSource.nsfw = site.nsfw;
+      }
       existingSource.name = site.name;
       existingSource.api = site.api;
       existingSource.detail = site.detail;
@@ -149,6 +157,7 @@ export function refineConfig(
         name: site.name,
         api: site.api,
         detail: site.detail,
+        ...(site.nsfw !== undefined ? { nsfw: site.nsfw } : {}),
         from: 'config',
         disabled: false,
       });
@@ -315,11 +324,15 @@ async function getInitConfig(
 
   // 从配置文件中补充源信息
   Object.entries(cfgFile.api_site || []).forEach(([key, site]) => {
+    if (site.nsfw !== undefined && typeof site.nsfw !== 'boolean') {
+      throw new Error('视频源 nsfw 必须为布尔值');
+    }
     adminConfig.SourceConfig.push({
       key: key,
       name: site.name,
       api: site.api,
       detail: site.detail,
+      ...(site.nsfw !== undefined ? { nsfw: site.nsfw } : {}),
       from: 'config',
       disabled: false,
     });
@@ -751,7 +764,11 @@ export async function getAvailableApiSites(
   userAccess?: Readonly<UserAccess>,
 ): Promise<ApiSite[]> {
   const currentConfig = config || (await getConfigForRead());
-  const enabledSources = currentConfig.SourceConfig.filter((s) => !s.disabled);
+  const enabledSources = currentConfig.SourceConfig.filter(
+    (s) =>
+      !s.disabled &&
+      !isAdultSourceBlocked(s, currentConfig.SiteConfig.DisableYellowFilter),
+  );
 
   if (!user) {
     return enabledSources.map(toApiSite);

@@ -1,6 +1,12 @@
 export const OAUTH_PROVIDERS = ['linuxdo'] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
+export const LINUXDO_NAME_ATTEMPTS = 100;
+
+export function linuxDoNameSuffix(attempt: number): string {
+  return attempt === 0 ? '' : `_ld${attempt === 1 ? '' : attempt}`;
+}
+
 export type OAuthIdentity = {
   provider: OAuthProvider;
   providerUserId: string;

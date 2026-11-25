@@ -7,6 +7,7 @@ import {
   SOURCE_HEALTH_PROBE_KEYWORDS,
   SOURCE_HEALTH_PROBE_KEYWORDS_PER_RUN,
 } from '@/lib/source-quality-policy';
+import { isAdultSourceBlocked } from '@/lib/yellow';
 
 export function getSourceHealthProbeKeywords(now: Date): string[] {
   const utcDay = Math.floor(now.getTime() / 86_400_000);
@@ -24,17 +25,19 @@ export async function probeConfiguredSources(now = new Date()): Promise<void> {
     const config = await getConfigForRead();
     const keywords = getSourceHealthProbeKeywords(now);
     await runWithConcurrency(
-      config.SourceConfig.filter((source) => !source.disabled).map(
-        (source) => async () => {
-          for (const query of keywords) {
-            try {
-              await probeSourceSearch(source, query);
-            } catch (error) {
-              console.warn(`Source health probe failed [${source.key}]`, error);
-            }
+      config.SourceConfig.filter(
+        (source) =>
+          !source.disabled &&
+          !isAdultSourceBlocked(source, config.SiteConfig.DisableYellowFilter),
+      ).map((source) => async () => {
+        for (const query of keywords) {
+          try {
+            await probeSourceSearch(source, query);
+          } catch (error) {
+            console.warn(`Source health probe failed [${source.key}]`, error);
           }
-        },
-      ),
+        }
+      }),
       SOURCE_HEALTH_PROBE_CONCURRENCY,
     );
   } catch (error) {

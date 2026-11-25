@@ -14,6 +14,10 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import {
+  SEARCH_FILTER_GROUP_SHAPE_CLASS,
+  SEARCH_FILTER_TRIGGER_SHAPE_CLASS,
+} from '@/features/search/lib/search-layout';
 import { subscribePageScroll } from '@/hooks/usePageScroll';
 
 type SearchFilterKey = 'source' | 'title' | 'year' | 'yearOrder';
@@ -35,8 +39,7 @@ interface SearchResultFilterProps {
   onChange: (values: Record<SearchFilterKey, string>) => void;
 }
 
-const TRIGGER_CLASS =
-  'relative z-10 inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors duration-200';
+const TRIGGER_CLASS = `relative z-10 ${SEARCH_FILTER_TRIGGER_SHAPE_CLASS} transition-colors duration-200`;
 
 const DEFAULTS: Record<SearchFilterKey, string> = {
   source: 'all',
@@ -213,7 +216,9 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
 
   return (
     <>
-      <div className='scrollbar-hide relative inline-flex max-w-full gap-0.5 overflow-x-auto rounded-full bg-gray-900/[0.05] p-1 dark:bg-white/[0.06]'>
+      <div
+        className={`scrollbar-hide ${SEARCH_FILTER_GROUP_SHAPE_CLASS} bg-gray-900/[0.05] dark:bg-white/[0.06]`}
+      >
         {categories.map((category) => (
           <div
             key={category.key}

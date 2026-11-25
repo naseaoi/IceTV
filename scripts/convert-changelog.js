@@ -63,6 +63,12 @@ async function main() {
       process.exit(1);
     }
 
+    // --check 只校验不写文件，供提交钩子使用
+    if (process.argv.includes('--check')) {
+      console.log('✅ CHANGELOG.md 校验通过');
+      return;
+    }
+
     const latestVersion = changelogData.latestVersion;
     console.log(`🔢 最新版本: ${latestVersion}`);
 

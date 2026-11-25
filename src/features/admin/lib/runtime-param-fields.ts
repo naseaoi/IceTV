@@ -9,7 +9,7 @@ export type RuntimeParamField = {
 
 export type RuntimeParamGroup = {
   id: string;
-  title?: string;
+  title: string;
   fields: RuntimeParamField[];
 };
 
@@ -84,24 +84,6 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
     ],
   },
   {
-    id: 'lists',
-    title: '列表与记录',
-    fields: [
-      {
-        key: 'ContinueWatchingLimit',
-        label: '首页继续观看数量',
-        unit: '条',
-      },
-      {
-        key: 'PlaybackHistoryPageSize',
-        label: '观看历史每次加载数量',
-        unit: '条',
-        hint: '同时决定“我的”页最近观看的数量。',
-      },
-      { key: 'SearchHistoryLimit', label: '搜索历史保留条数', unit: '条' },
-    ],
-  },
-  {
     id: 'network',
     title: '代理与缓存',
     fields: [
@@ -119,22 +101,8 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
       },
       {
         key: 'SiteInterfaceCacheTime',
-        label: '豆瓣数据缓存时间',
+        label: '豆瓣接口浏览器缓存时间',
         unit: '秒',
-      },
-    ],
-  },
-];
-
-export const ADVANCED_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
-  {
-    id: 'advanced',
-    fields: [
-      {
-        key: 'CoverImageCacheSize',
-        label: '封面加载状态记录上限',
-        unit: '条',
-        hint: '浏览器记住已加载和加载失败的封面，避免重复加载。',
       },
     ],
   },

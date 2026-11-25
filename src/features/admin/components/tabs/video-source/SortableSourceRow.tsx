@@ -71,6 +71,8 @@ interface SortableSourceRowProps {
   isSortingDisabled?: boolean;
   isToggleLoading: boolean;
   isAdminOnlyLoading: boolean;
+  isNsfwLoading: boolean;
+  onToggleNsfw: (key: string) => void;
   isDeleteLoading: boolean;
   isValidationLoading: boolean;
   onSelectSource: (key: string, checked: boolean) => void;
@@ -96,6 +98,8 @@ export function SortableSourceRow({
   isSortingDisabled = false,
   isToggleLoading,
   isAdminOnlyLoading,
+  isNsfwLoading,
+  onToggleNsfw,
   isDeleteLoading,
   isValidationLoading,
   onSelectSource,
@@ -209,6 +213,11 @@ export function SortableSourceRow({
                 ` · ${formatLastOkDate(sourceHealth.lastOkDate)}可用`}
             </span>
           )}
+          {source.nsfw && (
+            <span className='rounded bg-gray-100 px-1.5 text-xs text-gray-600 dark:bg-white/[0.06] dark:text-gray-300'>
+              成人内容
+            </span>
+          )}
           {source.adminOnly && (
             <span className='rounded bg-gray-100 px-1.5 text-xs text-gray-600 dark:bg-white/[0.06] dark:text-gray-300'>
               仅管理员
@@ -288,6 +297,11 @@ export function SortableSourceRow({
               label: '检测',
               onSelect: () => onValidate(source.key),
               disabled: isValidationLoading,
+            },
+            {
+              label: source.nsfw ? '取消成人内容标记' : '标记为成人内容',
+              onSelect: () => onToggleNsfw(source.key),
+              disabled: isNsfwLoading,
             },
             {
               label: source.adminOnly ? '对所有用户开放' : '仅管理员可用',

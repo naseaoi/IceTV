@@ -10,7 +10,7 @@ import { useState } from 'react';
 
 import MobileFilterSheet from '@/components/mobile/MobileFilterSheet';
 import MobileSheet from '@/components/mobile/MobileSheet';
-import type { SearchFilterCategory } from '@/components/SearchResultFilter';
+import type { SearchFilterCategory } from '@/features/search/components/SearchResultFilter';
 
 type FilterValues = Record<string, string>;
 

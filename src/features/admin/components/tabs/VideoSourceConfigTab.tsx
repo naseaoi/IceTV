@@ -18,15 +18,18 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { SearchX, Video } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import {
   useAdminAlerts,
   useRefreshAdminAlerts,
 } from '@/features/admin/components/AdminAlertsProvider';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
@@ -58,6 +61,7 @@ import {
   buttonStyles,
   checkboxStyles,
 } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { DataSource } from '@/features/admin/types/internal';
 import { useModalState } from '@/hooks/useModalState';
 import {
@@ -69,14 +73,14 @@ import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
-type SourceHealthFilter = 'all' | 'alert' | 'cleanup' | 'relay';
+type SourceHealthFilter = 'all' | 'alert' | 'cleanup' | 'disabled';
 
 function isSourceHealthFilter(value: string): value is SourceHealthFilter {
   return (
     value === 'all' ||
     value === 'alert' ||
     value === 'cleanup' ||
-    value === 'relay'
+    value === 'disabled'
   );
 }
 const SOURCE_FOCUS_HIGHLIGHT_MS = 4000;
@@ -144,25 +148,20 @@ const VideoSourceConfig = ({
   );
   const [filterQuery, setFilterQuery] = useState('');
   const [healthFilter, setHealthFilter] = useState<SourceHealthFilter>('all');
+  const [routeFilter, setRouteFilter] = useState<'all' | SourceProxyMode>(
+    'all',
+  );
   const [sortMode, setSortMode] = useState<SourceSortMode>('manual');
   const normalizedQuery = filterQuery.trim().toLowerCase();
-  const isFiltering = normalizedQuery.length > 0 || healthFilter !== 'all';
+  const isFiltering =
+    normalizedQuery.length > 0 ||
+    healthFilter !== 'all' ||
+    routeFilter !== 'all';
   const isSortingLocked =
     isFiltering || sortMode !== 'manual' || isLoading('saveSourceOrder');
-  const cleanupCount = useMemo(
-    () =>
-      sources.filter((item) =>
-        isSourceCleanupCandidate(sourceHealth.get(item.key)),
-      ).length,
-    [sources, sourceHealth],
-  );
   const alertCount = useMemo(
     () => sources.filter((item) => sourceAlerts.has(item.key)).length,
     [sources, sourceAlerts],
-  );
-  const relayCount = useMemo(
-    () => sources.filter((item) => item.proxyMode === 'server').length,
-    [sources],
   );
   const visibleRows = useMemo(() => {
     const matched = sources.filter(
@@ -172,7 +171,9 @@ const VideoSourceConfig = ({
             ? sourceAlerts.has(item.key)
             : healthFilter === 'cleanup'
               ? isSourceCleanupCandidate(sourceHealth.get(item.key))
-              : item.proxyMode === 'server')) &&
+              : item.disabled)) &&
+        (routeFilter === 'all' ||
+          (item.proxyMode ?? DEFAULT_SOURCE_PROXY_MODE) === routeFilter) &&
         [item.name, item.key, item.api, item.detail].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
         ),
@@ -185,6 +186,7 @@ const VideoSourceConfig = ({
     sourceAlerts,
     sourceHealth,
     healthFilter,
+    routeFilter,
     sortMode,
     normalizedQuery,
   ]);
@@ -205,6 +207,7 @@ const VideoSourceConfig = ({
     if (!sources.some((item) => item.key === focusSourceKey)) return;
     setFilterQuery('');
     setHealthFilter('all');
+    setRouteFilter('all');
     setHighlightedSourceKey(focusSourceKey);
   }, [focusSourceKey, sources, searchParams, router, pathname]);
   useEffect(() => {
@@ -319,6 +322,14 @@ const VideoSourceConfig = ({
     }
     withLoading(`proxyMode_${key}`, () =>
       callSourceApi({ action: 'set_proxy_mode', key, proxyMode }),
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
+  };
+
+  const handleToggleNsfw = (key: string) => {
+    const target = sources.find((s) => s.key === key);
+    if (!target) return;
+    withLoading(`nsfw_${key}`, () =>
+      callSourceApi({ action: 'set_nsfw', key, nsfw: !target.nsfw }),
     ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
@@ -514,46 +525,67 @@ const VideoSourceConfig = ({
           {actionError}
         </p>
       )}
-      <div className='flex items-center justify-between gap-3'>
-        <AdminSearchField
-          value={filterQuery}
-          onChange={setFilterQuery}
-          label='搜索视频源'
-          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
-        />
-        <div className='flex shrink-0 items-center gap-2'>
-          <Select
-            variant='pill'
-            align='end'
-            value={healthFilter}
-            onChange={(value) =>
-              setHealthFilter(isSourceHealthFilter(value) ? value : 'all')
-            }
-            options={[
-              { value: 'all', label: '全部' },
-              ...(alertCount > 0 || healthFilter === 'alert'
-                ? [{ value: 'alert', label: `告警中 ${alertCount}` }]
-                : []),
-              { value: 'cleanup', label: `待清理 ${cleanupCount}` },
-              { value: 'relay', label: `代理 ${relayCount}` },
-            ]}
-            showSelectedIcon={false}
-            ariaLabel='按源站质量筛选'
+      <AdminListToolbar
+        search={
+          <AdminSearchField
+            value={filterQuery}
+            onChange={setFilterQuery}
+            label='搜索视频源'
           />
-          <Select
-            variant='pill'
-            align='end'
-            value={sortMode}
-            onChange={(value) =>
-              setSortMode(value === 'quality' ? 'quality' : 'manual')
-            }
-            options={[
-              { value: 'manual', label: '手动排序' },
-              { value: 'quality', label: '质量排序' },
-            ]}
-            showSelectedIcon={false}
-            ariaLabel='视频源排序方式'
-          />
+        }
+        filters={
+          <>
+            <Select
+              variant='pill'
+              align='end'
+              value={healthFilter}
+              onChange={(value) =>
+                setHealthFilter(isSourceHealthFilter(value) ? value : 'all')
+              }
+              options={[
+                { value: 'all', label: '全部状态' },
+                ...(alertCount > 0 || healthFilter === 'alert'
+                  ? [{ value: 'alert', label: '告警中' }]
+                  : []),
+                { value: 'cleanup', label: '待清理' },
+                { value: 'disabled', label: '已禁用' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='筛选视频源状态'
+            />
+            <Select
+              variant='pill'
+              align='end'
+              value={routeFilter}
+              onChange={(value) =>
+                setRouteFilter(value as 'all' | SourceProxyMode)
+              }
+              options={[
+                { value: 'all', label: '全部线路' },
+                { value: 'auto', label: '自动' },
+                { value: 'browser', label: '直连' },
+                { value: 'server', label: '代理' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='筛选视频源线路'
+            />
+            <Select
+              variant='pill'
+              align='end'
+              value={sortMode}
+              onChange={(value) =>
+                setSortMode(value === 'quality' ? 'quality' : 'manual')
+              }
+              options={[
+                { value: 'manual', label: '手动排序' },
+                { value: 'quality', label: '质量排序' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='视频源排序方式'
+            />
+          </>
+        }
+        actions={
           <button
             onClick={() => {
               setFormError('');
@@ -564,8 +596,8 @@ const VideoSourceConfig = ({
           >
             添加视频源
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <VideoSourceAddForm
         error={formError}
@@ -658,16 +690,12 @@ const VideoSourceConfig = ({
               className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
               {visibleRows.length === 0 && (
-                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {healthFilter === 'alert' && !normalizedQuery
-                    ? '没有告警中的视频源'
-                    : healthFilter === 'cleanup' && !normalizedQuery
-                      ? '没有待清理的视频源'
-                      : healthFilter === 'relay' && !normalizedQuery
-                        ? '没有使用代理的视频源'
-                        : isFiltering
-                          ? '没有匹配的视频源'
-                          : '暂无视频源'}
+                <li>
+                  <ListEmptyState
+                    className={ADMIN_LIST_EMPTY_CLASS}
+                    icon={isFiltering ? <SearchX /> : <Video />}
+                    label={isFiltering ? '没有匹配的视频源' : '暂无视频源'}
+                  />
                 </li>
               )}
               {visibleRows.map((source) => (
@@ -686,6 +714,8 @@ const VideoSourceConfig = ({
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                   isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                   isAdminOnlyLoading={isLoading(`adminOnly_${source.key}`)}
+                  isNsfwLoading={isLoading(`nsfw_${source.key}`)}
+                  onToggleNsfw={handleToggleNsfw}
                   isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
                   isValidationLoading={isValidating}
                   onSelectSource={handleSelectSource}

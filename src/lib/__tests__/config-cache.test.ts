@@ -185,6 +185,34 @@ describe('config cache persistence', () => {
     },
   );
 
+  it('discards retired runtime keys when reading and saving legacy config', async () => {
+    const legacy = cloneBaseConfig();
+    const retired = {
+      CoverImageCacheSize: 'invalid',
+      PlaybackHistoryPageSize: 2,
+      SearchHistoryLimit: 100,
+      ContinueWatchingLimit: 30,
+    };
+    Object.assign(legacy.SiteConfig, retired);
+    const persist = jest.fn();
+    const { getConfig, saveConfig, getPublicConfig } = await loadConfigModule(
+      persist,
+      { adminConfig: legacy },
+    );
+    const config = await getConfig();
+    const publicConfig = await getPublicConfig();
+    for (const key of Object.keys(retired)) {
+      expect(config.SiteConfig).not.toHaveProperty(key);
+      expect(publicConfig).not.toHaveProperty(key);
+    }
+    await saveConfig(config);
+    const saved = persist.mock.calls.at(-1)?.[0] as AdminConfig;
+    for (const key of Object.keys(retired)) {
+      expect(saved.SiteConfig).not.toHaveProperty(key);
+    }
+    expect(saved.SiteConfig.SiteInterfaceCacheTime).toBe(300);
+  });
+
   it('preserves user danmaku through self-check and public config', async () => {
     const config = cloneBaseConfig();
     config.SiteConfig.EnableUserDanmaku = true;
@@ -404,6 +432,100 @@ describe('config cache persistence', () => {
     const second = await getAvailableApiSites();
 
     expect(second[0].name).toBe('Source 1');
+  });
+
+  it.each([false, true])(
+    'adult sources follow the site switch for every role (%s)',
+    async (allowed) => {
+      const config = cloneBaseConfig();
+      config.SiteConfig.DisableYellowFilter = allowed;
+      config.SourceConfig = [
+        { key: 'open', name: 'Open', api: 'https://a.example', from: 'custom' },
+        {
+          key: 'adult',
+          name: 'Adult',
+          api: 'https://b.example',
+          from: 'config',
+          nsfw: true,
+        },
+        {
+          key: 'disabled',
+          name: 'Disabled',
+          api: 'https://c.example',
+          from: 'custom',
+          nsfw: true,
+          disabled: true,
+        },
+      ];
+      const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+        adminConfig: config,
+        userAccess: { alice: { role: 'user' }, bob: { role: 'admin' } },
+      });
+      for (const user of [undefined, 'alice', 'bob', 'owner-1']) {
+        expect(
+          (await getAvailableApiSites(user)).map((site) => site.key),
+        ).toEqual(allowed ? ['open', 'adult'] : ['open']);
+      }
+    },
+  );
+
+  it('preserves explicit adult flags across subscription refresh and export', async () => {
+    const { refineConfig } = await loadConfigModule(jest.fn());
+    const { buildConfigFileFromAdminConfig } = require('../config-file-json');
+    const config = cloneBaseConfig();
+    config.SourceConfig = [
+      {
+        key: 'marked',
+        name: 'Marked',
+        api: 'https://a.example',
+        from: 'config',
+        nsfw: true,
+      },
+      {
+        key: 'cleared',
+        name: 'Cleared',
+        api: 'https://b.example',
+        from: 'config',
+        nsfw: false,
+      },
+      { key: 'unset', name: 'Unset', api: 'https://c.example', from: 'config' },
+    ];
+    const file = JSON.stringify({
+      api_site: Object.fromEntries(
+        ['marked', 'cleared', 'unset', 'new'].map((key) => [
+          key,
+          { name: key, api: 'https://new.example', nsfw: key !== 'marked' },
+        ]),
+      ),
+    });
+    refineConfig(config, file);
+    expect(config.SourceConfig.map((source) => source.nsfw)).toEqual([
+      true,
+      false,
+      true,
+      true,
+    ]);
+    const exported = buildConfigFileFromAdminConfig(config, file);
+    const imported = refineConfig(cloneBaseConfig(), exported);
+    expect(imported.SourceConfig.map((source) => source.nsfw)).toEqual([
+      true,
+      false,
+      true,
+      true,
+    ]);
+    refineConfig(
+      config,
+      JSON.stringify({
+        api_site: { marked: { name: 'Changed', api: 'https://new.example' } },
+      }),
+    );
+    expect(config.SourceConfig[0].nsfw).toBe(true);
+    expect(() =>
+      refineConfig(
+        config,
+        JSON.stringify({ api_site: { marked: { nsfw: 'false' } } }),
+      ),
+    ).toThrow('nsfw');
   });
 
   it('hides admin-only sources from regular users', async () => {

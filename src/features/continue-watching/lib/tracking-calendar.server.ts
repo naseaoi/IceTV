@@ -1,11 +1,23 @@
+import { cookies } from 'next/headers';
+
 import {
   type BangumiCalendarData,
   getBangumiCalendarData,
+  peekBangumiCalendarData,
 } from '@/features/bangumi/lib/bangumi';
+import { getServerAuthSession } from '@/lib/auth-session.server';
 import { db } from '@/lib/db';
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 
-import type { TrackingCalendarItem } from './tracking-calendar';
+import {
+  type TrackingCalendarItem,
+  type TrackingStripSeed,
+  isTrackingStripItem,
+  sortTrackingStrip,
+} from './tracking-calendar';
+
+// 页面首屏等待日历的上限：共享缓存命中即刻返回，冷启动超时则先只给有更新的作品
+const PAGE_BANGUMI_WAIT_MS = 800;
 
 // Bangumi 日历的 weekday.en 为 Mon、Thu 等缩写
 const weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -39,15 +51,76 @@ export function matchCalendarWeekdays(
     return { ...item, airWeekday: year ? (schedules.get(key) ?? null) : null };
   });
 }
-export async function getTrackingCalendar(
+
+function toStripItems(
+  items: TrackingCalendarItem[],
+  calendar: BangumiCalendarData[] | null,
+): TrackingCalendarItem[] {
+  return sortTrackingStrip(
+    (calendar ? matchCalendarWeekdays(items, calendar) : items).filter(
+      isTrackingStripItem,
+    ),
+  );
+}
+
+export interface TrackingStripResult {
+  items: TrackingCalendarItem[];
+  // false 表示日历未在等待上限内返回，播出日可能缺失，客户端应重新请求
+  complete: boolean;
+}
+
+export async function getTrackingStrip(
   username: string,
-): Promise<TrackingCalendarItem[]> {
+  { bangumiWaitMs }: { bangumiWaitMs?: number } = {},
+): Promise<TrackingStripResult> {
   const items = await db.getTrackingCalendarItems(username);
-  if (!items.length) return [];
+  if (!items.length) return { items: [], complete: true };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return matchCalendarWeekdays(items, await getBangumiCalendarData());
+    const calendar = getBangumiCalendarData();
+    const result =
+      bangumiWaitMs === undefined
+        ? await calendar
+        : await Promise.race([
+            calendar,
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), bangumiWaitMs);
+            }),
+          ]);
+    return { items: toStripItems(items, result), complete: result !== null };
   } catch (error) {
-    console.warn('追剧周历播出日加载失败', error);
-    return items;
+    console.warn('追更播出日加载失败', error);
+    return { items: toStripItems(items, null), complete: true };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 登录写计数 cookie 用：不等待上游，日历未缓存时只计有更新的作品
+export async function countTrackingStrip(username: string): Promise<number> {
+  const items = await db.getTrackingCalendarItems(username);
+  return toStripItems(items, peekBangumiCalendarData()).length;
+}
+
+const EMPTY_SEED: TrackingStripSeed = {
+  items: [],
+  complete: false,
+  fetchedAt: 0,
+};
+
+export async function getTrackingStripPageData(): Promise<TrackingStripSeed> {
+  const authCookie = (await cookies()).get('auth')?.value;
+  if (!authCookie) return EMPTY_SEED;
+  const session = await getServerAuthSession(authCookie);
+  if (session.status !== 'authenticated') return EMPTY_SEED;
+  try {
+    const fetchedAt = Date.now();
+    const result = await getTrackingStrip(session.username, {
+      bangumiWaitMs: PAGE_BANGUMI_WAIT_MS,
+    });
+    return { ...result, fetchedAt };
+  } catch (error) {
+    console.error('获取追更首屏数据失败:', error);
+    return EMPTY_SEED;
   }
 }

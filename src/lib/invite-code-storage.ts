@@ -7,7 +7,12 @@ import {
 } from '@/features/admin/services/inviteCodes';
 
 export { INVITE_CODE_MAX_PAGE_SIZE, INVITE_CODE_PAGE_SIZE };
-export type InviteCodeFilter = 'all' | 'active' | 'expired' | 'exhausted';
+export type InviteCodeFilter =
+  | 'all'
+  | 'active'
+  | 'unused'
+  | 'expired'
+  | 'exhausted';
 export type InviteCodeQuery = {
   filter?: InviteCodeFilter;
   cursor?: string;
@@ -94,7 +99,7 @@ export function invitePageStatements(query: InviteCodeQuery, now = Date.now()) {
   const filter = query.filter || 'all';
   const limit = query.limit ?? INVITE_CODE_PAGE_SIZE;
   if (
-    !['all', 'active', 'expired', 'exhausted'].includes(filter) ||
+    !['all', 'active', 'unused', 'expired', 'exhausted'].includes(filter) ||
     !Number.isInteger(limit) ||
     limit < 1 ||
     limit > INVITE_CODE_MAX_PAGE_SIZE
@@ -104,13 +109,17 @@ export function invitePageStatements(query: InviteCodeQuery, now = Date.now()) {
   const where =
     filter === 'active'
       ? INVITE_ACTIVE_SQL
-      : filter === 'expired'
-        ? 'expires_at <= ?'
-        : filter === 'exhausted'
-          ? INVITE_EXHAUSTED_SQL
-          : '1 = 1';
+      : filter === 'unused'
+        ? `${INVITE_ACTIVE_SQL} AND used_count = 0`
+        : filter === 'expired'
+          ? 'expires_at <= ?'
+          : filter === 'exhausted'
+            ? INVITE_EXHAUSTED_SQL
+            : '1 = 1';
   const countParams: (string | number)[] =
-    filter === 'active' || filter === 'expired' ? [now] : [];
+    filter === 'active' || filter === 'unused' || filter === 'expired'
+      ? [now]
+      : [];
   const params = [...countParams];
   let cursorWhere = '';
   if (query.cursor) {

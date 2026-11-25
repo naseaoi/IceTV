@@ -244,6 +244,7 @@ describe('/api/reviews/mine', () => {
       cursor: undefined,
       q: '',
       filter: 'all',
+      content: 'all',
       sort: 'updated',
     });
   });
@@ -281,6 +282,8 @@ describe('/api/reviews/mine', () => {
   it.each([
     '?cursor=broken',
     '?filter=invalid',
+    '?filter=text',
+    '?content=invalid',
     '?sort=invalid',
     `?q=${'x'.repeat(201)}`,
   ])('rejects invalid own page parameters %s', async (query) => {

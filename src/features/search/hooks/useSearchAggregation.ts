@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-import { SearchFilterCategory } from '@/components/SearchResultFilter';
 import { VideoCardHandle } from '@/components/VideoCard';
+import { SearchFilterCategory } from '@/features/search/components/SearchResultFilter';
 import {
   compareYear,
   computeGroupStats,
@@ -215,6 +215,58 @@ function createAggregatedResultItem(
   };
 }
 
+function buildFilterCategories(
+  sources: Map<string, string>,
+  titles: Set<string>,
+  years: Set<string>,
+): SearchFilterCategory[] {
+  const sourceOptions: { label: string; value: string }[] = [
+    { label: '全部来源', value: 'all' },
+    ...Array.from(sources.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([value, label]) => ({ label, value })),
+  ];
+
+  const titleOptions: { label: string; value: string }[] = [
+    { label: '全部标题', value: 'all' },
+    ...Array.from(titles.values())
+      .sort((a, b) => a.localeCompare(b))
+      .map((t) => ({ label: t, value: t })),
+  ];
+
+  const yearValues = Array.from(years.values());
+  const knownYears = yearValues
+    .filter((y) => y !== 'unknown')
+    .sort((a, b) => parseInt(b) - parseInt(a));
+  const hasUnknown = yearValues.includes('unknown');
+  const yearOptions: { label: string; value: string }[] = [
+    { label: '全部年份', value: 'all' },
+    ...knownYears.map((y) => ({ label: y, value: y })),
+    ...(hasUnknown ? [{ label: '未知', value: 'unknown' }] : []),
+  ];
+
+  return [
+    { key: 'source', label: '来源', options: sourceOptions },
+    { key: 'title', label: '标题', options: titleOptions },
+    { key: 'year', label: '年份', options: yearOptions },
+  ];
+}
+
+export function reconcileSearchFilter(
+  filter: FilterState,
+  categories: SearchFilterCategory[],
+): FilterState {
+  const next = { ...filter };
+  for (const { key, options } of categories) {
+    if (
+      key !== 'yearOrder' &&
+      !options.some((option) => option.value === filter[key])
+    )
+      next[key] = 'all';
+  }
+  return next;
+}
+
 export function useSearchAggregation({
   searchResults,
   filterAll,
@@ -279,46 +331,22 @@ export function useSearchAggregation({
 
   const filterOptions = useMemo(() => {
     const { sources, titles, years } = searchIndexState.index;
-
-    const sourceOptions: { label: string; value: string }[] = [
-      { label: '全部来源', value: 'all' },
-      ...Array.from(sources.entries())
-        .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([value, label]) => ({ label, value })),
-    ];
-
-    const titleOptions: { label: string; value: string }[] = [
-      { label: '全部标题', value: 'all' },
-      ...Array.from(titles.values())
-        .sort((a, b) => a.localeCompare(b))
-        .map((t) => ({ label: t, value: t })),
-    ];
-
-    const yearValues = Array.from(years.values());
-    const knownYears = yearValues
-      .filter((y) => y !== 'unknown')
-      .sort((a, b) => parseInt(b) - parseInt(a));
-    const hasUnknown = yearValues.includes('unknown');
-    const yearOptions: { label: string; value: string }[] = [
-      { label: '全部年份', value: 'all' },
-      ...knownYears.map((y) => ({ label: y, value: y })),
-      ...(hasUnknown ? [{ label: '未知', value: 'unknown' }] : []),
-    ];
-
-    const categoriesAll: SearchFilterCategory[] = [
-      { key: 'source', label: '来源', options: sourceOptions },
-      { key: 'title', label: '标题', options: titleOptions },
-      { key: 'year', label: '年份', options: yearOptions },
-    ];
-
-    const categoriesAgg: SearchFilterCategory[] = [
-      { key: 'source', label: '来源', options: sourceOptions },
-      { key: 'title', label: '标题', options: titleOptions },
-      { key: 'year', label: '年份', options: yearOptions },
-    ];
-
-    return { categoriesAll, categoriesAgg };
-  }, [searchIndexState]);
+    const aggSources = new Map<string, string>();
+    for (const { group } of aggregatedResultItems) {
+      for (const item of group) {
+        if (item.source && item.source_name)
+          aggSources.set(item.source, item.source_name);
+      }
+    }
+    return {
+      categoriesAll: buildFilterCategories(sources, titles, years),
+      categoriesAgg: buildFilterCategories(
+        aggSources,
+        new Set(aggregatedResultItems.map((item) => item.title)),
+        new Set(aggregatedResultItems.map((item) => item.year)),
+      ),
+    };
+  }, [searchIndexState, aggregatedResultItems]);
 
   // 非聚合筛选排序
   const filteredAllResults = useMemo(() => {
@@ -374,6 +402,8 @@ export function useSearchAggregation({
     }
 
     const filtered = aggregatedResultItems.flatMap((item) => {
+      if (title !== 'all' && item.title !== title) return [];
+      if (year !== 'all' && item.year !== year) return [];
       const group =
         source === 'all'
           ? item.group
@@ -384,9 +414,7 @@ export function useSearchAggregation({
         source === 'all'
           ? item
           : createAggregatedResultItem(item.mapKey, group, matcher);
-      if (title !== 'all' && filteredItem.title !== title) return [];
-      if (year !== 'all' && filteredItem.year !== year) return [];
-      return [filteredItem];
+      return [{ ...filteredItem, title: item.title, year: item.year }];
     });
 
     if (yearOrder === 'none') {

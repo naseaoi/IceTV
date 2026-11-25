@@ -372,6 +372,20 @@ div[data-media-provider] video {
   }
 }
 
+/* 放大镜沿小圆绕行且保持朝向，表示正在查找；绕行半径与 ListState 图标框留出的余量一致 */
+.searching-orbit {
+  animation: searching-orbit 1.6s linear infinite;
+}
+
+@keyframes searching-orbit {
+  from {
+    transform: rotate(0deg) translateX(6px) rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg) translateX(6px) rotate(-360deg);
+  }
+}
+
 .loading-bar-fill {
   position: relative;
   overflow: hidden;
@@ -402,6 +416,10 @@ div[data-media-provider] video {
   .ice-spinner-arc {
     animation: none;
     stroke-dasharray: 60 126;
+  }
+
+  .searching-orbit {
+    animation: none;
   }
 }
 

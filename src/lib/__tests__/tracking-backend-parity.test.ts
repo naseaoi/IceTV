@@ -1,7 +1,10 @@
 /** @jest-environment node */
 
 import { MySqlStorage } from '../mysql.db';
-import { hasPlayRecordUpdate } from '../play-records';
+import {
+  hasPlayRecordUpdate,
+  hasUnreadPlayRecordMessage,
+} from '../play-records';
 import { LocalSqliteStorage } from '../sqlite.db';
 import type { PlayRecord } from '../types';
 
@@ -33,6 +36,22 @@ const make = (
 // 覆盖两侧谓词的每个分支：布尔默认、集数刻度、分组刻度、缺字段、脏值、边界相等
 const CASES: Record<string, PlayRecord> = {
   'k+unread': make(100, { total_episodes: 12, update_baseline_episodes: 10 }),
+  'k+message-read': make(91, {
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+    update_message_read_episodes: 12,
+  }),
+  'k+message-new': make(92, {
+    total_episodes: 13,
+    update_baseline_episodes: 10,
+    update_message_read_episodes: 12,
+  }),
+  'k+group-message-read': make(93, {
+    group_index: 1,
+    group_total: 4,
+    update_baseline_group_total: 2,
+    update_message_read_group_total: 4,
+  }),
   'k+read': make(90, { total_episodes: 10, update_baseline_episodes: 10 }),
   'k+finished': make(80, {
     index: 12,
@@ -144,7 +163,7 @@ describeParity('追更谓词双后端一致性', () => {
       sqliteStorage.getUnreadTrackingPlayRecordPage(user, 50),
     ]);
     const jsHits = Object.entries(CASES)
-      .filter(([, record]) => hasPlayRecordUpdate(record))
+      .filter(([, record]) => hasUnreadPlayRecordMessage(record))
       .map(([key]) => key)
       .sort();
 
@@ -152,6 +171,21 @@ describeParity('追更谓词双后端一致性', () => {
     expect(Object.keys(sqlitePage.items).sort()).toEqual(jsHits);
     expect(mysqlPage.total).toBe(sqlitePage.total);
     expect(mysqlPage.total).toBe(jsHits.length);
+    const expectedUpdated = Object.entries(CASES)
+      .filter(([, record]) => hasPlayRecordUpdate(record))
+      .map(([key]) => key)
+      .sort();
+    for (const storage of [mysqlStorage, sqliteStorage]) {
+      const page = await storage.getPlayRecordPage(
+        user,
+        50,
+        undefined,
+        undefined,
+        'updated',
+      );
+      expect(Object.keys(page.items).sort()).toEqual(expectedUpdated);
+      expect(page.total).toBe(expectedUpdated.length);
+    }
   });
 
   it('同一批记录在两个后端的排序与游标翻页结果相同', async () => {

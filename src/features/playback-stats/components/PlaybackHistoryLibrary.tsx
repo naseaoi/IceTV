@@ -1,6 +1,6 @@
 'use client';
 
-import { History, Search, SearchX, X } from 'lucide-react';
+import { History, SearchX } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
@@ -13,6 +13,7 @@ import {
   LibraryEmptySkeleton,
   LibraryEmptyState,
 } from '@/components/LibraryPage';
+import { LibrarySearchField } from '@/components/LibraryToolbar';
 import LoadErrorState from '@/components/LoadErrorState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
@@ -70,7 +71,7 @@ export function PlaybackHistoryPageSkeleton({
   return (
     <>
       <div className='mb-4 flex items-center gap-2 py-3'>
-        <div className='skeleton h-9 w-full rounded-full sm:w-72' />
+        <div className='skeleton h-10 w-full rounded-xl sm:w-80' />
         {count > 0 && (
           <div className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full' />
         )}
@@ -280,29 +281,12 @@ export function PlaybackHistoryLibrary({
           </>
         ) : (
           <>
-            <label className='relative flex w-full items-center sm:w-72'>
-              <Search className='pointer-events-none absolute left-3 h-4 w-4 text-gray-400 dark:text-gray-500' />
-              <input
-                id='playback-history-search'
-                name='playbackHistorySearch'
-                type='text'
-                value={searchText}
-                onChange={(event) => setSearchText(event.target.value)}
-                placeholder='搜索观看记录'
-                aria-label='搜索观看记录'
-                className='h-9 w-full rounded-full border-0 bg-gray-900/[0.05] py-0 pl-9 pr-9 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-gray-900/[0.08] focus:ring-0 dark:bg-white/[0.06] dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:bg-white/[0.1]'
-              />
-              {searchText && (
-                <button
-                  type='button'
-                  aria-label='清空搜索'
-                  onClick={() => setSearchText('')}
-                  className='absolute right-2 flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition hover:text-gray-700 dark:hover:text-gray-200'
-                >
-                  <X className='h-4 w-4' />
-                </button>
-              )}
-            </label>
+            <LibrarySearchField
+              label='搜索观看记录'
+              query={searchText}
+              onQueryChange={setSearchText}
+              className='w-full sm:w-80'
+            />
             {loading
               ? placeholder.count > 0 && (
                   <div

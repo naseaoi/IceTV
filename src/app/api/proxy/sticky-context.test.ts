@@ -17,7 +17,11 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/lib/config', () => ({
   getConfigForRead: async () => ({
-    SiteConfig: { UpstreamProxyPoolSegments: mockSegmentsEnabled },
+    SourceConfig: [],
+    SiteConfig: {
+      UpstreamProxyPoolSegments: mockSegmentsEnabled,
+      DisableYellowFilter: false,
+    },
   }),
 }));
 jest.mock('@/lib/host-traffic.server', () => ({
@@ -111,7 +115,7 @@ describe('signed playback sticky context', () => {
     else process.env.AUTH_SECRET = originalSecret;
     if (originalPool === undefined) delete process.env.UPSTREAM_PROXY_POOL;
     else process.env.UPSTREAM_PROXY_POOL = originalPool;
-    getUpstreamRoutes();
+    getUpstreamRoutes('example.com');
   });
 
   it.each([429, 503] as const)(
@@ -238,10 +242,10 @@ describe('signed playback sticky context', () => {
       await segmentResponse.arrayBuffer();
       expect(mockRequireActiveUser).toHaveBeenCalledTimes(1);
       expect(pool.mock.calls).toEqual([
-        [sticky, true],
-        [sticky, true],
-        [sticky, true],
-        [sticky, segmentsEnabled],
+        ['cdn.example', sticky, true],
+        ['cdn.example', sticky, true],
+        ['cdn.example', sticky, true],
+        ['cdn.example', sticky, segmentsEnabled],
       ]);
       expect(guard.mock.calls.map((call) => call[2]?.identity)).toEqual([
         'user:viewer',

@@ -29,7 +29,13 @@ export function usePagedQuery<TPage extends PagedData>({
   const [data, setData] = useState<TPage | null>(null);
   const [pending, setPending] = useState(enabled);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [requestIdentity, setRequestIdentity] = useState<{
+    scopeKey: string | null;
+    queryKey: string;
+  } | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [errorPhase, setErrorPhase] = useState<'first' | 'more' | null>(null);
+  const dataQueryKey = useRef<string | null>(null);
   const failedCursor = useRef<string | undefined>(undefined);
   const dataRef = useRef<TPage | null>(null);
   const scope = useRef(scopeKey);
@@ -43,7 +49,8 @@ export function usePagedQuery<TPage extends PagedData>({
     options.current = { queryKey, enabled, fetchPage, getItemKey };
   });
 
-  const publish = useCallback((page: TPage | null) => {
+  const publish = useCallback((page: TPage | null, key: string) => {
+    dataQueryKey.current = key;
     dataRef.current = page;
     setData(page);
   }, []);
@@ -58,18 +65,24 @@ export function usePagedQuery<TPage extends PagedData>({
     async (cursor?: string) => {
       const { queryKey, enabled, fetchPage, getItemKey } = options.current;
       if (!mounted.current || !enabled) return;
-      if (cursor !== undefined && request.current) return;
+      if (
+        cursor !== undefined &&
+        (request.current || dataQueryKey.current !== queryKey)
+      )
+        return;
       invalidate();
       const current = generation.current;
       const controller = new AbortController();
       request.current = controller;
       const firstPage = cursor === undefined;
+      setRequestIdentity({ scopeKey: scope.current, queryKey });
       setPending(firstPage);
       setLoadingMore(!firstPage);
       setError(null);
+      setErrorPhase(null);
       if (firstPage) {
         const snapshot = snapshots.current.get(queryKey);
-        if (snapshot) publish(snapshot);
+        if (snapshot) publish(snapshot, queryKey);
       }
       try {
         const page = await fetchPage(cursor, controller.signal);
@@ -81,22 +94,25 @@ export function usePagedQuery<TPage extends PagedData>({
             const oldest = snapshots.current.keys().next().value;
             if (oldest !== undefined) snapshots.current.delete(oldest);
           }
-          publish(page);
+          publish(page, queryKey);
         } else {
           const previous = dataRef.current;
           const seen = new Set(previous?.items.map(getItemKey));
-          publish({
-            ...page,
-            items: [
-              ...(previous?.items ?? []),
-              ...page.items.filter((item) => {
-                const key = getItemKey(item);
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-              }),
-            ],
-          });
+          publish(
+            {
+              ...page,
+              items: [
+                ...(previous?.items ?? []),
+                ...page.items.filter((item) => {
+                  const key = getItemKey(item);
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                }),
+              ],
+            },
+            queryKey,
+          );
         }
       } catch (error) {
         if (
@@ -106,6 +122,7 @@ export function usePagedQuery<TPage extends PagedData>({
         )
           return;
         failedCursor.current = cursor;
+        setErrorPhase(firstPage ? 'first' : 'more');
         if (firstPage) snapshots.current.delete(queryKey);
         setError(
           error instanceof Error ? error : new Error('Page request failed'),
@@ -126,11 +143,14 @@ export function usePagedQuery<TPage extends PagedData>({
     if (scope.current !== scopeKey) {
       scope.current = scopeKey;
       snapshots.current.clear();
-      publish(null);
+      publish(null, queryKey);
     }
     setError(null);
+    setErrorPhase(null);
+    failedCursor.current = undefined;
     setPending(false);
     setLoadingMore(false);
+    if (!enabled) setRequestIdentity(null);
     void requestPage();
     return () => {
       mounted.current = false;
@@ -145,27 +165,53 @@ export function usePagedQuery<TPage extends PagedData>({
 
   const loadMore = useCallback(() => {
     const cursor = dataRef.current?.nextCursor;
-    if (cursor && !request.current) void requestPage(cursor);
+    if (
+      cursor &&
+      !request.current &&
+      dataQueryKey.current === options.current.queryKey
+    )
+      void requestPage(cursor);
   }, [requestPage]);
 
   const updateData = useCallback(
     (updater: (previous: TPage | null) => TPage | null) => {
-      if (!mounted.current) return;
+      if (
+        !mounted.current ||
+        (dataRef.current && dataQueryKey.current !== options.current.queryKey)
+      )
+        return;
       snapshots.current.clear();
-      publish(updater(dataRef.current));
+      publish(updater(dataRef.current), options.current.queryKey);
       // 保存期间到达的旧请求不能覆盖本地结果；重新读取服务器的最终状态。
       if (request.current) void requestPage();
     },
     [publish, requestPage],
   );
 
-  const visibleData = scope.current === scopeKey ? data : null;
+  const isCurrentRequest =
+    requestIdentity?.scopeKey === scopeKey &&
+    requestIdentity?.queryKey === queryKey;
+  const currentError = enabled && isCurrentRequest ? error : null;
+  // effect 发起请求前就隔离旧状态；切回条件时直接展示该条件的首页快照。
+  const snapshot =
+    enabled && !isCurrentRequest && scope.current === scopeKey
+      ? snapshots.current.get(queryKey)
+      : undefined;
+  const isCurrentData =
+    scope.current === scopeKey && dataQueryKey.current === queryKey;
+  const currentData = snapshot ?? (isCurrentData ? data : null);
+  const visibleData =
+    currentData ?? (scope.current === scopeKey && !currentError ? data : null);
+  const currentPending = enabled && (!isCurrentRequest || pending);
   return {
     data: visibleData,
-    initialLoading: visibleData === null && pending,
-    refreshing: visibleData !== null && pending,
-    loadingMore,
-    error,
+    currentData,
+    isPlaceholderData: visibleData !== null && currentData === null,
+    errorPhase: currentError ? errorPhase : null,
+    initialLoading: visibleData === null && currentPending,
+    refreshing: visibleData !== null && currentPending,
+    loadingMore: enabled && isCurrentRequest && loadingMore,
+    error: currentError,
     loadMore,
     refresh,
     retry: () => void requestPage(failedCursor.current),

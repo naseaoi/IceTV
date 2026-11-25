@@ -1,6 +1,6 @@
 'use client';
 
-import { type LucideIcon, Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -33,7 +33,6 @@ interface SelectProps {
   showSelectedIcon?: boolean;
   // field：表单内整宽输入框；pill：工具栏里的紧凑胶囊
   variant?: 'field' | 'pill';
-  icon?: LucideIcon;
   // 菜单对齐触发器的哪一侧，靠右的工具栏用 end 防止溢出
   align?: 'start' | 'end';
 }
@@ -71,7 +70,6 @@ export default function Select({
   disabled = false,
   showSelectedIcon = true,
   variant = 'field',
-  icon: Icon,
   align = 'start',
 }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -249,9 +247,6 @@ export default function Select({
         }}
         className={`${TRIGGER_CLASS[variant]} ${stateClass}`}
       >
-        {Icon && (
-          <Icon aria-hidden='true' className='h-3.5 w-3.5 text-gray-400' />
-        )}
         <span
           className={selectedOption ? '' : 'text-gray-400 dark:text-gray-500'}
         >

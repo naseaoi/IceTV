@@ -18,11 +18,13 @@ describe('FavoritePreviewSkeleton', () => {
     ).toHaveLength(0);
   });
 
-  it('没有收藏计数时保持空态布局高度', () => {
+  it('已知没有收藏时用虚线占位占住整排，不提前显示空状态文案', () => {
     const { container } = render(<FavoritePreviewSkeleton count={0} />);
-    const emptyPlaceholder = container.firstElementChild;
 
-    expect(container.querySelectorAll('.aspect-\\[2\\/3\\]')).toHaveLength(0);
-    expect(emptyPlaceholder).toHaveClass('h-[68px]');
+    expect(container.querySelectorAll('.border-dashed')).not.toHaveLength(0);
+    expect(
+      container.querySelectorAll('.skeleton.aspect-\\[2\\/3\\]'),
+    ).toHaveLength(0);
+    expect(container).not.toHaveTextContent('还没有收藏');
   });
 });

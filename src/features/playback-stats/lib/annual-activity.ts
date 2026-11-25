@@ -37,7 +37,7 @@ export function aggregateAnnualLists(
     if (within(like.createdAt))
       likeCounts.set(like.listId, (likeCounts.get(like.listId) ?? 0) + 1);
   }
-  // 年内有人点赞取获赞最多的片单，否则取收录最多的片单
+  // 年内有人收藏取被收藏最多的片单，否则取收录最多的片单
   const top = [...lists]
     .filter((list) => list.itemCount > 0 || likeCounts.has(list.id))
     .sort(

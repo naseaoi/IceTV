@@ -31,6 +31,7 @@ export interface TrackingSql {
   current: string;
   baseline: string;
   createdAt: string;
+  updatedWhere: string;
   unreadWhere: string;
 }
 
@@ -65,13 +66,21 @@ END`;
   0
 )`;
 
-  const unreadWhere = `
+  const updatedWhere = `
   ${dialect.trackingEnabled()}
   AND ${total} > COALESCE(${baseline}, ${total})
   AND ${current} < ${total}
 `;
+  const messageRead = `CASE
+  WHEN ${inGroupScale}
+  THEN ${dialect.jsonNumber('update_message_read_group_total')}
+  ELSE ${dialect.jsonNumber('update_message_read_episodes')}
+END`;
+  // 两个严格大于等价于超过 max(基线, 消息水位)，兼容无水位的旧记录。
+  const unreadWhere = `${updatedWhere}
+  AND ${total} > COALESCE(${messageRead}, ${baseline}, ${total})`;
 
-  return { total, current, baseline, createdAt, unreadWhere };
+  return { total, current, baseline, createdAt, updatedWhere, unreadWhere };
 }
 
 // 保存时间窗口由调用方绑定参数，分页与计数使用同一个截止时刻。

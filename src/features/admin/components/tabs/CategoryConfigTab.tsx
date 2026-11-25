@@ -18,9 +18,13 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { FolderOpen, SearchX } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
 import { CategoryEditForm } from '@/features/admin/components/tabs/category/CategoryEditForm';
@@ -28,11 +32,8 @@ import { SortableCategoryRow } from '@/features/admin/components/tabs/category/S
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { CustomCategory } from '@/features/admin/types/internal';
-import {
-  applyClientServerConfig,
-  fetchClientServerConfig,
-} from '@/lib/runtime-config';
 import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
@@ -49,22 +50,25 @@ const CategoryConfig = ({
   const { runAction } = useAdminSourceActions({
     endpoint: '/api/admin/category',
     refreshConfig,
-    afterRefresh: async () => {
-      applyClientServerConfig(await fetchClientServerConfig());
-    },
   });
   const [categories, setCategories] = useState<CustomCategory[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'enabled' | 'disabled'
+  >('all');
   const normalizedQuery = filterQuery.trim().toLowerCase();
-  const isFiltering = normalizedQuery.length > 0;
+  const isFiltering = normalizedQuery.length > 0 || statusFilter !== 'all';
   const visibleRows = useMemo(
     () =>
-      categories.filter((item) =>
-        [item.name, item.query].some((value) =>
-          value?.toLowerCase().includes(normalizedQuery),
-        ),
+      categories.filter(
+        (item) =>
+          (statusFilter === 'all' ||
+            (statusFilter === 'disabled' ? item.disabled : !item.disabled)) &&
+          [item.name, item.query].some((value) =>
+            value?.toLowerCase().includes(normalizedQuery),
+          ),
       ),
-    [categories, normalizedQuery],
+    [categories, normalizedQuery, statusFilter],
   );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CustomCategory | null>(
@@ -238,14 +242,34 @@ const CategoryConfig = ({
           {actionError}
         </p>
       )}
-      <div className='flex items-center justify-between gap-3'>
-        <AdminSearchField
-          value={filterQuery}
-          onChange={setFilterQuery}
-          label='搜索分类'
-          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
-        />
-        <div className='flex shrink-0 items-center'>
+      <AdminListToolbar
+        search={
+          <AdminSearchField
+            value={filterQuery}
+            onChange={setFilterQuery}
+            label='搜索分类'
+          />
+        }
+        filters={
+          <>
+            <Select
+              variant='pill'
+              align='end'
+              value={statusFilter}
+              onChange={(value) =>
+                setStatusFilter(value as 'all' | 'enabled' | 'disabled')
+              }
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'enabled', label: '已启用' },
+                { value: 'disabled', label: '已禁用' },
+              ]}
+              showSelectedIcon={false}
+              ariaLabel='筛选分类状态'
+            />
+          </>
+        }
+        actions={
           <button
             onClick={() => {
               setFormError('');
@@ -256,8 +280,8 @@ const CategoryConfig = ({
           >
             添加分类
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <CategoryAddForm
         error={formError}
@@ -304,8 +328,12 @@ const CategoryConfig = ({
               className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
               {visibleRows.length === 0 && (
-                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {isFiltering ? '没有匹配的分类' : '暂无分类'}
+                <li>
+                  <ListEmptyState
+                    className={ADMIN_LIST_EMPTY_CLASS}
+                    icon={isFiltering ? <SearchX /> : <FolderOpen />}
+                    label={isFiltering ? '没有匹配的分类' : '暂无分类'}
+                  />
                 </li>
               )}
               {visibleRows.map((category) => (

@@ -5,7 +5,10 @@ import type {
   FavoriteLibraryItem,
   FavoriteWorkQuery,
 } from '@/features/favorites/lib/library-query';
-import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import {
+  normalizeSearchQueryInput,
+  SEARCH_HISTORY_LIMIT,
+} from '@/features/search/lib/searchQuery';
 
 import { getAuthInfoFromBrowserCookie } from './auth.client';
 import { isCatalogFavoriteSource } from './catalog-favorites';
@@ -34,7 +37,6 @@ import {
   normalizePlayRecordLimit,
   selectRecentPlayRecords,
 } from './play-records';
-import { getRuntimeConfig } from './runtime-config';
 import type {
   EpisodeProgressEntry,
   Favorite,
@@ -43,13 +45,6 @@ import type {
 } from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
-
-function getSearchHistoryLimit(): number {
-  return Math.max(
-    1,
-    Math.floor(getRuntimeConfig()?.SEARCH_HISTORY_LIMIT || 20),
-  );
-}
 
 /**
  * 生成存储key
@@ -288,7 +283,7 @@ export async function getRecentPlayRecords(
 export async function getPlayRecordPage(
   limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   cursor?: string | null,
-  options?: { filter?: 'updated' | 'shelved' },
+  options?: { filter?: 'updated' | 'shelved'; signal?: AbortSignal },
 ): Promise<PlayRecordPage> {
   const normalizedLimit = normalizePlayRecordLimit(limit);
   const params = new URLSearchParams({
@@ -305,6 +300,7 @@ export async function getPlayRecordPage(
 
   const page = await fetchFromApi<PlayRecordPage>(
     `/api/playrecords?${params.toString()}`,
+    options?.signal ? { signal: options.signal } : undefined,
   );
   mergePlayRecordsIntoCache(page.items);
   return page;
@@ -523,6 +519,8 @@ async function patchPlayRecordState(
       window.dispatchEvent(
         new CustomEvent('playRecordsUpdated', { detail: nextRecords }),
       );
+    } else {
+      applyPlayRecordStateUpdates({ [key]: record });
     }
 
     return record;
@@ -614,7 +612,7 @@ export async function addSearchHistory(keyword: string): Promise<void> {
 
   const buildNewHistory = (arr: string[]): string[] => {
     const newHistory = [trimmed, ...arr.filter((k) => k !== trimmed)];
-    const limit = getSearchHistoryLimit();
+    const limit = SEARCH_HISTORY_LIMIT;
     if (newHistory.length > limit) {
       newHistory.length = limit;
     }
@@ -806,6 +804,8 @@ export async function setFavoriteTracking(
         new CustomEvent('favoritesUpdated', { detail: next }),
       );
     }
+    // 追更区等视图依赖写入完成信号，缓存未命中时也要派发。
+    window.dispatchEvent(new Event('userLibraryUpdated'));
     notifyMessagesUpdated();
     return favorite;
   } catch (error) {

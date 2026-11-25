@@ -18,6 +18,91 @@ export const videoReview: VideoReview = {
   updated_at: 2000,
 };
 
+export async function assertMyReviewWhitespaceFiltering(
+  storage: IStorage,
+  username: string,
+) {
+  // 分别建数，避免某个漏判字符被同一正文中的其他字符掩盖。
+  const whitespace = [
+    0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x00a0, 0x1680, 0x2000,
+    0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+    0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+  ].map((code) => String.fromCharCode(code));
+  // BOM 被 trim 移除；零宽空格、连接符、蒙古文元音分隔符及 NEL 保留。
+  const text = [0x200b, 0x200c, 0x200d, 0x180e, 0x0085]
+    .map((code) => String.fromCharCode(code))
+    .concat('正文');
+  const bodies = [
+    '',
+    ...whitespace,
+    whitespace.join(''),
+    ...text,
+    ...text.map(
+      (value) => `${whitespace.join('')}${value}${whitespace.join('')}`,
+    ),
+  ];
+  const reviews: VideoReview[] = [];
+  for (const isPublic of [true, false]) {
+    for (const rating of [null, 8.6]) {
+      for (const [index, content] of bodies.entries()) {
+        const title = `Whitespace ${isPublic}-${rating}-${String(index).padStart(2, '0')}`;
+        const review = {
+          ...videoReview,
+          title,
+          title_norm: title.toLowerCase(),
+          content,
+          rating,
+          is_public: isPublic,
+        };
+        reviews.push(review);
+        await storage.setVideoReview(username, review);
+      }
+    }
+  }
+  expect(await storage.getMyVideoReviewCount(username)).toBe(reviews.length);
+  for (const content of ['all', 'rating', 'text', 'both'] as const) {
+    const eligible = reviews.filter((review) => {
+      const hasText = review.content.trim().length > 0;
+      if (content === 'rating') return review.rating !== null && !hasText;
+      if (content === 'text') return review.rating === null && hasText;
+      if (content === 'both') return review.rating !== null && hasText;
+      return true;
+    });
+    for (const filter of ['all', 'public', 'private'] as const) {
+      const expected = eligible
+        .filter(
+          (review) =>
+            filter === 'all' || review.is_public === (filter === 'public'),
+        )
+        .map((review) => review.title_norm)
+        .sort()
+        .reverse();
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await storage.getMyVideoReviewPage(
+          username.toUpperCase(),
+          {
+            content,
+            filter,
+            cursor,
+          },
+        );
+        expect(page.total).toBe(reviews.length);
+        expect(page.counts).toEqual({
+          all: eligible.length,
+          public: eligible.filter((review) => review.is_public).length,
+          private: eligible.filter((review) => !review.is_public).length,
+        });
+        seen.push(...page.items.map((review) => review.title_norm));
+        expect(seen.length).toBeLessThanOrEqual(expected.length);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      expect(seen).toEqual(expected);
+    }
+  }
+}
+
 export async function assertFollowPagination(
   storage: IStorage,
   username: string,
@@ -320,7 +405,6 @@ export function videoReviewContract(createStorage: () => IStorage) {
           all: 45,
           public: 23,
           private: 22,
-          text: 15,
         });
         seen.push(...page.items);
         cursor = page.nextCursor ?? undefined;
@@ -500,6 +584,10 @@ export function videoReviewContract(createStorage: () => IStorage) {
     expect(profile?.nickname).toBe('Alice');
     expect(await storage.isNicknameAvailable('alice')).toBe(false);
     expect(await storage.isNicknameAvailable('ALICE', 'SOCIAL-A')).toBe(true);
+    expect(await storage.isNicknameAvailable(' ＡＬＩＣＥ ')).toBe(false);
+    await storage.registerUser('social-suffix', 'test-password', 'Alice_ld');
+    expect(await storage.isNicknameAvailable('ＡＬＩＣＥ_ld')).toBe(false);
+    expect(await storage.isNicknameAvailable('Alice_ld2')).toBe(true);
     await expect(
       storage.registerUser('social-b', 'test-password', 'alice'),
     ).rejects.toThrow('昵称已被使用');

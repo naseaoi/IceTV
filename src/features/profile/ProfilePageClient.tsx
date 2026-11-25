@@ -1,5 +1,6 @@
 'use client';
 
+import { MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -11,6 +12,11 @@ import {
 } from 'react';
 
 import CoverImage from '@/components/CoverImage';
+import {
+  ListEmptySkeleton,
+  ListEmptyState,
+  ListLoadingState,
+} from '@/components/ListState';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import { SIDEBAR_POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
@@ -21,7 +27,6 @@ import PublicReviewContent, {
   PUBLIC_REVIEW_TIME_TEXT_CLASS,
 } from '@/components/PublicReviewContent';
 import SkeletonText from '@/components/SkeletonText';
-import Spinner from '@/components/Spinner';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
 import {
@@ -58,6 +63,7 @@ import { replaceSearchParamInUrl } from '@/lib/url-search-param';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 
+const PROFILE_REVIEWS_STATE_CLASS = 'py-16 text-center';
 const REVIEW_TITLE_TEXT_CLASS = 'mb-1.5';
 const TABS_CLASS =
   'relative mb-6 flex gap-7 border-b border-gray-200/80 dark:border-white/[0.08]';
@@ -134,12 +140,12 @@ function ProfileReviews({
           </div>
         </article>
       ))}
-      {(initialLoading
-        ? reviewCount === 0
-        : !page.error && page.items.length === 0) && (
-        <p className='py-16 text-center text-sm text-gray-500'>
-          还没有公开评价
-        </p>
+      {!initialLoading && !page.error && page.items.length === 0 && (
+        <ListEmptyState
+          icon={<MessageSquare />}
+          label='还没有公开评价'
+          className={PROFILE_REVIEWS_STATE_CLASS}
+        />
       )}
       <PageFooter {...page} loading={page.loading && !initialLoading} />
     </div>
@@ -218,6 +224,7 @@ function ProfileFavorites({
       ) : (
         <div
           aria-busy={refreshing}
+          inert={refreshing}
           className={`transition-opacity ${refreshing ? 'pointer-events-none opacity-60' : ''}`}
         >
           <FavoriteGrid
@@ -253,7 +260,8 @@ function ProfileFavorites({
   );
 }
 function ProfileReviewsSkeleton({ count }: { count: number }) {
-  if (count === 0) return null;
+  if (count === 0)
+    return <ListEmptySkeleton className={PROFILE_REVIEWS_STATE_CLASS} />;
   return (
     <div className='space-y-3' role='status' aria-label='加载中'>
       {Array.from({ length: count }, (_, index) => (
@@ -310,9 +318,7 @@ function ProfileHeaderSkeleton({ profileId }: { profileId: string }) {
           ))}
         </div>
         {reviewCount === null ? (
-          <div className='flex justify-center py-12'>
-            <Spinner className='h-6 w-6' />
-          </div>
+          <ListLoadingState className={PROFILE_REVIEWS_STATE_CLASS} />
         ) : (
           <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
         )}

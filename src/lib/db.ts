@@ -124,10 +124,10 @@ class DbManager {
   ): ReturnType<IStorage['countPlazaLists']> {
     return (await this.getStorage()).countPlazaLists(...args);
   }
-  async getListItemCount(
-    ...args: Parameters<IStorage['getListItemCount']>
-  ): ReturnType<IStorage['getListItemCount']> {
-    return (await this.getStorage()).getListItemCount(...args);
+  async getListHeaderPreview(
+    ...args: Parameters<IStorage['getListHeaderPreview']>
+  ): ReturnType<IStorage['getListHeaderPreview']> {
+    return (await this.getStorage()).getListHeaderPreview(...args);
   }
   async setListLike(
     ...args: Parameters<IStorage['setListLike']>
@@ -148,6 +148,16 @@ class DbManager {
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
     return (await this.getStorage()).getLists(...args);
+  }
+  async getSavedLists(
+    ...args: Parameters<IStorage['getSavedLists']>
+  ): ReturnType<IStorage['getSavedLists']> {
+    return (await this.getStorage()).getSavedLists(...args);
+  }
+  async countSavedLists(
+    ...args: Parameters<IStorage['countSavedLists']>
+  ): ReturnType<IStorage['countSavedLists']> {
+    return (await this.getStorage()).countSavedLists(...args);
   }
   async countUserLists(
     ...args: Parameters<IStorage['countUserLists']>

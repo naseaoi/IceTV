@@ -17,6 +17,79 @@ describe('SQLite 片单契约', () => {
       (storage as unknown as { db: Database.Database }).db.close();
   });
 });
+it('旧收藏名幂等回填，私密改名后重新迁移保持快照', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const internal = storage as unknown as {
+    db: Database.Database;
+    migrateListSchema(): void;
+  };
+  try {
+    await storage.ensureUserProfile('alice');
+    await storage.ensureUserProfile('bobby');
+    const list = await storage.createList('alice', {
+      name: '旧公开名称',
+      visibility: 'members',
+    });
+    await storage.setListLike('bobby', list.id, true);
+    internal.db.exec('ALTER TABLE list_likes DROP COLUMN list_name');
+    internal.migrateListSchema();
+    expect(
+      internal.db.prepare('SELECT list_name FROM list_likes').get(),
+    ).toEqual({ list_name: '旧公开名称' });
+    await storage.updateList('alice', list.id, {
+      name: '秘密',
+      visibility: 'private',
+    });
+    internal.migrateListSchema();
+    expect((await storage.getSavedLists('bobby'))[0]).toMatchObject({
+      status: 'private',
+      name: '旧公开名称',
+    });
+  } finally {
+    internal.db.close();
+  }
+});
+
+it('收藏按时间和 ID 稳定排序，上限计数与失效行一致', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const internal = storage as unknown as {
+    db: Database.Database;
+    migrateLegacyUsernameCasing(): void;
+  };
+  try {
+    await storage.ensureUserProfile('bobby');
+    const insert = internal.db.prepare(
+      'INSERT INTO list_likes (list_id, username, created_at, list_name) VALUES (?, ?, ?, ?)',
+    );
+    internal.db.transaction(() => {
+      for (let i = 0; i < 502; i++)
+        insert.run(
+          String(i).padStart(36, '0'),
+          'BOBBY',
+          Math.floor(i / 2),
+          `名称${i}`,
+        );
+    })();
+    internal.migrateLegacyUsernameCasing();
+    const saved = await storage.getSavedLists('bobby');
+    expect(saved).toHaveLength(500);
+    expect(await storage.countSavedLists('bobby')).toBe(saved.length);
+    expect(saved[0]).toEqual({
+      status: 'deleted',
+      id: String(500).padStart(36, '0'),
+      name: '名称500',
+      savedAt: 250,
+    });
+    expect(saved[1].id).toBe(String(501).padStart(36, '0'));
+    await storage.deleteUser('bobby');
+    expect(
+      internal.db.prepare('SELECT COUNT(*) AS total FROM list_likes').get(),
+    ).toEqual({ total: 0 });
+  } finally {
+    internal.db.close();
+  }
+});
+
 it('大小写合并保留所有片单及条目，删号清除两表', async () => {
   const storage = new LocalSqliteStorage(':memory:');
   const internal = storage as unknown as {
@@ -50,7 +123,7 @@ it('大小写合并保留所有片单及条目，删号清除两表', async () =
     internal.db.close();
   }
 });
-it('大小写合并去重点赞并重算计数，删除片单清除点赞行', async () => {
+it('大小写合并去重收藏并重算计数，删除片单保留收藏行', async () => {
   const storage = new LocalSqliteStorage(':memory:');
   const internal = storage as unknown as {
     db: Database.Database;
@@ -82,8 +155,19 @@ it('大小写合并去重点赞并重算计数，删除片单清除点赞行', a
     ).toEqual([{ username: 'bobby' }]);
     await storage.deleteList('alice', list.id);
     expect(
+      (await storage.getAnnualActivity('alice', 0, Date.now() + 1000)).likes,
+    ).toEqual([]);
+    expect(
       internal.db.prepare('SELECT COUNT(*) AS total FROM list_likes').get(),
-    ).toEqual({ total: 0 });
+    ).toEqual({ total: 1 });
+    expect(await storage.getSavedLists('bobby')).toEqual([
+      {
+        status: 'deleted',
+        id: list.id,
+        name: '合并',
+        savedAt: expect.any(Number),
+      },
+    ]);
   } finally {
     internal.db.close();
   }

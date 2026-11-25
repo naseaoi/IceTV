@@ -15,6 +15,14 @@ import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
 import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
 import { UPSTREAM_COOLDOWN_POLICY } from '@/lib/upstream-resource-policy';
+import { fetchWithUrlGuard } from '@/lib/url-guard';
+
+jest.mock('@/lib/upstream-proxy-pool.server', () => ({
+  ...jest.requireActual('@/lib/upstream-proxy-pool.server'),
+}));
+const upstreamPool = jest.requireMock<
+  typeof import('../upstream-proxy-pool.server')
+>('@/lib/upstream-proxy-pool.server');
 
 jest.unmock('@/lib/upstream-resource-guard.server');
 jest.mock('@/lib/api-auth', () => ({
@@ -115,7 +123,8 @@ describe('upstream resources', () => {
         origin,
         { store },
       ).catch((error) => error);
-      expect(failure).toBeInstanceOf(ResourceLimitError);
+      expect(failure).toBeInstanceOf(UpstreamCooldownError);
+      expect(failure.responseReceived).toBe(true);
       expect(resourceLimitResponse(failure)?.status).toBe(503);
       expect(resourceLimitResponse(failure)?.headers.get('Retry-After')).toBe(
         '30',
@@ -132,7 +141,11 @@ describe('upstream resources', () => {
           kind: 'live',
           identity: 'other',
         }),
-      ).rejects.toMatchObject({ status: 503, retryAfterSeconds: 29 });
+      ).rejects.toMatchObject({
+        status: 503,
+        retryAfterSeconds: 29,
+        responseReceived: false,
+      });
       expect(origin).toHaveBeenCalledTimes(1);
       expect(acquire).not.toHaveBeenCalled();
       expect(consume).not.toHaveBeenCalled();
@@ -183,6 +196,107 @@ describe('upstream resources', () => {
           { store },
         ),
       ).rejects.toMatchObject({ status: 503, retryAfterSeconds: 15 });
+    });
+
+    describe('proxy pool cooldown failover', () => {
+      const url = 'https://up.example/write';
+      const proxy = 'http://proxy.example:8080';
+
+      beforeEach(() => {
+        delete process.env.UPSTREAM_PROXY_POOL;
+        upstreamPool.getUpstreamRoutes('up.example');
+        process.env.UPSTREAM_PROXY_POOL = `direct,${proxy}`;
+        jest.spyOn(db, 'getSharedResourceStore').mockResolvedValue(store);
+      });
+
+      it.each([429, 503])(
+        'keeps POST bodies on one exit after an upstream %s',
+        async (status) => {
+          const cancel = jest.fn();
+          const fetchRoute = jest
+            .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+            .mockResolvedValueOnce(
+              new Response(new ReadableStream({ cancel }), {
+                status,
+                headers: { 'Retry-After': '20' },
+              }),
+            )
+            .mockResolvedValue(new Response(null, { status: 204 }));
+          const failure = await fetchWithUrlGuard(url, {
+            method: 'POST',
+            body: 'payload',
+            skipInitialValidation: true,
+          }).catch((error) => error);
+          expect(failure).toBeInstanceOf(UpstreamCooldownError);
+          expect(failure.responseReceived).toBe(true);
+          const mapped = resourceLimitResponse(failure);
+          expect(mapped?.status).toBe(503);
+          expect(mapped?.headers.get('Retry-After')).toBe('20');
+          expect(fetchRoute).toHaveBeenCalledTimes(1);
+          expect(fetchRoute.mock.calls[0][0].id).toBe('direct');
+          expect(cancel).toHaveBeenCalledTimes(1);
+          expect(leaseCount()).toBe(0);
+        },
+      );
+
+      it.each([429, 503])(
+        'advances GET to the next exit after an upstream %s',
+        async (status) => {
+          const fetchRoute = jest
+            .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+            .mockResolvedValueOnce(limited(status, '20'))
+            .mockResolvedValue(new Response(null, { status: 204 }));
+          const response = await fetchWithUrlGuard(url, {
+            skipInitialValidation: true,
+          });
+          expect(response.status).toBe(204);
+          expect(fetchRoute.mock.calls.map(([route]) => route.id)).toEqual([
+            'direct',
+            proxy,
+          ]);
+          expect(leaseCount()).toBe(0);
+        },
+      );
+
+      it.each(['string', 'stream'])(
+        'advances POST with an unconsumed %s body past a pre-send cooldown',
+        async (bodyType) => {
+          await expect(
+            withUpstreamResponse(url, async () => limited(429, '20'), {
+              store,
+            }),
+          ).rejects.toMatchObject({ responseReceived: true });
+          const body =
+            bodyType === 'string'
+              ? 'payload'
+              : new ReadableStream<Uint8Array>({
+                  start(controller) {
+                    controller.enqueue(new TextEncoder().encode('payload'));
+                    controller.close();
+                  },
+                });
+          const fetchRoute = jest
+            .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+            .mockImplementation(async (_route, _url, init) => {
+              expect(init.body).toBe(body);
+              if (body instanceof ReadableStream)
+                await expect(new Response(body).text()).resolves.toBe(
+                  'payload',
+                );
+              return new Response(null, { status: 204 });
+            });
+          const response = await fetchWithUrlGuard(url, {
+            method: 'POST',
+            body,
+            skipInitialValidation: true,
+          });
+          expect(response.status).toBe(204);
+          expect(fetchRoute.mock.calls.map(([route]) => route.id)).toEqual([
+            proxy,
+          ]);
+          expect(leaseCount()).toBe(0);
+        },
+      );
     });
 
     it('isolates hosts and restores upstream access on expiry', async () => {

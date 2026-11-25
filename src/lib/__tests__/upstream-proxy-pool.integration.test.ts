@@ -1,11 +1,17 @@
 /** @jest-environment node */
 
 import { Blob, File } from 'node:buffer';
-import { type Server, createServer, request } from 'node:http';
-import { type Socket, connect } from 'node:net';
+import { createServer, request } from 'node:http';
+import {
+  type Server,
+  type Socket,
+  connect,
+  createServer as createTcpServer,
+} from 'node:net';
 import { MessageChannel, MessagePort } from 'node:worker_threads';
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import { setupDevProxy } from '@/lib/dev-proxy';
 
 import {
   fetchViaUpstreamRoute,
@@ -37,6 +43,7 @@ interface ProxyRequest {
 describe('real upstream HTTP proxy', () => {
   const originalPool = process.env.UPSTREAM_PROXY_POOL;
   const originalTimeout = process.env.UPSTREAM_PROXY_CONNECT_TIMEOUT_MS;
+  const originalDevProxyEnabled = process.env.DEV_PROXY_ENABLED;
   const originalFetch = global.fetch;
   const servers: Server[] = [];
   const sockets = new Set<Socket>();
@@ -83,8 +90,9 @@ describe('real upstream HTTP proxy', () => {
   }
 
   beforeEach(async () => {
+    process.env.DEV_PROXY_ENABLED = 'false';
     delete process.env.UPSTREAM_PROXY_POOL;
-    getUpstreamRoutes();
+    getUpstreamRoutes('example.com');
     process.env.UPSTREAM_PROXY_CONNECT_TIMEOUT_MS = '250';
     seen.length = 0;
     targetRequests.mockReset();
@@ -146,7 +154,7 @@ describe('real upstream HTTP proxy', () => {
 
   afterEach(async () => {
     delete process.env.UPSTREAM_PROXY_POOL;
-    getUpstreamRoutes();
+    getUpstreamRoutes('example.com');
     for (const socket of sockets) socket.destroy();
     await Promise.all(
       servers.splice(0).map(
@@ -163,6 +171,9 @@ describe('real upstream HTTP proxy', () => {
     if (originalTimeout === undefined)
       delete process.env.UPSTREAM_PROXY_CONNECT_TIMEOUT_MS;
     else process.env.UPSTREAM_PROXY_CONNECT_TIMEOUT_MS = originalTimeout;
+    if (originalDevProxyEnabled === undefined)
+      delete process.env.DEV_PROXY_ENABLED;
+    else process.env.DEV_PROXY_ENABLED = originalDevProxyEnabled;
     global.fetch = originalFetch;
     jest.restoreAllMocks();
   });
@@ -173,7 +184,7 @@ describe('real upstream HTTP proxy', () => {
       process.env.UPSTREAM_PROXY_POOL = authenticated
         ? proxyUrl.replace('://', '://user:pass@')
         : proxyUrl;
-      const route = getUpstreamRoutes()[0];
+      const route = getUpstreamRoutes('example.com')[0];
       const response = await fetchViaUpstreamRoute(
         route,
         `${targetUrl}/media`,
@@ -195,6 +206,43 @@ describe('real upstream HTTP proxy', () => {
       expect(targetRequests).toHaveBeenCalledWith('/media', undefined);
     },
   );
+
+  it('routes pool direct through the active development global dispatcher', async () => {
+    const { getGlobalDispatcher, setGlobalDispatcher } = await import('undici');
+    const originalDispatcher = getGlobalDispatcher();
+    const originalEnv = process.env;
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: 'development',
+      DEV_PROXY_ENABLED: 'true',
+      DEV_HTTP_PROXY: proxyUrl,
+      NO_PROXY: 'unused.example',
+      UPSTREAM_PROXY_POOL: `direct,${proxyUrl}`,
+    };
+    try {
+      await setupDevProxy();
+      const directFetch = jest.spyOn(global, 'fetch');
+      const response = await fetchWithUrlGuard(`${targetUrl}/dev-proxy`, {
+        skipInitialValidation: true,
+        timeoutMs: 3000,
+      });
+      await expect(response.text()).resolves.toBe('target response');
+      expect(directFetch).toHaveBeenCalledTimes(1);
+      expect(seen).toEqual([
+        {
+          method: 'CONNECT',
+          url: new URL(targetUrl).host,
+          authorization: undefined,
+        },
+      ]);
+      expect(targetRequests).toHaveBeenCalledTimes(1);
+    } finally {
+      const dispatcher = getGlobalDispatcher();
+      setGlobalDispatcher(originalDispatcher);
+      process.env = originalEnv;
+      if (dispatcher !== originalDispatcher) await dispatcher.close();
+    }
+  });
 
   it('fails over from a closed proxy port to a working proxy without direct fetch', async () => {
     const [unavailable] = await closedProxyUrls(1);
@@ -226,7 +274,7 @@ describe('real upstream HTTP proxy', () => {
       timeoutMs: 3000,
     });
     await expect(response.text()).resolves.toBe('target response');
-    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(directFetch).not.toHaveBeenCalled();
     expect(seen).toHaveLength(0);
     expect(targetRequests).toHaveBeenCalledWith('/direct', undefined);
     expect(attempts.mock.calls.map((call) => call[2]?.cooldownScope)).toEqual([
@@ -234,6 +282,38 @@ describe('real upstream HTTP proxy', () => {
       second,
       undefined,
     ]);
+  });
+
+  it('limits direct TLS connection establishment in pool mode', async () => {
+    process.env.UPSTREAM_PROXY_POOL = `direct,${proxyUrl}`;
+    const stalled = await listen(createTcpServer());
+    const error = await fetchViaUpstreamRoute(
+      { id: 'direct' },
+      stalled.replace('http:', 'https:'),
+      { signal: AbortSignal.timeout(3000) },
+    ).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(TypeError);
+    expect((error as Error & { cause?: { code?: string } }).cause?.code).toBe(
+      'UND_ERR_CONNECT_TIMEOUT',
+    );
+  });
+
+  it('allows direct response bodies to outlast the connect timeout', async () => {
+    process.env.UPSTREAM_PROXY_POOL = `direct,${proxyUrl}`;
+    const slow = await listen(
+      createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.flushHeaders();
+        const timer = setTimeout(() => res.end('slow body'), 500);
+        res.on('close', () => clearTimeout(timer));
+      }),
+    );
+    const response = await fetchWithUrlGuard(slow, {
+      skipInitialValidation: true,
+      timeoutMs: 3000,
+    });
+    await expect(response.text()).resolves.toBe('slow body');
+    expect(seen).toHaveLength(0);
   });
 
   it('bypasses a working proxy when useProxyPool is false', async () => {

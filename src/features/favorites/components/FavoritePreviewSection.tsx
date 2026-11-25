@@ -3,11 +3,16 @@
 import { LibraryBig } from 'lucide-react';
 import Link from 'next/link';
 
-import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
+import {
+  HOME_POSTER_CARD_CLASS,
+  POSTER_DASHED_SLOT_CLASS,
+} from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
-import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
-import { FAVORITE_PREVIEW_EMPTY_TEXT_CLASS } from '@/features/favorites/lib/card-layout';
+import {
+  FavoritePreviewSkeleton,
+  FavoriteShelfEmpty,
+} from '@/features/favorites/components/FavoritePreviewSkeleton';
 import type { FavoriteItem } from '@/features/favorites/types';
 import { FAVORITE_PREVIEW_LIMIT } from '@/lib/favorites-count';
 
@@ -16,7 +21,7 @@ function FavoriteShelfEnd({ total }: { total: number }) {
     <div className={HOME_POSTER_CARD_CLASS}>
       <Link
         href='/me/favorites'
-        className='group flex aspect-[2/3] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300/80 text-center transition hover:border-gray-400 hover:bg-gray-100/80 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]'
+        className={`${POSTER_DASHED_SLOT_CLASS} group flex w-full flex-col items-center justify-center gap-2 text-center transition hover:border-gray-400 hover:bg-gray-100/80 dark:hover:border-white/20 dark:hover:bg-white/[0.04]`}
       >
         <LibraryBig
           aria-hidden='true'
@@ -48,16 +53,7 @@ export function FavoritePreviewSection({
     return <FavoritePreviewSkeleton count={skeletonCount} />;
   }
 
-  if (items.length === 0) {
-    return (
-      <p
-        data-favorite-empty-state
-        className={`py-6 ${FAVORITE_PREVIEW_EMPTY_TEXT_CLASS} text-gray-400 dark:text-gray-500`}
-      >
-        还没有收藏
-      </p>
-    );
-  }
+  if (items.length === 0) return <FavoriteShelfEmpty />;
 
   return (
     <ScrollableRow>

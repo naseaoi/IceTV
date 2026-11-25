@@ -4,6 +4,7 @@ const mockDb = {
   getFavoriteLibraryPage: jest.fn(),
   getMyVideoReviewCount: jest.fn(),
   countUserLists: jest.fn(),
+  countSavedLists: jest.fn(),
   countPlazaLists: jest.fn(),
   getWatchHistoryPage: jest.fn(),
   getPlayRecordPage: jest.fn(),
@@ -11,13 +12,8 @@ const mockDb = {
 
 jest.mock('server-only', () => ({}));
 jest.mock('@/lib/db', () => ({ db: mockDb }));
-jest.mock('@/lib/config', () => ({
-  getConfigForRead: async () => ({
-    SiteConfig: {
-      PlaybackHistoryPageSize: 10,
-      ContinueWatchingLimit: 8,
-    },
-  }),
+jest.mock('@/features/continue-watching/lib/tracking-calendar.server', () => ({
+  countTrackingStrip: jest.fn().mockResolvedValue(2),
 }));
 
 const { seedListCountCookies } =
@@ -37,6 +33,7 @@ beforeEach(() => {
   mockDb.getFavoriteLibraryPage.mockResolvedValue({ libraryTotal: 5 });
   mockDb.getMyVideoReviewCount.mockResolvedValue(1);
   mockDb.countUserLists.mockResolvedValue(2);
+  mockDb.countSavedLists.mockResolvedValue(3);
   mockDb.countPlazaLists.mockResolvedValue(4);
   mockDb.getPlayRecordPage.mockResolvedValue({ total: 30 });
   // 同名不同源的历史独立计数
@@ -60,10 +57,12 @@ it('按各列表接口口径写入计数', async () => {
     fav_count: '5',
     review_count: '1',
     list_count: '2',
+    saved_list_count: '3',
     plaza_count: '4',
     history_count: '3',
-    cw_count: '8',
+    cw_count: '10',
     cw_page_count: '24',
+    cw_tracking_count: '2',
   });
 });
 

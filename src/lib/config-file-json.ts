@@ -55,13 +55,15 @@ export function buildConfigFileFromAdminConfig(
   const apiSiteEntries = config.SourceConfig.filter(
     (source) => source.key.trim() && source.name.trim() && source.api.trim(),
   ).map((source) => {
-    const site: { name: string; api: string; detail?: string } = {
-      name: source.name,
-      api: source.api,
-    };
+    const site: { name: string; api: string; detail?: string; nsfw?: boolean } =
+      {
+        name: source.name,
+        api: source.api,
+      };
     if (source.detail?.trim()) {
       site.detail = source.detail;
     }
+    if (source.nsfw !== undefined) site.nsfw = source.nsfw;
     return [source.key, site] as const;
   });
   const liveEntries = (config.LiveConfig || [])

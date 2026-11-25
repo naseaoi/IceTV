@@ -1,7 +1,5 @@
 'use client';
 
-import { Gauge } from 'lucide-react';
-
 import SkeletonText from '@/components/SkeletonText';
 import {
   ADMIN_PANEL_CLASS,
@@ -62,35 +60,27 @@ function ThresholdTick({ ratio, label }: { ratio: number; label: string }) {
   );
 }
 
-export function TrafficUsageCard({ status }: { status: HostTrafficStatus }) {
-  if (!status.available) {
-    return (
-      <div
-        className={`${ADMIN_PANEL_CLASS} flex flex-col items-center gap-2 px-4 py-10 text-center`}
-      >
-        <Gauge className='h-6 w-6 text-gray-400 dark:text-gray-500' />
-        <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-          未读取到流量统计
-        </p>
-        <p className={CAPTION_CLASS}>宿主机按部署文档配置 vnstat 后显示</p>
-      </div>
-    );
-  }
+const EMPTY_VALUE = '—';
 
-  const ratio = status.usedRatio;
+// 读取失败与未设额度时沿用同一布局，保持与骨架等高
+export function TrafficUsageCard({ status }: { status: HostTrafficStatus }) {
+  const { available } = status;
+  const ratio = available ? status.usedRatio : null;
   const tone = usageTone(ratio);
   const projectedOver =
     status.quotaBytes > 0 &&
     status.projectedBytes !== null &&
     status.projectedBytes > status.quotaBytes;
-  const stats = [
-    formatTrafficBytes(status.todayBytes),
-    status.projectedBytes === null
-      ? '—'
-      : formatTrafficBytes(status.projectedBytes),
-    formatTrafficBytes(status.rxBytes),
-    formatTrafficBytes(status.txBytes),
-  ];
+  const stats = available
+    ? [
+        formatTrafficBytes(status.todayBytes),
+        status.projectedBytes === null
+          ? EMPTY_VALUE
+          : formatTrafficBytes(status.projectedBytes),
+        formatTrafficBytes(status.rxBytes),
+        formatTrafficBytes(status.txBytes),
+      ]
+    : STAT_LABELS.map(() => EMPTY_VALUE);
 
   return (
     <section aria-label='本周期流量' className={ADMIN_PANEL_CLASS}>
@@ -98,7 +88,7 @@ export function TrafficUsageCard({ status }: { status: HostTrafficStatus }) {
         <p className={CAPTION_CLASS}>本周期已用</p>
         <div className='mt-1 flex items-baseline justify-between gap-3'>
           <p className={`${USED_CLASS} ${tone.text}`}>
-            {formatTrafficBytes(status.usedBytes)}
+            {available ? formatTrafficBytes(status.usedBytes) : EMPTY_VALUE}
             {status.quotaBytes > 0 && (
               <span className='ml-1.5 text-sm font-normal text-gray-400 dark:text-gray-500'>
                 / {formatTrafficBytes(status.quotaBytes)}
@@ -111,7 +101,12 @@ export function TrafficUsageCard({ status }: { status: HostTrafficStatus }) {
             </span>
           )}
         </div>
-        {ratio !== null && (
+        {ratio === null ? (
+          <div
+            aria-hidden='true'
+            className={`${BAR_CLASS} bg-gray-100 dark:bg-white/[0.06]`}
+          />
+        ) : (
           <div
             role='progressbar'
             aria-label='流量用量'
@@ -135,6 +130,11 @@ export function TrafficUsageCard({ status }: { status: HostTrafficStatus }) {
           <span className='text-gray-500 dark:text-gray-400'>
             {formatCycleDate(status.cycleEnd)}重置
           </span>
+          {!available && (
+            <span className='text-amber-600 dark:text-amber-400'>
+              统计文件读取失败
+            </span>
+          )}
           {status.updatedAt !== null && (
             <span
               className={

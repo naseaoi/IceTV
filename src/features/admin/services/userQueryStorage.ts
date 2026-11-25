@@ -4,7 +4,7 @@ import {
   type AdminUserItem,
   type AdminUserPage,
   type AdminUserQuery,
-  adminUserFilterProvider,
+  adminUserLoginProvider,
 } from '@/features/admin/lib/user-query';
 import { OAUTH_PROVIDERS } from '@/lib/oauth-identity';
 import { normalizeUsername } from '@/lib/username';
@@ -45,14 +45,14 @@ export function adminUserStatements(
   const loginProviders = mysql
     ? 'SELECT username, JSON_ARRAYAGG(provider) AS providers FROM oauth_identities GROUP BY username'
     : 'SELECT username, json_group_array(provider) AS providers FROM oauth_identities GROUP BY username';
-  const accessFilter =
-    query.filter === 'banned'
-      ? 'banned = 1'
-      : query.filter === 'admin' || query.filter === 'user'
-        ? `role = '${query.filter}'`
-        : '';
-  const names = accessFilter
-    ? `SELECT x.username FROM user_access x JOIN users u ON u.username = x.username WHERE x.${accessFilter}`
+  const accessFilters: string[] = [];
+  const accessParams: (string | number)[] = [];
+  if (query.role && query.role !== 'all') {
+    accessFilters.push(query.role === 'banned' ? 'x.banned = ?' : 'x.role = ?');
+    accessParams.push(query.role === 'banned' ? 1 : query.role);
+  }
+  const names = accessFilters.length
+    ? `SELECT x.username FROM user_access x JOIN users u ON u.username = x.username WHERE ${accessFilters.join(' AND ')}`
     : 'SELECT username FROM users';
   const cte = `WITH names AS (
     ${names}
@@ -72,7 +72,13 @@ export function adminUserStatements(
   ), ranked AS (
     SELECT base.*, ${query.sort === 'username' ? '0' : query.sort === 'activeAsc' || query.sort === 'activeDesc' ? 'COALESCE(lastActiveAt, 0)' : "CASE WHEN username = ? THEN 0 WHEN role = 'owner' THEN 1 WHEN role = 'admin' THEN 2 ELSE 3 END"} AS sort_key FROM base
   )`;
-  const params: (string | number)[] = [owner, owner, owner, owner];
+  const params: (string | number)[] = [
+    ...accessParams,
+    owner,
+    owner,
+    owner,
+    owner,
+  ];
   if (!query.sort || query.sort === 'priority') params.push(operator);
   const where: string[] = ['1 = 1'];
   if (query.q) {
@@ -85,16 +91,25 @@ export function adminUserStatements(
     );
     params.push(query.q, query.q, query.q);
   }
-  const provider = adminUserFilterProvider(query.filter);
-  if (query.filter === 'banned') where.push('banned = 1');
-  else if (provider) {
+  if (query.role && query.role !== 'all') {
+    where.push(query.role === 'banned' ? 'banned = ?' : 'role = ?');
+    params.push(query.role === 'banned' ? 1 : query.role);
+  }
+  const provider = adminUserLoginProvider(query.login);
+  if (provider) {
     where.push(
       'EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.username = ranked.username AND oi.provider = ?)',
     );
     params.push(provider);
-  } else if (query.filter && query.filter !== 'all') {
-    where.push('role = ?');
-    params.push(query.filter);
+  } else if (query.login === 'none' || query.login === 'any') {
+    where.push(
+      `${query.login === 'none' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.username = ranked.username)`,
+    );
+  }
+  if (query.ungrouped) {
+    where.push(
+      'NOT EXISTS (SELECT 1 FROM user_group_members g WHERE g.username = ranked.username)',
+    );
   }
   if (query.group) {
     where.push(
@@ -130,8 +145,10 @@ export function adminUserStatements(
     .update(
       JSON.stringify([
         query.q || '',
-        query.filter || 'all',
+        query.role || 'all',
+        query.login || 'all',
         query.group || '',
+        query.ungrouped || false,
         query.sort || 'priority',
         owner,
         operator,

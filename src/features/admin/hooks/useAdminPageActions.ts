@@ -2,6 +2,7 @@
 import { useCallback, useRef } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
+import { syncClientConfigAfterSave } from '@/lib/runtime-config';
 import { DisplayableError, getErrorMessage } from '@/lib/user-facing-error';
 import { type AdminConfigResult } from '@/types/admin';
 
@@ -65,9 +66,14 @@ export function useAdminPageActions(options: UseAdminPageActionsOptions) {
     [setConfig, setError, setLoading, setRole],
   );
 
+  const refreshConfig = useCallback(async () => {
+    await Promise.all([fetchConfig(), syncClientConfigAfterSave()]);
+  }, [fetchConfig]);
+
   const resetConfig = useCallback(async () => {
     await adminGet('/api/admin/reset', '重置失败');
-  }, []);
+    await refreshConfig();
+  }, [refreshConfig]);
 
-  return { fetchConfig, resetConfig };
+  return { fetchConfig, refreshConfig, resetConfig };
 }

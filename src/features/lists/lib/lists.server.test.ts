@@ -5,6 +5,7 @@ import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { getOptionalActiveUser, requireActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
+import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
@@ -13,6 +14,7 @@ jest.mock('@/lib/api-auth', () => ({
   getOptionalActiveUser: jest.fn(),
   isGuardFailure: (value: { response?: unknown }) => !!value.response,
 }));
+jest.mock('@/lib/config', () => ({ getConfigForRead: jest.fn() }));
 jest.mock('@/lib/client-ip', () => ({ getClientIp: jest.fn() }));
 jest.mock('@/lib/db', () => ({ db: {} }));
 installCryptoPolyfill();
@@ -33,6 +35,10 @@ const context = (id: string, itemId?: string) => ({
   params: Promise.resolve({ id, itemId }),
 });
 beforeEach(async () => {
+  (getConfigForRead as jest.Mock).mockResolvedValue({
+    SourceConfig: [],
+    SiteConfig: { DisableYellowFilter: false },
+  });
   storage = new LocalSqliteStorage(':memory:');
   jest.mocked(getClientIp).mockReturnValue('203.0.113.1');
   for (const method of [
@@ -42,6 +48,8 @@ beforeEach(async () => {
     'getPlazaLists',
     'getLists',
     'countUserLists',
+    'getSavedLists',
+    'countSavedLists',
     'getList',
     'createList',
     'updateList',
@@ -68,6 +76,161 @@ afterEach(() => {
   (storage as unknown as { db: { close(): void } }).db.close();
   jest.clearAllMocks();
 });
+it('本人收藏接口包含三种状态，失效项仅返回名称快照，并刷新计数', async () => {
+  await storage.updateUserProfile('alice', { nickname: '片单作者' });
+  const author = await storage.getUserProfile('alice');
+  const available = await storage.createList('alice', {
+    name: '可读',
+    visibility: 'members',
+  });
+  const hidden = await storage.createList('alice', {
+    name: '最后可见',
+    visibility: 'everyone',
+  });
+  const deleted = await storage.createList('alice', {
+    name: '已删除名称',
+    visibility: 'members',
+  });
+  for (const list of [available, hidden, deleted])
+    await storage.setListLike('bobby', list.id, true);
+  await storage.updateList('alice', hidden.id, {
+    name: '秘密名称',
+    description: '秘密简介',
+    visibility: 'private',
+  });
+  await storage.deleteList('alice', deleted.id);
+  guard.mockResolvedValue({ username: 'bobby' } as Awaited<
+    ReturnType<typeof requireActiveUser>
+  >);
+  const response = await handleLists(
+    req('/api/lists?scope=saved'),
+    'collection',
+  );
+  expect(response.status).toBe(200);
+  expect(response.cookies.get('saved_list_count')?.value).toBe('3');
+  const { lists } = await response.json();
+  expect(lists).toHaveLength(3);
+  expect(
+    lists.find((list: { id: string }) => list.id === available.id),
+  ).toEqual({
+    ...available,
+    owner: {
+      profileId: author!.profile_id,
+      nickname: '片单作者',
+      avatarSeed: author!.avatar_seed,
+      level: author!.level ?? 1,
+    },
+    likeCount: 1,
+    status: 'available',
+    savedAt: expect.any(Number),
+  });
+  expect(lists.find((list: { id: string }) => list.id === hidden.id)).toEqual({
+    status: 'private',
+    id: hidden.id,
+    name: '最后可见',
+    savedAt: expect.any(Number),
+  });
+  expect(lists.find((list: { id: string }) => list.id === deleted.id)).toEqual({
+    status: 'deleted',
+    id: deleted.id,
+    name: '已删除名称',
+    savedAt: expect.any(Number),
+  });
+  await storage.updateUserProfile('bobby', { nickname: '收藏者' });
+  for (const [index, list] of [hidden, deleted].entries()) {
+    const cancelled = await handleLists(
+      req('', 'DELETE'),
+      'like',
+      context(list.id),
+    );
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toEqual({ liked: false, likeCount: 0 });
+    expect(cancelled.cookies.get('saved_list_count')?.value).toBe(
+      String(2 - index),
+    );
+    expect(
+      (await handleLists(req('', 'DELETE'), 'like', context(list.id))).status,
+    ).toBe(404);
+  }
+  for (const parameter of ['profileId=abcdefghijkl', 'title=作品', 'year=2026'])
+    expect(
+      (
+        await handleLists(
+          req(`/api/lists?scope=saved&${parameter}`),
+          'collection',
+        )
+      ).status,
+    ).toBe(400);
+  guard.mockResolvedValue({ username: 'alice' } as Awaited<
+    ReturnType<typeof requireActiveUser>
+  >);
+  expect(
+    await (
+      await handleLists(req('/api/lists?scope=saved'), 'collection')
+    ).json(),
+  ).toEqual({ lists: [] });
+  guard.mockResolvedValue({
+    response: NextResponse.json({ error: '请先登录' }, { status: 401 }),
+  });
+  expect(
+    (await handleLists(req('/api/lists?scope=saved'), 'collection')).status,
+  ).toBe(401);
+});
+
+it.each([false, true])(
+  '片单详情、摘要封面和计数遵守成人源开关 (%s)',
+  async (allowed) => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      SourceConfig: [{ key: 'adult', nsfw: true }],
+      SiteConfig: { DisableYellowFilter: allowed },
+    });
+    const list = await storage.createList('alice', {
+      name: '测试',
+      visibility: 'everyone',
+    });
+    await storage.addListItem('alice', list.id, {
+      title: '成人源作品',
+      year: '2026',
+      cover: 'https://adult.example/cover.jpg',
+      source: 'adult',
+      id: '1',
+    });
+    await storage.addListItem('alice', list.id, {
+      title: '普通作品',
+      year: '2026',
+      cover: 'https://normal.example/cover.jpg',
+      source: 'normal',
+      id: '2',
+    });
+    const detail = await (
+      await handleLists(req(), 'detail', context(list.id))
+    ).json();
+    expect(detail.items.map((item: { source: string }) => item.source)).toEqual(
+      allowed ? ['adult', 'normal'] : ['normal'],
+    );
+    expect(detail.list.itemCount).toBe(allowed ? 2 : 1);
+    const summaries = await (await handleLists(req(), 'collection')).json();
+    expect(summaries.lists[0].covers).toEqual(
+      allowed
+        ? [
+            'https://adult.example/cover.jpg',
+            'https://normal.example/cover.jpg',
+          ]
+        : ['https://normal.example/cover.jpg'],
+    );
+    await storage.setListLike('bobby', list.id, true);
+    guard.mockResolvedValue({ username: 'bobby' } as Awaited<
+      ReturnType<typeof requireActiveUser>
+    >);
+    const saved = await (
+      await handleLists(req('/api/lists?scope=saved'), 'collection')
+    ).json();
+    expect(saved.lists[0].covers).toEqual(summaries.lists[0].covers);
+    expect(saved.lists[0].itemCount).toBe(allowed ? 2 : 1);
+    expect(saved.lists[0].owner).toEqual(detail.owner);
+  },
+);
+
 it('除片单详情读取外，每个路由动作先鉴权', async () => {
   guard.mockResolvedValue({
     response: NextResponse.json({ error: '请先登录' }, { status: 401 }),
@@ -426,9 +589,9 @@ it.each([
     (await handleLists(req(`/api/lists/plaza?${query}`), 'plaza')).status,
   ).toBe(400);
 });
-it('片单点赞要求登录和昵称，详情返回本人点赞态且游客恒为 false', async () => {
+it('片单收藏要求登录和昵称，详情返回本人收藏态且游客恒为 false', async () => {
   const list = await storage.createList('alice', {
-    name: '点赞',
+    name: '收藏',
     visibility: 'everyone',
   });
   guard.mockResolvedValue({
@@ -450,7 +613,7 @@ it('片单点赞要求登录和昵称，详情返回本人点赞态且游客恒�
     expect(response.status).toBe(403);
     expect((await response.json()).code).toBe('NICKNAME_REQUIRED');
   }
-  await storage.updateUserProfile('bobby', { nickname: '点赞用户' });
+  await storage.updateUserProfile('bobby', { nickname: '收藏用户' });
   for (let i = 0; i < 2; i++) {
     const response = await handleLists(
       req('', 'PUT'),
@@ -482,7 +645,7 @@ it('片单点赞要求登录和昵称，详情返回本人点赞态且游客恒�
   >);
   const own = await handleLists(req('', 'PUT'), 'like', context(list.id));
   expect(own.status).toBe(400);
-  expect((await own.json()).error).toBe('不能给自己点赞');
+  expect((await own.json()).error).toBe('不能收藏自己的片单');
 });
 
 it('登录访客的片单进度优先继续在看，游客省略私人状态', async () => {

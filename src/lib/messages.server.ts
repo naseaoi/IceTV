@@ -29,9 +29,9 @@ import {
 } from '@/lib/message-types';
 import {
   getPlayRecordEpisodeDisplay,
-  getPlayRecordUpdateBaseline,
-  hasPlayRecordUpdate,
-  markPlayRecordUpdateRead,
+  getPlayRecordMessageReadThrough,
+  hasUnreadPlayRecordMessage,
+  markPlayRecordMessageRead,
 } from '@/lib/play-records';
 import { PlayRecord, SiteAnnouncement, UserMessageState } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
@@ -63,12 +63,12 @@ function buildTrackingMessage(
   recordKey: string,
   record: PlayRecord,
 ): TrackingUpdateUserMessage | null {
-  if (!hasPlayRecordUpdate(record)) return null;
+  if (!hasUnreadPlayRecordMessage(record)) return null;
   const parsed = parseStorageKey(recordKey);
   if (!parsed) return null;
 
   const { totalEpisodes } = getPlayRecordEpisodeDisplay(record);
-  const fromEpisodes = getPlayRecordUpdateBaseline(record);
+  const fromEpisodes = getPlayRecordMessageReadThrough(record);
   const encodedKey = encodeURIComponent(recordKey);
 
   return {
@@ -584,7 +584,7 @@ export async function readUserMessage(
     message.source,
     message.videoId,
     (current) =>
-      current ? markPlayRecordUpdateRead(current, message.toEpisodes) : null,
+      current ? markPlayRecordMessageRead(current, message.toEpisodes) : null,
   );
   if (!updatedRecord) return null;
   return {
@@ -629,7 +629,7 @@ export async function readAllUserMessages(
         parsed.id,
         (current) =>
           current
-            ? markPlayRecordUpdateRead(current, message.toEpisodes)
+            ? markPlayRecordMessageRead(current, message.toEpisodes)
             : null,
       );
       if (updated) batch[recordKey] = updated;

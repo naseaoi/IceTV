@@ -22,6 +22,7 @@ import {
   readSourcePlaybackStats,
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
+import { recordSourceWorkFailure } from '@/lib/source-work-failures';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 import { clearPlaybackWarmups } from '@/lib/video-prefetch';
 
@@ -493,6 +494,79 @@ describe('usePlayInit 线路偏好', () => {
     await waitFor(() =>
       expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
     );
+  });
+
+  it.each([true, false])(
+    '起播决策前排后失败作品，测速开关为 %s',
+    async (optimizationEnabled) => {
+      recordSourceWorkFailure(direct.source, direct.id);
+      markTrusted(direct.source);
+      probeOnly([relay.episodes[0], direct.episodes[0]]);
+      const params = setupHook([direct, relay], { optimizationEnabled });
+      await waitFor(() =>
+        expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
+      );
+      expect(params.setCurrentSource).toHaveBeenCalledTimes(1);
+      if (optimizationEnabled)
+        expect(probeMock.mock.calls[0][0]).toBe(relay.episodes[0]);
+    },
+  );
+
+  it('quick 命中失败作品时先完成候选决策再起播', async () => {
+    recordSourceWorkFailure(direct.source, direct.id);
+    probeOnly([relay.episodes[0], direct.episodes[0]]);
+    installFetch(
+      {},
+      {},
+      {
+        '/api/search/quick': Promise.resolve({
+          detail: direct,
+          sources: [direct, relay],
+        }),
+        '/api/search': Promise.resolve({ results: [direct, relay] }),
+      },
+    );
+    const params = setupHook(null);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
+    );
+    expect(params.setCurrentSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('quick 的失败作品仍保留为完整搜索为空时的单候选', async () => {
+    recordSourceWorkFailure(direct.source, direct.id);
+    installFetch(
+      {},
+      {},
+      {
+        '/api/search/quick': Promise.resolve({ detail: direct }),
+        '/api/search': Promise.resolve({ results: [] }),
+      },
+    );
+    const params = setupHook(null);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    expect(probeMock).not.toHaveBeenCalled();
+  });
+
+  it('显式固定源仍使用近期失败过的作品', async () => {
+    recordSourceWorkFailure(direct.source, direct.id);
+    window.history.replaceState(
+      {},
+      '',
+      `/play?source=${direct.source}&id=${direct.id}`,
+    );
+    installFetch({}, {}, { '/api/detail': Promise.resolve(direct) });
+    const params = setupHook([direct, relay], {
+      currentSource: direct.source,
+      currentId: direct.id,
+      needPreferRef: { current: false },
+    });
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    expect(probeMock).not.toHaveBeenCalled();
   });
 
   it('有中转线路时仍走 quick，由服务端竞速决定起播源', async () => {

@@ -7,14 +7,15 @@ import { type AdminTabId, resolveTabId } from '@/features/admin/lib/admin-tabs';
 
 const TAB_PARAM = 'tab';
 
-export function useAdminTab(isOwnerRole: boolean) {
+export function useAdminTab(isOwnerRole: boolean, trafficTabVisible: boolean) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const activeTab = useMemo(
-    () => resolveTabId(searchParams.get(TAB_PARAM), isOwnerRole),
-    [searchParams, isOwnerRole],
+    () =>
+      resolveTabId(searchParams.get(TAB_PARAM), isOwnerRole, trafficTabVisible),
+    [searchParams, isOwnerRole, trafficTabVisible],
   );
 
   const setActiveTab = useCallback(

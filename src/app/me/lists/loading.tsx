@@ -1,7 +1,15 @@
 import { MyListsPageSkeleton } from '@/features/lists/components/MyListsPageClient';
-import { getListSkeletonCount } from '@/lib/list-count-cookies.server';
+import { peekListCountCookie } from '@/lib/list-count-cookies.server';
 
 export default async function MyListsLoading() {
-  const count = await getListSkeletonCount('list_count');
-  return <MyListsPageSkeleton skeletonCount={count} />;
+  const [count, savedCount] = await Promise.all([
+    peekListCountCookie('list_count'),
+    peekListCountCookie('saved_list_count'),
+  ]);
+  return (
+    <MyListsPageSkeleton
+      skeletonCount={count}
+      savedSkeletonCount={savedCount}
+    />
+  );
 }

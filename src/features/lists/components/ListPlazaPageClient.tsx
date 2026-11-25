@@ -5,12 +5,12 @@ import Link from 'next/link';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
+import { LIBRARY_PILL_BUTTON_CLASS } from '@/components/LibraryPage';
 import {
-  LIBRARY_PILL_BUTTON_CLASS,
-  LibraryEmptySkeleton,
-  LibraryEmptyState,
-} from '@/components/LibraryPage';
-import { libraryChipClass } from '@/components/LibraryToolbar';
+  ListEmptySkeleton,
+  ListEmptyState,
+  ListLoadingState,
+} from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
@@ -22,23 +22,57 @@ import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { writeListCountCookie } from '@/lib/list-count-cookies';
 
 import { ListGrid, ListGridSkeleton } from './ListCard';
+import { ListPillSwitch } from './ListPillSwitch';
 
 const SORT_OPTIONS: { value: PlazaSort; label: string }[] = [
   { value: 'hot', label: '最热' },
   { value: 'new', label: '最新' },
 ];
+const PLAZA_STATE_CLASS = 'px-6 text-center';
+
+function PlazaState({
+  children,
+  action,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className='flex flex-col items-center py-20'>
+      {children}
+      {action && <div className='mt-5'>{action}</div>}
+    </div>
+  );
+}
+
 function PlazaContentSkeleton({
   total,
   authenticated,
 }: {
-  total: number;
+  total: number | null;
   authenticated: boolean;
 }) {
-  return total === 0 ? (
-    <LibraryEmptySkeleton action={authenticated} />
-  ) : (
-    <ListGridSkeleton count={Math.min(total, PLAZA_PAGE_SIZE)} />
-  );
+  if (total === null || total === 0) {
+    return (
+      <PlazaState
+        action={
+          authenticated ? (
+            <div
+              aria-hidden='true'
+              className='skeleton h-9 w-28 rounded-full'
+            />
+          ) : null
+        }
+      >
+        {total === null ? (
+          <ListLoadingState className={PLAZA_STATE_CLASS} />
+        ) : (
+          <ListEmptySkeleton className={PLAZA_STATE_CLASS} />
+        )}
+      </PlazaState>
+    );
+  }
+  return <ListGridSkeleton count={Math.min(total, PLAZA_PAGE_SIZE)} />;
 }
 
 function PlazaShell({
@@ -57,19 +91,12 @@ function PlazaShell({
       <div className={`${PAGE_CONTAINER_CLASS} pb-12 pt-4 sm:pt-8`}>
         <h1 className='sr-only'>片单广场</h1>
         <div className='mb-5 flex items-center justify-between gap-3'>
-          <div role='group' aria-label='排序' className='flex gap-2'>
-            {SORT_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type='button'
-                aria-pressed={sort === option.value}
-                onClick={() => onSortChange?.(option.value)}
-                className={libraryChipClass(sort === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <ListPillSwitch
+            label='排序'
+            options={SORT_OPTIONS}
+            value={sort}
+            onChange={onSortChange}
+          />
           {authenticated && (
             <Link href='/me/lists' className={LIBRARY_PILL_BUTTON_CLASS}>
               我的片单
@@ -91,16 +118,7 @@ export function ListPlazaPageSkeleton({
   const authenticated = useAuthSession().session.status === 'authenticated';
   return (
     <PlazaShell sort='hot' authenticated={authenticated}>
-      {knownTotal === null ? (
-        <div className='flex justify-center py-12'>
-          <Spinner className='h-6 w-6' />
-        </div>
-      ) : (
-        <PlazaContentSkeleton
-          total={knownTotal}
-          authenticated={authenticated}
-        />
-      )}
+      <PlazaContentSkeleton total={knownTotal} authenticated={authenticated} />
     </PlazaShell>
   );
 }
@@ -124,6 +142,7 @@ export function ListPlazaPageClient({
   );
   const {
     data,
+    currentData,
     initialLoading,
     refreshing,
     loadingMore,
@@ -139,13 +158,13 @@ export function ListPlazaPageClient({
     getItemKey: (list) => list.id,
   });
   const lists = data?.items ?? [];
-  const cursor = data?.nextCursor;
-  const total = initialTotal ?? PLAZA_PAGE_SIZE;
+  const cursor = currentData?.nextCursor;
+  const total = initialTotal;
   // 总数在浏览期间可能变化，有下一页时至少画一张
-  const moreSkeletonCount = Math.min(
-    Math.max(total - lists.length, 1),
-    PLAZA_PAGE_SIZE,
-  );
+  const moreSkeletonCount =
+    total === null
+      ? null
+      : Math.min(Math.max(total - lists.length, 1), PLAZA_PAGE_SIZE);
   const sentinelRef = useInfiniteScroll<HTMLDivElement>({
     enabled:
       !!cursor && !initialLoading && !refreshing && !loadingMore && !error,
@@ -161,9 +180,7 @@ export function ListPlazaPageClient({
     );
   } else if (lists.length === 0) {
     content = (
-      <LibraryEmptyState
-        icon={ListVideo}
-        title='还没有公开的片单'
+      <PlazaState
         action={
           authenticated ? (
             <Link href='/me/lists' className={LIBRARY_PILL_BUTTON_CLASS}>
@@ -171,7 +188,13 @@ export function ListPlazaPageClient({
             </Link>
           ) : null
         }
-      />
+      >
+        <ListEmptyState
+          icon={<ListVideo />}
+          label='还没有公开的片单'
+          className={PLAZA_STATE_CLASS}
+        />
+      </PlazaState>
     );
   } else {
     content = <ListGrid lists={lists} />;
@@ -201,7 +224,11 @@ export function ListPlazaPageClient({
       {!initialLoading && !refreshing && !error && cursor && (
         <div ref={sentinelRef} className='mt-5'>
           {loadingMore ? (
-            <ListGridSkeleton count={moreSkeletonCount} />
+            moreSkeletonCount === null ? (
+              <Spinner label='加载更多' className='mx-auto h-6 w-6' />
+            ) : (
+              <ListGridSkeleton count={moreSkeletonCount} />
+            )
           ) : (
             <button
               type='button'

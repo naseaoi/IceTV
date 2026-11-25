@@ -125,7 +125,12 @@ describe('messagesUpdated 派发点', () => {
         nextCursor: null,
       }),
     });
-    await getPlayRecordPage(2, '100|src+3', { filter: 'updated' });
+    const controller = new AbortController();
+    await getPlayRecordPage(2, '100|src+3', {
+      filter: 'updated',
+      signal: controller.signal,
+    });
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
     const url = new URL(fetchMock.mock.calls[0][0], 'http://localhost');
     expect(url.searchParams.get('filter')).toBe('updated');
     expect(url.searchParams.get('cursor')).toBe('100|src+3');
@@ -141,6 +146,34 @@ describe('messagesUpdated 派发点', () => {
     await markPlayRecordUpdateRead('src', '1');
 
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('没有全量缓存时卡片已读也广播状态，保留分页缓存边界', async () => {
+    const { markPlayRecordUpdateRead, getCachedPlayRecordsSnapshot } =
+      await import('@/lib/db.client');
+    const { cacheManager: currentCache } =
+      await import('@/lib/db.client.cache');
+    currentCache.clearUserCache();
+    const record = {
+      index: 1,
+      total_episodes: 12,
+      update_baseline_episodes: 12,
+    };
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => record,
+    });
+    const updated = jest.fn();
+    window.addEventListener('playRecordStatesUpdated', updated);
+    try {
+      await markPlayRecordUpdateRead('src', '1');
+      expect(updated).toHaveBeenCalledTimes(1);
+      expect(updated.mock.calls[0][0].detail).toEqual({ 'src+1': record });
+      expect(getCachedPlayRecordsSnapshot()).toBeNull();
+    } finally {
+      window.removeEventListener('playRecordStatesUpdated', updated);
+    }
   });
 
   it('切换追更开关后派发', async () => {

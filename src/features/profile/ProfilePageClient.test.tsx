@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+import { FollowList } from '@/features/profile/FollowList';
 import ProfilePageClient, {
   ProfilePageSkeleton,
 } from '@/features/profile/ProfilePageClient';
@@ -103,9 +104,11 @@ beforeEach(() => {
 });
 it('资料加载骨架按已知公开评价数渲染，未知时只转圈', () => {
   const { unmount } = render(<ProfilePageSkeleton profileId='profileAlice' />);
-  const unknown = screen.getByRole('status', { name: '加载中' });
+  const [unknown] = screen.getAllByRole('status', { name: '加载中' });
   expect(unknown.querySelector('.ice-spinner')).not.toBeNull();
-  expect(within(unknown).queryAllByRole('status')).toHaveLength(0);
+  expect(
+    within(unknown).getByRole('status', { name: '加载中' }),
+  ).toBeInTheDocument();
   unmount();
   jest.mocked(getKnownPublicReviewCount).mockReturnValueOnce(2);
   render(<ProfilePageSkeleton profileId='profileAlice' />);
@@ -304,12 +307,12 @@ it('收藏未返回时按资料中的公开等级与收藏数渲染筛选条与�
   expect(statuses).toHaveLength(1);
   expect(statuses[0].children).toHaveLength(3);
 });
-it('资料显示无公开评价时加载期间直接给出空状态', async () => {
+it('资料显示无公开评价时加载期间先占位', async () => {
   jest.mocked(getUserReviews).mockReturnValue(new Promise(() => undefined));
   render(<ProfilePageClient profileId='profileAlice' />);
   await screen.findByRole('heading', { name: '爱丽丝' });
-  expect(screen.getByText('还没有公开评价')).toBeInTheDocument();
-  expect(screen.queryByRole('status', { name: '加载中' })).toBeNull();
+  expect(screen.queryByText('还没有公开评价')).toBeNull();
+  expect(screen.getByRole('status', { name: '加载中' })).toBeInTheDocument();
 });
 
 it('复制主页链接使用当前站点地址与资料标识，并按结果给出提示', async () => {
@@ -389,4 +392,31 @@ it('标签写入地址栏，带标签参数进入时直接打开对应标签', a
   expect(window.location.search).toBe('');
   fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
   expect(window.location.search).toBe('?tab=favorites');
+});
+
+it('关注弹窗未知条数转圈，已知条数最多渲染一页', () => {
+  jest.mocked(getUserFollows).mockReturnValue(new Promise(() => undefined));
+  const props = {
+    isOpen: true,
+    profileId: 'profileAlice',
+    type: 'followers' as const,
+    onClose: jest.fn(),
+  };
+  const { rerender } = render(<FollowList {...props} count={null} />);
+  expect(
+    screen
+      .getByRole('status', { name: '加载中' })
+      .querySelector('.ice-spinner'),
+  ).not.toBeNull();
+  rerender(<FollowList {...props} count={2} />);
+  expect(screen.getByRole('status', { name: '加载中' }).children).toHaveLength(
+    2,
+  );
+  rerender(<FollowList {...props} count={50} />);
+  expect(screen.getByRole('status', { name: '加载中' }).children).toHaveLength(
+    30,
+  );
+  rerender(<FollowList {...props} count={0} />);
+  expect(screen.getByRole('status', { name: '加载中' })).toBeInTheDocument();
+  expect(screen.queryByText('暂无用户')).toBeNull();
 });

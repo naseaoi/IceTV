@@ -183,15 +183,16 @@ it('JSON 解析失败记录错误，刷新失败只记录日志', async () => {
     expect.any(Error),
   );
 });
-it.each(['https://girigirilove.com', 'https://xgcartoon.com'])(
-  '特殊源 %s 保持不采样',
-  async (api) => {
-    mockConfig.mockResolvedValue({ SourceConfig: [{ key: 'special', api }] });
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({ list: [] })));
-    await (await GET(request())).text();
-    expect(mockRecord).not.toHaveBeenCalled();
-  },
-);
+it('特殊源同样写入健康样本', async () => {
+  mockConfig.mockResolvedValue({
+    SourceConfig: [{ key: 'giri', api: 'https://girigirilove.com' }],
+  });
+  mockFetch.mockResolvedValue(new Response(JSON.stringify({ list: [] })));
+  expect(await (await GET(request())).text()).toContain(
+    '"status":"no_results"',
+  );
+  expect(mockRecord).toHaveBeenCalledWith('giri', 'empty', expect.any(Number));
+});
 
 it('西瓜卡通按网页搜索检测，区分有效、无匹配与页面异常', async () => {
   mockConfig.mockResolvedValue({
@@ -215,5 +216,11 @@ it('西瓜卡通按网页搜索检测，区分有效、无匹配与页面异常'
       ([url]) => url === 'https://www.xgcartoon.com/search?q=test',
     ),
   ).toBe(true);
-  expect(mockRecord).not.toHaveBeenCalled();
+  expect(
+    mockRecord.mock.calls.map(([source, outcome]) => [source, outcome]),
+  ).toEqual([
+    ['xigua', 'ok'],
+    ['xigua', 'empty'],
+    ['xigua', 'error'],
+  ]);
 });

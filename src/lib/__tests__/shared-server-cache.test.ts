@@ -44,6 +44,45 @@ describe('shared server cache', () => {
     });
   }
 
+  it('serializes JSON once for both local weight and persistence', async () => {
+    const toJSON = jest.fn(() => ({ title: '中文' }));
+    const options = {
+      name: 'single-serialization',
+      freshMs: 1000,
+      enabled: true,
+    };
+    const first = createSharedServerCache<object>(options);
+    await first.getOrLoad('key', async () => ({ toJSON }));
+    expect(toJSON).toHaveBeenCalledTimes(1);
+    expect(first.stats().estimatedBytes).toBe(
+      Buffer.byteLength('{"title":"中文"}'),
+    );
+    const second = createSharedServerCache<object>(options);
+    const stringify = jest.spyOn(JSON, 'stringify');
+    await expect(second.getOrLoad('key', async () => ({}))).resolves.toEqual({
+      title: '中文',
+    });
+    expect(stringify).not.toHaveBeenCalled();
+    expect(second.stats().estimatedBytes).toBe(first.stats().estimatedBytes);
+  });
+
+  it('preserves string and custom in-memory weight semantics', async () => {
+    const strings = cache('string-weight');
+    await strings.getOrLoad('key', async () => '中文');
+    expect(strings.stats().estimatedBytes).toBe(6);
+    const stringsFromDb = cache('string-weight');
+    await stringsFromDb.getOrLoad('key', async () => 'unused');
+    expect(stringsFromDb.stats().estimatedBytes).toBe(6);
+    const custom = createSharedServerCache<object>({
+      name: 'custom-weight',
+      freshMs: 1000,
+      enabled: true,
+      estimateWeight: () => 123,
+    });
+    await custom.getOrLoad('key', async () => ({ title: '中文' }));
+    expect(custom.stats().estimatedBytes).toBe(123);
+  });
+
   it('reuses a result across independent cache instances', async () => {
     const loader = jest.fn(async () => 'value');
     await expect(cache().getOrLoad('same', loader)).resolves.toBe('value');

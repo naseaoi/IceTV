@@ -1,3 +1,4 @@
+export const CONTINUE_WATCHING_LIMIT = 10;
 export const CONTINUE_WATCHING_PAGE_SIZE = 24;
 
 // 列宽下限对齐首页横排卡片，宽屏按可用宽度增列，避免卡片中段大片留白
@@ -10,12 +11,4 @@ export function parseContinueWatchingFilter(
   value: string | string[] | null | undefined,
 ): ContinueWatchingFilter {
   return value === 'updated' || value === 'shelved' ? value : 'all';
-}
-
-export type ContinueWatchingView = 'grid' | 'calendar';
-
-export function parseContinueWatchingView(
-  value: string | string[] | null | undefined,
-): ContinueWatchingView {
-  return value === 'calendar' ? 'calendar' : 'grid';
 }

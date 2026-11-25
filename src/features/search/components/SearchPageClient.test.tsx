@@ -1,15 +1,22 @@
-import { render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useSearchParams } from 'next/navigation';
+import { type ReactNode, Suspense, useState } from 'react';
 
 import SearchPageClient from '@/features/search/components/SearchPageClient';
+import SearchResultFilter from '@/features/search/components/SearchResultFilter';
 import { useSearchAggregation } from '@/features/search/hooks/useSearchAggregation';
 import { useSearchExecution } from '@/features/search/hooks/useSearchExecution';
 import { useSearchViewMode } from '@/features/search/hooks/useSearchViewMode';
+import {
+  SEARCH_DESKTOP_BAR_ROW_CLASS,
+  SEARCH_FILTER_GROUP_SHAPE_CLASS,
+  SEARCH_FILTER_TRIGGER_SHAPE_CLASS,
+} from '@/features/search/lib/search-layout';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ replace: jest.fn() }),
-  useSearchParams: () => new URLSearchParams({ q: 'Title' }),
+  useSearchParams: jest.fn(() => new URLSearchParams({ q: 'Title' })),
 }));
 jest.mock('@/components/AuthenticatedRoute', () => ({
   __esModule: true,
@@ -25,12 +32,13 @@ jest.mock('@/components/PageLayout', () => ({
   default: ({ children }: { children: ReactNode }) => children,
 }));
 jest.mock('@/components/SearchBox', () => ({
+  ...jest.requireActual('@/components/SearchBox'),
   __esModule: true,
   default: () => null,
 }));
-jest.mock('@/components/SearchResultFilter', () => ({
+jest.mock('@/features/search/components/SearchResultFilter', () => ({
   __esModule: true,
-  default: () => null,
+  default: jest.fn(() => null),
 }));
 jest.mock('@/components/VideoCard', () => ({
   __esModule: true,
@@ -68,6 +76,9 @@ jest.mock('@/features/search/components/VirtualizedSearchGrid', () => ({
   ),
 }));
 jest.mock('@/features/search/hooks/useSearchAggregation', () => ({
+  reconcileSearchFilter: jest.requireActual(
+    '@/features/search/hooks/useSearchAggregation',
+  ).reconcileSearchFilter,
   useSearchAggregation: jest.fn(),
 }));
 jest.mock('@/features/search/hooks/useSearchExecution', () => ({
@@ -133,8 +144,72 @@ function setup({
   jest.mocked(useSearchViewMode).mockReturnValue(['agg', jest.fn()]);
 }
 
+describe('搜索筛选栏几何', () => {
+  it('查询参数等待期间由外层路由边界承接', () => {
+    const { SearchPageSkeleton } = jest.requireActual<
+      typeof import('@/features/search/components/SearchPageSkeleton')
+    >('@/features/search/components/SearchPageSkeleton');
+    const pending = new Promise(() => undefined);
+    jest.mocked(useSearchParams).mockImplementation(() => {
+      throw pending;
+    });
+
+    try {
+      render(
+        <Suspense fallback={<div role='status'>等待查询参数</div>}>
+          <SearchPageSkeleton />
+        </Suspense>,
+      );
+      expect(screen.getByRole('status')).toHaveTextContent('等待查询参数');
+    } finally {
+      jest
+        .mocked(useSearchParams)
+        .mockReturnValue(
+          new URLSearchParams({ q: 'Title' }) as ReturnType<
+            typeof useSearchParams
+          >,
+        );
+    }
+  });
+
+  it('骨架与真实栏共用行、筛选组和按钮的几何常量', () => {
+    const { SearchPageSkeleton } = jest.requireActual<
+      typeof import('@/features/search/components/SearchPageSkeleton')
+    >('@/features/search/components/SearchPageSkeleton');
+    const { default: SearchResultFilter } = jest.requireActual<
+      typeof import('@/features/search/components/SearchResultFilter')
+    >('@/features/search/components/SearchResultFilter');
+
+    const skeleton = render(<SearchPageSkeleton />);
+    setup({ loading: true });
+    const page = render(<SearchPageClient />);
+    const filter = render(
+      <SearchResultFilter categories={[]} values={{}} onChange={jest.fn()} />,
+    );
+
+    for (const { container } of [skeleton, page]) {
+      expect(
+        container.querySelector('[data-nav-subbar]')?.firstElementChild,
+      ).toHaveClass(SEARCH_DESKTOP_BAR_ROW_CLASS);
+    }
+    for (const { container } of [skeleton, filter]) {
+      const group = container.getElementsByClassName(
+        SEARCH_FILTER_GROUP_SHAPE_CLASS,
+      )[0];
+      expect(group).toBeInTheDocument();
+      const triggers = group.getElementsByClassName(
+        SEARCH_FILTER_TRIGGER_SHAPE_CLASS,
+      );
+      expect(triggers.length).toBeGreaterThan(0);
+      for (const trigger of Array.from(triggers)) {
+        expect(trigger.textContent).not.toBe('');
+      }
+    }
+  });
+});
+
 describe('搜索结果区状态', () => {
-  it('原始结果已到达而匹配模块未就绪时继续显示骨架', () => {
+  it('原始结果已到达而匹配模块未就绪时继续显示搜索动画', () => {
     setup({ results: [item], matching: true });
     render(<SearchPageClient />);
 
@@ -165,7 +240,7 @@ describe('搜索结果区状态', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('搜索仍在进行且筛选暂无可展示结果时显示骨架', () => {
+  it('搜索仍在进行且筛选暂无可展示结果时显示搜索动画', () => {
     setup({ results: [item], loading: true });
     render(<SearchPageClient />);
 
@@ -186,7 +261,7 @@ describe('搜索结果区状态', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('全部源失败后显示错误，重试期间恢复骨架', () => {
+  it('全部源失败后显示错误，重试期间恢复搜索动画', () => {
     setup({ failed: true });
     const { rerender } = render(<SearchPageClient />);
     expect(screen.getByText('搜索失败')).toBeInTheDocument();
@@ -215,4 +290,53 @@ describe('搜索结果区状态', () => {
     expect(screen.getAllByText('搜索未完成')).toHaveLength(1);
     expect(screen.getByText('当前筛选无结果')).toBeInTheDocument();
   });
+});
+
+it('切回聚合视图时将已经合并消失的年份筛选重置为全部', () => {
+  setup({ results: [item] });
+  jest.mocked(useSearchViewMode).mockImplementation(function useTestMode() {
+    return useState<'agg' | 'all'>('agg');
+  });
+  let years = ['all', 'unknown'];
+  jest.mocked(useSearchAggregation).mockImplementation(() => ({
+    isMatchingLoading: false,
+    filterOptions: {
+      categoriesAll: [
+        {
+          key: 'year',
+          label: '年份',
+          options: ['all', 'unknown'].map((value) => ({ label: value, value })),
+        },
+      ],
+      categoriesAgg: [
+        {
+          key: 'year',
+          label: '年份',
+          options: years.map((value) => ({ label: value, value })),
+        },
+      ],
+    },
+    filteredAllResults: [item],
+    filteredAggResults: [],
+    getGroupRef: jest.fn(),
+  }));
+  const { rerender } = render(<SearchPageClient />);
+  act(() =>
+    jest.mocked(SearchResultFilter).mock.calls.at(-1)![0].onChange({
+      source: 'all',
+      title: 'all',
+      year: 'unknown',
+      yearOrder: 'none',
+    }),
+  );
+  expect(
+    jest.mocked(useSearchAggregation).mock.calls.at(-1)![0].filterAgg.year,
+  ).toBe('unknown');
+  fireEvent.click(screen.getByRole('checkbox', { name: '聚合' }));
+  years = ['all', '2026'];
+  rerender(<SearchPageClient />);
+  fireEvent.click(screen.getByRole('checkbox', { name: '聚合' }));
+  expect(
+    jest.mocked(useSearchAggregation).mock.calls.at(-1)![0].filterAgg.year,
+  ).toBe('all');
 });

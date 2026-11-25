@@ -12,6 +12,7 @@ import { searchFromXgcartoon } from '@/lib/downstream-sources/xgcartoon';
 import {
   dedupeSearchLoad,
   getCachedSearchPage,
+  loadSpecialSourceSearch,
   peekCachedSearchPage,
 } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
@@ -245,14 +246,81 @@ it.each([
   },
 );
 
-it.each(['https://www.girigirilove.com', 'https://www.xgcartoon.com'])(
-  'skips special source %s without collecting a sample',
-  async (api) => {
-    await probeSourceSearch({ ...site, api }, 'movie');
-    expect(fetchMock).not.toHaveBeenCalled();
+describe('special source samples', () => {
+  const giri = { ...site, api: 'https://www.girigirilove.com' };
+  const giriSearch = searchFromGirigiri as jest.Mock;
+
+  it.each([
+    ['ok', () => Promise.resolve([searchResult('1')])],
+    ['empty', () => Promise.resolve([])],
+    ['error', () => Promise.reject(new SearchSourceUnavailableError('A'))],
+  ] as const)(
+    'records %s from the shared search loader',
+    async (outcome, run) => {
+      giriSearch.mockImplementation(run);
+      await searchFromApi(giri, 'movie');
+      expect(giriSearch).toHaveBeenCalledWith(giri, 'movie', undefined);
+      expect(recordSourceSearchOutcome).toHaveBeenCalledTimes(1);
+      expect(recordSourceSearchOutcome).toHaveBeenCalledWith(
+        'a',
+        outcome,
+        expect.any(Number),
+      );
+    },
+  );
+
+  it('excludes resource limits', async () => {
+    giriSearch.mockRejectedValue(new ResourceLimitError());
+    await expect(searchFromApi(giri, 'movie')).rejects.toBeInstanceOf(
+      ResourceLimitError,
+    );
     expect(recordSourceSearchOutcome).not.toHaveBeenCalled();
-  },
-);
+  });
+
+  it.each([
+    ['giri', 'https://www.girigirilove.com', searchFromGirigiri],
+    ['xgcartoon', 'https://www.xgcartoon.com', searchFromXgcartoon],
+  ])(
+    'probes %s without the shared search cache',
+    async (_name, api, search) => {
+      (search as jest.Mock).mockResolvedValue([]);
+      await expect(
+        probeSourceSearch({ ...site, api }, 'movie'),
+      ).resolves.toBeUndefined();
+      expect(loadSpecialSourceSearch).not.toHaveBeenCalled();
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(recordSourceSearchOutcome).toHaveBeenCalledWith(
+        'a',
+        'empty',
+        expect.any(Number),
+      );
+    },
+  );
+
+  it('records probe failures without throwing and excludes cancellation', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      giriSearch.mockRejectedValue(new SearchSourceUnavailableError('A'));
+      await expect(probeSourceSearch(giri, 'movie')).resolves.toBeUndefined();
+      expect(recordSourceSearchOutcome).toHaveBeenCalledWith(
+        'a',
+        'error',
+        expect.any(Number),
+      );
+      (recordSourceSearchOutcome as jest.Mock).mockClear();
+      const parent = new AbortController();
+      giriSearch.mockImplementation(async () => {
+        parent.abort();
+        return [];
+      });
+      await probeSourceSearch(giri, 'movie', parent.signal);
+      expect(recordSourceSearchOutcome).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 it('isolates probe resource limits and excludes cancellation', async () => {
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});

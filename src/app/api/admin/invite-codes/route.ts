@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
       : INVITE_CODE_PAGE_SIZE;
     const cursor = params.get('cursor') || undefined;
     if (
-      !['all', 'active', 'expired', 'exhausted'].includes(filter) ||
+      !['all', 'active', 'unused', 'expired', 'exhausted'].includes(filter) ||
       !Number.isInteger(limit) ||
       limit < 1 ||
       limit > INVITE_CODE_MAX_PAGE_SIZE ||

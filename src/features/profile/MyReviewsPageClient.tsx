@@ -25,6 +25,7 @@ import {
 import { LibraryToolbar } from '@/components/LibraryToolbar';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingBadge from '@/components/RatingBadge';
+import Select from '@/components/Select';
 import SkeletonText from '@/components/SkeletonText';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { ReviewEditor } from '@/features/reviews/components/ReviewEditor';
@@ -44,6 +45,9 @@ import type { MyVideoReviewPage, VideoReview } from '@/lib/types';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 import {
+  type MyReviewContent,
+  type MyReviewFilter,
+  matchesMyReviewContent,
   MY_REVIEWS_PAGE_SIZE,
   VIDEO_REVIEWS_UPDATED_EVENT,
 } from '@/lib/video-reviews';
@@ -52,14 +56,13 @@ import {
   fetchMyVideoReviews,
 } from '@/lib/video-reviews.client';
 
-type ReviewFilter = 'all' | 'public' | 'private' | 'text';
+type ReviewFilter = MyReviewFilter;
 type ReviewSort = 'updated' | 'high' | 'low';
 
 const FILTERS: { value: ReviewFilter; label: string }[] = [
   { value: 'all', label: '全部' },
   { value: 'public', label: '公开' },
   { value: 'private', label: '私密' },
-  { value: 'text', label: '仅文字' },
 ];
 
 const SORT_OPTIONS: { value: ReviewSort; label: string }[] = [
@@ -68,12 +71,35 @@ const SORT_OPTIONS: { value: ReviewSort; label: string }[] = [
   { value: 'low', label: '评分从低到高' },
 ];
 
+function ReviewContentSelect({
+  value,
+  onChange,
+}: {
+  value: MyReviewContent;
+  onChange: (value: MyReviewContent) => void;
+}) {
+  return (
+    <Select
+      variant='pill'
+      ariaLabel='内容'
+      value={value}
+      onChange={(next) => onChange(next as MyReviewContent)}
+      className='shrink-0'
+      options={[
+        { value: 'all', label: '全部内容' },
+        { value: 'rating', label: '仅评分' },
+        { value: 'text', label: '仅文字' },
+        { value: 'both', label: '评分和文字' },
+      ]}
+    />
+  );
+}
+
 function matchesReviewFilter(review: VideoReview, filter: ReviewFilter) {
   return (
     filter === 'all' ||
     (filter === 'public' && review.is_public) ||
-    (filter === 'private' && !review.is_public) ||
-    (filter === 'text' && review.rating === null)
+    (filter === 'private' && !review.is_public)
   );
 }
 
@@ -117,10 +143,13 @@ function buildFilterOptions(counts: Record<ReviewFilter, number> | null) {
   }));
 }
 
+const EMPTY_DESCRIPTION = '在播放页的「评价」里打分或写下感受，就会出现在这里';
+
 function noop() {}
 
 function ReviewListSkeleton({ count }: { count: number }) {
-  if (count === 0) return <LibraryEmptySkeleton />;
+  if (count === 0)
+    return <LibraryEmptySkeleton description={EMPTY_DESCRIPTION} />;
   return (
     <ul
       aria-hidden='true'
@@ -176,6 +205,7 @@ export function MyReviewsPageSkeleton({
             filterOptions={buildFilterOptions(null)}
             filter='all'
             onFilterChange={noop}
+            extraFilters={<ReviewContentSelect value='all' onChange={noop} />}
             sortOptions={SORT_OPTIONS}
             sort='updated'
             onSortChange={noop}
@@ -346,6 +376,7 @@ export default function MyReviewsPageClient({
   const [mutationError, setMutationError] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ReviewFilter>('all');
+  const [contentFilter, setContentFilter] = useState<MyReviewContent>('all');
   const [sort, setSort] = useState<ReviewSort>('updated');
   const [pending, setPending] = useState<VideoReview | null>(null);
   const [editing, setEditing] = useState<VideoReview | null>(null);
@@ -360,13 +391,17 @@ export default function MyReviewsPageClient({
       cursor: string | undefined,
       signal: AbortSignal,
     ): Promise<MyVideoReviewPage & { countsQuery: string }> => ({
-      ...(await fetchMyVideoReviews({ cursor, q, filter, sort }, signal)),
+      ...(await fetchMyVideoReviews(
+        { cursor, q, filter, content: contentFilter, sort },
+        signal,
+      )),
       countsQuery: q,
     }),
-    [q, filter, sort],
+    [q, filter, contentFilter, sort],
   );
   const {
     data,
+    currentData,
     initialLoading,
     refreshing,
     loadingMore,
@@ -377,15 +412,15 @@ export default function MyReviewsPageClient({
     updateData,
   } = usePagedQuery({
     scopeKey: profileId,
-    queryKey: JSON.stringify([q, filter, sort]),
+    queryKey: JSON.stringify([q, filter, contentFilter, sort]),
     fetchPage,
     getItemKey: (review) => JSON.stringify([review.title_norm, review.year]),
   });
   const reviews = data?.items ?? [];
-  const total = data?.total ?? 0;
-  const counts = data?.counts ?? null;
-  const countsQuery = data?.countsQuery;
-  const cursor = data?.nextCursor;
+  const displayTotal = data?.total ?? 0;
+  const counts = currentData?.counts ?? null;
+  const countsQuery = currentData?.countsQuery;
+  const cursor = currentData?.nextCursor;
   const loading = initialLoading || refreshing;
   const error = mutationError || (queryError ? '评价加载失败，请重试' : '');
   const refresh = useCallback(() => {
@@ -394,11 +429,11 @@ export default function MyReviewsPageClient({
   }, [refreshPage]);
 
   useEffect(() => {
-    // 只有未搜索时的「全部」计数才是本人评价总数
-    if (!data || data.countsQuery !== '') return;
-    setCount(Math.min(data.counts.all, MY_REVIEWS_PAGE_SIZE));
-    if (profileId) rememberMyReviewCount(profileId, data.counts.all);
-  }, [data, profileId, setCount]);
+    // total 始终是未筛选的本人评价数，分面计数受搜索与内容条件约束。
+    if (!currentData) return;
+    setCount(Math.min(currentData.total, MY_REVIEWS_PAGE_SIZE));
+    if (profileId) rememberMyReviewCount(profileId, currentData.total);
+  }, [currentData, profileId, setCount]);
 
   useEffect(() => {
     const update = () => {
@@ -415,24 +450,27 @@ export default function MyReviewsPageClient({
     onLoadMore: loadMore,
   });
   const filterOptions = useMemo(() => buildFilterOptions(counts), [counts]);
-  // 计数与当前筛选无关，重新查询时沿用旧值，避免占位块让胶囊宽度来回跳
+  // 条件变化后只使用当前条件的计数，旧列表仅作不可交互的占位。
   const countsLoading = loading && counts === null;
   const selected = reviews;
   const containerRef = useListLayoutMotion<HTMLUListElement>(
     selected.map((review) => `${review.title_norm}:${review.year}`),
   );
-  const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
+  const narrowed =
+    deferredQuery.trim() !== '' || filter !== 'all' || contentFilter !== 'all';
   const knownCount =
     counts && countsQuery === deferredQuery.trim() ? counts[filter] : null;
   const listSkeletonCount =
     knownCount === null
-      ? skeletonCount
+      ? narrowed
+        ? null
+        : skeletonCount
       : Math.min(knownCount, MY_REVIEWS_PAGE_SIZE);
   const moreSkeletonCount =
     knownCount === null
-      ? MY_REVIEWS_PAGE_SIZE
+      ? 0
       : Math.min(
-          Math.max(knownCount - reviews.length, 1),
+          Math.max(knownCount - reviews.length, 0),
           MY_REVIEWS_PAGE_SIZE,
         );
   // 新条件已知为空时直接给空状态；否则重新查询期间沿用屏幕上的旧结果（列表或空状态）并变暗
@@ -441,13 +479,15 @@ export default function MyReviewsPageClient({
     : selected.length === 0;
   const dimmed = refreshing && knownCount !== 0;
 
+  const matchesSearchAndContent = (review: VideoReview) =>
+    `${review.title} ${review.content}`
+      .toLowerCase()
+      .includes(q.toLowerCase()) &&
+    matchesMyReviewContent(review, contentFilter);
+
   function applySavedReview(updated: VideoReview) {
     if (!editing) return;
     const previous = editing;
-    const matchesQuery = (review: VideoReview) =>
-      `${review.title} ${review.content}`
-        .toLowerCase()
-        .includes(deferredQuery.trim().toLowerCase());
     updateData((current) => {
       if (!current) return current;
       const items = current.items.flatMap((review) => {
@@ -456,7 +496,8 @@ export default function MyReviewsPageClient({
           review.year !== previous.year
         )
           return [review];
-        return matchesQuery(updated) && matchesReviewFilter(updated, filter)
+        return matchesSearchAndContent(updated) &&
+          matchesReviewFilter(updated, filter)
           ? [updated]
           : [];
       });
@@ -468,10 +509,12 @@ export default function MyReviewsPageClient({
             value,
             current.counts[value] +
               Number(
-                matchesQuery(updated) && matchesReviewFilter(updated, value),
+                matchesSearchAndContent(updated) &&
+                  matchesReviewFilter(updated, value),
               ) -
               Number(
-                matchesQuery(previous) && matchesReviewFilter(previous, value),
+                matchesSearchAndContent(previous) &&
+                  matchesReviewFilter(previous, value),
               ),
           ]),
         ) as Record<ReviewFilter, number>,
@@ -492,6 +535,20 @@ export default function MyReviewsPageClient({
         (current) =>
           current && {
             ...current,
+            total: Math.max(0, current.total - 1),
+            counts: Object.fromEntries(
+              FILTERS.map(({ value }) => [
+                value,
+                Math.max(
+                  0,
+                  current.counts[value] -
+                    Number(
+                      matchesSearchAndContent(target) &&
+                        matchesReviewFilter(target, value),
+                    ),
+                ),
+              ]),
+            ) as Record<ReviewFilter, number>,
             items: current.items.filter(
               (review) =>
                 review.title_norm !== target.title_norm ||
@@ -511,15 +568,28 @@ export default function MyReviewsPageClient({
     }
   }
 
+  const narrowedDescription = deferredQuery.trim()
+    ? `找不到与「${deferredQuery.trim()}」相关的评价`
+    : undefined;
   let content: React.ReactNode;
-  if (initialLoading && !listEmpty) {
-    content = <ReviewListSkeleton count={listSkeletonCount} />;
+  if (queryError && data === null) {
+    content = null;
+  } else if (initialLoading && !listEmpty) {
+    content =
+      listSkeletonCount === null ? (
+        <LibraryEmptySkeleton
+          loading
+          description={narrowed ? narrowedDescription : EMPTY_DESCRIPTION}
+        />
+      ) : (
+        <ReviewListSkeleton count={listSkeletonCount} />
+      );
   } else if (listEmpty && !narrowed) {
     content = error ? null : (
       <LibraryEmptyState
         icon={MessageSquareText}
         title='还没有评价'
-        description='在播放页的「评价」里打分或写下感受，就会出现在这里'
+        description={EMPTY_DESCRIPTION}
         action={
           <Link href='/' className={LIBRARY_PILL_BUTTON_CLASS}>
             去首页逛逛
@@ -532,17 +602,14 @@ export default function MyReviewsPageClient({
       <LibraryEmptyState
         icon={SearchX}
         title='暂无符合条件的评价'
-        description={
-          deferredQuery.trim()
-            ? `找不到与「${deferredQuery.trim()}」相关的评价`
-            : '当前筛选下没有评价'
-        }
+        description={narrowedDescription}
         action={
           <button
             type='button'
             onClick={() => {
               setQuery('');
               setFilter('all');
+              setContentFilter('all');
             }}
             className={LIBRARY_PILL_BUTTON_CLASS}
           >
@@ -574,7 +641,9 @@ export default function MyReviewsPageClient({
     <LibraryPageFrame
       title='我的评价'
       toolbar={
-        ((loading && skeletonCount > 0) || total > 0 || narrowed) && (
+        ((initialLoading && skeletonCount > 0) ||
+          displayTotal > 0 ||
+          narrowed) && (
           <LibraryToolbar
             searchLabel='搜索我的评价'
             countsKey='reviews'
@@ -586,6 +655,12 @@ export default function MyReviewsPageClient({
             sortOptions={SORT_OPTIONS}
             sort={sort}
             onSortChange={setSort}
+            extraFilters={
+              <ReviewContentSelect
+                value={contentFilter}
+                onChange={setContentFilter}
+              />
+            }
             loading={countsLoading}
           />
         )
@@ -610,7 +685,7 @@ export default function MyReviewsPageClient({
       >
         {content}
       </div>
-      {!loading && cursor && (
+      {!loading && !error && cursor && (
         <div ref={sentinelRef} className='mt-3'>
           {loadingMore ? (
             <ReviewListSkeleton count={moreSkeletonCount} />

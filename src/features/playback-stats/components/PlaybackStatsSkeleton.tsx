@@ -3,9 +3,15 @@
 import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
 
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import { ListEmptySkeleton, ListLoadingState } from '@/components/ListState';
+import {
+  HOME_POSTER_CARD_CLASS,
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_CARD_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import { getCachedPlaybackPeriodSnapshot } from '@/features/playback-stats/lib/client';
-import { PLAYBACK_TOP_WORKS_LIMIT } from '@/features/playback-stats/types';
 
 // 桌面端观看统计与常看并排，统计卡拉伸到与海报区同高
 export const STATS_LAYOUT_CLASS =
@@ -90,11 +96,31 @@ function MetricSkeleton({
   );
 }
 
+export const TOP_WORKS_STATE_CLASS = 'absolute inset-0 px-4 text-center';
+
+// 保留常看海报行的几何外壳，各个无列表状态使用同一框架。
+export function TopWorksStateFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className='relative'>
+      <div aria-hidden='true' className='invisible'>
+        <ScrollableRow>
+          <div className={HOME_POSTER_CARD_CLASS}>
+            <div className={POSTER_CARD_COVER_CLASS} />
+            <p className={POSTER_CARD_TITLE_ROW_CLASS}>&nbsp;</p>
+            <p className={POSTER_CARD_SUBTITLE_ROW_CLASS}>&nbsp;</p>
+          </div>
+        </ScrollableRow>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function PlaybackStatsSkeleton() {
-  const [count, setCount] = useState(PLAYBACK_TOP_WORKS_LIMIT);
+  const [count, setCount] = useState<number | null>(null);
   useIsomorphicLayoutEffect(() => {
     const cached = getCachedPlaybackPeriodSnapshot('week');
     if (cached) setCount(cached.topWorks.length);
@@ -134,13 +160,24 @@ export function PlaybackStatsSkeleton() {
         <StatsHeading title='常看'>
           <div className='skeleton h-7 w-28 rounded-full' />
         </StatsHeading>
-        <div className={count === 0 ? 'invisible' : undefined}>
+        {count === null || count === 0 ? (
+          <TopWorksStateFrame>
+            {count === null ? (
+              <ListLoadingState
+                label='加载常看'
+                className={TOP_WORKS_STATE_CLASS}
+              />
+            ) : (
+              <ListEmptySkeleton className={TOP_WORKS_STATE_CLASS} />
+            )}
+          </TopWorksStateFrame>
+        ) : (
           <ScrollableRow>
-            {Array.from({ length: Math.max(1, count) }, (_, index) => (
+            {Array.from({ length: count }, (_, index) => (
               <HomePosterCardSkeleton key={index} subtitle />
             ))}
           </ScrollableRow>
-        </div>
+        )}
       </section>
     </div>
   );

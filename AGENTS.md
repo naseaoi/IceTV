@@ -63,12 +63,12 @@
 - 页面滚动必须由文档承担：`html` / `body` 不设固定高度，`body` 横向裁切用 `overflow-x: clip`（见 `src/app/globals.css`）。让 `body` 成为一屏高的内部滚动容器后，手机浏览器地址栏不再收起，页面底部约一个地址栏高度的内容滚不到，桌面模拟器无法复现。
 - 页面滚动可能发生在 `window`、`documentElement` 或 `body` 上，监听或回顶统一用 `src/hooks/usePageScroll.ts`，只监听其中一处会静默失效。需要捕获任意容器滚动的虚拟列表、无限加载可在 `document` 上用捕获监听。换页滚动位置由根布局的 `PageScrollRestorer` 接管（新页面回顶、前进后退恢复），不要在页面里另写换页回顶。
 - 加载反馈与骨架有统一入口，骨架与真实组件共用布局常量，不手写 `animate-pulse` / `animate-spin` 或像素高度，见 [前端界面](docs/frontend.md#加载反馈与骨架)。
-- 本站数据的列表骨架条数跟随真实条数（快照、计数 cookie 或服务端同次渲染的轻量计数），已知为 0 时渲染空状态骨架；固定默认条数仅限搜索结果、分类等外部数据源列表。新增或改造列表页时同次接入计数来源，见 [前端界面](docs/frontend.md#加载反馈与骨架)。
+- 本站数据的列表骨架条数跟随真实条数（快照、计数 cookie 或服务端同次渲染的轻量计数），已知为 0 时渲染空状态骨架；条数未知时转圈，不回退固定条数；固定默认条数仅限分类等总是满页的外部数据源列表；结果数未知的查找（搜索结果、后台关键词搜索）用 `SearchingState`；加载、查找与空状态统一走 `src/components/ListState.tsx`，同一槽位共用外层留白，切换时高度不变。新增或改造列表页时同次接入计数来源，见 [前端界面](docs/frontend.md#加载反馈与骨架)。
 
 ## 本地设置
 
 - `localStorage` 只经 `src/lib/browser-storage.ts` 访问（ESLint 拦截直接访问），它统一处理服务端渲染、隐私模式与配额已满时的异常；写入返回是否成功，配额满时调用方可清理后重试。
-- 业务代码不直接拼 key 与默认值，各类设置用对应 helper（均在 `src/lib/`）：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`。新增设置先补 helper，再让设置面板和消费方接入。
+- 业务代码不直接拼 key 与默认值，各类设置用对应 helper（均在 `src/lib/`）：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`、源与作品近期失败记忆 `source-work-failures.ts`。新增设置先补 helper，再让设置面板和消费方接入。
 - 主题的存储键、默认值与首屏主题脚本都在 `src/lib/theme-preference.ts`，脚本与 `ThemeProvider` 共用常量；新增主题取值时同步改脚本里的取值判断。
 
 ## 错误处理
@@ -93,14 +93,14 @@
 
 按**完整改动单元和风险**验证，不在每次编辑后重复全量执行。CI（`.github/workflows/quality.yml`）跑 `lint:strict`、`typecheck`、`test --runInBand`，本地以同一口径为准。
 
-| 改动范围                               | 验证要求                                                                                |
-| -------------------------------------- | --------------------------------------------------------------------------------------- |
-| 纯文档                                 | 检查链接、命令与当前实现；无需跑应用测试或构建                                          |
-| 单一模块代码                           | 改动文件 ESLint、相关 Jest；TypeScript 改动加 `pnpm typecheck`；UI 交互加浏览器实际操作 |
-| 跨模块、鉴权、数据写入、共享缓存或并发 | `pnpm lint:strict` → `pnpm typecheck` → `pnpm test --runInBand`                         |
-| 发布、依赖或构建配置                   | 上述全量检查，加 `pnpm build`                                                           |
+| 改动范围                                               | 验证要求                                                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 纯文档                                                 | 检查链接、命令与当前实现；无需跑应用测试或构建                                                                                                   |
+| 界面、组件与业务逻辑（含跨模块共享组件）               | 改动文件 ESLint（跨模块用 `pnpm lint:strict`）、`pnpm typecheck`、`pnpm test --runInBand --findRelatedTests <改动文件>`；UI 交互加浏览器实际操作 |
+| 鉴权、数据写入、共享缓存、并发，或 Jest 配置与测试工具 | `pnpm lint:strict` → `pnpm typecheck` → `pnpm test --runInBand`                                                                                  |
+| 发布、依赖或构建配置                                   | 上述全量检查，加 `pnpm build`                                                                                                                    |
 
-- 影响范围不明确时按全量处理；相关测试可用 `pnpm test --runInBand --runTestsByPath <文件>`。仅后续文档变化时可复用代码验证结果。
+- `--findRelatedTests` 按导入关系选出所有直接或间接依赖改动文件的测试，共享组件改动不必为覆盖使用方而跑全量；删除或重命名文件时把引用方一并列入。影响范围不明确时按全量处理。仅后续文档变化时可复用代码验证结果。
 - 中文变更加 `pnpm check:encoding`；MySQL 查询、事务或共享存储变更加 `pnpm test:mysql`；性能改动按 [性能验证](docs/performance-baseline.md) 选择场景。
 - 提交钩子只检查暂存文件的 lint / 格式，CI 不跑 `check:encoding` 与 `test:mysql`。说明实际检查及未覆盖项，不把 skip 当通过。
 
@@ -108,4 +108,4 @@
 
 `docs/` 的索引与维护规则见 [docs/README.md](docs/README.md)。改动使文档中的约束失效时同次更新对应文档。
 
-用户或部署者可感知的改动，同次提交更新 `CHANGELOG.md` 顶部的 `## [Unreleased]`：重要改动单列，细节改动并入已有的概括条目或省略，取舍见 [发布](docs/release.md#条目取舍)。
+用户或部署者可感知的改动，同次提交更新 `CHANGELOG.md` 顶部的 `## [Unreleased]`：先判受众，只有站长、管理员或部署者能感知的一律写进 `Admin`，其余再按类型分 `Added` / `Changed` / `Fixed`；重要改动单列，细节改动并入已有的概括条目或省略，见 [发布](docs/release.md#发布说明)。

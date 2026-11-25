@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfigForRead, getPublicConfig } from '@/lib/config';
+import {
+  getConfigForRead,
+  getConfigFresh,
+  getPublicConfig,
+} from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
@@ -16,8 +20,12 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   const activeUser = await getOptionalActiveUser(request);
   const canReadSensitiveConfig = !!activeUser;
+  // 普通读取走 TTL 缓存；管理员保存后的刷新带 fresh=1，跳过其他实例或执行路径中的旧快照。
+  const readFresh =
+    request.nextUrl.searchParams.get('fresh') === '1' &&
+    (activeUser?.role === 'admin' || activeUser?.role === 'owner');
+  const config = readFresh ? await getConfigFresh() : await getConfigForRead();
   const publicConfig = await getPublicConfig();
-  const config = await getConfigForRead();
   const doubanProxyType = canReadSensitiveConfig
     ? normalizeSiteDoubanProxyType(config.SiteConfig.DoubanProxyType)
     : publicConfig.DoubanProxyType;
@@ -50,10 +58,6 @@ export async function GET(request: NextRequest) {
     FluidSearch: publicConfig.FluidSearch,
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,
     VodFragmentTimeoutSeconds: publicConfig.VodFragmentTimeoutSeconds,
-    PlaybackHistoryPageSize: publicConfig.PlaybackHistoryPageSize,
-    SearchHistoryLimit: publicConfig.SearchHistoryLimit,
-    ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
-    CoverImageCacheSize: publicConfig.CoverImageCacheSize,
     ImageProxyTimeoutSeconds: publicConfig.ImageProxyTimeoutSeconds,
     SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
   };

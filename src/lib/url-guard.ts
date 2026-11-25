@@ -7,6 +7,7 @@ import { UpstreamCooldownError } from '@/lib/server-resource-errors';
 import {
   fetchViaUpstreamRoute,
   getUpstreamRoutes,
+  isUpstreamConnectFailure,
   isUpstreamNetworkFailure,
   reportUpstreamRouteFailure,
   reportUpstreamRouteSuccess,
@@ -166,7 +167,7 @@ export async function fetchWithUrlGuard(
   throw new UrlValidationError('Too many redirects');
 }
 
-// 换出口只发生在拿到响应之前；节点网络失败或对该站处于冷却时顺延到下一个出口
+// 换出口只发生在响应交付之前；节点网络失败或对该站处于冷却时按请求体安全性顺延
 async function loadUpstream(
   url: string,
   fetchInit: RequestInit,
@@ -175,7 +176,9 @@ async function loadUpstream(
   useProxyPool: boolean,
   proxyPoolStickyKey?: string,
 ): Promise<Response> {
+  const hostname = new URL(url).hostname;
   const routes = getUpstreamRoutes(
+    hostname,
     proxyPoolStickyKey ?? resourceContext?.identity,
     useProxyPool,
   );
@@ -185,25 +188,41 @@ async function loadUpstream(
       const response = await withUpstreamResponse(
         url,
         (guardSignal) =>
-          fetchViaUpstreamRoute(route, url, {
-            ...fetchInit,
-            redirect: 'manual',
-            signal: guardSignal,
-          }),
+          fetchViaUpstreamRoute(
+            route,
+            url,
+            {
+              ...fetchInit,
+              redirect: 'manual',
+              signal: guardSignal,
+            },
+            useProxyPool,
+          ),
         {
           ...resourceContext,
           signal,
           cooldownScope: route.proxyUrl ? route.id : undefined,
         },
       );
-      reportUpstreamRouteSuccess(route);
+      if (useProxyPool) reportUpstreamRouteSuccess(route, hostname);
       return response;
     } catch (error) {
-      const proxyFailed =
-        Boolean(route.proxyUrl) && isUpstreamNetworkFailure(error);
-      if (proxyFailed) reportUpstreamRouteFailure(route);
-      const retryable = proxyFailed || error instanceof UpstreamCooldownError;
-      if (!retryable || signal.aborted || index + 1 >= routes.length)
+      if (signal.aborted) throw error;
+      const networkFailed = isUpstreamNetworkFailure(error);
+      if (useProxyPool && networkFailed)
+        reportUpstreamRouteFailure(route, hostname);
+      const retryable = networkFailed || error instanceof UpstreamCooldownError;
+      // 发送前冷却可安全顺延；收到响应后保留单次发送，网络失败仅重放尚未发出的可复用正文。
+      const bodyBlocksRetry =
+        fetchInit.body != null &&
+        ((error instanceof UpstreamCooldownError && error.responseReceived) ||
+          (networkFailed &&
+            !(
+              (typeof fetchInit.body === 'string' ||
+                fetchInit.body instanceof URLSearchParams) &&
+              isUpstreamConnectFailure(error)
+            )));
+      if (!retryable || bodyBlocksRetry || index + 1 >= routes.length)
         throw error;
     }
   }

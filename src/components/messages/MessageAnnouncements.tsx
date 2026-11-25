@@ -3,11 +3,14 @@
 import { Inbox } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import { useSite } from '@/components/SiteProvider';
 import Spinner from '@/components/Spinner';
 import type { AnnouncementUserMessage } from '@/lib/message-types';
 import { getAnnouncementHistoryPage } from '@/lib/messages.client';
 import { formatRelativeTime } from '@/lib/relative-time';
+
+export const MESSAGE_STATE_CLASS = 'min-h-full flex-1 px-4 py-6 text-center';
 
 const SECTION_TITLE_CLASS =
   'pb-2 text-xs font-semibold text-gray-500 dark:text-gray-400';
@@ -52,18 +55,15 @@ export default function MessageAnnouncements() {
   const firstLoad = loading && items.length === 0;
 
   if (firstLoad && !notice)
-    return (
-      <div className='flex min-h-full items-center justify-center text-gray-400'>
-        <Spinner className='h-6 w-6' />
-      </div>
-    );
+    return <ListLoadingState className={MESSAGE_STATE_CLASS} />;
 
   if (!loading && !failed && items.length === 0 && !notice)
     return (
-      <div className='flex min-h-full flex-col items-center justify-center gap-2 px-4 text-center text-gray-400'>
-        <Inbox className='h-10 w-10' />
-        <p className='text-sm'>暂无公告</p>
-      </div>
+      <ListEmptyState
+        icon={<Inbox />}
+        label='暂无公告'
+        className={MESSAGE_STATE_CLASS}
+      />
     );
 
   return (

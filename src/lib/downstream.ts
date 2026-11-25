@@ -293,12 +293,21 @@ export async function probeSourceSearch(
   query: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (
-    signal?.aborted ||
-    isGirigiriSource(apiSite) ||
-    isXgcartoonSource(apiSite) ||
-    isXifanSource(apiSite)
-  ) {
+  if (signal?.aborted) return;
+
+  const specialSearch = getSpecialSourceSearch(apiSite);
+  if (specialSearch) {
+    try {
+      // 跳过特殊源共享搜索缓存，直接回源采样
+      await searchSpecialSourceWithSample(
+        apiSite,
+        query,
+        specialSearch,
+        signal,
+      );
+    } catch (error) {
+      console.warn(`Source health probe failed [${apiSite.key}]`, error);
+    }
     return;
   }
 
@@ -318,23 +327,56 @@ export async function probeSourceSearch(
   }
 }
 
+type SpecialSourceSearch = (
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+) => Promise<SearchResult[]>;
+
+function getSpecialSourceSearch(apiSite: ApiSite): SpecialSourceSearch | null {
+  if (isGirigiriSource(apiSite)) return searchFromGirigiri;
+  if (isXgcartoonSource(apiSite)) return searchFromXgcartoon;
+  if (isXifanSource(apiSite)) return searchFromXifan;
+  return null;
+}
+
+// 适配器失败时抛错、真正无结果时返回空数组，据此记 error / empty / ok
+async function searchSpecialSourceWithSample(
+  apiSite: ApiSite,
+  query: string,
+  search: SpecialSourceSearch,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const startedAt = Date.now();
+  let outcome: SourceSearchOutcome = 'error';
+  let resourceLimited = false;
+  try {
+    const results = await search(apiSite, query, signal);
+    outcome = results.length > 0 ? 'ok' : 'empty';
+    return results;
+  } catch (error) {
+    resourceLimited = error instanceof ResourceLimitError;
+    throw error;
+  } finally {
+    if (!resourceLimited && !signal?.aborted) {
+      recordSourceSearchOutcome(apiSite.key, outcome, Date.now() - startedAt);
+    }
+  }
+}
+
 // 共享加载不绑定单个请求的取消，消费者取消只放弃等待
 async function searchSpecialSource(
   apiSite: ApiSite,
   query: string,
+  search: SpecialSourceSearch,
   options: SearchFromApiOptions = {},
 ): Promise<SearchResult[]> {
   const { signal, reportFailure } = options;
-  const search = isGirigiriSource(apiSite)
-    ? searchFromGirigiri
-    : isXifanSource(apiSite)
-      ? searchFromXifan
-      : searchFromXgcartoon;
   try {
     return await waitForSharedLoad(
       () =>
         loadSpecialSourceSearch(getSourceCacheKey(apiSite), query, () =>
-          search(apiSite, query),
+          searchSpecialSourceWithSample(apiSite, query, search),
         ),
       signal,
     );
@@ -367,13 +409,10 @@ async function searchFromApiQuery(
     return [];
   }
 
-  if (
-    isGirigiriSource(apiSite) ||
-    isXgcartoonSource(apiSite) ||
-    isXifanSource(apiSite)
-  ) {
+  const specialSearch = getSpecialSourceSearch(apiSite);
+  if (specialSearch) {
     return uniqueSearchResults(
-      await searchSpecialSource(apiSite, query, options),
+      await searchSpecialSource(apiSite, query, specialSearch, options),
     );
   }
 

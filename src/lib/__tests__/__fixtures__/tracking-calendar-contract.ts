@@ -133,6 +133,21 @@ export async function assertTrackingCalendar(storage: IStorage) {
       (item) => item.key === 'source+favorite',
     ),
   ).toMatchObject({ hasUpdate: true });
+  await storage.readFavoriteUpdate('calendar-user', 'source+favorite', 5);
+  expect(
+    await storage.getFavorite('calendar-user', 'source+favorite'),
+  ).toMatchObject({
+    update_baseline_episodes: 4,
+    update_message_read_episodes: 5,
+  });
+  expect(
+    (await storage.getFavoriteUpdateMessagePage('calendar-user', 10)).total,
+  ).toBe(0);
+  expect(
+    (await storage.getTrackingCalendarItems('calendar-user')).find(
+      (item) => item.key === 'source+favorite',
+    )?.hasUpdate,
+  ).toBe(true);
   for (const key of ['source+missing', 'source+live', 'douban+catalog'])
     expect(
       await storage.setFavoriteTracking('calendar-user', key, false),

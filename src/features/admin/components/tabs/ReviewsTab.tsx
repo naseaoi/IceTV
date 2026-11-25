@@ -1,15 +1,19 @@
 'use client';
 
-import { Trash2 } from 'lucide-react';
+import { MessageSquare, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import ExpandableText from '@/components/ExpandableText';
+import { ListEmptyState, SearchingState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import MoreMenu from '@/components/MoreMenu';
 import RatingStars from '@/components/RatingStars';
 import Spinner from '@/components/Spinner';
 import { AdminReviewRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
+import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
+import { ADMIN_PANEL_CLASS } from '@/features/admin/components/AdminSettings';
 import ReviewReports from '@/features/admin/components/tabs/ReviewReports';
 import {
   adminDelete,
@@ -17,6 +21,8 @@ import {
   getAdminReviewReports,
 } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { rememberAdminListCount } from '@/features/admin/lib/list-counts';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { showError } from '@/features/admin/lib/notifications';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
@@ -72,6 +78,7 @@ function AllReviews({ search }: { search: string }) {
         '加载评价失败',
       );
       if (id !== requestId.current) return;
+      if (!q && !cursor) rememberAdminListCount('reviews', page.items.length);
       setItems((previous) => {
         const rows = cursor ? [...previous, ...page.items] : page.items;
         return Array.from(
@@ -124,6 +131,7 @@ function AllReviews({ search }: { search: string }) {
         },
         '删除评价失败',
       );
+      rememberAdminListCount('reviews', undefined);
       const key = reviewKey(review);
       // 在途分页响应也要过滤已删除行，避免迟到响应将其重新放回列表。
       deletedKeys.current.add(key);
@@ -145,14 +153,11 @@ function AllReviews({ search }: { search: string }) {
           {error}
         </p>
       )}
-      <div
-        aria-busy={loading}
-        className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'
-      >
+      <div aria-busy={loading} className={ADMIN_PANEL_CLASS}>
         {items.length > 0 && (
           <ul
             aria-label='公开评价'
-            className='divide-y divide-gray-200 dark:divide-gray-700'
+            className='divide-y divide-gray-200 dark:divide-white/[0.06]'
           >
             {items.map((review) => (
               <li key={reviewKey(review)} className='flex gap-3 p-4 sm:gap-4'>
@@ -179,16 +184,18 @@ function AllReviews({ search }: { search: string }) {
                         {review.username}）
                       </p>
                     </div>
-                    <button
-                      type='button'
-                      aria-label={`删除 ${review.username} 对 ${review.title} 的评价`}
-                      disabled={deleting}
-                      onClick={() => setPendingDelete(review)}
-                      className={`${deleting ? buttonStyles.disabledSmall : buttonStyles.roundedDanger} inline-flex shrink-0 items-center gap-1`}
-                    >
-                      <Trash2 aria-hidden='true' className='h-3.5 w-3.5' />
-                      删除
-                    </button>
+                    <MoreMenu
+                      label={`${review.username} 对 ${review.title} 的评价操作`}
+                      items={[
+                        {
+                          label: '删除评价',
+                          icon: Trash2,
+                          danger: true,
+                          disabled: deleting,
+                          onSelect: () => setPendingDelete(review),
+                        },
+                      ]}
+                    />
                   </div>
                   <div className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1'>
                     {review.rating === null ? (
@@ -214,7 +221,13 @@ function AllReviews({ search }: { search: string }) {
             ))}
           </ul>
         )}
-        {loading && items.length === 0 && <AdminReviewRowsSkeleton />}
+        {loading &&
+          items.length === 0 &&
+          (query ? (
+            <SearchingState className={ADMIN_LIST_EMPTY_CLASS} />
+          ) : (
+            <AdminReviewRowsSkeleton />
+          ))}
         {loading && items.length > 0 && (
           <div
             role='status'
@@ -225,9 +238,11 @@ function AllReviews({ search }: { search: string }) {
           </div>
         )}
         {!loading && !failed && items.length === 0 && (
-          <p className='py-12 text-center text-sm text-gray-500 dark:text-gray-400'>
-            {query ? '暂无匹配的公开评价' : '暂无公开评价'}
-          </p>
+          <ListEmptyState
+            className={ADMIN_LIST_EMPTY_CLASS}
+            icon={query ? <SearchX /> : <MessageSquare />}
+            label={query ? '暂无匹配的公开评价' : '暂无公开评价'}
+          />
         )}
         {!loading && (failed || nextCursor) && (
           <div className='flex justify-center p-4'>
@@ -278,43 +293,46 @@ export default function ReviewsTab() {
   }, [tab]);
   return (
     <div className='space-y-5'>
-      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-        <div
-          role='tablist'
-          aria-label='评价管理视图'
-          className='inline-flex w-fit rounded-lg bg-gray-100 p-1 dark:bg-white/[0.06]'
-        >
-          {(
-            [
-              ['all', '全部评价'],
-              ['reports', `举报待处理 (${pendingTotal ?? '—'})`],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type='button'
-              role='tab'
-              aria-selected={tab === id}
-              onClick={() => setTab(id)}
-              className={`h-7 rounded-md px-3 text-sm transition-colors ${
-                tab === id
-                  ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
-                  : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {tab === 'all' && (
-          <AdminSearchField
-            value={search}
-            onChange={setSearch}
-            label='搜索标题或用户名'
-            className='w-full sm:w-72'
-          />
-        )}
-      </div>
+      <AdminListToolbar
+        search={
+          tab === 'all' && (
+            <AdminSearchField
+              value={search}
+              onChange={setSearch}
+              label='搜索标题或用户名'
+            />
+          )
+        }
+        filters={
+          <div
+            role='tablist'
+            aria-label='评价管理视图'
+            className='inline-flex w-fit rounded-lg bg-gray-100 p-1 dark:bg-white/[0.06]'
+          >
+            {(
+              [
+                ['all', '全部评价'],
+                ['reports', `举报待处理 (${pendingTotal ?? '—'})`],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type='button'
+                role='tab'
+                aria-selected={tab === id}
+                onClick={() => setTab(id)}
+                className={`h-7 rounded-md px-3 text-sm transition-colors ${
+                  tab === id
+                    ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      />
       {tab === 'all' ? (
         <AllReviews search={search} />
       ) : (

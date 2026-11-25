@@ -27,6 +27,7 @@ export default async function Home() {
       likelyMobile={likelyMobile}
       continueWatchingSkeletonCount={continueWatchingSkeletonCount}
       continueWatchingRecords={continueWatching.records}
+      continueWatchingFetchedAt={continueWatching.fetchedAt}
       continueWatchingUpdateCount={continueWatching.updateCount}
     />
   );

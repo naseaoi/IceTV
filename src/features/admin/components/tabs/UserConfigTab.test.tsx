@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -6,6 +7,7 @@ import {
   within,
 } from '@testing-library/react';
 
+import { CleanupInactiveUsersDialog } from '@/features/admin/components/tabs/user-config/CleanupInactiveUsersDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import UserConfigTab from '@/features/admin/components/tabs/UserConfigTab';
 import { showToast } from '@/lib/toast';
@@ -38,27 +40,43 @@ let mockRows: Array<{
   nickname?: string;
   loginProviders?: string[];
 }> = [];
+let mockUserLoading = false;
+afterEach(() => {
+  mockUserLoading = false;
+});
 let mockNextCursor: string | null = null;
 jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
-  useAdminUsers: (query: { q: string; filter: string }) => {
+  useAdminUsers: (query: {
+    q: string;
+    role: string;
+    group: string;
+    ungrouped: boolean;
+    login: string;
+  }) => {
     const q = query.q.trim().toLowerCase();
     const items = mockRows.filter(
       (row) =>
         (!q ||
           row.username.toLowerCase().includes(q) ||
           row.nickname?.toLowerCase().includes(q)) &&
-        (query.filter === 'all' ||
-          (query.filter === 'banned'
-            ? row.banned
-            : query.filter.startsWith('provider:')
-              ? row.loginProviders?.includes(query.filter.slice(9))
-              : row.role === query.filter)),
+        (query.role === 'all' ||
+          (query.role === 'banned'
+            ? !!row.banned && row.role !== 'owner'
+            : row.role === query.role)) &&
+        (!query.group || !!row.tags?.includes(query.group)) &&
+        (!query.ungrouped || !row.tags?.length) &&
+        (query.login === 'all' ||
+          (query.login === 'none'
+            ? !row.loginProviders?.length
+            : query.login === 'any'
+              ? !!row.loginProviders?.length
+              : row.loginProviders?.includes(query.login.slice(9)))),
     );
     return {
       items,
       total: items.length,
       nextCursor: mockNextCursor,
-      loading: false,
+      loading: mockUserLoading,
       error: '',
       refresh: jest.fn(),
       loadMore: jest.fn(),
@@ -347,7 +365,11 @@ describe('UserConfigTab user search and selection', () => {
     { username: 'Blocked', role: 'user', banned: true, tags: ['VIP'] },
   ];
   const config = {
-    UserConfig: { Users: users, Tags: [], OpenRegister: false },
+    UserConfig: {
+      Users: users,
+      Tags: [{ name: 'VIP' }, { name: 'Standard' }, { name: 'ungrouped' }],
+      OpenRegister: false,
+    },
     SourceConfig: [],
   } as never;
 
@@ -367,8 +389,8 @@ describe('UserConfigTab user search and selection', () => {
     return screen.getByRole('searchbox', { name: '搜索用户名、昵称或邀请码' });
   }
 
-  function filterUsers(label: string) {
-    fireEvent.click(screen.getByRole('button', { name: '筛选用户角色或状态' }));
+  function filterUsers(label: string, dimension = '筛选用户角色') {
+    fireEvent.click(screen.getByRole('button', { name: dimension }));
     fireEvent.click(screen.getByRole('option', { name: label }));
   }
 
@@ -409,21 +431,73 @@ describe('UserConfigTab user search and selection', () => {
   });
 
   it.each([
-    ['全部', ['owner', 'manager', 'Alice', 'Bob', 'Blocked']],
-    ['站长', ['owner']],
-    ['管理员', ['manager']],
-    ['普通用户', ['Alice', 'Bob', 'Blocked']],
-    ['已封禁', ['Blocked']],
-    ['已绑定 LinuxDo', ['Bob']],
-  ])('filters by %s', (label, usernames) => {
+    [
+      '筛选用户角色',
+      '全部角色',
+      ['owner', 'manager', 'Alice', 'Bob', 'Blocked'],
+    ],
+    ['筛选用户角色', '管理员', ['manager']],
+    ['筛选用户角色', '普通用户', ['Alice', 'Bob', 'Blocked']],
+    ['筛选用户角色', '封禁用户', ['Blocked']],
+    ['筛选登录方式', '未绑定第三方', ['owner', 'manager', 'Alice', 'Blocked']],
+    ['筛选登录方式', '已绑定第三方', ['Bob']],
+    ['筛选登录方式', '已绑定 LinuxDo', ['Bob']],
+  ])('filters by %s / %s', (dimension, label, usernames) => {
     setup();
-    filterUsers(label as string);
+    filterUsers(label as string, dimension as string);
     expectVisibleUsers(usernames as string[]);
   });
 
-  it('combines search with the status filter and shows an empty state', () => {
+  it('combines role and login filters', () => {
+    setup();
+    filterUsers('普通用户', '筛选用户角色');
+    filterUsers('未绑定第三方', '筛选登录方式');
+    expectVisibleUsers(['Alice', 'Blocked']);
+    filterUsers('已绑定第三方', '筛选登录方式');
+    expectVisibleUsers(['Bob']);
+    filterUsers('封禁用户');
+    expect(screen.getByText('没有匹配的用户')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['筛选用户角色', '普通用户'],
+    ['筛选用户组', 'Standard'],
+    ['筛选登录方式', '已绑定第三方'],
+  ])('clears all-matching selections when %s changes', (dimension, label) => {
+    mockNextCursor = 'next-page';
+    setup();
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '选择全部 5 个匹配用户' }),
+    );
+    filterUsers(label, dimension);
+    expect(
+      screen.queryByText(/已选择全部 \d+ 个匹配用户/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', { name: '选择用户 Bob' }),
+    ).not.toBeChecked();
+  });
+
+  it('搜索或条件筛选尚无结果时显示查找动画', () => {
+    mockUserLoading = true;
+    mockRows = [];
     const search = setup();
-    filterUsers('已封禁');
+    fireEvent.change(search, { target: { value: 'missing' } });
+    expect(
+      screen.getByRole('status', { name: '正在搜索' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+    mockRows = [];
+    filterUsers('封禁用户');
+    expect(
+      screen.getByRole('status', { name: '正在搜索' }),
+    ).toBeInTheDocument();
+  });
+
+  it('combines search with the banned role filter and shows an empty state', () => {
+    const search = setup();
+    filterUsers('封禁用户');
     fireEvent.change(search, { target: { value: 'VIP' } });
     expectVisibleUsers(['Blocked']);
     fireEvent.change(search, { target: { value: 'Alice' } });
@@ -496,13 +570,88 @@ describe('UserConfigTab user search and selection', () => {
         dryRun: true,
         selection: {
           mode: 'all',
-          filter: { q: '', filter: 'all', group: '' },
+          filter: {
+            q: '',
+            role: 'all',
+            login: 'all',
+            group: '',
+            ungrouped: false,
+          },
           excluded: ['Bob'],
         },
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: '确认' }));
     await waitFor(() => expect(mockBatchPost).toHaveBeenCalledTimes(2));
+  });
+
+  it('submits all three selected dimensions for all-matching batch actions', async () => {
+    mockBatchPost.mockResolvedValueOnce({ affectedCount: 1, skippedCount: 0 });
+    mockNextCursor = 'next-page';
+    setup();
+    filterUsers('封禁用户');
+    filterUsers('VIP', '筛选用户组');
+    filterUsers('未绑定第三方', '筛选登录方式');
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '选择全部 1 个匹配用户' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '批量设置用户组' }));
+    fireEvent.click(screen.getByRole('button', { name: '预估批量操作' }));
+    await screen.findByText('预计处理 1 个用户，跳过 0 个。');
+    expect(mockBatchPost).toHaveBeenLastCalledWith(
+      '/api/admin/user',
+      expect.objectContaining({
+        selection: {
+          mode: 'all',
+          filter: {
+            q: '',
+            role: 'banned',
+            login: 'none',
+            group: 'VIP',
+            ungrouped: false,
+          },
+          excluded: [],
+        },
+      }),
+    );
+  });
+
+  it('keeps ungrouped distinct from literal group names and submits its selection', async () => {
+    mockBatchPost.mockResolvedValueOnce({ affectedCount: 1, skippedCount: 1 });
+    mockNextCursor = 'next-page';
+    setup();
+    filterUsers('未分组', '筛选用户组');
+    expectVisibleUsers(['owner', 'manager']);
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '选择全部 2 个匹配用户' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '批量设置用户组' }));
+    fireEvent.click(screen.getByRole('button', { name: '预估批量操作' }));
+    await screen.findByText('预计处理 1 个用户，跳过 1 个。');
+    expect(mockBatchPost).toHaveBeenLastCalledWith(
+      '/api/admin/user',
+      expect.objectContaining({
+        selection: {
+          mode: 'all',
+          filter: {
+            q: '',
+            role: 'all',
+            login: 'all',
+            group: '',
+            ungrouped: true,
+          },
+          excluded: [],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    filterUsers('ungrouped', '筛选用户组');
+    expect(screen.getByText('没有匹配的用户')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/已选择全部 \d+ 个匹配用户/),
+    ).not.toBeInTheDocument();
   });
 
   it('shows owner actions in a portal menu with destructive deletion last', () => {
@@ -556,9 +705,9 @@ describe('UserConfigTab user search and selection', () => {
 
   it('keeps administrator selection limited to configurable visible users', () => {
     setup('admin');
-    filterUsers('管理员');
+    filterUsers('管理员', '筛选用户角色');
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    filterUsers('全部');
+    filterUsers('全部角色', '筛选用户角色');
     fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
     expect(screen.getByText('共 5 人 · 已选 3 人')).toBeInTheDocument();
     expect(
@@ -630,5 +779,82 @@ describe('UserGroupTable responsive list', () => {
     );
     expect(screen.getByText('暂无用户组')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+});
+
+describe('CleanupInactiveUsersDialog', () => {
+  const renderDialog = (
+    onPreview: (days: number) => Promise<{
+      count: number;
+      confirmation: string;
+    }>,
+  ) => {
+    const onConfirm = jest.fn();
+    render(
+      <CleanupInactiveUsersDialog
+        isOpen
+        isDeleting={false}
+        onPreview={onPreview}
+        onConfirm={onConfirm}
+        onClose={jest.fn()}
+      />,
+    );
+    return { onConfirm };
+  };
+
+  it('打开即按默认天数筛选，无匹配时禁用清理', async () => {
+    const onPreview = jest
+      .fn()
+      .mockResolvedValue({ count: 0, confirmation: 'empty' });
+    renderDialog(onPreview);
+    expect(
+      screen.getByRole('status', { name: '正在筛选用户' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+    expect(await screen.findByText('没有符合条件的用户')).toBeInTheDocument();
+    expect(onPreview).toHaveBeenCalledWith(90);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+  });
+
+  it('改天数后丢弃旧结果，确认时提交当前天数与凭据', async () => {
+    let resolveFirst!: (value: { count: number; confirmation: string }) => void;
+    const onPreview = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ count: 3, confirmation: 'days-30' });
+    const { onConfirm } = renderDialog(onPreview);
+    await waitFor(() => expect(onPreview).toHaveBeenCalledWith(90));
+    fireEvent.change(screen.getByLabelText('未活跃天数超过'), {
+      target: { value: '30' },
+    });
+    await act(async () => {
+      resolveFirst({ count: 9, confirmation: 'days-90' });
+    });
+    expect(screen.queryByText('9')).not.toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole('button', { name: '清理 3 个用户' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    expect(onConfirm).toHaveBeenCalledWith(30, 'days-30');
+  });
+
+  it('天数越界时提示范围且不发起筛选', async () => {
+    const onPreview = jest
+      .fn()
+      .mockResolvedValue({ count: 2, confirmation: 'ok' });
+    renderDialog(onPreview);
+    fireEvent.change(screen.getByLabelText('未活跃天数超过'), {
+      target: { value: '0' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入');
+    expect(screen.getByRole('button', { name: '清理用户' })).toBeDisabled();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(onPreview).not.toHaveBeenCalled();
   });
 });

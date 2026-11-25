@@ -14,12 +14,14 @@ export const MY_REVIEWS_PAGE_SIZE = 20;
 export const WORK_REVIEWS_PAGE_SIZE = 20;
 export const VIDEO_REVIEWS_UPDATED_EVENT = 'videoReviewsUpdated';
 
-export type MyReviewFilter = 'all' | 'public' | 'private' | 'text';
+export type MyReviewFilter = 'all' | 'public' | 'private';
+export type MyReviewContent = 'all' | 'rating' | 'text' | 'both';
 export type MyReviewSort = 'updated' | 'high' | 'low';
 export interface MyReviewQuery {
   cursor?: string;
   q?: string;
   filter?: MyReviewFilter;
+  content?: MyReviewContent;
   sort?: MyReviewSort;
 }
 
@@ -27,18 +29,61 @@ export function validateMyReviewQuery(query: MyReviewQuery) {
   const q = text(query.q ?? '', '搜索关键词', 200);
   const filter = query.filter ?? 'all';
   const sort = query.sort ?? 'updated';
+  const content = query.content ?? 'all';
   if (
-    !['all', 'public', 'private', 'text'].includes(filter) ||
+    !['all', 'public', 'private'].includes(filter) ||
+    !['all', 'rating', 'text', 'both'].includes(content) ||
     !['updated', 'high', 'low'].includes(sort)
   )
     throw new ReviewValidationError('评价筛选或排序无效');
-  const after = decodeReviewCursor(query.cursor);
+  let after: ReviewCursor | null = null;
+  if (query.cursor) {
+    try {
+      if (query.cursor.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(query.cursor))
+        throw new Error();
+      const value = JSON.parse(
+        Buffer.from(query.cursor, 'base64url').toString('utf8'),
+      );
+      if (
+        !Array.isArray(value) ||
+        value.length !== 6 ||
+        value[0] !== 'my-v2' ||
+        value[1] !== q ||
+        value[2] !== filter ||
+        value[3] !== content ||
+        value[4] !== sort ||
+        typeof value[5] !== 'string'
+      )
+        throw new Error();
+      after = decodeReviewCursor(value[5]);
+      if (!after) throw new Error();
+    } catch {
+      throw new ReviewValidationError('分页游标已失效，请重新加载');
+    }
+  }
   if (
     after &&
     (!/^\d+$/.test(after[1]) || !Number.isSafeInteger(Number(after[1])))
   )
     throw new ReviewValidationError('分页游标无效');
-  return { q, filter, sort, after };
+  return { q, filter, content, sort, after };
+}
+
+export function matchesMyReviewContent(
+  review: Pick<VideoReview, 'rating' | 'content'>,
+  content: MyReviewContent,
+): boolean {
+  const hasText = review.content.trim().length > 0;
+  switch (content) {
+    case 'rating':
+      return review.rating !== null && !hasText;
+    case 'text':
+      return review.rating === null && hasText;
+    case 'both':
+      return review.rating !== null && hasText;
+    default:
+      return true;
+  }
 }
 
 export class ReviewValidationError extends Error {}

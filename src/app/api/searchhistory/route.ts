@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import {
+  normalizeSearchQueryInput,
+  SEARCH_HISTORY_LIMIT,
+} from '@/features/search/lib/searchQuery';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
-import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 export const runtime = 'nodejs';
 
@@ -51,21 +52,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const runtimeParams = normalizeRuntimeParams(
-      (await getConfigForRead()).SiteConfig,
-    );
-
     await db.addSearchHistory(
       guardResult.username,
       keyword,
-      runtimeParams.SearchHistoryLimit,
+      SEARCH_HISTORY_LIMIT,
     );
 
     const history = await db.getSearchHistory(guardResult.username);
-    return NextResponse.json(
-      history.slice(0, runtimeParams.SearchHistoryLimit),
-      { status: 200 },
-    );
+    return NextResponse.json(history.slice(0, SEARCH_HISTORY_LIMIT), {
+      status: 200,
+    });
   } catch (err) {
     console.error('添加搜索历史失败', err);
     return NextResponse.json(

@@ -1,3 +1,10 @@
+export function isAdultSourceBlocked(
+  source: { nsfw?: boolean } | undefined,
+  disableYellowFilter: boolean,
+): boolean {
+  return source?.nsfw === true && !disableYellowFilter;
+}
+
 export const yellowWords = [
   '伦理片',
   '福利',

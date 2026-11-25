@@ -1,6 +1,6 @@
 {
   "name": "icetv",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
@@ -26,7 +26,7 @@
     "gen:manifest": "node scripts/generate-manifest.js",
     "gen:dev-sw": "node scripts/generate-dev-sw.js",
     "gen:changelog": "node scripts/convert-changelog.js",
-    "validate:changelog": "node scripts/convert-changelog.js",
+    "validate:changelog": "node scripts/convert-changelog.js --check",
     "release:prepare": "node scripts/prepare-release.js",
     "postbuild": "echo 'Build completed - sitemap generation disabled'",
     "prepare": "husky install"
@@ -95,6 +95,9 @@
     ],
     "**/*.{json,css,scss,md,webmanifest}": [
       "prettier -w --ignore-unknown --no-error-on-unmatched-pattern"
+    ],
+    "CHANGELOG.md": [
+      "node scripts/convert-changelog.js --check"
     ]
   },
   "pnpm": {

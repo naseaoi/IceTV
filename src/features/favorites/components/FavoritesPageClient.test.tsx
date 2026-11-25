@@ -12,6 +12,7 @@ jest.mock('@/components/AuthProvider', () => ({
 }));
 const mockRetry = jest.fn();
 let mockRefreshing = false;
+let mockHasMore = false;
 let mockError: string | null = null;
 
 jest.mock('@/lib/db.client', () => ({
@@ -37,8 +38,20 @@ jest.mock('@/components/LibraryPage', () => ({
 }));
 jest.mock('@/features/favorites/components/FavoriteLibraryToolbar', () => ({
   EMPTY_FAVORITE_COUNTS: {},
-  FavoriteLibraryToolbar: ({ action }: { action: React.ReactNode }) => (
-    <div>{action}</div>
+  FavoriteLibraryToolbar: ({
+    action,
+    onFilterChange,
+    onReviewChange,
+  }: {
+    action: React.ReactNode;
+    onFilterChange: (filter: string) => void;
+    onReviewChange: (review: string) => void;
+  }) => (
+    <div>
+      {action}
+      <button onClick={() => onFilterChange('completed')}>筛看过</button>
+      <button onClick={() => onReviewChange('unreviewed')}>筛未评价</button>
+    </div>
   ),
 }));
 jest.mock('@/components/VideoCard', () => ({
@@ -58,6 +71,7 @@ const items: FavoriteItem[] = ['a', 'b', 'c'].map((id) => ({
 jest.mock('@/features/favorites/hooks/useFavoriteLibrary', () => ({
   useFavoriteLibrary: () => ({
     items,
+    displayPage: { total: 3, libraryTotal: 3, query: '', narrowed: false },
     loading: false,
     refreshing: mockRefreshing,
     loadingMore: false,
@@ -65,10 +79,11 @@ jest.mock('@/features/favorites/hooks/useFavoriteLibrary', () => ({
     retry: mockRetry,
     skeletonCount: 3,
     clearFavorites: jest.fn(),
+    canOperate: !mockRefreshing,
     counts: {},
     total: 3,
     libraryTotal: 3,
-    hasMore: false,
+    hasMore: mockHasMore,
     loadMore: jest.fn(),
   }),
 }));
@@ -76,6 +91,7 @@ jest.mock('@/features/favorites/hooks/useFavoriteLibrary', () => ({
 beforeEach(() => {
   mockRetry.mockReset();
   mockRefreshing = false;
+  mockHasMore = false;
   mockError = null;
   mockBatch.mockReset().mockResolvedValue({ affected: 1 });
 });
@@ -88,6 +104,7 @@ it('刷新时列表设置 inert，结束后恢复交互', () => {
   );
   expect(container.querySelector('[inert]')).toHaveClass('opacity-60');
   mockRefreshing = false;
+  mockHasMore = false;
   rerender(<FavoritesPageClient />);
   expect(container.querySelector('[inert]')).toBeNull();
 });
@@ -133,7 +150,10 @@ it('全选后按当前筛选提交并带上排除项，移出前先确认', asyn
   await waitFor(() =>
     expect(mockBatch).toHaveBeenCalledWith({
       action: 'remove',
-      target: { match: { q: '', filter: 'all' }, exclude: ['src+a'] },
+      target: {
+        match: { q: '', filter: 'all', review: 'all' },
+        exclude: ['src+a'],
+      },
     }),
   );
 });
@@ -148,5 +168,37 @@ it('批量失败时保留选择并提示', async () => {
   expect(screen.getByRole('checkbox', { name: '作品c' })).toHaveAttribute(
     'aria-checked',
     'true',
+  );
+});
+
+it('加载失败底栏调用重试而不是继续加载', () => {
+  mockError = '收藏加载失败，请重试';
+  mockHasMore = true;
+  render(<FavoritesPageClient />);
+  fireEvent.click(screen.getByRole('button', { name: '加载失败，点击重试' }));
+  expect(mockRetry).toHaveBeenCalledTimes(1);
+});
+
+it('双维筛选变化清空旧选择，全选仅提交当前交集', async () => {
+  render(<FavoritesPageClient />);
+  fireEvent.click(screen.getByRole('button', { name: '多选' }));
+  fireEvent.click(screen.getByRole('button', { name: '全选' }));
+  fireEvent.click(screen.getByRole('button', { name: '筛看过' }));
+  expect(screen.getByText('已选 0 部')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '全选' }));
+  fireEvent.click(screen.getByRole('button', { name: '筛未评价' }));
+  expect(screen.getByText('已选 0 部')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '全选' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: '作品a' }));
+  fireEvent.click(screen.getByRole('button', { name: '看过' }));
+  await waitFor(() =>
+    expect(mockBatch).toHaveBeenCalledWith({
+      action: 'set-status',
+      watchStatus: 'completed',
+      target: {
+        match: { q: '', filter: 'completed', review: 'unreviewed' },
+        exclude: ['src+a'],
+      },
+    }),
   );
 });

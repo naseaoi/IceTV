@@ -59,10 +59,19 @@ const SEARCH_AGGREGATE_CACHE =
   });
 const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
 const SHARED_SEARCH_PAGES = createSharedServerCache<SearchPageLoadResult>({
-  name: 'search-page-shared-v1',
+  name: 'search-page-shared-v2',
   ...getServerCacheBudget('search-empty-pages'),
-  freshMs: 60_000,
+  freshMs: SEARCH_EMPTY_CACHE_TTL_MS,
   staleMs: 0,
+  // 共享层保留小型近端预算；非空结果的数据库寿命与成功页对齐。
+  // 无 stale 避免本地页刷新再次拿到旧共享值、推迟真正回源。
+  getTtl: (entry) => ({
+    freshMs:
+      !entry.failed && entry.results.length > 0
+        ? SEARCH_CACHE_TTL_MS
+        : SEARCH_EMPTY_CACHE_TTL_MS,
+    staleMs: 0,
+  }),
 });
 // 特殊源只共享非空搜索结果；失败由 loader 抛出，不写入缓存
 const SPECIAL_SOURCE_SEARCHES = createSharedServerCache<SearchResult[]>({

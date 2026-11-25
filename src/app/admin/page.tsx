@@ -17,6 +17,7 @@ import {
   AdminSettingsGroup,
 } from '@/features/admin/components/AdminSettings';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
+import { useTrafficTabVisible } from '@/features/admin/components/AdminTrafficTabProvider';
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -60,8 +61,10 @@ function AdminLoadingSkeleton({
   activeTab?: AdminTabId;
 }) {
   const { session } = useAuthSession();
+  const trafficTabVisible = useTrafficTabVisible();
   const tabs = getVisibleTabs(
     session.status === 'authenticated' && session.role === 'owner',
+    trafficTabVisible,
   );
   return (
     <AdminShell
@@ -142,8 +145,12 @@ function AdminPageClient() {
         ? 'owner'
         : null),
   );
-  const visibleTabs = getVisibleTabs(isOwnerRole);
-  const { activeTab, setActiveTab } = useAdminTab(isOwnerRole);
+  const trafficTabVisible = useTrafficTabVisible();
+  const visibleTabs = getVisibleTabs(isOwnerRole, trafficTabVisible);
+  const { activeTab, setActiveTab } = useAdminTab(
+    isOwnerRole,
+    trafficTabVisible,
+  );
   const activeSaveAction =
     activeTab === 'config-file'
       ? {
@@ -221,7 +228,7 @@ function AdminPageClient() {
     };
   }, [hasUnsavedChanges]);
 
-  const { fetchConfig, resetConfig } = useAdminPageActions({
+  const { fetchConfig, refreshConfig, resetConfig } = useAdminPageActions({
     setConfig,
     setRole,
     setError,
@@ -288,7 +295,6 @@ function AdminPageClient() {
     await withLoading('resetConfig', async () => {
       try {
         await resetConfig();
-        await fetchConfig();
         setShowResetConfigModal(false);
       } catch (err) {
         showError(err, '重置失败');
@@ -339,7 +345,7 @@ function AdminPageClient() {
         activeTab={activeTab}
         config={config}
         role={role}
-        refreshConfig={fetchConfig}
+        refreshConfig={refreshConfig}
         onSiteConfigSavingChange={setSiteConfigSaving}
         onRuntimeParamsSavingChange={setRuntimeParamsSaving}
         onConfigFileSavingChange={setConfigFileSaving}

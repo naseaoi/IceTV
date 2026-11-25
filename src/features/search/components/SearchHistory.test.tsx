@@ -1,6 +1,13 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
+import { cacheManager } from '@/lib/db.client.cache';
+
 import SearchHistory from './SearchHistory';
+import { SearchHistorySkeleton } from './SearchPageSkeleton';
+
+jest.mock('@/lib/db.client.cache', () => ({
+  cacheManager: { getCachedSearchHistory: jest.fn(() => null) },
+}));
 
 const push = jest.fn();
 const deleteSearchHistory = jest.fn().mockResolvedValue(undefined);
@@ -84,5 +91,50 @@ describe('SearchHistory', () => {
       `/search?q=${encodeURIComponent('芙莉莲')}`,
     );
     expect(deleteSearchHistory).not.toHaveBeenCalled();
+  });
+});
+
+describe('搜索历史加载条数', () => {
+  afterEach(() => jest.mocked(cacheManager.getCachedSearchHistory).mockReset());
+
+  it('未知时转圈，已知空缓存时不占位', () => {
+    const { container, unmount } = render(<SearchHistorySkeleton />);
+    expect(screen.getByRole('status', { name: '加载搜索历史' })).toHaveClass(
+      'ice-spinner',
+    );
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0);
+    unmount();
+    jest.mocked(cacheManager.getCachedSearchHistory).mockReturnValue([]);
+    const empty = render(<SearchHistorySkeleton />);
+    expect(empty.container).toBeEmptyDOMElement();
+  });
+
+  it('按缓存条数占位，显式已知条数优先', () => {
+    jest
+      .mocked(cacheManager.getCachedSearchHistory)
+      .mockReturnValue(['一', '二']);
+    const { container, rerender } = render(<SearchHistorySkeleton />);
+    expect(container.querySelectorAll('.flex-wrap > .skeleton')).toHaveLength(
+      2,
+    );
+    rerender(<SearchHistorySkeleton count={1} />);
+    expect(container.querySelectorAll('.flex-wrap > .skeleton')).toHaveLength(
+      1,
+    );
+    rerender(<SearchHistorySkeleton count={0} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('历史组件加载时沿用已知列表条数', () => {
+    const { container } = render(
+      <SearchHistory
+        loading
+        searchHistory={['一', '二', '三']}
+        setSearchQuery={jest.fn()}
+      />,
+    );
+    expect(container.querySelectorAll('.flex-wrap > .skeleton')).toHaveLength(
+      3,
+    );
   });
 });

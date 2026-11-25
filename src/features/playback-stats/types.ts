@@ -6,6 +6,7 @@ import type {
 } from '@/lib/types';
 import type { WatchLevelUp } from '@/lib/watch-level-types';
 
+export const PLAYBACK_HISTORY_PAGE_SIZE = 10;
 export const PLAYBACK_TOP_WORKS_LIMIT = 10;
 
 export const PLAYBACK_BUCKET_MS = 15 * 60 * 1000;

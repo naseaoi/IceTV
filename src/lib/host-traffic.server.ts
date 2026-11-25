@@ -96,6 +96,13 @@ export async function getHostTrafficStatus(
   });
 }
 
+// 设了额度时统计不可用会告警并跳到流量页，所以有额度就保留该页
+export async function isTrafficTabVisible(): Promise<boolean> {
+  const config = await getConfigForRead();
+  if (normalizeTrafficSettings(config.TrafficConfig).QuotaGB > 0) return true;
+  return (await getHostTrafficStatus(config)).available;
+}
+
 // 中转保护不能因统计异常反过来挡住播放，出错一律放行
 export async function isServerRelayPaused(
   config?: Readonly<AdminConfig>,

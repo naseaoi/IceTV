@@ -1,7 +1,9 @@
 'use client';
+import { Flag } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ExpandableText from '@/components/ExpandableText';
+import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { REPORT_REASON_LABELS } from '@/components/ReportDialog';
 import {
@@ -9,6 +11,7 @@ import {
   moderateReviewReport,
 } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { formatRelativeTime } from '@/lib/relative-time';
 import { type AdminReviewReportItem, REVIEW_REPORT_REASONS } from '@/lib/types';
 import { getErrorMessage } from '@/lib/user-facing-error';
@@ -170,15 +173,23 @@ export default function ReviewReports({
           </div>
         </article>
       ))}
-      {loading && (
-        <p role='status' className='py-8 text-center text-sm text-gray-500'>
-          加载举报中…
-        </p>
-      )}
+      {loading &&
+        (items.length === 0 ? (
+          <ListLoadingState
+            className={ADMIN_LIST_EMPTY_CLASS}
+            label='加载举报中…'
+          />
+        ) : (
+          <p role='status' className='py-8 text-center text-sm text-gray-500'>
+            加载举报中…
+          </p>
+        ))}
       {!loading && !error && items.length === 0 && (
-        <p className='py-12 text-center text-sm text-gray-500'>
-          暂无待处理举报
-        </p>
+        <ListEmptyState
+          className={ADMIN_LIST_EMPTY_CLASS}
+          icon={<Flag />}
+          label='暂无待处理举报'
+        />
       )}
       {!loading && (cursor || error) && (
         <button

@@ -1,14 +1,13 @@
 'use client';
 
-import type {
-  PlaybackHistoryResponse,
-  PlaybackPeriodStats,
-  PlaybackPeriodType,
+import {
+  type PlaybackHistoryResponse,
+  type PlaybackPeriodStats,
+  type PlaybackPeriodType,
+  PLAYBACK_HISTORY_PAGE_SIZE,
 } from '@/features/playback-stats/types';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { writeListCountCookie } from '@/lib/list-count-cookies';
-
-const PLAYBACK_HISTORY_PAGE_SIZE = 10;
 
 const playbackPeriodCache = new Map<string, PlaybackPeriodStats>();
 

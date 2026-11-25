@@ -6,6 +6,8 @@ import {
   Copy,
   Eraser,
   Plus,
+  SearchX,
+  Ticket,
   Trash2,
   Users,
   X,
@@ -19,6 +21,11 @@ import {
   useState,
 } from 'react';
 
+import {
+  ListEmptySkeleton,
+  ListEmptyState,
+  ListLoadingState,
+} from '@/components/ListState';
 import Select from '@/components/Select';
 import SkeletonText from '@/components/SkeletonText';
 import Spinner from '@/components/Spinner';
@@ -54,7 +61,7 @@ export interface InviteCodeListState {
   activeCount: number;
   inactiveCount: number;
   nextCursor: string | null;
-  // 骨架行数依据；未知时按 1 行
+  // 骨架行数依据；未知时转圈，已知为零时显示空状态骨架
   expectedCount?: number;
   loading: boolean;
   error: string;
@@ -87,6 +94,7 @@ const INVITE_LIST_CLASS =
   'max-h-80 divide-y divide-gray-200 dark:divide-white/[0.06]';
 // 列表限高 max-h-80（320px）约容纳 5.5 行，多出的骨架行被裁掉
 const MAX_SKELETON_ROWS = 6;
+const INVITE_EMPTY_CLASS = 'px-4 py-8';
 const INVITE_META_TEXT_CLASS = 'mt-0.5 text-xs';
 const SECTION_TITLE_CLASS =
   'text-sm font-semibold text-gray-900 dark:text-gray-100';
@@ -549,7 +557,12 @@ function InviteCodeRow({
   );
 }
 
-function InviteCodeRowsSkeleton({ count }: { count: number }) {
+function InviteCodeRowsSkeleton({ count }: { count?: number }) {
+  if (count === undefined)
+    return (
+      <ListLoadingState label='加载邀请码' className={INVITE_EMPTY_CLASS} />
+    );
+  if (count === 0) return <ListEmptySkeleton className={INVITE_EMPTY_CLASS} />;
   return (
     <div
       role='status'
@@ -623,8 +636,8 @@ export function InviteCodesDialog({
     loading,
     error,
   } = inviteList;
-  const expectedCount = inviteList.expectedCount ?? 1;
-  const initialLoading = loading && items.length === 0 && expectedCount > 0;
+  const expectedCount = inviteList.expectedCount;
+  const initialLoading = loading && items.length === 0;
   const { copiedKey, copy } = useCopyFeedback();
 
   return (
@@ -676,9 +689,12 @@ export function InviteCodesDialog({
                 }
                 ariaLabel='筛选邀请码状态'
                 variant='pill'
+                align='end'
+                showSelectedIcon={false}
                 options={[
                   { value: 'all', label: '全部' },
                   { value: 'active', label: `有效 ${activeCount}` },
+                  { value: 'unused', label: '未使用' },
                   { value: 'expired', label: '已过期' },
                   { value: 'exhausted', label: '已用尽' },
                 ]}
@@ -704,11 +720,15 @@ export function InviteCodesDialog({
             ) : initialLoading ? (
               <InviteCodeRowsSkeleton count={expectedCount} />
             ) : items.length === 0 ? (
-              <p className='px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400'>
-                {inviteFilter === 'all'
-                  ? '还没有邀请码'
-                  : '没有符合条件的邀请码'}
-              </p>
+              <ListEmptyState
+                className={INVITE_EMPTY_CLASS}
+                icon={inviteFilter === 'all' ? <Ticket /> : <SearchX />}
+                label={
+                  inviteFilter === 'all'
+                    ? '还没有邀请码'
+                    : '没有符合条件的邀请码'
+                }
+              />
             ) : (
               <ul
                 aria-label='邀请码列表'

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable */
 // 根据 NEXT_PUBLIC_SITE_NAME 动态生成 manifest.json
 
 const fs = require('fs');
@@ -12,6 +11,23 @@ const manifestPath = path.join(publicDir, 'manifest.json');
 
 // 从环境变量获取站点名称
 const siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'IceTV';
+
+// 与 src/lib/site-icon.ts 一致：图标地址带应用版本，换图后长缓存随发版失效
+function resolveIconVersion() {
+  const explicitVersion = process.env.NEXT_PUBLIC_APP_VERSION?.trim();
+  if (explicitVersion) return explicitVersion;
+
+  // 运行时镜像只带 scripts/ 不带 src/，start.js 每次启动都会执行本脚本，版本只能取镜像 ENV；
+  // 本地构建与开发没有注入版本，按 next.config.js 的同一规则解析
+  const { resolveAppVersion } = require('../src/lib/build-version');
+  return resolveAppVersion({
+    rootDir: projectRoot,
+    packageVersion: require('../package.json').version,
+  });
+}
+
+const iconVersion = encodeURIComponent(resolveIconVersion());
+const icon = (file) => `/icons/${file}?v=${iconVersion}`;
 
 // manifest.json 模板
 const manifestTemplate = {
@@ -26,34 +42,34 @@ const manifestTemplate = {
   'apple-mobile-web-app-status-bar-style': 'black',
   icons: [
     {
-      src: '/icons/icon-192x192.png',
+      src: icon('icon-192x192.png'),
       sizes: '192x192',
       type: 'image/png',
     },
     {
-      src: '/icons/icon-256x256.png',
+      src: icon('icon-256x256.png'),
       sizes: '256x256',
       type: 'image/png',
     },
     {
-      src: '/icons/icon-384x384.png',
+      src: icon('icon-384x384.png'),
       sizes: '384x384',
       type: 'image/png',
     },
     {
-      src: '/icons/icon-512x512.png',
+      src: icon('icon-512x512.png'),
       sizes: '512x512',
       type: 'image/png',
     },
     // 安卓启动器按 maskable 图标裁切，图形须在中心 80% 的安全区内
     {
-      src: '/icons/icon-maskable-192x192.png',
+      src: icon('icon-maskable-192x192.png'),
       sizes: '192x192',
       type: 'image/png',
       purpose: 'maskable',
     },
     {
-      src: '/icons/icon-maskable-512x512.png',
+      src: icon('icon-maskable-512x512.png'),
       sizes: '512x512',
       type: 'image/png',
       purpose: 'maskable',

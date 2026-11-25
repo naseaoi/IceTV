@@ -37,6 +37,33 @@ describe('cover image cache', () => {
     flushCoverImageCacheForTests();
   });
 
+  it.each(['loaded', 'failed'] as const)(
+    'evicts the oldest %s keys after exceeding 500 records',
+    (state) => {
+      const cache = loadCacheModule();
+      const mark =
+        state === 'loaded'
+          ? cache.markCoverImagesLoaded
+          : cache.markCoverImagesFailed;
+      const has =
+        state === 'loaded'
+          ? cache.isCoverImageCached
+          : cache.isCoverImageFailed;
+      const keys = Array.from({ length: 500 }, (_, i) => `cover-${i}`);
+      mark(keys);
+      expect(has([keys[0]])).toBe(true);
+      mark(['overflow']);
+      cache.flushCoverImageCacheForTests();
+      const persisted = JSON.parse(
+        sessionStorage.getItem(`icetv:cover-image-${state}`) || '[]',
+      );
+      expect(persisted).toHaveLength(250);
+      expect(has([keys[1]])).toBe(false);
+      expect(has(['overflow'])).toBe(true);
+      cache.clearCoverImageCacheForTests();
+    },
+  );
+
   it('hydrates loaded image keys from session storage', () => {
     const { flushCoverImageCacheForTests, markCoverImagesLoaded } =
       loadCacheModule();

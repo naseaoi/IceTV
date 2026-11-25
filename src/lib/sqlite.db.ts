@@ -56,6 +56,7 @@ import {
   aggregateSourceUsage,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
+import { SEARCH_HISTORY_LIMIT } from '@/features/search/lib/searchQuery';
 import {
   ViewingHappinessPlans,
   viewingHappinessSchema,
@@ -99,6 +100,11 @@ import {
   socialSchema,
   updateUserProfilePlan,
 } from '@/lib/review-social-storage';
+import {
+  type SharedCacheMetadata,
+  pruneSharedCacheBatches,
+  SHARED_CACHE_MAX_ENTRIES,
+} from '@/lib/shared-cache-maintenance';
 import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
@@ -216,11 +222,11 @@ import {
   planUsernameMigration,
 } from './username-migration';
 
-const SEARCH_HISTORY_LIMIT = 20;
 const REVIEW_SQL = reviewSql('sqlite');
 
 const {
   createdAt: SQLITE_TRACKING_CREATED_AT,
+  updatedWhere: SQLITE_UPDATED_TRACKING_WHERE,
   unreadWhere: SQLITE_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(SQLITE_TRACKING_DIALECT);
 
@@ -499,6 +505,7 @@ export class LocalSqliteStorage implements IStorage {
     countPlayRecords: Database.Statement;
     getUnreadTrackingPlayRecordPage: Database.Statement;
     getUnreadTrackingPlayRecordPageAfter: Database.Statement;
+    countUpdatedPlayRecords: Database.Statement;
     countUnreadTrackingPlayRecords: Database.Statement;
     deletePlayRecord: Database.Statement;
     getVideoReview: Database.Statement;
@@ -568,6 +575,8 @@ export class LocalSqliteStorage implements IStorage {
     setSharedCache: Database.Statement;
     releaseSharedCacheLease: Database.Statement;
     pruneSharedCache: Database.Statement;
+    getSharedCacheMetadata: Database.Statement;
+    trimSharedCache: Database.Statement;
   };
 
   async backup(filename: string): Promise<string> {
@@ -669,20 +678,7 @@ export class LocalSqliteStorage implements IStorage {
     for (const statement of viewingHappinessSchema('sqlite'))
       this.db.exec(statement);
     for (const statement of listSchema('sqlite')) this.db.exec(statement);
-    runWithBusyRetry('迁移 SQLite 片单浏览量', () => {
-      this.db
-        .transaction(() => {
-          const columns = this.db.pragma('table_info(user_lists)') as {
-            name: string;
-          }[];
-          for (const column of ['view_count', 'like_count'])
-            if (!columns.some((entry) => entry.name === column))
-              this.db.exec(
-                `ALTER TABLE user_lists ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
-              );
-        })
-        .immediate();
-    });
+    this.migrateListSchema();
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
@@ -1056,6 +1052,33 @@ export class LocalSqliteStorage implements IStorage {
     }
   }
 
+  private migrateListSchema(): void {
+    runWithBusyRetry('迁移 SQLite 片单结构', () => {
+      this.db
+        .transaction(() => {
+          const columns = this.db.pragma('table_info(user_lists)') as {
+            name: string;
+          }[];
+          for (const column of ['view_count', 'like_count'])
+            if (!columns.some((entry) => entry.name === column))
+              this.db.exec(
+                `ALTER TABLE user_lists ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
+              );
+          const likeColumns = this.db.pragma('table_info(list_likes)') as {
+            name: string;
+          }[];
+          if (!likeColumns.some((entry) => entry.name === 'list_name'))
+            this.db.exec(
+              "ALTER TABLE list_likes ADD COLUMN list_name VARCHAR(30) NOT NULL DEFAULT ''",
+            );
+          this.db.exec(
+            "UPDATE list_likes SET list_name = (SELECT name FROM user_lists WHERE id = list_id) WHERE list_name = '' AND EXISTS (SELECT 1 FROM user_lists WHERE id = list_id)",
+          );
+        })
+        .immediate();
+    });
+  }
+
   private initializeSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -1257,6 +1280,7 @@ export class LocalSqliteStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS shared_cache (
         cache_key TEXT PRIMARY KEY,
         value_text TEXT NOT NULL,
+        value_bytes INTEGER NULL,
         fresh_until INTEGER NOT NULL,
         stale_until INTEGER NOT NULL,
         lease_token TEXT,
@@ -1270,6 +1294,19 @@ export class LocalSqliteStorage implements IStorage {
       CREATE INDEX IF NOT EXISTS idx_shared_cache_updated_at
         ON shared_cache (updated_at);
     `);
+    this.db
+      .transaction(() => {
+        const cacheColumns = this.db
+          .prepare('PRAGMA table_info(shared_cache)')
+          .all() as { name: string }[];
+        if (!cacheColumns.some((column) => column.name === 'value_bytes'))
+          this.db.exec(
+            'ALTER TABLE shared_cache ADD COLUMN value_bytes INTEGER NULL',
+          );
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_shared_cache_budget
+        ON shared_cache (updated_at, cache_key, lease_until, value_bytes)`);
+      })
+      .immediate();
   }
 
   private prepareStatements(): typeof this.stmts {
@@ -1332,7 +1369,7 @@ export class LocalSqliteStorage implements IStorage {
       getUpdatedPlayRecordPage: this.db.prepare(
         `SELECT record_key, record_json
          FROM play_records
-         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         WHERE username = ? AND ${SQLITE_UPDATED_TRACKING_WHERE}
          ORDER BY CAST(json_extract(record_json, '$.save_time') AS INTEGER) DESC,
                   record_key DESC
          LIMIT ?`,
@@ -1340,7 +1377,7 @@ export class LocalSqliteStorage implements IStorage {
       getUpdatedPlayRecordPageAfter: this.db.prepare(
         `SELECT record_key, record_json
          FROM play_records
-         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         WHERE username = ? AND ${SQLITE_UPDATED_TRACKING_WHERE}
            AND (
              CAST(json_extract(record_json, '$.save_time') AS INTEGER) < ?
              OR (
@@ -1376,6 +1413,11 @@ export class LocalSqliteStorage implements IStorage {
            )
          ORDER BY ${SQLITE_TRACKING_CREATED_AT} DESC, record_key DESC
          LIMIT ?`,
+      ),
+      countUpdatedPlayRecords: this.db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UPDATED_TRACKING_WHERE}`,
       ),
       countUnreadTrackingPlayRecords: this.db.prepare(
         `SELECT COUNT(*) AS count
@@ -1589,9 +1631,9 @@ export class LocalSqliteStorage implements IStorage {
       ),
       acquireSharedCacheLease: this.db.prepare(
         `INSERT INTO shared_cache (
-           cache_key, value_text, fresh_until, stale_until,
+           cache_key, value_text, value_bytes, fresh_until, stale_until,
            lease_token, lease_until, updated_at
-         ) VALUES (?, '', 0, 0, ?, ?, ?)
+         ) VALUES (?, '', 0, 0, 0, ?, ?, ?)
          ON CONFLICT(cache_key) DO UPDATE SET
            lease_token = excluded.lease_token,
            lease_until = excluded.lease_until,
@@ -1600,7 +1642,7 @@ export class LocalSqliteStorage implements IStorage {
       ),
       setSharedCache: this.db.prepare(
         `UPDATE shared_cache
-         SET value_text = ?, fresh_until = ?, stale_until = ?,
+         SET value_text = ?, value_bytes = ?, fresh_until = ?, stale_until = ?,
              lease_token = NULL, lease_until = 0, updated_at = ?
          WHERE cache_key = ? AND lease_token = ?`,
       ),
@@ -1609,12 +1651,24 @@ export class LocalSqliteStorage implements IStorage {
          SET lease_token = NULL, lease_until = 0
          WHERE cache_key = ? AND lease_token = ?`,
       ),
+      getSharedCacheMetadata: this.db.prepare(
+        `SELECT cache_key, updated_at, value_bytes
+         FROM shared_cache INDEXED BY idx_shared_cache_budget WHERE lease_until <= ?
+         ORDER BY updated_at DESC, cache_key DESC LIMIT ?`,
+      ),
+      trimSharedCache: this.db.prepare(
+        `DELETE FROM shared_cache WHERE cache_key IN (
+           SELECT cache_key FROM shared_cache
+           WHERE lease_until <= ? AND (updated_at < ? OR (updated_at = ? AND cache_key <= ?))
+           ORDER BY updated_at ASC, cache_key ASC LIMIT ?
+         )`,
+      ),
       pruneSharedCache: this.db.prepare(
         `DELETE FROM shared_cache
          WHERE cache_key IN (
            SELECT cache_key FROM shared_cache
            WHERE stale_until <= ? AND lease_until <= ?
-           ORDER BY updated_at ASC LIMIT ?
+           ORDER BY stale_until ASC LIMIT ?
          )`,
       ),
     };
@@ -2388,7 +2442,7 @@ export class LocalSqliteStorage implements IStorage {
         : this.stmts.getPlayRecordPageAfter;
     const countStatement =
       filter === 'updated'
-        ? this.stmts.countUnreadTrackingPlayRecords
+        ? this.stmts.countUpdatedPlayRecords
         : this.stmts.countPlayRecords;
     const rows = (
       cursorTime !== undefined && cursorKey
@@ -2477,7 +2531,7 @@ export class LocalSqliteStorage implements IStorage {
   ): Promise<void> {
     this.db
       .prepare(favoriteReadStatement('sqlite'))
-      .run(episodes, normalizeUsername(userName), key, episodes, episodes);
+      .run(episodes, episodes, normalizeUsername(userName), key, episodes);
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
@@ -2768,10 +2822,12 @@ export class LocalSqliteStorage implements IStorage {
   ): ReturnType<IStorage['countPlazaLists']> {
     return this.runListPlan(new ListPlans('sqlite').countPlazaLists(...args));
   }
-  async getListItemCount(
-    ...args: Parameters<IStorage['getListItemCount']>
-  ): ReturnType<IStorage['getListItemCount']> {
-    return this.runListPlan(new ListPlans('sqlite').getListItemCount(...args));
+  async getListHeaderPreview(
+    ...args: Parameters<IStorage['getListHeaderPreview']>
+  ): ReturnType<IStorage['getListHeaderPreview']> {
+    return this.runListPlan(
+      new ListPlans('sqlite').getListHeaderPreview(...args),
+    );
   }
   async setListLike(
     ...args: Parameters<IStorage['setListLike']>
@@ -2792,6 +2848,16 @@ export class LocalSqliteStorage implements IStorage {
     ...args: Parameters<IStorage['getLists']>
   ): ReturnType<IStorage['getLists']> {
     return this.runListPlan(new ListPlans('sqlite').getLists(...args));
+  }
+  async getSavedLists(
+    ...args: Parameters<IStorage['getSavedLists']>
+  ): ReturnType<IStorage['getSavedLists']> {
+    return this.runListPlan(new ListPlans('sqlite').getSavedLists(...args));
+  }
+  async countSavedLists(
+    ...args: Parameters<IStorage['countSavedLists']>
+  ): ReturnType<IStorage['countSavedLists']> {
+    return this.runListPlan(new ListPlans('sqlite').countSavedLists(...args));
   }
   async countUserLists(
     ...args: Parameters<IStorage['countUserLists']>
@@ -4141,6 +4207,7 @@ export class LocalSqliteStorage implements IStorage {
     return (
       this.stmts.setSharedCache.run(
         value,
+        Buffer.byteLength(value),
         freshUntil,
         staleUntil,
         now,
@@ -4162,23 +4229,32 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async pruneSharedCache(now: number, limit: number): Promise<void> {
-    this.stmts.pruneSharedCache.run(
-      now,
-      now,
-      Math.max(1, Math.min(1000, Math.floor(limit))),
+    await pruneSharedCacheBatches(
+      limit,
+      async (batchSize) =>
+        this.stmts.pruneSharedCache.run(now, now, batchSize).changes,
+      async () =>
+        this.stmts.getSharedCacheMetadata.all(
+          now,
+          SHARED_CACHE_MAX_ENTRIES + 1,
+        ) as SharedCacheMetadata[],
+      async (boundary, batchSize) =>
+        this.stmts.trimSharedCache.run(
+          now,
+          boundary.updated_at,
+          boundary.updated_at,
+          boundary.cache_key,
+          batchSize,
+        ).changes,
+      async (keys) => {
+        this.db
+          .prepare(
+            `UPDATE shared_cache SET value_bytes = length(CAST(value_text AS BLOB))
+          WHERE cache_key IN (${keys.map(() => '?').join(',')}) AND value_bytes IS NULL`,
+          )
+          .run(...keys);
+      },
     );
-    this.db
-      .prepare(
-        `DELETE FROM shared_cache WHERE cache_key IN (
-      SELECT cache_key FROM (
-        SELECT cache_key,
-          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
-          SUM(length(CAST(value_text AS BLOB))) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
-        FROM shared_cache WHERE lease_until <= ?
-      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
-    )`,
-      )
-      .run(now);
   }
 
   async renewSharedCacheLease(

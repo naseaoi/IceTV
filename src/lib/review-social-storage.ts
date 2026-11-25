@@ -536,7 +536,13 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     username: string,
     query: MyReviewQuery = {},
   ): Promise<MyVideoReviewPage> {
-    const { q, filter, sort, after } = validateMyReviewQuery(query);
+    const {
+      q,
+      filter,
+      content: contentFilter,
+      sort,
+      after,
+    } = validateMyReviewQuery(query);
     const { rating, title } = reviewSql(this.sql.dialect);
     const content =
       this.sql.dialect === 'sqlite'
@@ -546,7 +552,45 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       this.sql.dialect === 'sqlite'
         ? `${title} || ' ' || ${content}`
         : `CONCAT(${title}, ' ', ${content})`;
-    const where = `username = ? AND (? = '' OR LOWER(${haystack}) LIKE LOWER(?) ESCAPE '!')`;
+    // 与 String.trim() 使用相同空白集合，覆盖导入或旧存储中的未裁剪正文。
+    const whitespace = String.fromCharCode(
+      9,
+      10,
+      11,
+      12,
+      13,
+      32,
+      160,
+      5760,
+      8192,
+      8193,
+      8194,
+      8195,
+      8196,
+      8197,
+      8198,
+      8199,
+      8200,
+      8201,
+      8202,
+      8232,
+      8233,
+      8239,
+      8287,
+      12288,
+      65279,
+    );
+    const hasText =
+      this.sql.dialect === 'sqlite'
+        ? `LENGTH(TRIM(COALESCE(${content}, ''), '${whitespace}')) > 0`
+        : `REGEXP_LIKE(COALESCE(${content}, ''), '[^${whitespace}]')`;
+    const contentCondition = {
+      all: '',
+      rating: ` AND ${rating} IS NOT NULL AND NOT (${hasText})`,
+      text: ` AND ${rating} IS NULL AND (${hasText})`,
+      both: ` AND ${rating} IS NOT NULL AND (${hasText})`,
+    }[contentFilter];
+    const where = `username = ? AND (? = '' OR LOWER(${haystack}) LIKE LOWER(?) ESCAPE '!')${contentCondition}`;
     const params = [
       normalizeUsername(username),
       q,
@@ -556,9 +600,8 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       all: number;
       public: number;
       private: number;
-      text: number;
     }>(
-      `SELECT COUNT(*) AS \`all\`, COALESCE(SUM(is_public), 0) AS \`public\`, COALESCE(SUM(1-is_public), 0) AS \`private\`, COALESCE(SUM(CASE WHEN ${rating} IS NULL THEN 1 ELSE 0 END), 0) AS \`text\` FROM video_reviews WHERE ${where}`,
+      `SELECT COUNT(*) AS \`all\`, COALESCE(SUM(is_public), 0) AS \`public\`, COALESCE(SUM(1-is_public), 0) AS \`private\` FROM video_reviews WHERE ${where}`,
       params,
     );
     // 整数排名统一降序；无评分在高低分两种排序下都沉底。
@@ -571,9 +614,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         ? ' AND is_public = 1'
         : filter === 'private'
           ? ' AND is_public = 0'
-          : filter === 'text'
-            ? ` AND ${rating} IS NULL`
-            : '';
+          : '';
     const rows = await this.sql.rows<VideoReviewRow>(
       `SELECT review_json FROM video_reviews WHERE ${where}${filtered}
        ${after ? `AND (${rank} < ? OR (${rank} = ? AND (updated_at < ? OR (updated_at = ? AND (title_norm < ? OR (title_norm = ? AND year < ?))))))` : ''}
@@ -602,16 +643,23 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       nextCursor:
         rows.length > MY_REVIEWS_PAGE_SIZE && last
           ? socialCursor([
-              sort === 'updated'
-                ? last.updated_at
-                : last.rating === null
-                  ? 0
-                  : sort === 'high'
-                    ? Math.round(last.rating * 10)
-                    : 101 - Math.round(last.rating * 10),
-              String(last.updated_at),
-              last.title_norm,
-              last.year,
+              'my-v2',
+              q,
+              filter,
+              contentFilter,
+              sort,
+              socialCursor([
+                sort === 'updated'
+                  ? last.updated_at
+                  : last.rating === null
+                    ? 0
+                    : sort === 'high'
+                      ? Math.round(last.rating * 10)
+                      : 101 - Math.round(last.rating * 10),
+                String(last.updated_at),
+                last.title_norm,
+                last.year,
+              ]),
             ])
           : null,
       total: await this.getMyVideoReviewCount(username),
@@ -619,7 +667,6 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         all: Number(counts.all),
         public: Number(counts.public),
         private: Number(counts.private),
-        text: Number(counts.text),
       },
     };
   }

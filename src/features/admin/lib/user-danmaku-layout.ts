@@ -3,8 +3,8 @@ export const USER_DANMAKU_ROW_CLASS = 'flex items-center gap-3 px-4 py-3';
 export const USER_DANMAKU_TEXT_CLASS = 'text-sm leading-5';
 export const USER_DANMAKU_META_CLASS = 'mt-0.5 text-xs leading-4';
 export const USER_DANMAKU_ACTION_CLASS = 'h-8 w-8';
-export const USER_DANMAKU_TOOLBAR_CLASS =
-  'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between';
+export const USER_DANMAKU_HEADER_CLASS =
+  'flex h-10 items-center gap-3 rounded-t-xl bg-gray-50 px-4 text-xs text-gray-500 dark:bg-white/[0.03] dark:text-gray-400';
 
 export function formatUserDanmakuEpisode(key: string): string {
   if (key.startsWith('dandan:')) return `弹幕集 ${key.slice(7)}`;

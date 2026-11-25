@@ -19,6 +19,7 @@ jest.mock('@/lib/db', () => ({
     ensureUserProfile: jest.fn(),
     updateUserProfile: jest.fn(),
     getProfileShowcase: jest.fn(),
+    getUserOAuthIdentity: jest.fn(),
     isNicknameAvailable: jest.fn(),
     getUserProfileById: jest.fn(),
     getUserProfileView: jest.fn(),
@@ -95,6 +96,7 @@ it('returns only public profile fields and validates updates', async () => {
   expect(await (await profile.GET(request())).json()).toEqual({
     profileId: 'Reader012345',
     nickname: 'Reader',
+    suggestedNickname: null,
     avatarSeed: null,
     level: 1,
     libraryVisibility: 0,
@@ -128,6 +130,141 @@ it('returns only public profile fields and validates updates', async () => {
   const duplicate = await profile.PUT(request('PUT', { nickname: 'NewName' }));
   expect(duplicate.status).toBe(409);
   expect(await duplicate.json()).toEqual({ error: '昵称已被使用' });
+});
+
+describe('LinuxDo 建议昵称', () => {
+  beforeEach(() => {
+    db.ensureUserProfile.mockResolvedValue({
+      username: 'reader',
+      profile_id: 'Reader012345',
+      nickname: null,
+      favorites_public: 0,
+    });
+    db.getUserOAuthIdentity.mockResolvedValue({
+      provider: 'linuxdo',
+      providerUsername: 'LinuxReader',
+    });
+    db.isNicknameAvailable.mockResolvedValue(true);
+  });
+
+  it('只返回建议，保存前保持昵称为空', async () => {
+    const response = await profile.GET(request());
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(await response.json()).toMatchObject({
+      nickname: null,
+      suggestedNickname: 'LinuxReader',
+    });
+    expect(db.getUserOAuthIdentity).toHaveBeenCalledWith('reader');
+    expect(db.isNicknameAvailable).toHaveBeenCalledWith(
+      'LinuxReader',
+      'reader',
+    );
+    expect(db.updateUserProfile).not.toHaveBeenCalled();
+  });
+
+  it('已有昵称时跳过建议与绑定查询', async () => {
+    db.ensureUserProfile.mockResolvedValue({ nickname: '已有昵称' });
+    expect(await (await profile.GET(request())).json()).toMatchObject({
+      nickname: '已有昵称',
+      suggestedNickname: null,
+    });
+    expect(db.getUserOAuthIdentity).not.toHaveBeenCalled();
+    expect(db.isNicknameAvailable).not.toHaveBeenCalled();
+  });
+
+  it('未绑定时保持空昵称', async () => {
+    db.getUserOAuthIdentity.mockResolvedValue(null);
+    expect(
+      (await (await profile.GET(request())).json()).suggestedNickname,
+    ).toBeNull();
+    expect(db.isNicknameAvailable).not.toHaveBeenCalled();
+  });
+
+  it('重名按 _ld、_ld2 顺序选择首个可用值', async () => {
+    db.isNicknameAvailable
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    expect(
+      (await (await profile.GET(request())).json()).suggestedNickname,
+    ).toBe('LinuxReader_ld2');
+    expect(db.isNicknameAvailable.mock.calls).toEqual([
+      ['LinuxReader', 'reader'],
+      ['LinuxReader_ld', 'reader'],
+      ['LinuxReader_ld2', 'reader'],
+    ]);
+  });
+
+  it.each([
+    ['  ＡＢ. c!  ', 'ABc'],
+    ['读'.repeat(20), '读'.repeat(16)],
+    ['𠮷'.repeat(20), '𠮷'.repeat(16)],
+  ])('合法化用户名 %s 为 %s', async (providerUsername, expected) => {
+    db.getUserOAuthIdentity.mockResolvedValue({
+      provider: 'linuxdo',
+      providerUsername,
+    });
+    expect(
+      (await (await profile.GET(request())).json()).suggestedNickname,
+    ).toBe(expected);
+  });
+
+  it.each(['a', '!!!', ' ＡＤＭＩＮ ', '站长'])(
+    '合法化后仍无效时保持空值：%s',
+    async (providerUsername) => {
+      db.getUserOAuthIdentity.mockResolvedValue({
+        provider: 'linuxdo',
+        providerUsername,
+      });
+      expect(
+        (await (await profile.GET(request())).json()).suggestedNickname,
+      ).toBeNull();
+      expect(db.isNicknameAvailable).not.toHaveBeenCalled();
+    },
+  );
+
+  it('为后缀留出字符长度，超过 9 次后继续递增', async () => {
+    db.getUserOAuthIdentity.mockResolvedValue({
+      provider: 'linuxdo',
+      providerUsername: '𠮷'.repeat(20),
+    });
+    db.isNicknameAvailable.mockImplementation(async (name: string) =>
+      name.endsWith('_ld10'),
+    );
+    expect(
+      (await (await profile.GET(request())).json()).suggestedNickname,
+    ).toBe(`${'𠮷'.repeat(11)}_ld10`);
+    expect(db.isNicknameAvailable.mock.calls[1][0]).toBe(
+      `${'𠮷'.repeat(13)}_ld`,
+    );
+  });
+
+  it('100 个候选全部占用时保持空值', async () => {
+    db.isNicknameAvailable.mockResolvedValue(false);
+    expect(
+      (await (await profile.GET(request())).json()).suggestedNickname,
+    ).toBeNull();
+    expect(db.isNicknameAvailable).toHaveBeenCalledTimes(100);
+    expect(db.isNicknameAvailable).toHaveBeenLastCalledWith(
+      'LinuxReader_ld99',
+      'reader',
+    );
+  });
+
+  it('查询失败显式返回错误，不泄露数据库异常', async () => {
+    const log = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    db.isNicknameAvailable.mockRejectedValue(
+      new Error('private database error'),
+    );
+    try {
+      const response = await profile.GET(request());
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: '操作失败，请稍后重试' });
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
 
 it('allows reserved nicknames only for the owner', async () => {

@@ -23,7 +23,9 @@ import { createPortal } from 'react-dom';
 
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
+import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import MessageAnnouncements from '@/components/messages/MessageAnnouncements';
+import { MESSAGE_STATE_CLASS } from '@/components/messages/MessageAnnouncements';
 import MessageReviewDetail, {
   type ReviewMessage,
   isReviewMessage,
@@ -487,12 +489,12 @@ function MessageList({
       )}
       {feed.map(renderRow)}
       {items.length === 0 && (
-        <div
-          data-list-motion-key={EMPTY_KEY}
-          className='flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center text-gray-400'
-        >
-          <Inbox className='h-10 w-10' />
-          <p className='text-sm'>暂无新消息</p>
+        <div data-list-motion-key={EMPTY_KEY} className='flex flex-1 flex-col'>
+          <ListEmptyState
+            icon={<Inbox />}
+            label='暂无新消息'
+            className={MESSAGE_STATE_CLASS}
+          />
         </div>
       )}
       {hasMore && (
@@ -700,9 +702,7 @@ export default function MessagePanel({
           ) : view.kind === 'capsule' ? (
             <CapsuleLetter letter={view.message} onNavigate={onClose} />
           ) : loading && page.items.length === 0 ? (
-            <div className='flex min-h-full items-center justify-center text-gray-400'>
-              <Spinner className='h-6 w-6' />
-            </div>
+            <ListLoadingState className={MESSAGE_STATE_CLASS} />
           ) : loadError && page.items.length === 0 ? (
             <div className='flex min-h-full flex-col items-center justify-center gap-3 px-4 text-center'>
               <div className='flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500'>

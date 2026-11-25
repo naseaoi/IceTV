@@ -1,3 +1,4 @@
+export const SEARCH_HISTORY_LIMIT = 20;
 export const MAX_SEARCH_QUERY_LENGTH = 80;
 export const MIN_SEARCH_SUGGESTION_LENGTH = 2;
 

@@ -1,4 +1,4 @@
-// 「自动」模式回退成功后，同一标签页短期内优先用该通道，到期后恢复默认顺序重新尝试第三方
+// 「自动」模式回退成功后，同一标签页短期内优先用该通道，到期后恢复默认顺序
 const ROUTE_MEMORY_TTL_MS = 5 * 60 * 1000;
 
 export type DoubanRouteKind = 'data' | 'image';

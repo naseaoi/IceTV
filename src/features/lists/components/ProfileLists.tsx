@@ -1,7 +1,9 @@
 'use client';
 
+import { ListVideo } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { ListEmptySkeleton, ListEmptyState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import { fetchProfileLists } from '@/features/lists/lib/lists-client';
 import type { ListSummary } from '@/features/lists/types';
@@ -12,6 +14,8 @@ import {
   ListGridSkeleton,
   SIDEBAR_LIST_GRID_CLASS,
 } from './ListCard';
+
+const PROFILE_LISTS_EMPTY_CLASS = 'py-5 text-center';
 
 export function ProfileLists({
   profileId,
@@ -48,7 +52,10 @@ export function ProfileLists({
       />
     );
   }
-  if (!lists && skeletonCount > 0) {
+  if (!lists) {
+    if (skeletonCount === 0) {
+      return <ListEmptySkeleton className={PROFILE_LISTS_EMPTY_CLASS} />;
+    }
     return (
       <ListGridSkeleton
         count={skeletonCount}
@@ -56,11 +63,13 @@ export function ProfileLists({
       />
     );
   }
-  if (!lists || lists.length === 0) {
+  if (lists.length === 0) {
     return (
-      <div className='py-5 text-center text-gray-500 dark:text-gray-400'>
-        {isSelf ? '还没有片单' : '暂无公开片单'}
-      </div>
+      <ListEmptyState
+        icon={<ListVideo />}
+        label={isSelf ? '还没有片单' : '暂无公开片单'}
+        className={PROFILE_LISTS_EMPTY_CLASS}
+      />
     );
   }
   return (

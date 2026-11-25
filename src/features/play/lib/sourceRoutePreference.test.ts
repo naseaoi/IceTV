@@ -1,4 +1,5 @@
 import type { SourcePlaybackStat } from '@/lib/source-playback-stats';
+import { sourceWorkFailureKey } from '@/lib/source-work-failures';
 
 import {
   type SourceSelectionContext,
@@ -7,7 +8,7 @@ import {
 } from './sourceRoutePreference';
 
 const now = Date.now();
-const source = (key: string) => ({ source: key });
+const source = (key: string) => ({ source: key, id: `${key}-id` });
 const context: SourceSelectionContext = {
   proxyModes: {
     relay: 'server',
@@ -26,6 +27,44 @@ const context: SourceSelectionContext = {
 const stats = new Map<string, SourcePlaybackStat>();
 
 describe('client route preference', () => {
+  it('demotes the failed pair ahead of reliability while preserving the other ordering', () => {
+    const failed = source('auto');
+    const anotherWork = { ...failed, id: 'another-work' };
+    const input = [failed, source('relay'), anotherWork, source('browser')];
+    const failures = new Set([sourceWorkFailureKey(failed.source, failed.id)]);
+    const history = new Map([
+      [
+        'auto',
+        {
+          startupMs: 100,
+          successes: 5,
+          failures: 0,
+          manualSelections: 0,
+          lastUsedAt: now,
+        },
+      ],
+    ]);
+    const remaining = input.filter((item) => item !== failed);
+    expect(
+      preferDirectRouteSources(input, context, history, now, failures),
+    ).toEqual([
+      ...preferDirectRouteSources(remaining, context, history, now),
+      failed,
+    ]);
+    expect(
+      preferDirectRouteSources([failed], context, history, now, failures),
+    ).toEqual([failed]);
+    expect(
+      preferDirectRouteSources(
+        input,
+        { proxyModes: {}, healthTiers: {} },
+        stats,
+        now,
+        failures,
+      ),
+    ).toEqual([source('relay'), anotherWork, source('browser'), failed]);
+  });
+
   it('prefers all non-server modes within a health tier without mutating input', () => {
     const input = ['relay', 'auto', 'missing', 'poor', 'browser'].map(source);
     expect(

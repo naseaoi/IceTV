@@ -28,15 +28,19 @@ function setup() {
         requests.push({ queryKey, cursor, signal, resolve, reject });
       }),
   );
+  const renders: ReturnType<typeof usePagedQuery<Page>>[] = [];
   const hook = renderHook(
-    ({ scopeKey, queryKey, enabled }) =>
-      usePagedQuery({
+    ({ scopeKey, queryKey, enabled }) => {
+      const result = usePagedQuery({
         scopeKey,
         queryKey,
         enabled,
         fetchPage: (cursor, signal) => fetchPage(queryKey, cursor, signal),
         getItemKey: (item) => item.id,
-      }),
+      });
+      renders.push(result);
+      return result;
+    },
     { initialProps: { scopeKey: 'user', queryKey: 'a', enabled: true } },
   );
   const switchQuery = (queryKey: string) =>
@@ -47,8 +51,89 @@ function setup() {
   const reject = async (index: number) => {
     await act(async () => requests[index].reject(new Error('network failure')));
   };
-  return { ...hook, requests, fetchPage, switchQuery, resolve, reject };
+  return {
+    ...hook,
+    requests,
+    renders,
+    fetchPage,
+    switchQuery,
+    resolve,
+    reject,
+  };
 }
+
+it('查询变化的首帧保留旧结果并立即进入刷新，切回时首帧显示快照', async () => {
+  const { renders, switchQuery, resolve } = setup();
+  await resolve(0, page(['a']));
+  renders.length = 0;
+  switchQuery('b');
+  expect(renders[0]).toMatchObject({
+    data: page(['a']),
+    currentData: null,
+    isPlaceholderData: true,
+    refreshing: true,
+    initialLoading: false,
+    loadingMore: false,
+  });
+  await resolve(1, page(['b']));
+  renders.length = 0;
+  switchQuery('a');
+  expect(renders[0]).toMatchObject({
+    data: page(['a']),
+    currentData: page(['a']),
+    isPlaceholderData: false,
+    refreshing: true,
+  });
+});
+
+it('scope 变化的首帧隔离旧数据并立即进入首次加载', async () => {
+  const { renders, rerender, resolve } = setup();
+  await resolve(0, page(['private']));
+  renders.length = 0;
+  rerender({ scopeKey: 'other-user', queryKey: 'a', enabled: true });
+  expect(renders[0]).toMatchObject({
+    data: null,
+    currentData: null,
+    initialLoading: true,
+    refreshing: false,
+    error: null,
+  });
+});
+
+it('新查询首帧忽略旧错误，保留同 scope 的展示数据', async () => {
+  const { renders, switchQuery, resolve, reject } = setup();
+  await resolve(0, page(['a']));
+  switchQuery('b');
+  await reject(1);
+  renders.length = 0;
+  switchQuery('c');
+  expect(renders[0]).toMatchObject({
+    data: page(['a']),
+    currentData: null,
+    refreshing: true,
+    error: null,
+    errorPhase: null,
+  });
+});
+
+it('停用时保留展示数据且没有请求加载态，重新启用首帧立即刷新', async () => {
+  const { renders, requests, rerender, resolve } = setup();
+  await resolve(0, page(['a']));
+  renders.length = 0;
+  rerender({ scopeKey: 'user', queryKey: 'b', enabled: false });
+  expect(renders[0]).toMatchObject({
+    data: page(['a']),
+    currentData: null,
+    initialLoading: false,
+    refreshing: false,
+    loadingMore: false,
+  });
+  expect(requests).toHaveLength(1);
+  renders.length = 0;
+  rerender({ scopeKey: 'user', queryKey: 'b', enabled: true });
+  expect(renders[0].refreshing).toBe(true);
+  expect(requests).toHaveLength(2);
+});
 
 it('rapid query switches abort old requests and only apply the latest response', async () => {
   const { result, requests, switchQuery, resolve } = setup();
@@ -277,4 +362,35 @@ it('survives StrictMode effect cleanup and setup', async () => {
   expect(signals).toHaveLength(2);
   expect(signals[0].aborted).toBe(true);
   expect(result.current.data?.items).toEqual([{ id: 'a' }]);
+});
+
+it('隔离 A 占位数据，B 首页失败后只重试 B 首页', async () => {
+  const { result, requests, switchQuery, resolve, reject } = setup();
+  await resolve(0, page(['a'], 'a-next'));
+  switchQuery('b');
+  expect(result.current.isPlaceholderData).toBe(true);
+  expect(result.current.currentData).toBeNull();
+  const updater = jest.fn(() => page(['wrong']));
+  act(() => {
+    result.current.loadMore();
+    result.current.updateData(updater);
+  });
+  expect(updater).not.toHaveBeenCalled();
+  expect(requests).toHaveLength(2);
+  await reject(1);
+  expect(result.current.errorPhase).toBe('first');
+  expect(result.current.data).toBeNull();
+  expect(result.current.currentData).toBeNull();
+  act(() => result.current.loadMore());
+  expect(requests).toHaveLength(2);
+  act(() => result.current.retry());
+  expect(requests[2]).toMatchObject({ queryKey: 'b', cursor: undefined });
+  await resolve(2, page(['b'], 'b-next'));
+  expect(result.current.currentData?.items).toEqual([{ id: 'b' }]);
+  act(() => result.current.loadMore());
+  expect(requests[3]).toMatchObject({ queryKey: 'b', cursor: 'b-next' });
+  await reject(3);
+  expect(result.current.errorPhase).toBe('more');
+  act(() => result.current.retry());
+  expect(requests[4]).toMatchObject({ queryKey: 'b', cursor: 'b-next' });
 });
