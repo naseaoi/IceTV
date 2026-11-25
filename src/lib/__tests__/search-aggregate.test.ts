@@ -6,7 +6,10 @@ import {
   runSearchAggregation,
 } from '@/lib/search-aggregate';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
-import { ResourceLimitError } from '@/lib/server-resource-errors';
+import {
+  ResourceLimitError,
+  UpstreamCooldownError,
+} from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/lib/downstream', () => ({
@@ -380,6 +383,22 @@ describe('failed source reporting', () => {
       '重试',
       expect.objectContaining({ reportFailure: true, refreshFirstPage: false }),
     );
+  });
+
+  it.each([
+    ['本站额度不足', new ResourceLimitError(429, 5)],
+    ['上游出口冷却', new UpstreamCooldownError(30, true)],
+  ])('%s只报失败源，不进入整源冷却', async (_label, error) => {
+    (searchFromApi as jest.Mock)
+      .mockRejectedValueOnce(error)
+      .mockResolvedValue([createResult({ title: '重试成功' })]);
+    await expect(collectSearchAggregation(baseOptions)).resolves.toEqual({
+      results: [],
+      failedSources: ['flaky'],
+    });
+    const next = await collectSearchAggregation(baseOptions);
+    expect(next.failedSources).toEqual([]);
+    expect(searchFromApi).toHaveBeenCalledTimes(2);
   });
 
   it.each(['api', 'detail'] as const)(
