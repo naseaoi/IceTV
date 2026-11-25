@@ -9,12 +9,17 @@ import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
 import type { TrackingCalendarItem } from './tracking-calendar';
 import {
-  getTrackingCalendar,
+  getTrackingStrip,
   matchCalendarWeekdays,
 } from './tracking-calendar.server';
 
 jest.mock('@/features/bangumi/lib/bangumi', () => ({
   getBangumiCalendarData: jest.fn(),
+  peekBangumiCalendarData: jest.fn(),
+}));
+jest.mock('next/headers', () => ({ cookies: jest.fn() }));
+jest.mock('@/lib/auth-session.server', () => ({
+  getServerAuthSession: jest.fn(),
 }));
 jest.mock('@/lib/db', () => ({ db: { getTrackingCalendarItems: jest.fn() } }));
 const base: TrackingCalendarItem = {
@@ -78,14 +83,46 @@ it('歧义播出日不猜测，非法日期与星期不匹配', () => {
     )[0].airWeekday,
   ).toBeNull();
 });
-it('日历请求失败保留原始条目与历史更新时间，空列表不回源', async () => {
+it('追更区只保留有更新与日历命中的作品，日历失败时只剩有更新', async () => {
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-  jest.mocked(db.getTrackingCalendarItems).mockResolvedValue([base]);
+  const updated = {
+    ...base,
+    key: 'source+2',
+    title: '作品 B',
+    hasUpdate: true,
+  };
+  const stale = { ...base, key: 'source+3', title: '旧作' };
+  jest
+    .mocked(db.getTrackingCalendarItems)
+    .mockResolvedValue([base, updated, stale]);
+  jest.mocked(getBangumiCalendarData).mockResolvedValue(calendar);
+  const result = await getTrackingStrip('user');
+  expect(result.complete).toBe(true);
+  expect(result.items.map((item) => item.key)).toEqual([
+    'source+2',
+    'source+1',
+  ]);
+
   jest.mocked(getBangumiCalendarData).mockRejectedValue(new Error('upstream'));
-  expect(await getTrackingCalendar('user')).toEqual([base]);
+  expect(await getTrackingStrip('user')).toEqual({
+    items: [updated],
+    complete: true,
+  });
+
   jest.mocked(getBangumiCalendarData).mockClear();
   jest.mocked(db.getTrackingCalendarItems).mockResolvedValue([]);
-  expect(await getTrackingCalendar('user')).toEqual([]);
+  expect(await getTrackingStrip('user')).toEqual({ items: [], complete: true });
   expect(getBangumiCalendarData).not.toHaveBeenCalled();
   warn.mockRestore();
+});
+it('日历超过等待上限时先返回有更新的作品并标记未完成', async () => {
+  const updated = { ...base, key: 'source+2', hasUpdate: true };
+  jest.mocked(db.getTrackingCalendarItems).mockResolvedValue([base, updated]);
+  jest
+    .mocked(getBangumiCalendarData)
+    .mockReturnValue(new Promise<BangumiCalendarData[]>(() => {}));
+  expect(await getTrackingStrip('user', { bangumiWaitMs: 5 })).toEqual({
+    items: [updated],
+    complete: false,
+  });
 });

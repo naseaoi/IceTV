@@ -1,4 +1,4 @@
-// 周历条目：服务端只给事实，星期推测与分组在客户端按本地时区完成
+// 追更条目：服务端只给事实，与「今天」相关的文案在客户端按本地时区计算
 export interface TrackingCalendarItem {
   key: string;
   source: string;
@@ -17,9 +17,17 @@ export interface TrackingCalendarItem {
   airWeekday: number | null;
 }
 
+// 服务端首屏结果，供客户端判断是否需要重新验证
+export interface TrackingStripSeed {
+  items: TrackingCalendarItem[];
+  // false 表示日历未在等待上限内返回，播出日可能缺失
+  complete: boolean;
+  // 0 表示没有完成查询
+  fetchedAt: number;
+}
+
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export const WEEKDAYS: readonly Weekday[] = [1, 2, 3, 4, 5, 6, 7];
 export const WEEKDAY_LABELS: Record<Weekday, string> = {
   1: '周一',
   2: '周二',
@@ -30,18 +38,6 @@ export const WEEKDAY_LABELS: Record<Weekday, string> = {
   7: '周日',
 };
 
-export const TRACKING_CALENDAR_INFER_DAYS = 21;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-export interface PlacedCalendarItem extends TrackingCalendarItem {
-  inferred: boolean;
-}
-
-export interface TrackingCalendarGroups {
-  days: Record<Weekday, PlacedCalendarItem[]>;
-  unscheduled: TrackingCalendarItem[];
-}
-
 export function toWeekday(date: Date): Weekday {
   const day = date.getDay();
   return (day === 0 ? 7 : day) as Weekday;
@@ -51,56 +47,51 @@ function isWeekday(value: number | null): value is Weekday {
   return value !== null && Number.isInteger(value) && value >= 1 && value <= 7;
 }
 
-function compareItems(a: TrackingCalendarItem, b: TrackingCalendarItem) {
-  if (a.hasUpdate !== b.hasUpdate) return a.hasUpdate ? -1 : 1;
-  const updatedDiff = (b.updateDetectedAt ?? 0) - (a.updateDetectedAt ?? 0);
-  if (updatedDiff !== 0) return updatedDiff;
-  return a.title.localeCompare(b.title, 'zh-CN');
+// 追更区只收可立即续看的更新与有可靠播出日的作品；更新发现时间不是播出时间，不据此推测星期
+export function isTrackingStripItem(item: TrackingCalendarItem): boolean {
+  return item.hasUpdate || isWeekday(item.airWeekday);
 }
 
-export function groupTrackingCalendar(
+// 顺序不依赖「今天」，服务端与客户端渲染一致：有更新在前，其余按周一到周日
+export function sortTrackingStrip(
   items: TrackingCalendarItem[],
-  now: number,
-): TrackingCalendarGroups {
-  const days = Object.fromEntries(
-    WEEKDAYS.map((weekday) => [weekday, [] as PlacedCalendarItem[]]),
-  ) as Record<Weekday, PlacedCalendarItem[]>;
-  const unscheduled: TrackingCalendarItem[] = [];
-
-  for (const item of items) {
-    if (isWeekday(item.airWeekday)) {
-      days[item.airWeekday].push({ ...item, inferred: false });
-      continue;
+): TrackingCalendarItem[] {
+  const weekdayRank = (item: TrackingCalendarItem) =>
+    isWeekday(item.airWeekday) ? item.airWeekday : 8;
+  return [...items].sort((a, b) => {
+    if (a.hasUpdate !== b.hasUpdate) return a.hasUpdate ? -1 : 1;
+    if (a.hasUpdate) {
+      const updatedDiff = (b.updateDetectedAt ?? 0) - (a.updateDetectedAt ?? 0);
+      if (updatedDiff !== 0) return updatedDiff;
+    } else {
+      const weekdayDiff = weekdayRank(a) - weekdayRank(b);
+      if (weekdayDiff !== 0) return weekdayDiff;
     }
-    const detectedAt = item.updateDetectedAt;
-    if (
-      detectedAt !== null &&
-      detectedAt <= now &&
-      now - detectedAt <= TRACKING_CALENDAR_INFER_DAYS * DAY_MS
-    ) {
-      days[toWeekday(new Date(detectedAt))].push({ ...item, inferred: true });
-      continue;
-    }
-    unscheduled.push(item);
-  }
-
-  for (const weekday of WEEKDAYS) days[weekday].sort(compareItems);
-  unscheduled.sort(compareItems);
-  return { days, unscheduled };
+    return a.title.localeCompare(b.title, 'zh-CN');
+  });
 }
 
-// 本周（周一起）各天的日期，用于列头显示
-export function getWeekDates(now: Date): Record<Weekday, Date> {
-  const monday = new Date(now);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - (toWeekday(now) - 1));
-  return Object.fromEntries(
-    WEEKDAYS.map((weekday) => {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + weekday - 1);
-      return [weekday, date];
-    }),
-  ) as Record<Weekday, Date>;
+export type TrackingStripStatus =
+  | { tone: 'update'; label: string }
+  | { tone: 'today'; label: string }
+  | { tone: 'scheduled'; label: string };
+
+// today 为 null 时（服务端与水合前）只给出星期，避免与客户端时区不一致
+export function getTrackingStripStatus(
+  item: TrackingCalendarItem,
+  today: Weekday | null,
+): TrackingStripStatus | null {
+  if (item.hasUpdate) return { tone: 'update', label: '有更新' };
+  if (!isWeekday(item.airWeekday)) return null;
+  if (today !== null) {
+    const distance = (item.airWeekday - today + 7) % 7;
+    if (distance === 0) return { tone: 'today', label: '今天更新' };
+    if (distance === 1) return { tone: 'scheduled', label: '明天更新' };
+  }
+  return {
+    tone: 'scheduled',
+    label: `${WEEKDAY_LABELS[item.airWeekday]}更新`,
+  };
 }
 
 export function formatCalendarProgress(item: TrackingCalendarItem): string {

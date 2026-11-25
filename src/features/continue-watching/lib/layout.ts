@@ -12,11 +12,3 @@ export function parseContinueWatchingFilter(
 ): ContinueWatchingFilter {
   return value === 'updated' || value === 'shelved' ? value : 'all';
 }
-
-export type ContinueWatchingView = 'grid' | 'calendar';
-
-export function parseContinueWatchingView(
-  value: string | string[] | null | undefined,
-): ContinueWatchingView {
-  return value === 'calendar' ? 'calendar' : 'grid';
-}

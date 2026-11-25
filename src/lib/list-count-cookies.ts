@@ -5,6 +5,7 @@ export const LIST_COUNT_COOKIE_NAMES = [
   'fav_count',
   'cw_count',
   'cw_page_count',
+  'cw_tracking_count',
   'review_count',
   'history_count',
   'list_count',

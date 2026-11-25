@@ -804,6 +804,8 @@ export async function setFavoriteTracking(
         new CustomEvent('favoritesUpdated', { detail: next }),
       );
     }
+    // 追更区等视图依赖写入完成信号，缓存未命中时也要派发。
+    window.dispatchEvent(new Event('userLibraryUpdated'));
     notifyMessagesUpdated();
     return favorite;
   } catch (error) {

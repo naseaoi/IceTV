@@ -65,6 +65,11 @@ export async function getBangumiCalendarData(
   return bangumiCalendarCache.peek(BANGUMI_CALENDAR_URL)?.value ?? data;
 }
 
+// 只读本进程已有的日历，不回源；供登录等不能等待上游的路径使用
+export function peekBangumiCalendarData(): BangumiCalendarData[] | null {
+  return bangumiCalendarCache.peek(BANGUMI_CALENDAR_URL)?.value ?? null;
+}
+
 async function loadBangumiCalendarData(
   init: BangumiFetchInit,
 ): Promise<BangumiCalendarData[]> {
