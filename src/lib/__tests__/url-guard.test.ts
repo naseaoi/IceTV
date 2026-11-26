@@ -64,6 +64,26 @@ describe('upstream route failover', () => {
     },
   );
 
+  it('leaves manual redirects and their bodies to the guarded caller', async () => {
+    const cancel = jest.fn();
+    const redirect = {
+      status: 302,
+      body: { cancel },
+      headers: { get: () => 'https://other.example/' },
+    } as unknown as Response;
+    const fetchRoute = jest
+      .spyOn(upstreamPool, 'fetchViaUpstreamRoute')
+      .mockResolvedValue(redirect);
+    expect(
+      await fetchWithUrlGuard(url, {
+        skipInitialValidation: true,
+        redirect: 'manual',
+      }),
+    ).toBe(redirect);
+    expect(fetchRoute).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   it('returns HTTP 403 from direct without switching exits', async () => {
     const forbidden = { status: 403, body: null } as Response;
     const fetchRoute = jest

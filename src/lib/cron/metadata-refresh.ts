@@ -1,3 +1,5 @@
+import { setImmediate } from 'node:timers/promises';
+
 import {
   type MetadataCandidate,
   buildFavoriteCandidate,
@@ -6,7 +8,6 @@ import {
   getMetadataStaleReferenceTime,
 } from '@/lib/cron/metadata-candidates';
 import { db } from '@/lib/db';
-import { getOwnerUsername } from '@/lib/env.server';
 import {
   hasUsableEpisodeGroups,
   resolvePlayRecordEpisode,
@@ -18,15 +19,15 @@ import {
 } from '@/lib/play-records';
 import type {
   Favorite,
-  MetadataRecordPage,
+  MetadataRefreshCursor,
+  MetadataRefreshKind,
   PlayRecord,
   SearchResult,
 } from '@/lib/types';
-import { normalizeUsername } from '@/lib/username';
 import { parseStorageKey } from '@/lib/utils';
 
 const DEFAULT_METADATA_REFRESH_TTL_MS = 6 * 60 * 60 * 1000;
-const DEFAULT_METADATA_RECORD_MAX_ITEMS = 80;
+const DEFAULT_METADATA_RECORD_MAX_ITEMS = 240;
 const DEFAULT_METADATA_FAVORITE_MAX_ITEMS = 40;
 const DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS = 5 * 60 * 1000;
 const DEFAULT_METADATA_PAGE_SIZE = 100;
@@ -46,10 +47,9 @@ export type GetDetail = (
   retry?: boolean,
 ) => Promise<SearchResult | null>;
 
-type CandidateCollection<T> = {
-  candidates: Array<MetadataCandidate<T>>;
-  total: number;
-};
+type RefreshItem =
+  | { kind: 'record'; value: PlayRecord }
+  | { kind: 'favorite'; value: Favorite };
 
 class TopMetadataCandidates<T> {
   private readonly items: Array<MetadataCandidate<T>> = [];
@@ -58,7 +58,12 @@ class TopMetadataCandidates<T> {
 
   add(candidate: MetadataCandidate<T>): void {
     if (this.maxItems <= 0) return;
-
+    const existing = this.items.findIndex((item) => item.key === candidate.key);
+    if (existing >= 0) {
+      if (compareMetadataCandidates(this.items[existing], candidate) <= 0)
+        return;
+      this.items.splice(existing, 1);
+    }
     let low = 0;
     let high = this.items.length;
     while (low < high) {
@@ -69,11 +74,8 @@ class TopMetadataCandidates<T> {
         high = middle;
       }
     }
-
     this.items.splice(low, 0, candidate);
-    if (this.items.length > this.maxItems) {
-      this.items.pop();
-    }
+    if (this.items.length > this.maxItems) this.items.pop();
   }
 
   toArray(): Array<MetadataCandidate<T>> {
@@ -81,72 +83,114 @@ class TopMetadataCandidates<T> {
   }
 }
 
-async function collectPagedCandidates<T>(
-  users: string[],
-  maxItems: number,
-  fetchPage: (
-    user: string,
-    cursorKey?: string,
-  ) => Promise<MetadataRecordPage<T>>,
-  buildCandidate: (
-    user: string,
-    key: string,
-    item: T,
-    snapshot: string,
-  ) => MetadataCandidate<T> | null,
-  errorLabel: string,
-): Promise<CandidateCollection<T>> {
-  const topCandidates = new TopMetadataCandidates<T>(maxItems);
-  let total = 0;
-
-  for (const user of users) {
-    let cursorKey: string | undefined;
-    for (;;) {
-      let page: MetadataRecordPage<T>;
-      try {
-        page = await fetchPage(user, cursorKey);
-      } catch (error) {
-        console.error(`${errorLabel} (${user}):`, error);
-        break;
-      }
-
-      for (const { key, item, snapshot } of page.items) {
-        let candidate: MetadataCandidate<T> | null;
-        try {
-          candidate = buildCandidate(user, key, item, snapshot);
-        } catch (error) {
-          console.error(`处理元数据候选失败 (${user}:${key}):`, error);
-          continue;
-        }
-        if (!candidate) continue;
-        total += 1;
-        topCandidates.add(candidate);
-      }
-
-      const nextCursor = page.nextCursor === null ? undefined : page.nextCursor;
-      if (nextCursor === undefined) break;
-      if (nextCursor === cursorKey) {
-        console.warn(`元数据分页游标未前进 (${user}): ${nextCursor}`);
-        break;
-      }
-      cursorKey = nextCursor;
+function buildCandidate(
+  kind: MetadataRefreshKind,
+  row: MetadataRefreshCursor & { snapshot: string },
+  now: number,
+  ttlMs: number,
+  includeFresh = false,
+): MetadataCandidate<RefreshItem> | null {
+  if (!parseStorageKey(row.key)) return null;
+  try {
+    const value = JSON.parse(row.snapshot);
+    if (!value || typeof value !== 'object') return null;
+    const eligibilityValue = includeFresh
+      ? { ...value, metadata_checked_at: undefined }
+      : value;
+    if (kind === 'record') {
+      const candidate = buildPlayRecordCandidate(
+        row.user,
+        row.key,
+        eligibilityValue,
+        now,
+        ttlMs,
+        row.snapshot,
+      );
+      return candidate && { ...candidate, item: { kind, value } };
     }
+    const candidate = buildFavoriteCandidate(
+      row.user,
+      row.key,
+      eligibilityValue,
+      now,
+      ttlMs,
+      row.snapshot,
+    );
+    return candidate && { ...candidate, item: { kind, value } };
+  } catch (error) {
+    console.error(`处理元数据候选失败 (${row.user}:${row.key}):`, error);
+    return null;
   }
+}
 
-  return { candidates: topCandidates.toArray(), total };
+const scanCursors: Partial<Record<MetadataRefreshKind, MetadataRefreshCursor>> =
+  {};
+
+async function collectPagedCandidates(
+  kind: MetadataRefreshKind,
+  maxItems: number,
+  pageSize: number,
+  now: number,
+  ttlMs: number,
+  deadline: number,
+): Promise<Array<MetadataCandidate<RefreshItem>>> {
+  const topCandidates = new TopMetadataCandidates<RefreshItem>(maxItems);
+  let cursor = scanCursors[kind];
+  const canWrap = cursor !== undefined;
+  let wrapped = false;
+  let firstRow: MetadataRefreshCursor | undefined;
+  while (Date.now() < deadline) {
+    const page = await db.getMetadataRefreshPage(kind, pageSize, cursor);
+    for (const row of page.items) {
+      // 使用数据库返回的首行作回绕边界，避免 JS 字符串序与 MySQL ci 序不同。
+      if (wrapped && row.key === firstRow?.key && row.user === firstRow.user) {
+        delete scanCursors[kind];
+        return topCandidates.toArray();
+      }
+      if (!wrapped && !firstRow) firstRow = { key: row.key, user: row.user };
+      const candidate = buildCandidate(kind, row, now, ttlMs);
+      if (candidate) topCandidates.add(candidate);
+      scanCursors[kind] = { key: row.key, user: row.user };
+    }
+    if (!page.nextCursor) {
+      delete scanCursors[kind];
+      if (!canWrap || wrapped) break;
+      wrapped = true;
+      cursor = undefined;
+    } else {
+      cursor = page.nextCursor;
+    }
+    await setImmediate();
+  }
+  return topCandidates.toArray();
+}
+
+// 详情回源前读取关联快照，回源期间的进度、已读、开关或删除由原始 JSON CAS 保护。
+async function loadWorkCandidates(
+  key: string,
+  pageSize: number,
+  budget: MetadataRefreshBudget,
+): Promise<Array<MetadataCandidate<RefreshItem>> | null> {
+  const candidates: Array<MetadataCandidate<RefreshItem>> = [];
+  for (const kind of ['record', 'favorite'] as const) {
+    let cursor: MetadataRefreshCursor | undefined;
+    do {
+      if (!hasTimeBudget(budget)) return null;
+      const page = await db.getMetadataRefreshPage(kind, pageSize, cursor, key);
+      for (const row of page.items) {
+        // 已选作品同步全部关联条目，仍排除目录与直播收藏。
+        const candidate = buildCandidate(kind, row, Date.now(), 0, true);
+        if (candidate) candidates.push(candidate);
+      }
+      cursor = page.nextCursor ?? undefined;
+      await setImmediate();
+    } while (cursor);
+  }
+  return hasTimeBudget(budget) ? candidates : null;
 }
 
 export async function refreshRecordAndFavorites(): Promise<void> {
   try {
-    const ownerUsername = normalizeUsername(getOwnerUsername());
-    const users = await db.getAllUsers();
-    if (
-      ownerUsername &&
-      !users.some((user) => normalizeUsername(user) === ownerUsername)
-    ) {
-      users.push(ownerUsername);
-    }
-
     const metadataRefreshTtlMs = readPositiveInteger(
       process.env.CRON_METADATA_REFRESH_TTL_MS,
       DEFAULT_METADATA_REFRESH_TTL_MS,
@@ -156,8 +200,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS,
     );
     const recordMaxItems = readPositiveInteger(
-      process.env.CRON_METADATA_RECORD_MAX_ITEMS ||
-        process.env.CRON_METADATA_MAX_ITEMS,
+      process.env.CRON_METADATA_RECORD_MAX_ITEMS,
       DEFAULT_METADATA_RECORD_MAX_ITEMS,
     );
     const favoriteMaxItems = readPositiveInteger(
@@ -174,10 +217,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       metadataRefreshTtlMs,
       totalTimeBudgetMs,
     );
-    const detailCache = new Map<string, Promise<SearchResult | null>>();
-    const retriedDetailKeys = new Set<string>();
-
-    const fetchDetail = (source: string, id: string, fallbackTitle: string) =>
+    const getDetail: GetDetail = (source, id, fallbackTitle) =>
       fetchVideoDetail({
         source,
         id,
@@ -187,73 +227,48 @@ export async function refreshRecordAndFavorites(): Promise<void> {
         return null;
       });
 
-    // 同一作品在本轮只请求一次；失败的详情在重试阶段每个作品至多重新请求一次
-    const getDetail: GetDetail = async (source, id, fallbackTitle, retry) => {
-      const key = `${source}+${id}`;
-      const cached = detailCache.get(key);
-      if (!cached) {
-        const promise = fetchDetail(source, id, fallbackTitle);
-        detailCache.set(key, promise);
-        return promise;
-      }
-      if (!retry || (await cached) || retriedDetailKeys.has(key)) {
-        return detailCache.get(key) as Promise<SearchResult | null>;
-      }
-      retriedDetailKeys.add(key);
-      const promise = fetchDetail(source, id, fallbackTitle);
-      detailCache.set(key, promise);
-      return promise;
+    // 收集至多使用整轮 20% 时间，为刷新保留预算；两类扫描独立保留一半。
+    const collectionBudgetMs = Math.max(1, Math.floor(totalTimeBudgetMs * 0.1));
+    const recordCandidates = await collectPagedCandidates(
+      'record',
+      recordMaxItems,
+      metadataPageSize,
+      staleReferenceTime,
+      metadataRefreshTtlMs,
+      startedAt + collectionBudgetMs,
+    );
+    const favoriteCandidates = await collectPagedCandidates(
+      'favorite',
+      favoriteMaxItems + recordMaxItems,
+      metadataPageSize,
+      staleReferenceTime,
+      metadataRefreshTtlMs,
+      Math.min(
+        Date.now() + collectionBudgetMs,
+        startedAt + collectionBudgetMs * 2,
+      ),
+    );
+    const processedKeys = new Set<string>();
+    const target: MetadataTarget<RefreshItem> = {
+      label: '作品元数据',
+      getTitle: (item) => item.value.title,
+      build: (item, detail, checkedAt) =>
+        item.kind === 'record'
+          ? {
+              kind: 'record',
+              value: buildRefreshedPlayRecord(item.value, detail, checkedAt),
+            }
+          : {
+              kind: 'favorite',
+              value: buildRefreshedFavorite(item.value, detail, checkedAt),
+            },
+      saveIfUnchanged: (user, source, id, item, snapshot) =>
+        item.kind === 'record'
+          ? db.savePlayRecordIfUnchanged(user, source, id, item.value, snapshot)
+          : db.saveFavoriteIfUnchanged(user, source, id, item.value, snapshot),
+      loadRelated: (candidate, budget) =>
+        loadWorkCandidates(candidate.key, metadataPageSize, budget),
     };
-
-    const [recordCollection, favoriteCollection] = await Promise.all([
-      collectPagedCandidates(
-        users,
-        recordMaxItems,
-        (user, cursorKey) =>
-          db.getStalePlayRecordPage(
-            user,
-            staleReferenceTime,
-            metadataRefreshTtlMs,
-            metadataPageSize,
-            cursorKey,
-          ),
-        (user, key, record, snapshot) =>
-          buildPlayRecordCandidate(
-            user,
-            key,
-            record,
-            staleReferenceTime,
-            metadataRefreshTtlMs,
-            snapshot,
-          ),
-        '获取用户播放记录分页失败',
-      ),
-      collectPagedCandidates(
-        users,
-        favoriteMaxItems,
-        (user, cursorKey) =>
-          db.getStaleFavoritePage(
-            user,
-            staleReferenceTime,
-            metadataRefreshTtlMs,
-            metadataPageSize,
-            cursorKey,
-          ),
-        (user, key, favorite, snapshot) =>
-          buildFavoriteCandidate(
-            user,
-            key,
-            favorite,
-            staleReferenceTime,
-            metadataRefreshTtlMs,
-            snapshot,
-          ),
-        '获取用户收藏分页失败',
-      ),
-    ]);
-
-    const recordCandidates = recordCollection.candidates;
-    const favoriteCandidates = favoriteCollection.candidates;
 
     // 播放记录与收藏各自独立预算，避免其中一方吃满预算导致另一方长期不刷新
     const recordBudget: MetadataRefreshBudget = {
@@ -266,7 +281,8 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       recordCandidates,
       recordBudget,
       getDetail,
-      PLAY_RECORD_TARGET,
+      target,
+      processedKeys,
     );
 
     const favoriteBudget: MetadataRefreshBudget = {
@@ -279,11 +295,12 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       favoriteCandidates,
       favoriteBudget,
       getDetail,
-      FAVORITE_TARGET,
+      target,
+      processedKeys,
     );
 
     console.log(
-      `刷新播放记录/收藏任务完成: 记录 ${recordBudget.processed}/${recordCollection.total}，收藏 ${favoriteBudget.processed}/${favoriteCollection.total}`,
+      `刷新播放记录/收藏任务完成: 播放作品 ${recordBudget.processed}，额外收藏作品 ${favoriteBudget.processed}`,
     );
   } catch (error) {
     console.error('刷新播放记录/收藏任务启动失败', error);
@@ -301,24 +318,10 @@ export type MetadataTarget<T> = {
     next: T,
     snapshot: string,
   ) => Promise<boolean>;
-};
-
-const PLAY_RECORD_TARGET: MetadataTarget<PlayRecord> = {
-  label: '播放记录',
-  getTitle: (record) => record.title,
-  build: (record, detail, checkedAt) =>
-    buildRefreshedPlayRecord(record, detail, checkedAt),
-  saveIfUnchanged: (user, source, id, next, snapshot) =>
-    db.savePlayRecordIfUnchanged(user, source, id, next, snapshot),
-};
-
-const FAVORITE_TARGET: MetadataTarget<Favorite> = {
-  label: '收藏',
-  getTitle: (favorite) => favorite.title,
-  build: (favorite, detail, checkedAt) =>
-    buildRefreshedFavorite(favorite, detail, checkedAt),
-  saveIfUnchanged: (user, source, id, next, snapshot) =>
-    db.saveFavoriteIfUnchanged(user, source, id, next, snapshot),
+  loadRelated?: (
+    candidate: MetadataCandidate<T>,
+    budget: MetadataRefreshBudget,
+  ) => Promise<Array<MetadataCandidate<T>> | null>;
 };
 
 export async function refreshMetadataCandidates<T>(
@@ -326,6 +329,7 @@ export async function refreshMetadataCandidates<T>(
   budget: MetadataRefreshBudget,
   getDetail: GetDetail,
   target: MetadataTarget<T>,
+  processedKeys = new Set<string>(),
 ): Promise<void> {
   const save = async (
     candidate: MetadataCandidate<T>,
@@ -350,22 +354,49 @@ export async function refreshMetadataCandidates<T>(
     }
   };
 
+  const saveRelated = async (
+    related: Array<MetadataCandidate<T>>,
+    source: string,
+    id: string,
+    detail: SearchResult | null,
+    checkedAt: number,
+  ) => {
+    // 每条 CAS 独立提交，最多连续写 50 条后让出；不持有跨用户的长事务。
+    for (let index = 0; index < related.length; index += 1) {
+      await save(related[index], source, id, detail, checkedAt);
+      if ((index + 1) % 50 === 0) await setImmediate();
+    }
+    await setImmediate();
+  };
+  const grouped = new Map<string, Array<MetadataCandidate<T>>>();
+  for (const candidate of candidates) {
+    const group = grouped.get(candidate.key) ?? [];
+    group.push(candidate);
+    grouped.set(candidate.key, group);
+  }
   const failed: Array<{
     candidate: MetadataCandidate<T>;
+    related: Array<MetadataCandidate<T>>;
     source: string;
     id: string;
     checkedAt: number;
   }> = [];
-  for (const candidate of candidates) {
+  for (const group of grouped.values()) {
+    const candidate = group[0];
+    if (processedKeys.has(candidate.key)) continue;
     if (!canProcessMetadata(budget)) break;
-
     const parsed = parseStorageKey(candidate.key);
-    if (!parsed) {
-      console.warn(`跳过无效的${target.label}键: ${candidate.key}`);
-      continue;
-    }
+    if (!parsed) continue;
+    const loaded = target.loadRelated
+      ? await target.loadRelated(candidate, budget)
+      : group;
+    if (!loaded || !hasTimeBudget(budget)) break;
+    // 原始作品键逐字匹配；存储排序规则或关联读取变化也不能跨作品写回。
+    const related = loaded.filter((item) => item.key === candidate.key);
+    if (!related.length) continue;
 
     budget.processed += 1;
+    processedKeys.add(candidate.key);
     const checkedAt = Date.now();
     const detail = await getDetail(
       parsed.source,
@@ -373,22 +404,27 @@ export async function refreshMetadataCandidates<T>(
       target.getTitle(candidate.item),
     );
     if (detail) {
-      await save(candidate, parsed.source, parsed.id, detail, checkedAt);
+      await saveRelated(related, parsed.source, parsed.id, detail, checkedAt);
     } else {
-      failed.push({ candidate, ...parsed, checkedAt });
+      failed.push({ candidate, related, ...parsed, checkedAt });
     }
   }
 
-  // 获取失败的条目在本轮末尾重试一次，瞬时故障不必再等一个检查周期；
-  // 仍失败或预算用尽时只写入检查时间
-  for (const { candidate, source, id, checkedAt } of failed) {
+  // 已开始作品完成全部 CAS 写回，即使详情耗尽时间；预算约束后续回源与候选读取。
+  for (const { candidate, related, source, id, checkedAt } of failed) {
     const detail = hasTimeBudget(budget)
       ? await getDetail(source, id, target.getTitle(candidate.item), true)
       : null;
     if (!detail) {
       console.warn(`跳过无法获取详情的${target.label}: ${candidate.key}`);
     }
-    await save(candidate, source, id, detail, detail ? Date.now() : checkedAt);
+    await saveRelated(
+      related,
+      source,
+      id,
+      detail,
+      detail ? Date.now() : checkedAt,
+    );
   }
 }
 

@@ -5,10 +5,19 @@ import { gzipSync } from 'node:zlib';
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import {
+  readRelayHostFailure,
+  recordRelayHostResult,
+} from '@/features/play/lib/relayHostHealth.server';
+import { db } from '@/lib/db';
+import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 
+jest.mock('@/lib/source-proxy-failures.server', () => ({
+  recordSourceProxyFailure: jest.fn(),
+}));
 jest.mock('@/lib/proxy-auth', () => ({
   resolveProxyAuthorization: (...args: unknown[]) => mockAuthorization(...args),
 }));
@@ -543,9 +552,14 @@ describe('warm-only m3u8', () => {
   );
 
   it('does not cache failed warm loads and permits retries', async () => {
+    (recordSourceProxyFailure as jest.Mock).mockClear();
     const url = 'https://cdn.example/warm/retry.m3u8';
     mockFetch.mockRejectedValueOnce(new Error('synthetic failure'));
-    expect((await GET(request(url))).status).toBe(500);
+    expect((await GET(request(url))).status).toBe(502);
+    expect(recordSourceProxyFailure).toHaveBeenCalledTimes(1);
+    expect(recordSourceProxyFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ source: SOURCE, reason: 'upstream-fetch' }),
+    );
     expect(peekM3U8Cache(url, SOURCE)).toBeNull();
     expect((await GET(request(url))).status).toBe(204);
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -560,6 +574,259 @@ describe('warm-only m3u8', () => {
     expect(peekM3U8Cache(url, SOURCE)).toBeNull();
     expect(mockRewrite).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('relay host failures', () => {
+  const request = (url: string) =>
+    ({
+      url: `http://localhost/api/proxy/m3u8?forceServer=true&icetv-source=${SOURCE}&url=${encodeURIComponent(url)}`,
+      headers: new Headers(),
+      signal: new AbortController().signal,
+    }) as NextRequest;
+  beforeEach(() => {
+    mockAuthorization.mockResolvedValue({
+      authorized: true,
+      via: 'session',
+      username: 'viewer',
+    });
+    mockFetch.mockReset();
+    mockQuota.mockResolvedValue(null);
+    mockValidate.mockImplementation(async (url) => ({
+      ok: true,
+      url: url as string,
+    }));
+    (recordSourceProxyFailure as jest.Mock).mockClear();
+  });
+
+  it.each([444, 'socket', 'tls', 'empty'])(
+    'remembers %s across URL and users, returning explicit host reason without refetching',
+    async (failure) => {
+      const url = `https://blocked-${failure}.example/a.m3u8?token=one`;
+      if (typeof failure === 'number')
+        mockFetch.mockResolvedValueOnce(new Response('', { status: failure }));
+      else if (failure === 'empty')
+        mockFetch.mockResolvedValueOnce(new Response(''));
+      else
+        mockFetch.mockRejectedValueOnce(
+          Object.assign(new TypeError('fetch failed'), {
+            cause: {
+              code:
+                failure === 'tls' ? 'ERR_SSL_PROTOCOL_ERROR' : 'UND_ERR_SOCKET',
+            },
+          }),
+        );
+      const first = await GET(request(url));
+      expect(first.status).toBe(502);
+      expect(first.headers.get('X-IceTV-Relay-Failure')).toBe(
+        'host-connection',
+      );
+      mockAuthorization.mockResolvedValueOnce({
+        authorized: true,
+        via: 'session',
+        username: 'another',
+      });
+      const second = await GET(request(url.replace('a.m3u8', 'b.m3u8')));
+      expect(second.status).toBe(first.status);
+      expect(second.headers.get('X-IceTV-Relay-Failure')).toBe(
+        first.headers.get('X-IceTV-Relay-Failure'),
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(recordSourceProxyFailure).toHaveBeenCalledTimes(1);
+      await recordRelayHostResult(url, false, null);
+      expect(await readRelayHostFailure(url, false)).toBeNull();
+      mockFetch.mockResolvedValueOnce(new Response(mediaPlaylist('ok.ts')));
+      expect((await GET(request(url))).status).toBe(200);
+    },
+  );
+
+  it('keeps repeated URL 403 ordinary until three distinct paths fail across users', async () => {
+    const base = 'https://forbidden-paths.example';
+    mockFetch.mockImplementation(async () => new Response('', { status: 403 }));
+    for (const path of ['a?token=1', 'a?token=2', 'a?token=2', 'b?token=1']) {
+      const response = await GET(request(`${base}/${path}`));
+      expect(response.status).toBe(403);
+      expect(response.headers.get('X-IceTV-Relay-Failure')).toBeNull();
+      expect(await readRelayHostFailure(base, false)).toBeNull();
+    }
+    mockAuthorization.mockResolvedValueOnce({
+      authorized: true,
+      via: 'session',
+      username: 'another',
+    });
+    const promoted = await GET(request(`${base}/c?token=1`));
+    expect(promoted.status).toBe(403);
+    expect(promoted.headers.get('X-IceTV-Relay-Failure')).toBe(
+      'host-forbidden',
+    );
+    expect((await GET(request(`${base}/d?token=1`))).status).toBe(403);
+    expect(mockFetch).toHaveBeenCalledTimes(5);
+    expect(recordSourceProxyFailure).toHaveBeenCalledTimes(5);
+  });
+
+  it('clears pending 403 evidence after a successful origin response', async () => {
+    const base = 'https://forbidden-success.example';
+    mockFetch.mockImplementation(async () => new Response('', { status: 403 }));
+    await GET(request(`${base}/a?token=1`));
+    await GET(request(`${base}/b?token=1`));
+    mockFetch.mockResolvedValueOnce(new Response(mediaPlaylist('ok.ts')));
+    expect((await GET(request(`${base}/a?token=fresh`))).status).toBe(200);
+    expect(
+      (await GET(request(`${base}/c?token=1`))).headers.get(
+        'X-IceTV-Relay-Failure',
+      ),
+    ).toBeNull();
+    expect(
+      (await GET(request(`${base}/d?token=1`))).headers.get(
+        'X-IceTV-Relay-Failure',
+      ),
+    ).toBeNull();
+    expect(await readRelayHostFailure(base, false)).toBeNull();
+  });
+
+  it('merges concurrent forbidden paths under the shared lease', async () => {
+    const base = 'https://forbidden-concurrent.example';
+    await Promise.all(
+      ['a', 'b', 'c'].map((path) =>
+        recordRelayHostResult(`${base}/${path}`, false, 'host-forbidden'),
+      ),
+    );
+    expect(await readRelayHostFailure(base, false)).toMatchObject({
+      reason: 'host-forbidden',
+    });
+  });
+
+  it('expires pending 403 evidence without extending the window on repeats', async () => {
+    const base = 'https://forbidden-window.example';
+    const now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      await recordRelayHostResult(`${base}/a`, false, 'host-forbidden');
+      clock.mockReturnValue(now + 599_999);
+      await recordRelayHostResult(
+        `${base}/a?token=new`,
+        false,
+        'host-forbidden',
+      );
+      clock.mockReturnValue(now + 600_001);
+      await recordRelayHostResult(`${base}/b`, false, 'host-forbidden');
+      await recordRelayHostResult(`${base}/c`, false, 'host-forbidden');
+      expect(await readRelayHostFailure(base, false)).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('uses bounded local path evidence when the shared database is unavailable', async () => {
+    const read = jest
+      .spyOn(db, 'getSharedCache')
+      .mockRejectedValue(new Error('unavailable'));
+    const lease = jest
+      .spyOn(db, 'acquireSharedCacheLease')
+      .mockRejectedValue(new Error('unavailable'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const base = 'https://forbidden-local.example';
+    try {
+      for (const path of ['a', 'a?token=2', 'b']) {
+        expect(
+          await recordRelayHostResult(
+            `${base}/${path}`,
+            false,
+            'host-forbidden',
+          ),
+        ).toBeNull();
+      }
+      expect(
+        await recordRelayHostResult(`${base}/c`, false, 'host-forbidden'),
+      ).toMatchObject({ reason: 'host-forbidden' });
+      expect(await readRelayHostFailure(base, false)).not.toBeNull();
+      await recordRelayHostResult(base, false, null);
+      expect(
+        await recordRelayHostResult(`${base}/d`, false, 'host-forbidden'),
+      ).toBeNull();
+      await recordRelayHostResult(`${base}/e`, false, 'host-forbidden');
+      for (let i = 0; i < 512; i += 1) {
+        await recordRelayHostResult(
+          `https://bounded-${i}.example/a`,
+          false,
+          'host-forbidden',
+        );
+      }
+      expect(
+        await recordRelayHostResult(`${base}/f`, false, 'host-forbidden'),
+      ).toBeNull();
+    } finally {
+      read.mockRestore();
+      lease.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it('a successful in-flight request clears concurrent host failure', async () => {
+    const url = 'https://recovered.example/a.m3u8?token=one';
+    let finish!: (value: Response) => void;
+    mockFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = GET(request(url));
+    while (!finish) await new Promise((resolve) => setTimeout(resolve, 0));
+    for (const path of ['a', 'b', 'c']) {
+      await recordRelayHostResult(
+        `https://recovered.example/${path}`,
+        false,
+        'host-forbidden',
+      );
+    }
+    expect(await readRelayHostFailure(url, false)).not.toBeNull();
+    finish(new Response(mediaPlaylist('ok.ts')));
+    expect((await pending).status).toBe(200);
+    expect(await readRelayHostFailure(url, false)).toBeNull();
+    await recordRelayHostResult(
+      'https://recovered.example/d',
+      false,
+      'host-forbidden',
+    );
+    expect(
+      await recordRelayHostResult(
+        'https://recovered.example/e',
+        false,
+        'host-forbidden',
+      ),
+    ).toBeNull();
+  });
+
+  it('404 stays URL-scoped and arbitrary errors remain private', async () => {
+    const url = 'https://not-found.example/a.m3u8?token=one';
+    mockFetch.mockResolvedValueOnce(new Response('', { status: 404 }));
+    expect((await GET(request(url))).status).toBe(404);
+    expect(await readRelayHostFailure(url, false)).toBeNull();
+    mockFetch.mockRejectedValueOnce(new Error('private-secret-origin'));
+    const failure = await GET(request(url));
+    expect(failure.status).toBe(502);
+    expect(await failure.text()).not.toContain('private-secret-origin');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('expires host failures and keeps ports and live exits separate', async () => {
+    const url = 'https://expiry.example/a.m3u8';
+    for (const path of ['a', 'b', 'c']) {
+      await recordRelayHostResult(
+        `https://expiry.example/${path}`,
+        false,
+        'host-forbidden',
+      );
+    }
+    expect(await readRelayHostFailure(url, false)).not.toBeNull();
+    expect(await readRelayHostFailure(url, true)).toBeNull();
+    expect(
+      await readRelayHostFailure('https://expiry.example:8443/a.m3u8', false),
+    ).toBeNull();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 600_001);
+    expect(await readRelayHostFailure(url, false)).toBeNull();
+    clock.mockRestore();
   });
 });
 

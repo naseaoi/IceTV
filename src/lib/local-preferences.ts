@@ -9,21 +9,42 @@ import {
   writeListCountCookie,
 } from '@/lib/list-count-cookies';
 
+export const LAST_LIVE_CHANNEL_STORAGE_KEY = 'lastLiveChannel';
+export interface LastLiveChannel {
+  sourceKey: string;
+  groupKey: string;
+}
+export function readLastLiveChannel(): LastLiveChannel | null {
+  try {
+    const value = JSON.parse(
+      readStorage(LAST_LIVE_CHANNEL_STORAGE_KEY) || 'null',
+    );
+    return value &&
+      typeof value.sourceKey === 'string' &&
+      value.sourceKey &&
+      typeof value.groupKey === 'string' &&
+      value.groupKey
+      ? { sourceKey: value.sourceKey, groupKey: value.groupKey }
+      : null;
+  } catch {
+    return null;
+  }
+}
+export function writeLastLiveChannel(value: LastLiveChannel): boolean {
+  return writeStorage(LAST_LIVE_CHANNEL_STORAGE_KEY, JSON.stringify(value));
+}
+
 export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const AUTO_SWITCH_SOURCE_STORAGE_KEY = 'autoSwitchSource';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
-export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const PLAYBACK_RATE_STORAGE_KEY = 'playbackRate';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const NOTIFIED_RELEASE_VERSION_STORAGE_KEY = 'notifiedReleaseVersion';
 export const SEEN_RELEASE_VERSION_STORAGE_KEY = 'seenReleaseVersion';
-export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
-  'notifiedMessageRevision:';
-export const DANMAKU_ENABLED_STORAGE_KEY = 'danmakuEnabled';
 export const DANMAKU_OPACITY_STORAGE_KEY = 'danmakuOpacity';
 export const DANMAKU_FONT_SIZE_STORAGE_KEY = 'danmakuFontSize';
 export const DANMAKU_HEATMAP_STORAGE_KEY = 'danmakuHeatmap';
@@ -215,34 +236,6 @@ export function writeSeenReleaseVersion(version: string) {
   return writeStoredString(SEEN_RELEASE_VERSION_STORAGE_KEY, version);
 }
 
-function getNotifiedMessageRevisionStorageKey(username: string): string | null {
-  const normalized = username.trim();
-  if (!normalized) {
-    return null;
-  }
-  return `${NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX}${normalized}`;
-}
-
-export function readNotifiedMessageRevision(
-  username: string,
-): string | undefined {
-  const storageKey = getNotifiedMessageRevisionStorageKey(username);
-  return storageKey ? readStoredString(storageKey) : undefined;
-}
-
-export function writeNotifiedMessageRevision(
-  username: string,
-  revision: string,
-): void {
-  const storageKey = getNotifiedMessageRevisionStorageKey(username);
-  if (!storageKey) {
-    return;
-  }
-  try {
-    writeStoredString(storageKey, revision);
-  } catch {}
-}
-
 // 列表计数只存在不区分账号的 cookie 中，登录时由服务端覆盖、退出时清除，不再落 localStorage
 export function readContinueWatchingCount(): number {
   return readListCountCookie('cw_count') ?? 0;
@@ -281,15 +274,6 @@ export function writeFavoriteItemsCount(value: number): void {
   writeListCountCookie('fav_count', value);
 }
 
-export function readPreferredQualityHeight(): number | null {
-  const raw = readStoredString(PREFERRED_QUALITY_STORAGE_KEY);
-  if (!raw || raw === 'auto') {
-    return null;
-  }
-  const height = Number.parseInt(raw, 10);
-  return Number.isFinite(height) && height > 0 ? height : null;
-}
-
 export type PreferredQualityPreference =
   | { mode: 'default' }
   | { mode: 'auto' }
@@ -318,19 +302,6 @@ function getSourcePreferredQualityStorageKey(sourceKey: string): string | null {
   return `${SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX}${normalizedSourceKey}`;
 }
 
-export function readPreferredQualityPreference(): PreferredQualityPreference {
-  return parsePreferredQualityPreference(
-    readStoredString(PREFERRED_QUALITY_STORAGE_KEY),
-  );
-}
-
-export function writePreferredQualityHeight(height: number | null) {
-  return writeStoredString(
-    PREFERRED_QUALITY_STORAGE_KEY,
-    height && height > 0 ? String(height) : 'auto',
-  );
-}
-
 export function readSourcePreferredQualityPreference(
   sourceKey: string,
 ): PreferredQualityPreference {
@@ -338,14 +309,7 @@ export function readSourcePreferredQualityPreference(
   if (!storageKey) {
     return { mode: 'default' };
   }
-  const sourcePreference = readStoredString(storageKey);
-  if (sourcePreference !== undefined) {
-    return parsePreferredQualityPreference(sourcePreference);
-  }
-  if (sourceKey === 'xigua') {
-    return readPreferredQualityPreference();
-  }
-  return { mode: 'default' };
+  return parsePreferredQualityPreference(readStoredString(storageKey));
 }
 
 export function writeSourcePreferredQualityHeight(
@@ -367,24 +331,6 @@ export const DANMAKU_FONT_SIZE_RANGE = { min: 14, max: 40 };
 export const DANMAKU_OFFSET_RANGE = { min: -600, max: 600 };
 
 const DANMAKU_SCOPE_PATTERN = /^[a-zA-Z0-9_.-]{1,96}$/;
-
-export function readDanmakuEnabled(): boolean {
-  return readStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY) ?? false;
-}
-
-// 仅用于把旧版客户端偏好迁移到账号设置
-export function readStoredDanmakuEnabled(): boolean | undefined {
-  return readStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY);
-}
-
-// 账号设置成功接管后清理旧版客户端偏好
-export function clearStoredDanmakuEnabled(): boolean {
-  return resetStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY);
-}
-
-export function writeDanmakuEnabled(value: boolean): boolean {
-  return writeStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY, value);
-}
 
 export function readDanmakuHeatmapEnabled(): boolean {
   return readStoredBoolean(DANMAKU_HEATMAP_STORAGE_KEY) ?? true;

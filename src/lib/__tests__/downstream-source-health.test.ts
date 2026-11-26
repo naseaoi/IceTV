@@ -38,6 +38,7 @@ jest.mock('@/lib/downstream-sources/xgcartoon', () => ({
   searchFromXgcartoon: jest.fn(),
 }));
 jest.mock('@/lib/search-cache', () => ({
+  acquireUpstreamSearchSlot: jest.fn(async () => () => {}),
   loadSpecialSourceSearch: jest.fn(
     (_source: string, _query: string, loader: () => Promise<unknown>) =>
       loader(),

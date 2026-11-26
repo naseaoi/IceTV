@@ -5,6 +5,7 @@ import {
   resolveProxyUserAgent,
 } from '@/app/api/proxy/utils';
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
+import { RelayHostUnavailableError } from '@/features/play/lib/relayHostHealth.server';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
@@ -23,6 +24,7 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 import {
   UrlValidationError,
   validateProxyUrlForRequest,
@@ -261,7 +263,7 @@ async function handleGet(request: NextRequest) {
       targetUrl: validation.url,
       stage: 'upstream',
       reason: 'upstream-fetch',
-      status: 500,
+      status: 502,
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive,
@@ -269,8 +271,20 @@ async function handleGet(request: NextRequest) {
       userInitiated,
     });
     logProxyFailure(diagnostic);
+    // 冷却命中没有真实回源，不重复放大服务端失败原因样本。
+    if (!(error instanceof RelayHostUnavailableError && error.cached)) {
+      recordSourceProxyFailure(diagnostic);
+    }
+    const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
+    if (error instanceof RelayHostUnavailableError) {
+      headers['X-IceTV-Relay-Failure'] = error.failure.reason;
+      headers['Retry-After'] = String(
+        Math.max(1, Math.ceil((error.failure.until - Date.now()) / 1000)),
+      );
+    }
     return NextResponse.json(toProxyFailurePayload(diagnostic), {
       status: diagnostic.status,
+      headers,
     });
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "icetv",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
@@ -28,7 +28,6 @@
     "gen:changelog": "node scripts/convert-changelog.js",
     "validate:changelog": "node scripts/convert-changelog.js --check",
     "release:prepare": "node scripts/prepare-release.js",
-    "postbuild": "echo 'Build completed - sitemap generation disabled'",
     "prepare": "husky install"
   },
   "dependencies": {

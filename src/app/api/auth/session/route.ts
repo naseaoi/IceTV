@@ -70,7 +70,6 @@ export async function GET(request: NextRequest) {
     const isValidSignature = await verifyAuthSignature(
       getSignatureData('account', authInfo.expiresAt, authInfo.username),
       authInfo.signature,
-      { allowLegacyOwnerPassword: true },
     );
 
     if (!isValidSignature) {

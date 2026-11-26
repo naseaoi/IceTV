@@ -58,6 +58,71 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
     global.fetch = originalFetch;
   });
 
+  it('同作品批量写回跳过回源期间的进度、收藏变更与删除', async () => {
+    const concurrentUser = 'metadata-concurrent';
+    const deletedUser = 'metadata-deleted';
+    const favorite = {
+      title: giriTrackingRecord.title,
+      source_name: 'Giri资源',
+      cover: '',
+      year: '2026',
+      total_episodes: 16,
+      save_time: 1,
+    };
+    await db.savePlayRecord(
+      concurrentUser,
+      'giri',
+      '27100',
+      giriTrackingRecord,
+    );
+    await db.savePlayRecord(deletedUser, 'giri', '27100', giriTrackingRecord);
+    await db.saveFavorite(concurrentUser, 'giri', '27100', favorite);
+    global.fetch = jest.fn(async () => {
+      await db.savePlayRecord(concurrentUser, 'giri', '27100', {
+        ...giriTrackingRecord,
+        index: 3,
+        tracking_enabled: false,
+      });
+      await db.saveFavorite(concurrentUser, 'giri', '27100', {
+        ...favorite,
+        title: '并发保存收藏',
+      });
+      await db.setFavoriteTracking(concurrentUser, 'giri+27100', false);
+      await db.deletePlayRecord(deletedUser, 'giri', '27100');
+      return new Response(upstreamHtml);
+    });
+    try {
+      await refreshRecordAndFavorites();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(await db.getPlayRecord(username, 'giri', '27100')).toMatchObject({
+        group_total: 9,
+        metadata_checked_at: expect.any(Number),
+      });
+      expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(
+        1,
+      );
+      expect(
+        await db.getPlayRecord(concurrentUser, 'giri', '27100'),
+      ).toMatchObject({
+        index: 3,
+        group_total: 8,
+        tracking_enabled: false,
+      });
+      expect(
+        await db.getFavorite(concurrentUser, 'giri', '27100'),
+      ).toMatchObject({
+        title: '并发保存收藏',
+        total_episodes: 16,
+        tracking_enabled: false,
+      });
+      expect(await db.getPlayRecord(deletedUser, 'giri', '27100')).toBeNull();
+    } finally {
+      await db.deletePlayRecord(concurrentUser, 'giri', '27100');
+      await db.deletePlayRecord(deletedUser, 'giri', '27100');
+      await db.deleteFavorite(concurrentUser, 'giri', '27100');
+    }
+  });
+
   it('收藏在已有回源结果上生成更新，已读、静音与播放接管保持一致', async () => {
     await db.deletePlayRecord(username, 'giri', '27100');
     await db.saveFavorite(username, 'giri', '27100', {

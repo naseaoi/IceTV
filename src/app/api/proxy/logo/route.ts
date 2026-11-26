@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfigForRead } from '@/lib/config';
-import {
-  fetchResponseThroughProxy,
-  getProxyUrlForTarget,
-} from '@/lib/http-proxy-json';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { createSwrCache } from '@/lib/server-cache';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -20,6 +18,23 @@ import {
 export const runtime = 'nodejs';
 
 const MAX_LOGO_BYTES = 10 * 1024 * 1024;
+const failedLogos = createSwrCache<boolean>({
+  name: 'failed-live-logos',
+  maxSize: 512,
+  freshMs: 120_000,
+  staleMs: 0,
+});
+
+function logoFailure(url: string) {
+  failedLogos.set(url, true);
+  return NextResponse.json(
+    { error: '台标暂时无法加载' },
+    {
+      status: 502,
+      headers: { 'Cache-Control': 'private, max-age=120' },
+    },
+  );
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -43,6 +58,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
+  if (failedLogos.peek(validation.url)) {
+    return NextResponse.json(
+      { error: '台标暂时无法加载' },
+      {
+        status: 502,
+        headers: { 'Cache-Control': 'private, max-age=120' },
+      },
+    );
+  }
   const config = await getConfigForRead();
   const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   const timeoutMs = runtimeParams.ProxyRequestTimeoutSeconds * 1000;
@@ -51,6 +75,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const imageResponse = await fetchWithUrlGuard(validation.url, {
+      useProxyPool: true,
       cache: 'no-cache',
       redirect: 'follow',
       credentials: 'same-origin',
@@ -61,38 +86,22 @@ export async function GET(request: NextRequest) {
       timeoutMs,
     });
 
-    return await buildLogoResponse(imageResponse);
+    const response = await buildLogoResponse(imageResponse);
+    if (response.status !== 200) return logoFailure(validation.url);
+    failedLogos.invalidate(validation.url);
+    return response;
   } catch (error) {
-    const proxyUrl = getProxyUrlForTarget(new URL(validation.url));
-    if (proxyUrl) {
-      try {
-        const response = await fetchResponseThroughProxy(
-          new URL(validation.url),
-          proxyUrl,
-          {
-            timeoutMs,
-            userAgent: ua,
-            maxBytes: MAX_LOGO_BYTES,
-            accept: 'image/*,*/*',
-          },
-        );
-        return buildLogoBufferResponse(response.body, response.headers);
-      } catch (proxyError) {
-        console.warn('代理 logo 环境代理回源失败:', proxyError);
-      }
-    }
-
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
-      return NextResponse.json({ error: error.message }, { status: 413 });
+      return NextResponse.json({ error: '台标文件过大' }, { status: 413 });
     }
 
-    return NextResponse.json(
-      { error: 'Error fetching image' },
-      { status: 500 },
-    );
+    console.warn('台标代理回源失败', error);
+    return logoFailure(validation.url);
   }
 }
 

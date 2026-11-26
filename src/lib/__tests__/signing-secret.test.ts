@@ -1,9 +1,8 @@
-﻿/** @jest-environment node */
+/** @jest-environment node */
 
 import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 
 import { generateSignature } from '../auth.server';
-import { getOwnerPassword } from '../env.server';
 import {
   getAuthSigningSecret,
   verifyAuthSignature,
@@ -13,19 +12,12 @@ const AUTH_SECRET = 'auth-secret-with-at-least-32-chars';
 
 installCryptoPolyfill();
 
-jest.mock('../env.server', () => ({
-  getOwnerPassword: jest.fn(),
-}));
-
 describe('auth signing secret', () => {
   const originalAuthSecret = process.env.AUTH_SECRET;
-  const originalLegacyCutoff = process.env.LEGACY_COOKIE_CUTOFF_DATE;
 
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.AUTH_SECRET;
-    process.env.LEGACY_COOKIE_CUTOFF_DATE = '2099-01-01T00:00:00.000Z';
-    (getOwnerPassword as jest.Mock).mockReturnValue('owner-secret');
   });
 
   afterEach(() => {
@@ -35,12 +27,6 @@ describe('auth signing secret', () => {
       delete process.env.AUTH_SECRET;
     } else {
       process.env.AUTH_SECRET = originalAuthSecret;
-    }
-
-    if (originalLegacyCutoff === undefined) {
-      delete process.env.LEGACY_COOKIE_CUTOFF_DATE;
-    } else {
-      process.env.LEGACY_COOKIE_CUTOFF_DATE = originalLegacyCutoff;
     }
   });
 
@@ -62,37 +48,21 @@ describe('auth signing secret', () => {
     await expect(verifyAuthSignature(data, signature)).resolves.toBe(true);
   });
 
-  it('accepts legacy owner-password sessions only when migration is allowed', async () => {
-    process.env.AUTH_SECRET = AUTH_SECRET;
-    const data = 'user:1777777777777';
-    const legacySignature = await generateSignature(data, 'owner-secret');
-    const consoleWarnSpy = jest
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
+  it.each([AUTH_SECRET, undefined])(
+    'rejects signatures made with another secret when AUTH_SECRET is %s',
+    async (secret) => {
+      if (secret) process.env.AUTH_SECRET = secret;
+      const data = 'user:1777777777777';
+      const signature = await generateSignature(data, 'owner-secret');
 
-    await expect(verifyAuthSignature(data, legacySignature)).resolves.toBe(
-      false,
-    );
-    await expect(
-      verifyAuthSignature(data, legacySignature, {
-        allowLegacyOwnerPassword: true,
-      }),
-    ).resolves.toBe(true);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
-    );
-  });
+      await expect(verifyAuthSignature(data, signature)).resolves.toBe(false);
+    },
+  );
 
-  it('rejects legacy owner-password sessions after the cutoff date', async () => {
-    process.env.AUTH_SECRET = AUTH_SECRET;
-    process.env.LEGACY_COOKIE_CUTOFF_DATE = '2020-01-01T00:00:00.000Z';
-    const data = 'user:1777777777777';
-    const legacySignature = await generateSignature(data, 'owner-secret');
-
-    await expect(
-      verifyAuthSignature(data, legacySignature, {
-        allowLegacyOwnerPassword: true,
-      }),
-    ).resolves.toBe(false);
+  it('trims AUTH_SECRET before signing and verification', async () => {
+    process.env.AUTH_SECRET = `  ${AUTH_SECRET}  `;
+    expect(getAuthSigningSecret()).toBe(AUTH_SECRET);
+    const signature = await generateSignature('data', AUTH_SECRET);
+    await expect(verifyAuthSignature('data', signature)).resolves.toBe(true);
   });
 });

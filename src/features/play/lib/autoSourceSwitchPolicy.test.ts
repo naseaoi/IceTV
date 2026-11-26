@@ -166,8 +166,12 @@ describe('auto source switch policy', () => {
     const rank = () =>
       rankAutoSwitchCandidates([a, b, c], precomputed, new Map());
     expect(rank()).toEqual([c, b, a]);
-    jest.advanceTimersByTime(10 * 60_000 - 1);
+    jest.advanceTimersByTime(3 * 60_000 - 1);
     expect(rank()).toEqual([c, b, a]);
+    jest.advanceTimersByTime(1);
+    expect(rank()).toEqual([c, a, b]);
+    jest.advanceTimersByTime(7 * 60_000 - 1);
+    expect(rank()).toEqual([c, a, b]);
     jest.advanceTimersByTime(1);
     expect(rank()).toEqual([a, b, c]);
     expect(rank()).toEqual([a, b, c]);

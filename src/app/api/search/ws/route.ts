@@ -1,20 +1,20 @@
 import { NextRequest } from 'next/server';
 
+import { createSharedSearchStream } from '@/features/search/lib/search-stream.server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getSearchSourceConcurrency } from '@/lib/cache-budget-profile';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { collectSearchAggregation } from '@/lib/search-aggregate';
 import {
-  mergeRetriedSearchAggregate,
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
-  setCachedSearchAggregate,
 } from '@/lib/search-cache';
 import {
   type SearchFailedSource,
   describeFailedSearchSources,
 } from '@/lib/search-failed-sources';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 
@@ -100,165 +100,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 共享状态
-  let streamClosed = false;
-  const searchAbortController = new AbortController();
-
-  const abortSearch = () => {
-    if (!searchAbortController.signal.aborted) {
-      searchAbortController.abort();
-    }
-  };
-
-  const closeSearch = () => {
-    streamClosed = true;
-    abortSearch();
-  };
-  const cleanupRequestSignal = () => {
-    request.signal.removeEventListener('abort', closeSearch);
-  };
-
-  if (request.signal.aborted) {
-    closeSearch();
-  } else {
-    request.signal.addEventListener('abort', closeSearch, { once: true });
+  try {
+    return createSearchStreamResponse(
+      createSharedSearchStream(
+        {
+          apiSites: targetSites,
+          query,
+          maxSearchPages,
+          disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+          sourceConcurrency,
+          sourceFailureCooldownMs,
+          sourceTimeoutMs,
+          sourceHealthTiers,
+          retryFailed: retrySources !== null,
+        },
+        aggregateCacheParams,
+        request.signal,
+      ),
+    );
+  } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
+    throw error;
   }
-
-  // 创建可读流
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-
-      // 辅助函数：安全地向控制器写入数据
-      const safeEnqueue = (data: Uint8Array) => {
-        try {
-          if (
-            streamClosed ||
-            (!controller.desiredSize && controller.desiredSize !== 0)
-          ) {
-            // 流已标记为关闭或控制器已关闭
-            return false;
-          }
-          controller.enqueue(data);
-          return true;
-        } catch (error) {
-          // 控制器已关闭或出现其他错误
-          console.warn('Failed to enqueue data:', error);
-          streamClosed = true;
-          abortSearch();
-          return false;
-        }
-      };
-
-      // 发送开始事件
-      const startEvent = `data: ${JSON.stringify({
-        type: 'start',
-        query,
-        totalSources: targetSites.length,
-        timestamp: Date.now(),
-      })}\n\n`;
-
-      if (!safeEnqueue(encoder.encode(startEvent))) {
-        cleanupRequestSignal();
-        return; // 连接已关闭，提前退出
-      }
-
-      // 记录已完成的源数量
-      let completedSources = 0;
-      const aggregate = await collectSearchAggregation({
-        apiSites: targetSites,
-        query,
-        maxSearchPages,
-        disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-        sourceConcurrency,
-        sourceFailureCooldownMs,
-        sourceTimeoutMs,
-        sourceHealthTiers,
-        signal: searchAbortController.signal,
-        retryFailed: retrySources !== null,
-        shouldContinue: () =>
-          !streamClosed && !searchAbortController.signal.aborted,
-        onSourceResult: (site, results) => {
-          completedSources++;
-
-          if (streamClosed) {
-            return;
-          }
-
-          const sourceEvent = `data: ${JSON.stringify({
-            type: 'source_result',
-            source: site.key,
-            sourceName: site.name,
-            results,
-            timestamp: Date.now(),
-          })}\n\n`;
-
-          if (!safeEnqueue(encoder.encode(sourceEvent))) {
-            streamClosed = true;
-          }
-        },
-        onSourceError: (site, error) => {
-          completedSources++;
-
-          if (streamClosed) {
-            return;
-          }
-
-          console.error('流式搜索源请求失败:', site.key, error);
-          const errorEvent = `data: ${JSON.stringify({
-            type: 'source_error',
-            source: site.key,
-            sourceName: site.name,
-            error: '搜索失败',
-            timestamp: Date.now(),
-          })}\n\n`;
-
-          if (!safeEnqueue(encoder.encode(errorEvent))) {
-            streamClosed = true;
-          }
-        },
-      });
-
-      if (!streamClosed) {
-        if (retrySources) {
-          mergeRetriedSearchAggregate(
-            aggregateCacheParams,
-            new Set(targetSites.map((site) => site.key)),
-            aggregate,
-          );
-        } else {
-          setCachedSearchAggregate(aggregateCacheParams, aggregate);
-        }
-
-        const completeEvent = `data: ${JSON.stringify({
-          type: 'complete',
-          totalResults: aggregate.results.length,
-          completedSources,
-          timestamp: Date.now(),
-        })}\n\n`;
-
-        if (safeEnqueue(encoder.encode(completeEvent))) {
-          try {
-            controller.close();
-          } catch (error) {
-            console.warn('Failed to close controller:', error);
-          }
-        }
-      }
-
-      cleanupRequestSignal();
-    },
-
-    cancel() {
-      // 客户端断开连接时，标记流已关闭
-      closeSearch();
-      cleanupRequestSignal();
-      console.log('Client disconnected, cancelling search stream');
-    },
-  });
-
-  // 返回流式响应
-  return createSearchStreamResponse(stream);
 }
 
 function buildCachedSearchStream(
@@ -304,6 +168,8 @@ function createSearchStreamResponse(body: BodyInit) {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
+      // Nginx 反代默认缓冲上游响应，事件会成批到达；此头让其逐条转发，部署者无需改反代配置
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET',

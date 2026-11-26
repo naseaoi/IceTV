@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const response = await fetchWithUrlGuard(validation.url, {
+      useProxyPool: false,
       cache: 'no-cache',
       redirect: 'follow',
       credentials: 'same-origin',

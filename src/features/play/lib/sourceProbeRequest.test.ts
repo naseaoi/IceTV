@@ -42,6 +42,31 @@ describe('probe request admission', () => {
     });
   });
 
+  it.each([
+    [403, 'host-forbidden'],
+    [502, 'host-connection'],
+  ] as const)(
+    'remembers %s host failure without refresh and skips subsequent forceServer requests',
+    async (status, reason) => {
+      const target = `https://blocked-${status}.example/a.m3u8`;
+      const url = `/api/proxy/m3u8?forceServer=true&icetv-source=blocked&url=${encodeURIComponent(target)}`;
+      (global.fetch as jest.Mock).mockResolvedValue({
+        status,
+        headers: new Headers({
+          'X-IceTV-Relay-Failure': reason,
+          'Retry-After': '600',
+        }),
+      });
+      expect((await fetchSourceProbe(url)).status).toBe(status);
+      await expect(
+        fetchSourceProbe(url.replace('a.m3u8', 'b.m3u8')),
+      ).rejects.toMatchObject({ name: 'SourceProbeNetworkError' });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      await fetchSourceProbe(target);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('cancels busy responses and shares Retry-After cooldown across probe requests', async () => {
     let now = 100_000;
     jest.spyOn(Date, 'now').mockImplementation(() => now);

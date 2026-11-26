@@ -264,12 +264,17 @@ async function getInitConfig(
     LastCheck: '',
   },
 ): Promise<AdminConfig> {
-  let cfgFile: ConfigFileStruct;
-  try {
-    cfgFile = JSON.parse(configFile) as ConfigFileStruct;
-  } catch (e) {
-    console.warn('解析初始配置文件失败:', e);
-    cfgFile = {} as ConfigFileStruct;
+  let cfgFile: ConfigFileStruct = {};
+  if (configFile.trim()) {
+    try {
+      cfgFile = JSON.parse(configFile) as ConfigFileStruct;
+    } catch (e) {
+      console.warn(
+        '解析初始配置文件失败：配置重置使用的 config_subscription.config_file 不是有效 JSON，沿用默认配置',
+        { contentLength: configFile.length },
+        e,
+      );
+    }
   }
   const adminConfig: AdminConfig = {
     ConfigFile: configFile,
@@ -290,8 +295,6 @@ async function getInitConfig(
       EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
-        SearchDownstreamMaxPage:
-          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       }),
       DoubanProxyType:
@@ -557,8 +560,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
-        SearchDownstreamMaxPage:
-          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: 7200,
       }),
       DoubanProxyType:

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+import LiveLoading from '@/app/live/loading';
 import LivePage, { LivePlayerOverlay } from '@/features/live/LivePageClient';
 
 const mockUseLiveSources = jest.fn();
@@ -11,19 +12,14 @@ jest.mock('@/components/AuthenticatedRoute', () => ({
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-jest.mock('@/components/PlayerPageLayout', () => ({
-  PlayerPageLayout: ({
-    playerOverlay,
-    rightPanel,
-  }: {
-    playerOverlay: ReactNode;
-    rightPanel: ReactNode;
-  }) => (
-    <div>
-      {playerOverlay}
-      {rightPanel}
-    </div>
-  ),
+jest.mock('@/components/PageLayout', () => ({
+  __esModule: true,
+  default: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+jest.mock('@/components/PlayerShortcutsModal', () => ({
+  __esModule: true,
+  default: () => null,
 }));
 
 jest.mock('@/features/live/components/LiveChannelSidebar', () => ({
@@ -32,8 +28,10 @@ jest.mock('@/features/live/components/LiveChannelSidebar', () => ({
 
 jest.mock('@/features/live/hooks/useLiveFavorite', () => ({
   useLiveFavorite: () => ({
-    favorited: false,
-    handleToggleFavorite: jest.fn(),
+    ready: true,
+    isGroupFavorited: () => false,
+    toggleGroupFavorite: jest.fn(),
+    favoriteGroups: [],
   }),
 }));
 
@@ -125,6 +123,83 @@ describe('LivePlayerOverlay', () => {
 });
 
 describe('LivePage', () => {
+  beforeEach(() => {
+    window.matchMedia = jest.fn().mockReturnValue({
+      matches: false,
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+    });
+  });
+  it.each([1, 2])(
+    'shares loading and ready layout with %i channel lines',
+    (lineCount) => {
+      const sources = {
+        loading: true,
+        loadingMessage: '获取直播源',
+        error: null,
+        videoUrl: '',
+        currentChannel: null,
+        currentChannelRef: { current: null },
+        currentChannels: [],
+        currentSource: null,
+        currentSourceRef: { current: null },
+        isVideoLoading: false,
+        unsupportedType: null,
+        isChannelListCollapsed: false,
+      };
+      mockUseLiveSources.mockReturnValue(sources);
+      mockUseLivePlayer.mockReturnValue({
+        artPlayerRef: { current: null },
+        cleanupPlayer: jest.fn(),
+        playbackFailed: false,
+        retryPlayback: jest.fn(),
+      });
+      const { container, rerender } = render(<LiveLoading />);
+      const readLayoutClasses = () =>
+        Array.from(
+          container.querySelectorAll(
+            '[data-player-layout], [data-player-heading], [data-player-video], [data-player-sidebar]',
+          ),
+          (element) => element.className,
+        );
+      const readActionClasses = () =>
+        container.querySelector('[data-player-heading] > .ml-auto > div')
+          ?.className;
+      const loadingLayout = readLayoutClasses();
+      const loadingActions = readActionClasses();
+      expect(loadingActions).toBeTruthy();
+
+      rerender(<LivePage />);
+      const playerContainer = container.querySelector('[data-player-video]');
+      expect(playerContainer).not.toBeNull();
+      expect(readLayoutClasses()).toEqual(loadingLayout);
+      expect(readActionClasses()).toBe(loadingActions);
+      expect(screen.getByText('获取直播源')).toBeInTheDocument();
+
+      const channels = Array.from({ length: lineCount }, (_, index) => ({
+        id: `ch${index}`,
+        tvgId: 'ch1',
+        name: '频道一',
+        logo: '',
+        group: '央视',
+        url: `https://example.com/ch${index}.m3u8`,
+      }));
+      mockUseLiveSources.mockReturnValue({
+        ...sources,
+        loading: false,
+        currentChannel: channels[0],
+        currentChannels: channels,
+      });
+      rerender(<LivePage />);
+      expect(container.querySelector('[data-player-video]')).toBe(
+        playerContainer,
+      );
+      expect(readLayoutClasses()).toEqual(loadingLayout);
+      expect(readActionClasses()).toBe(loadingActions);
+      expect(screen.getByTestId('live-channel-sidebar')).toBeInTheDocument();
+    },
+  );
+
   it('keeps the channel panel and retries in place when playback fails', () => {
     const channel = {
       id: 'ch1',

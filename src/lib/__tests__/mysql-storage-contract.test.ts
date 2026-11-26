@@ -21,7 +21,15 @@ import {
   assertPlayRecordTitleLookup,
 } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
+import {
+  assertPlaybackRetentionBatches,
+  assertSourceUsageAggregation,
+} from '@/lib/__tests__/__fixtures__/playback-maintenance-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import {
+  assertSourceProxyFailures,
+  assertSourceRoutePhases,
+} from '@/lib/__tests__/__fixtures__/source-route-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { assertWatchLevelContract } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
@@ -30,6 +38,7 @@ import {
   hasUnreadPlayRecordMessage,
   isTrackingEnabled,
 } from '@/lib/play-records';
+import type { SourceProxyFailureDelta } from '@/lib/types';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
@@ -54,7 +63,7 @@ type SearchHistoryRow = {
 
 type SourceRouteStatsRow = {
   source: string;
-  routeMode: 'browser' | 'server' | 'browser-v2' | 'server-v2';
+  routeMode: string;
   bucketDate: string;
   successCount: number;
   failureCount: number;
@@ -81,6 +90,7 @@ type HealthPlayRow = {
 
 type FakeState = ListFakeState & {
   announcements: Map<string, AnnouncementRow>;
+  proxyFailures: SourceProxyFailureDelta[];
   healthSearch: HealthSearchRow[];
   healthPlay: HealthPlayRow[];
   subscription: Record<string, unknown> | null;
@@ -103,15 +113,11 @@ type FakeState = ListFakeState & {
   watchBuckets: Record<string, any>[];
   watchTotals: Map<string, number>;
   levelEvents: Record<string, any>[];
-  levelMigrated: boolean;
-  historyMigrated: boolean;
-  reviewPublishedMigrated: boolean;
   searchHistory: SearchHistoryRow[];
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
-  inviteCodeUsage: Map<string, number>;
   inviteCodeRedemptions: Map<string, string>;
   inviteCodes: Map<string, Record<string, any>>;
   danmakuEpisodes: Map<string, Map<string, number>>;
@@ -132,6 +138,7 @@ function cloneState(state: FakeState): FakeState {
     announcements: new Map(
       [...state.announcements].map(([id, row]) => [id, { ...row }]),
     ),
+    proxyFailures: state.proxyFailures.map((row) => ({ ...row })),
     healthSearch: state.healthSearch.map((row) => ({ ...row })),
     healthPlay: state.healthPlay.map((row) => ({ ...row })),
     subscription: state.subscription ? { ...state.subscription } : null,
@@ -162,15 +169,11 @@ function cloneState(state: FakeState): FakeState {
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
     watchTotals: new Map(state.watchTotals),
     levelEvents: state.levelEvents.map((row) => ({ ...row })),
-    levelMigrated: state.levelMigrated,
-    historyMigrated: state.historyMigrated,
-    reviewPublishedMigrated: state.reviewPublishedMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
-    inviteCodeUsage: new Map(state.inviteCodeUsage),
     inviteCodeRedemptions: new Map(state.inviteCodeRedemptions),
     inviteCodes: new Map(
       [...state.inviteCodes].map(([code, item]) => [code, { ...item }]),
@@ -191,6 +194,7 @@ function createState(): FakeState {
     listItems: [],
     listLikes: [],
     announcements: new Map(),
+    proxyFailures: [],
     healthSearch: [],
     healthPlay: [],
     subscription: null,
@@ -218,15 +222,11 @@ function createState(): FakeState {
     watchBuckets: [],
     watchTotals: new Map(),
     levelEvents: [],
-    levelMigrated: false,
-    historyMigrated: false,
-    reviewPublishedMigrated: false,
     searchHistory: [],
     sourceRouteStats: [],
     adminConfig: null,
     messageStates: new Map(),
     loginActivities: new Map(),
-    inviteCodeUsage: new Map(),
     inviteCodeRedemptions: new Map(),
     inviteCodes: new Map(),
     danmakuEpisodes: new Map(),
@@ -397,6 +397,7 @@ function createFakePool() {
   let state = createState();
   let transactionQueue = Promise.resolve();
   let queryCount = 0;
+  let transactionSql: string[] = [];
 
   const runExecute = async (
     sql: string,
@@ -431,29 +432,104 @@ function createFakePool() {
         ];
       }
     }
+    if (
+      normalized.startsWith(
+        'DELETE FROM playback_watch_buckets WHERE (username, session_id) IN',
+      )
+    ) {
+      const before = currentState.watchBuckets.length;
+      currentState.watchBuckets = currentState.watchBuckets.filter(
+        (row) =>
+          !params.some(
+            (value, index) =>
+              index % 2 === 0 &&
+              row.username === value &&
+              row.session_id === params[index + 1],
+          ),
+      );
+      return [{ affectedRows: before - currentState.watchBuckets.length }, []];
+    }
+    if (normalized.startsWith('DELETE FROM playback_sessions WHERE id IN')) {
+      let count = 0;
+      for (const id of params) {
+        if (currentState.playbackSessions.delete(String(id))) count++;
+      }
+      return [{ affectedRows: count }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE user_access SET enabled_apis = CASE username',
+      )
+    ) {
+      const size = (params.length - 1) / 3;
+      for (let index = 0; index < size; index++) {
+        const row = currentState.userAccess.get(String(params[index * 2]));
+        if (row) {
+          row.enabled_apis = params[index * 2 + 1];
+          row.updated_at = params[size * 2];
+        }
+      }
+      return [{ affectedRows: size }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE user_notice_events SET payload_json = CASE id',
+      )
+    ) {
+      const size = (params.length - 1) / 3;
+      for (let index = 0; index < size; index++) {
+        const row = (currentState.social.user_notice_events ?? []).find(
+          (item) => item.id === params[index * 2],
+        );
+        if (row) {
+          row.payload_json = params[index * 2 + 1];
+          row.created_at = params[size * 2];
+        }
+      }
+      return [{ affectedRows: size }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_notice_events WHERE id IN')) {
+      const rows = currentState.social.user_notice_events ?? [];
+      currentState.social.user_notice_events = rows.filter(
+        (row) => !params.includes(row.id),
+      );
+      return [
+        {
+          affectedRows:
+            rows.length - currentState.social.user_notice_events.length,
+        },
+        [],
+      ];
+    }
     if (normalized.startsWith('INSERT IGNORE INTO user_notice_events')) {
       const rows = (currentState.social.user_notice_events ??= []);
-      if (
-        rows.some(
-          (row) =>
-            row.recipient_username === params[1] && row.event_key === params[2],
+      let count = 0;
+      for (let offset = 0; offset < params.length; offset += 7) {
+        const values = params.slice(offset, offset + 7);
+        if (
+          rows.some(
+            (row) =>
+              row.recipient_username === values[1] &&
+              row.event_key === values[2],
+          )
         )
-      )
-        return [{ affectedRows: 0 }, []];
-      rows.push(
-        Object.fromEntries(
-          [
-            'id',
-            'recipient_username',
-            'event_key',
-            'kind',
-            'action',
-            'payload_json',
-            'created_at',
-          ].map((key, index) => [key, params[index]]),
-        ),
-      );
-      return [{ affectedRows: 1 }, []];
+          continue;
+        rows.push(
+          Object.fromEntries(
+            [
+              'id',
+              'recipient_username',
+              'event_key',
+              'kind',
+              'action',
+              'payload_json',
+              'created_at',
+            ].map((key, index) => [key, values[index]]),
+          ),
+        );
+        count++;
+      }
+      return [{ affectedRows: count }, []];
     }
     if (
       normalized.startsWith(
@@ -532,21 +608,6 @@ function createFakePool() {
       currentState.levelEvents = currentState.levelEvents.filter(
         (row) => row.username !== params[0],
       );
-      return [{ affectedRows: 1 }, []];
-    }
-    if (normalized.startsWith('INSERT IGNORE INTO storage_migrations'))
-      return [{ affectedRows: 0 }, []];
-    if (normalized.startsWith('UPDATE video_reviews SET first_published_at')) {
-      for (const row of currentState.videoReviews.values())
-        row.first_published_at ??= row.review.updated_at;
-      return [{ affectedRows: 1 }, []];
-    }
-    if (normalized.startsWith('UPDATE storage_migrations')) {
-      if (params[1] === 'review_first_published_v1')
-        currentState.reviewPublishedMigrated = true;
-      else if (params[1] === 'watch_level_v1')
-        currentState.levelMigrated = true;
-      else currentState.historyMigrated = true;
       return [{ affectedRows: 1 }, []];
     }
     if (normalized.startsWith('DELETE FROM watch_history WHERE username = ?')) {
@@ -1147,62 +1208,6 @@ function createFakePool() {
         [],
       ];
     }
-    if (
-      normalized ===
-      'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)'
-    ) {
-      const [code, usedCount] = params as [string, number];
-      if (!currentState.inviteCodeUsage.has(code)) {
-        currentState.inviteCodeUsage.set(code, Number(usedCount));
-      }
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (
-      normalized ===
-      'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?'
-    ) {
-      const [code, maxUses] = params as [string, number];
-      const usedCount = currentState.inviteCodeUsage.get(code);
-      if (usedCount === undefined || usedCount >= Number(maxUses)) {
-        return [{ affectedRows: 0 }, []];
-      }
-      currentState.inviteCodeUsage.set(code, usedCount + 1);
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (
-      normalized ===
-      'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?'
-    ) {
-      const [code] = params as [string];
-      const usedCount = currentState.inviteCodeUsage.get(code);
-      if (usedCount === undefined) return [{ affectedRows: 0 }, []];
-      currentState.inviteCodeUsage.set(code, usedCount + 1);
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (
-      normalized ===
-      'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0'
-    ) {
-      const [code] = params as [string];
-      const usedCount = currentState.inviteCodeUsage.get(code);
-      if (!usedCount) return [{ affectedRows: 0 }, []];
-      currentState.inviteCodeUsage.set(code, usedCount - 1);
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (normalized === 'DELETE FROM invite_code_usage WHERE code = ?') {
-      const [code] = params as [string];
-      currentState.inviteCodeUsage.delete(code);
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM invite_code_usage') {
-      currentState.inviteCodeUsage.clear();
-      return [[], []];
-    }
 
     if (
       normalized ===
@@ -1645,6 +1650,38 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized.startsWith('INSERT INTO source_proxy_failures (')) {
+      const [source, bucketDate, reason, failureCount] = params as [
+        string,
+        string,
+        SourceProxyFailureDelta['reason'],
+        number,
+      ];
+      const row = currentState.proxyFailures.find(
+        (item) =>
+          item.source === source &&
+          item.bucketDate === bucketDate &&
+          item.reason === reason,
+      );
+      if (row) row.failureCount += failureCount;
+      else
+        currentState.proxyFailures.push({
+          source,
+          bucketDate,
+          reason,
+          failureCount,
+        });
+      return [[], []];
+    }
+    if (
+      normalized === 'DELETE FROM source_proxy_failures WHERE bucket_date < ?'
+    ) {
+      currentState.proxyFailures = currentState.proxyFailures.filter(
+        (row) => row.bucketDate >= (params[0] as string),
+      );
+      return [[], []];
+    }
+
     if (normalized.startsWith('INSERT INTO source_health_search (')) {
       const [
         source,
@@ -1735,10 +1772,77 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
     if (
-      normalized ===
-      "SHOW COLUMNS FROM config_subscription LIKE 'failure_since'"
+      normalized.startsWith(
+        'SELECT id, recipient_username, payload_json FROM user_notice_events',
+      )
+    )
+      return [
+        (currentState.social.user_notice_events ?? [])
+          .filter(
+            (row) =>
+              row.kind === 'account-change' &&
+              row.action === 'permissions-changed' &&
+              Number(row.created_at) > Number(params[0]),
+          )
+          .sort((a, b) => Number(a.created_at) - Number(b.created_at)),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT username, enabled_apis FROM user_access WHERE enabled_apis IS NOT NULL',
+      )
+    )
+      return [
+        [...currentState.userAccess.values()].filter(
+          (row) => row.enabled_apis !== null,
+        ),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'WITH filtered AS (SELECT id, CAST(username AS BINARY)',
+      )
     ) {
-      return [[{ Field: 'failure_since' }], []];
+      const personal = normalized.includes('WHERE username = ? AND started_at');
+      const start = Number(params[personal ? 1 : 0]);
+      const end = Number(params[personal ? 2 : 1]);
+      const rows = [...currentState.playbackSessions.values()].filter(
+        (row) =>
+          (!personal || row.username === params[0]) &&
+          Number(row.started_at) >= start &&
+          Number(row.started_at) < end &&
+          Number(row.watch_seconds) > 0,
+      );
+      const groups = new Map<string, Record<string, unknown>[]>();
+      for (const row of rows)
+        groups.set(String(row.source), [
+          ...(groups.get(String(row.source)) ?? []),
+          row,
+        ]);
+      return [
+        [...groups.values()].flatMap((items) => {
+          const latest = [...items].sort(
+            (a, b) =>
+              Number(b.started_at) - Number(a.started_at) ||
+              String(b.id).localeCompare(String(a.id)),
+          )[0];
+          const works = new Map(
+            items.map((row) => [JSON.stringify([row.title, row.year]), row]),
+          );
+          return [...works.values()].map((row) => ({
+            source: row.source,
+            title: row.title,
+            year: row.year,
+            watch_seconds: items.reduce(
+              (sum, item) => sum + Number(item.watch_seconds),
+              0,
+            ),
+            user_count: new Set(items.map((item) => item.username)).size,
+            source_name: latest.source_name,
+          }));
+        }),
+        [],
+      ];
     }
     if (normalized === "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'")
       return [[{ Field: 'value_bytes' }], []];
@@ -1747,16 +1851,6 @@ function createFakePool() {
       "SHOW INDEX FROM shared_cache WHERE Key_name = 'idx_shared_cache_budget'"
     )
       return [[{ Key_name: 'idx_shared_cache_budget' }], []];
-    if (normalized === "SHOW COLUMNS FROM list_likes LIKE 'list_name'")
-      return [[{ Field: 'list_name' }], []];
-    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")
-      return [[{ Field: 'like_count' }], []];
-    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'view_count'")
-      return [[{ Field: 'view_count' }], []];
-    if (normalized === "SHOW COLUMNS FROM users LIKE 'password_set'")
-      return [[{ Field: 'password_set' }], []];
-    if (normalized.startsWith('SHOW COLUMNS FROM user_danmaku'))
-      return [[{ Field: normalized.includes('title') ? 'title' : 'year' }], []];
     if (
       normalized ===
       'SELECT password, password_set FROM users WHERE username = ? FOR UPDATE'
@@ -1929,37 +2023,15 @@ function createFakePool() {
       normalized === 'SELECT source_key, channel_number FROM live_source_state'
     )
       return [[...currentState.liveCounts.values()], []];
-    if (normalized === 'SHOW COLUMNS FROM video_reviews')
-      return [[{ Field: 'first_published_at' }], []];
-    if (normalized === 'SHOW COLUMNS FROM playback_sessions')
-      return [[{ Field: 'measurement_version' }], []];
-    if (normalized.startsWith('SELECT completed_at FROM storage_migrations'))
-      return [
-        [
-          {
-            completed_at: (
-              params[0] === 'review_first_published_v1'
-                ? currentState.reviewPublishedMigrated
-                : params[0] === 'watch_level_v1'
-                  ? currentState.levelMigrated
-                  : currentState.historyMigrated
-            )
-              ? 1
-              : 0,
-          },
-        ],
-        [],
-      ];
-    if (normalized.startsWith('SELECT ranked.*, p.record_json'))
-      return [[], []];
     if (
       normalized ===
-      'SELECT id FROM playback_sessions WHERE updated_at < ? FOR UPDATE'
+      'SELECT username, id FROM playback_sessions WHERE updated_at < ? ORDER BY updated_at LIMIT ? FOR UPDATE'
     )
       return [
-        [...currentState.playbackSessions.values()].filter(
-          (row) => Number(row.updated_at) < Number(params[0]),
-        ),
+        [...currentState.playbackSessions.values()]
+          .filter((row) => Number(row.updated_at) < Number(params[0]))
+          .sort((a, b) => Number(a.updated_at) - Number(b.updated_at))
+          .slice(0, Number(params[1])),
         [],
       ];
     if (
@@ -2049,40 +2121,51 @@ function createFakePool() {
       );
       return [rows.slice(0, Number(params.at(-1))), []];
     }
-    if (normalized === 'SHOW COLUMNS FROM favorites')
-      return [
-        [
-          'title_norm',
-          'year_norm',
-          'year_number',
-          'search_text',
-          'saved_at',
-          'library_valid',
-          'watch_status',
-          'watched_at',
-          'projection_version',
-        ].map((Field) => ({ Field })),
-        [],
-      ];
+    if (normalized === 'SHOW INDEX FROM playback_sessions')
+      return [[{ Key_name: 'idx_playback_sessions_started_at' }], []];
+    if (normalized === 'SHOW INDEX FROM video_reviews')
+      return [[{ Key_name: 'idx_review_author_public_time' }], []];
+    if (normalized === 'SHOW INDEX FROM play_records')
+      return [[{ Key_name: 'idx_records_metadata_work' }], []];
     if (normalized === 'SHOW INDEX FROM favorites')
       return [
         [
           'idx_favorites_saved',
           'idx_favorites_work',
           'idx_favorites_projection',
+          'idx_favorites_metadata_work',
         ].map((Key_name) => ({ Key_name })),
         [],
       ];
-    if (
-      normalized ===
-      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250'
-    )
-      return [[], []];
     if (
       normalized.startsWith(
         'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a',
       )
     ) {
+      const all = normalized.includes('WHERE (a.username = ?');
+      const selected = all
+        ? [...currentState.userAccess.values()].filter(
+            (row) =>
+              row.username === params[0] ||
+              currentState.users.has(String(row.username)),
+          )
+        : [];
+      if (all)
+        return [
+          selected.flatMap((row) => {
+            const groups = currentState.userGroups
+              .filter((group) => group.username === row.username)
+              .sort(
+                (a, b) =>
+                  a.position - b.position ||
+                  String(a.group_name).localeCompare(String(b.group_name)),
+              );
+            return (groups.length ? groups : [{ group_name: null }]).map(
+              (group) => ({ ...row, group_name: group.group_name }),
+            );
+          }),
+          [],
+        ];
       const username = String(params[0]);
       const row = currentState.userAccess.get(username);
       if (!row || (username !== params[1] && !currentState.users.has(username)))
@@ -2615,6 +2698,23 @@ function createFakePool() {
 
     if (
       normalized.startsWith(
+        'SELECT record_key, record_json, COUNT(*) OVER () AS total FROM play_records',
+      )
+    ) {
+      const rows = selectUnreadTrackingRows(
+        currentState,
+        params[0] as string,
+        undefined,
+        undefined,
+        true,
+      );
+      return [
+        rows.slice(0, 2).map((row) => ({ ...row, total: rows.length })),
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
         'SELECT record_key, record_json FROM play_records',
       ) &&
       normalized.includes(TRACKING_SQL_MARKER)
@@ -3072,15 +3172,6 @@ function createFakePool() {
       ];
     }
 
-    if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
-      return [
-        Array.from(currentState.inviteCodeUsage.entries()).map(
-          ([code, usedCount]) => ({ code, used_count: usedCount }),
-        ),
-        [],
-      ];
-    }
-
     if (
       normalized ===
         'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1' ||
@@ -3096,20 +3187,6 @@ function createFakePool() {
     }
 
     if (
-      normalized === 'SELECT username, last_login_at FROM user_login_activity'
-    ) {
-      return [
-        Array.from(currentState.loginActivities.entries()).map(
-          ([username, lastLoginAt]) => ({
-            username,
-            last_login_at: lastLoginAt,
-          }),
-        ),
-        [],
-      ];
-    }
-
-    if (
       normalized === 'SELECT password FROM users WHERE username = ? LIMIT 1'
     ) {
       const [username] = params as [string];
@@ -3119,6 +3196,39 @@ function createFakePool() {
     if (normalized === 'SELECT 1 AS v FROM users WHERE username = ? LIMIT 1') {
       const [username] = params as [string];
       return [currentState.users.has(username) ? [{ v: 1 }] : [], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT source, reason, SUM(failure_count) AS failureCount FROM source_proxy_failures WHERE bucket_date >= ? GROUP BY source, reason ORDER BY source ASC, reason ASC'
+    ) {
+      const grouped = new Map<
+        string,
+        {
+          source: string;
+          reason: SourceProxyFailureDelta['reason'];
+          failureCount: number;
+        }
+      >();
+      for (const row of currentState.proxyFailures) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const key = JSON.stringify([row.source, row.reason]);
+        const current = grouped.get(key) ?? {
+          source: row.source,
+          reason: row.reason,
+          failureCount: 0,
+        };
+        current.failureCount += row.failureCount;
+        grouped.set(key, current);
+      }
+      return [
+        [...grouped.values()].sort(
+          (a, b) =>
+            a.source.localeCompare(b.source) ||
+            a.reason.localeCompare(b.reason),
+        ),
+        [],
+      ];
     }
 
     if (
@@ -3193,6 +3303,47 @@ function createFakePool() {
     }
     if (
       normalized ===
+      'SELECT source, bucket_date AS bucketDate, SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays, SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays FROM source_health_play WHERE bucket_date >= ? GROUP BY source, bucket_date ORDER BY bucket_date ASC, source ASC'
+    ) {
+      const daily = new Map<
+        string,
+        {
+          source: string;
+          bucketDate: string;
+          successReporterDays: number;
+          failureReporterDays: number;
+        }
+      >();
+      for (const row of currentState.healthPlay) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const key = JSON.stringify([row.source, row.bucketDate]);
+        const summary = daily.get(key) ?? {
+          source: row.source,
+          bucketDate: row.bucketDate,
+          successReporterDays: 0,
+          failureReporterDays: 0,
+        };
+        if (row.successCount > 0) summary.successReporterDays++;
+        else if (row.failureCount > 0) summary.failureReporterDays++;
+        daily.set(key, summary);
+      }
+      return [
+        [...daily.values()]
+          .sort(
+            (a, b) =>
+              a.bucketDate.localeCompare(b.bucketDate) ||
+              a.source.localeCompare(b.source),
+          )
+          .map((row) => ({
+            ...row,
+            successReporterDays: String(row.successReporterDays),
+            failureReporterDays: String(row.failureReporterDays),
+          })),
+        [],
+      ];
+    }
+    if (
+      normalized ===
       'SELECT source, SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays, SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays, MAX(CASE WHEN success_count > 0 THEN bucket_date ELSE NULL END) AS lastSuccessDate FROM source_health_play WHERE bucket_date >= ? GROUP BY source ORDER BY source ASC'
     ) {
       const summaries = new Map<
@@ -3255,6 +3406,12 @@ function createFakePool() {
       state = createState();
       queryCount = 0;
     },
+    resetTransactionSql() {
+      transactionSql = [];
+    },
+    getTransactionSql() {
+      return transactionSql;
+    },
     async getConnection() {
       let transactionState = cloneState(state);
       let unlock = () => {};
@@ -3268,6 +3425,7 @@ function createFakePool() {
           transactionState = cloneState(state);
         },
         async query(sql: string, params?: unknown[]) {
+          transactionSql.push(normalizeSql(sql));
           return runQuery(sql, params, transactionState);
         },
         async commit() {
@@ -3278,6 +3436,7 @@ function createFakePool() {
           unlock();
         },
         async execute(sql: string, params?: unknown[]) {
+          transactionSql.push(normalizeSql(sql));
           return runExecute(sql, params, transactionState);
         },
         release() {},
@@ -3361,6 +3520,123 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it.each(['record', 'favorite'] as const)(
+    'metadata %s lookup retains index equality and rejects case variants',
+    async (kind) => {
+      const storage = new MySqlStorage(
+        'mysql://demo:demo@localhost:3306/icetv',
+      );
+      await storage.getAllPlayRecords('metadata-init');
+      const column = kind === 'record' ? 'record_key' : 'favorite_key';
+      const rows = [
+        { user: 'a', work_key: 'site+Ab1', snapshot: '{}' },
+        { user: 'b', work_key: 'site+ab1', snapshot: '{}' },
+      ];
+      const query = jest
+        .spyOn(fakePool, 'query')
+        .mockImplementation(async (sql, params = []) => {
+          expect(sql).toContain(
+            `${column} = ? AND BINARY ${column} = BINARY ?`,
+          );
+          expect(params).toEqual(['site+Ab1', 'site+Ab1', 11]);
+          return [rows.filter((row) => row.work_key === params[1]), []];
+        });
+      try {
+        const page = await storage.getMetadataRefreshPage(
+          kind,
+          10,
+          undefined,
+          'site+Ab1',
+        );
+        expect(page.items.map((row) => row.user)).toEqual(['a']);
+      } finally {
+        query.mockRestore();
+      }
+    },
+  );
+  it('uses one permission snapshot and bounded notice writes for 501 recipients', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const before = {
+      SourceConfig: [{ key: 'a' }, { key: 'b' }],
+      UserConfig: { Tags: [] },
+    } as unknown as AdminConfig;
+    await storage.setAdminConfig(before);
+    for (let index = 0; index < 501; index++) {
+      const username = `notice-batch-${index}`;
+      await fakePool.execute(
+        'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)',
+        [username, 'unused', 1],
+      );
+      await fakePool.execute(
+        'INSERT INTO user_access (username, role, banned, enabled_apis, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [username, 'user', 0, null, 0],
+      );
+    }
+    fakePool.resetTransactionSql();
+    const next = {
+      ...before,
+      SourceConfig: [{ key: 'a' }, { key: 'b', disabled: true }],
+    } as AdminConfig;
+    expect(await storage.compareAndSetAdminConfig(before, next)).toBe(true);
+    const statements = fakePool.getTransactionSql();
+    expect(
+      statements.filter((sql) => sql.startsWith('SELECT a.username')),
+    ).toHaveLength(1);
+    expect(statements.filter((sql) => sql.startsWith('SELECT'))).toHaveLength(
+      3,
+    );
+    expect(
+      statements.filter((sql) =>
+        sql.startsWith('INSERT IGNORE INTO user_notice_events'),
+      ),
+    ).toHaveLength(2);
+    const read = () =>
+      fakePool.query(
+        "SELECT id, recipient_username, payload_json FROM user_notice_events WHERE kind = 'account-change' AND action = 'permissions-changed' AND created_at > ? ORDER BY created_at",
+        [0],
+      );
+    const [notices] = await read();
+    expect(notices).toHaveLength(501);
+    expect(
+      (notices as Record<string, unknown>[]).map((row) =>
+        JSON.parse(String(row.payload_json)),
+      ),
+    ).toEqual(
+      Array.from({ length: 501 }, () => ({
+        sourcesAdded: 0,
+        sourcesRemoved: 1,
+        sourceKeysAdded: [],
+        sourceKeysRemoved: ['b'],
+      })),
+    );
+    const disabled = {
+      ...next,
+      SourceConfig: next.SourceConfig.map((source) => ({
+        ...source,
+        disabled: true,
+      })),
+    };
+    expect(await storage.compareAndSetAdminConfig(next, disabled)).toBe(true);
+    const [merged] = await read();
+    expect(
+      (merged as Record<string, unknown>[]).every(
+        (row) => JSON.parse(String(row.payload_json)).sourcesRemoved === 2,
+      ),
+    ).toBe(true);
+    // 同一静默期回滚源设置，所有待发通知净变化归零并批量删除。
+    expect(await storage.compareAndSetAdminConfig(disabled, before)).toBe(true);
+    expect((await read())[0]).toHaveLength(0);
+  });
+  it('aggregates source usage with the shared identity contract', async () => {
+    await assertSourceUsageAggregation(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+  it('cleans playback sessions and buckets in bounded batches', async () => {
+    await assertPlaybackRetentionBatches(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
   it.each(['none', 'any', 'provider:linuxdo'] as const)(
     'builds composable admin user predicates for login=%s',
     (login) => {
@@ -3546,10 +3822,37 @@ describe('mysql storage contract', () => {
         lastSuccessDate: null,
       },
     ];
+    const daily = [
+      {
+        source: 'alpha',
+        bucketDate: '2026-01-02',
+        successReporterDays: 1,
+        failureReporterDays: 1,
+      },
+      {
+        source: 'beta',
+        bucketDate: '2026-01-02',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+      },
+      {
+        source: 'alpha',
+        bucketDate: '2026-01-03',
+        successReporterDays: 1,
+        failureReporterDays: 0,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterDaily('2026-01-02')).toEqual(
+      daily,
+    );
+    expect(await storage.getSourcePlayReporterDaily('2026-01-04')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
       summaries,
     );
     await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterDaily('2026-01-01')).toEqual(
+      daily,
+    );
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       summaries,
     );
@@ -3654,9 +3957,9 @@ describe('mysql storage contract', () => {
     await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(false);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      LIMITED: 2,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'LIMITED', usedCount: 2 }),
+    ]);
   });
 
   it('maxUses 为 0 表示不限次数', async () => {
@@ -3673,12 +3976,12 @@ describe('mysql storage contract', () => {
 
     await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      FREE: 2,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'FREE', usedCount: 2 }),
+    ]);
   });
 
-  it('首次占用以配置里的历史用量为种子', async () => {
+  it('占用从当前邀请码的已用次数继续累加', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
     await storage.createInviteCode({
@@ -3692,9 +3995,9 @@ describe('mysql storage contract', () => {
 
     await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(false);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      SEEDED: 3,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'SEEDED', usedCount: 3 }),
+    ]);
   });
 
   it('回滚邀请码次数且不会减到负数', async () => {
@@ -3711,17 +4014,17 @@ describe('mysql storage contract', () => {
 
     await storage.reserveInviteCodeUse('ROLLBACK');
     await storage.releaseInviteCodeUse('ROLLBACK');
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      ROLLBACK: 0,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'ROLLBACK', usedCount: 0 }),
+    ]);
 
     await storage.releaseInviteCodeUse('ROLLBACK');
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      ROLLBACK: 0,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'ROLLBACK', usedCount: 0 }),
+    ]);
   });
 
-  it('删除邀请码用量后重建从零开始', async () => {
+  it('删除邀请码后重建从零开始', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
     await storage.createInviteCode({
@@ -3734,10 +4037,12 @@ describe('mysql storage contract', () => {
     });
 
     await storage.reserveInviteCodeUse('RECREATED');
-    await storage.deleteInviteCodeUsage('RECREATED');
+    await storage.deleteInviteCode('RECREATED');
 
     await expect(
-      (await storage.getAllInviteCodeUsage()).RECREATED,
+      (await storage.getAllInviteCodes()).find(
+        (item) => item.code === 'RECREATED',
+      ),
     ).toBeUndefined();
     await storage.createInviteCode({
       code: 'RECREATED',
@@ -3823,9 +4128,6 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );
-    await expect(storage.getAllUserLastLogins()).resolves.toEqual({
-      'demo-user': 1700000000000,
-    });
 
     await storage.deleteUser('demo-user');
 
@@ -3846,7 +4148,6 @@ describe('mysql storage contract', () => {
       storage.getDanmakuEnabledPreference('demo-user'),
     ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
-    await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
 
   it('筛选分页与追更计数及客户端判定保持一致', async () => {
@@ -4328,21 +4629,33 @@ describe('mysql storage contract', () => {
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
   });
 
+  it('separates route phases', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await assertSourceRoutePhases(storage);
+  });
+
+  it('aggregates and purges source proxy failures', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await assertSourceProxyFailures(storage);
+  });
+
   it('isolates current route semantics while retaining and purging both versions', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.recordSourceRouteStat({
       source: 'versioned',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'versioned',
       routeMode: 'server',
+      phase: 'primary',
       success: false,
       eventAt: Date.UTC(2026, 0, 8),
     });
-    for (const mode of ['browser', 'server']) {
+    for (const mode of ['browser', 'server', 'browser-v2', 'server-v2']) {
       await fakePool.execute(
         'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE success_count = success_count + VALUES(success_count)',
         ['versioned', mode, '2026-01-08', 99, 99, 1],
@@ -4353,12 +4666,14 @@ describe('mysql storage contract', () => {
         {
           source: 'versioned',
           routeMode: 'browser',
+          phase: 'primary',
           successCount: 1,
           failureCount: 0,
         },
         {
           source: 'versioned',
           routeMode: 'server',
+          phase: 'primary',
           successCount: 0,
           failureCount: 1,
         },
@@ -4369,11 +4684,9 @@ describe('mysql storage contract', () => {
       (await storage.getAllSourceRouteStatBuckets()).map(
         (row) => row.routeMode,
       ),
-    ).toEqual(
-      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
-    );
+    ).toEqual(expect.arrayContaining(['browser-v3', 'server-v3']));
     await storage.purgeSourceRouteStatsBefore('2026-01-08');
-    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
     await storage.purgeSourceRouteStatsBefore('2026-01-09');
     expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
   });
@@ -4384,30 +4697,35 @@ describe('mysql storage contract', () => {
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
+      phase: 'primary',
       success: false,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'server',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 7),
     });
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2025, 11, 31),
     });
     await storage.recordSourceRouteStat({
       source: 'source-b',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
@@ -4425,18 +4743,21 @@ describe('mysql storage contract', () => {
       {
         source: 'source-a',
         routeMode: 'browser',
+        phase: 'primary',
         successCount: 1,
         failureCount: 1,
       },
       {
         source: 'source-a',
         routeMode: 'server',
+        phase: 'primary',
         successCount: 1,
         failureCount: 0,
       },
       {
         source: 'source-b',
         routeMode: 'browser',
+        phase: 'primary',
         successCount: 1,
         failureCount: 0,
       },

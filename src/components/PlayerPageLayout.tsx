@@ -18,6 +18,8 @@ interface PlayerPageLayoutProps {
   onTogglePanel: () => void;
   artRef: RefObject<HTMLDivElement | null>;
   titleSuffix?: ReactNode;
+  titleActions?: ReactNode;
+  titleDescription?: ReactNode;
   tags?: ReactNode[];
   playerOverlay?: ReactNode;
   rightPanel: ReactNode;
@@ -82,6 +84,8 @@ export function PlayerPageLayout({
   onTogglePanel,
   artRef,
   titleSuffix,
+  titleActions,
+  titleDescription,
   tags = [],
   playerOverlay,
   rightPanel,
@@ -95,8 +99,14 @@ export function PlayerPageLayout({
       showDesktopBack={false}
       mobileHeader={{ title: title || titleFallback }}
     >
-      <div className='relative flex h-full min-h-0 flex-col overflow-hidden pb-2 md:mx-auto md:w-full md:max-w-[1680px] md:px-8 md:pb-6 xl:px-12'>
-        <div className='hidden h-16 flex-shrink-0 items-center gap-3 md:flex'>
+      <div
+        data-player-layout={shortcutMode}
+        className='relative flex h-full min-h-0 flex-col overflow-hidden pb-2 md:mx-auto md:w-full md:max-w-[1680px] md:px-8 md:pb-6 xl:px-12'
+      >
+        <div
+          data-player-heading
+          className='hidden h-16 flex-shrink-0 items-center gap-3 md:flex'
+        >
           <DesktopBackButton />
           <h1 className='-ml-1 min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
             {title || titleFallback}
@@ -106,11 +116,25 @@ export function PlayerPageLayout({
               {titleSuffix}
             </span>
           )}
+          {titleActions && (
+            <div className='ml-auto min-w-0'>{titleActions}</div>
+          )}
         </div>
+        {titleDescription && (
+          <div
+            data-player-heading
+            className='hidden truncate pb-3 text-xs text-gray-500 dark:text-gray-400 md:block'
+          >
+            {titleDescription}
+          </div>
+        )}
 
         {/* 内容区：移动端与竖屏平板上下排列，分栏时播放器吃满剩余宽高 + 固定宽右面板 */}
         <div className='relative flex min-h-0 flex-1 flex-col split:flex-row'>
-          <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 split:aspect-auto split:h-full split:max-h-none split:min-w-0 split:flex-1 phone-landscape:aspect-auto phone-landscape:max-h-none phone-landscape:min-h-0 phone-landscape:flex-1'>
+          <div
+            data-player-video
+            className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 split:aspect-auto split:h-full split:max-h-none split:min-w-0 split:flex-1 phone-landscape:aspect-auto phone-landscape:max-h-none phone-landscape:min-h-0 phone-landscape:flex-1'
+          >
             <div data-theme-transition='live' className='absolute inset-0'>
               <div
                 ref={artRef}
@@ -121,7 +145,10 @@ export function PlayerPageLayout({
           </div>
 
           {/* 移动端播放信息：标题 + 标签 */}
-          <div className='flex-shrink-0 px-4 pt-3 phone-landscape:hidden md:hidden'>
+          <div
+            data-player-heading
+            className='flex-shrink-0 px-4 pt-3 phone-landscape:hidden md:hidden'
+          >
             <div className='flex min-w-0 items-baseline gap-2'>
               <h1 className='min-w-0 truncate text-base font-semibold text-gray-900 dark:text-gray-100'>
                 {title || titleFallback}
@@ -132,6 +159,12 @@ export function PlayerPageLayout({
                 </span>
               )}
             </div>
+            {titleActions && <div className='mt-2'>{titleActions}</div>}
+            {titleDescription && (
+              <div className='mt-2 truncate text-xs text-gray-500 dark:text-gray-400'>
+                {titleDescription}
+              </div>
+            )}
             {tags.length > 0 && (
               <div className='mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-medium'>
                 {tags.map((tag, index) => (
@@ -142,6 +175,7 @@ export function PlayerPageLayout({
           </div>
 
           <div
+            data-player-sidebar
             className={`min-h-0 overflow-hidden px-4 transition-[max-width,margin,opacity] ${PANEL_TRANSITION_CLASS} split:mt-0 split:h-full split:w-[21rem] split:flex-none phone-landscape:hidden md:px-0 xl:w-[24rem] ${
               isPanelCollapsed
                 ? `${

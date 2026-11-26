@@ -41,6 +41,7 @@ type GetConfigForRead = typeof getConfigForReadType;
 type RecordSourceRouteStat = typeof dbType.recordSourceRouteStat;
 
 function getHandlers() {
+  const { GET: getSourceHealth } = require('@/app/api/source-health/route');
   const { GET: getLiveSources } = require('@/app/api/live/sources/route');
   const { GET: getProxyModes } = require('@/app/api/proxy-modes/route');
   const {
@@ -48,6 +49,9 @@ function getHandlers() {
   } = require('@/app/api/source-route-stats/route');
 
   return {
+    getSourceHealth: getSourceHealth as (
+      request: NextRequest,
+    ) => Promise<Response>,
     getLiveSources: getLiveSources as (
       request: NextRequest,
     ) => Promise<Response>,
@@ -81,6 +85,13 @@ describe('游客受保护接口', () => {
   });
 
   it.each([
+    [
+      '源站健康',
+      () =>
+        getHandlers().getSourceHealth(
+          createRequest('http://test/api/source-health'),
+        ),
+    ],
     [
       '直播源列表',
       () => getHandlers().getLiveSources(createRequest('http://test/live')),
@@ -152,6 +163,7 @@ describe('游客受保护接口', () => {
         stat: {
           source: 'hidden',
           routeMode: 'server',
+          phase: 'primary',
           success: true,
           eventAt: Date.now(),
         },

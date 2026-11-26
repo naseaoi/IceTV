@@ -73,15 +73,6 @@ export function stripConfigState(config: AdminConfig): AdminConfig {
   for (const live of config.LiveConfig || []) delete live.channelNumber;
   return config;
 }
-export function hasLegacyConfigState(config: AdminConfig): boolean {
-  return (
-    Object.hasOwn(config, 'ConfigFile') ||
-    Object.hasOwn(config, 'ConfigSubscribtion') ||
-    (config.LiveConfig || []).some((live) =>
-      Object.hasOwn(live, 'channelNumber'),
-    )
-  );
-}
 export function sameSubscription(
   a: ConfigSubscription,
   b: ConfigSubscription,

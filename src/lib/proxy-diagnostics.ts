@@ -1,4 +1,6 @@
-type ProxyRouteName = 'm3u8' | 'segment';
+import type { SourceProxyFailureReason } from '@/lib/types';
+
+type ProxyRouteName = 'm3u8' | 'segment' | 'key';
 
 type ProxyFailureStage =
   | 'request'
@@ -220,7 +222,7 @@ export function getUpstreamFailureStatus(error: unknown): 502 | 504 {
 
 export function toProxyFailurePayload(diagnostic: ProxyFailureDiagnostic) {
   return {
-    error: diagnostic.message,
+    error: getDefaultProxyFailureMessage(diagnostic.reason),
     code: diagnostic.code,
     reason: diagnostic.reason,
     stage: diagnostic.stage,
@@ -379,4 +381,40 @@ function extractStatusFromMessage(message: string): number | undefined {
 
 function isTimeoutMessage(message: string): boolean {
   return /timeout|timed out|超时/i.test(message);
+}
+
+export function toSourceProxyFailureReason(
+  diagnostic: ProxyFailureDiagnostic,
+): SourceProxyFailureReason | null {
+  if (
+    !diagnostic.source?.trim() ||
+    diagnostic.isLive ||
+    ['request', 'validation', 'auth', 'internal'].includes(diagnostic.stage)
+  )
+    return null;
+
+  switch (diagnostic.reason) {
+    case 'upstream-http': {
+      const status = diagnostic.upstreamStatus;
+      if (status === 403) return 'http-403';
+      if (status === 404 || status === 410) return 'http-404';
+      if (status && status >= 400 && status < 500) return 'http-4xx';
+      if (status && status >= 500 && status < 600) return 'http-5xx';
+      return null;
+    }
+    case 'upstream-timeout':
+    case 'proxy-timeout':
+      return 'timeout';
+    case 'upstream-fetch':
+    case 'proxy-connect':
+    case 'proxy-http':
+    case 'proxy-response':
+      return 'connection';
+    case 'content-type':
+    case 'response-too-large':
+    case 'proxy-response-too-large':
+      return 'invalid-response';
+    default:
+      return null;
+  }
 }

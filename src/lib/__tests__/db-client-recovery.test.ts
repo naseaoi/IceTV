@@ -67,3 +67,27 @@ it('批量删除后续批失败仅恢复失败批，成功批保持删除并报�
     'error',
   );
 });
+
+it('用户缓存只读取当前前缀，过期清理同时回收旧前缀键', () => {
+  const oldCache = JSON.stringify({
+    favorites: {
+      data: { 's+old': favorite },
+      timestamp: Date.now(),
+      version: '1.0.0',
+    },
+  });
+  localStorage.setItem('moontv_cache_tester', oldCache);
+  localStorage.setItem('moontv_cache_other', oldCache);
+  localStorage.setItem('unrelated', 'keep');
+
+  expect(cacheManager.getCachedFavorites()).toBeNull();
+  expect(localStorage.getItem('icetv_cache_tester')).toBeNull();
+
+  cacheManager.cacheFavorites({ 's+current': favorite });
+  cacheManager.clearExpiredCaches();
+
+  expect(cacheManager.getCachedFavorites()).toEqual({ 's+current': favorite });
+  expect(localStorage.getItem('moontv_cache_tester')).toBeNull();
+  expect(localStorage.getItem('moontv_cache_other')).toBeNull();
+  expect(localStorage.getItem('unrelated')).toBe('keep');
+});

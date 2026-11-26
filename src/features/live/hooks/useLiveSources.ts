@@ -9,6 +9,13 @@ import {
   useState,
 } from 'react';
 
+import { scrollToVerticalCenter } from '@/features/live/hooks/useVerticalScrollEdgeFade';
+import {
+  groupLiveChannels,
+  liveChannelGroupKey,
+  liveGroupFavoriteId,
+  sortLiveLines,
+} from '@/features/live/lib/liveChannelGroups';
 import { parseCustomTimeFormat } from '@/features/live/lib/time';
 import type {
   EpgData,
@@ -17,6 +24,8 @@ import type {
   LivePanelTab,
   LiveSource,
 } from '@/features/live/types';
+import { readLiveLineResults } from '@/lib/live-line-results';
+import { readLastLiveChannel } from '@/lib/local-preferences';
 import {
   DisplayableError,
   getErrorMessage,
@@ -159,7 +168,6 @@ interface UseLiveSourcesReturn {
 export function useLiveSources({
   cleanupPlayer,
   channelListRef,
-  groupContainerRef,
 }: UseLiveSourcesParams): UseLiveSourcesReturn {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -189,7 +197,11 @@ export function useLiveSources({
     currentChannelRef.current = currentChannel;
   }, [currentChannel]);
 
-  const [needLoadSource] = useState(searchParams.get('source'));
+  const [lastChannel] = useState(readLastLiveChannel);
+  const [needLoadSource] = useState(
+    searchParams.get('source') ||
+      (!searchParams.get('id') ? lastChannel?.sourceKey : null),
+  );
   const [needLoadChannel] = useState(searchParams.get('id'));
 
   const [videoUrl, setVideoUrl] = useState('');
@@ -215,36 +227,15 @@ export function useLiveSources({
   // ----- 滚动到频道 -----
   const scrollToChannel = (channel: LiveChannel) => {
     if (!channelListRef.current) return;
-    const targetElement = channelListRef.current.querySelector(
-      `[data-channel-id="${channel.id}"]`,
-    ) as HTMLButtonElement;
+    const targetElement = Array.from(
+      channelListRef.current.querySelectorAll<HTMLElement>(
+        '[data-channel-group]',
+      ),
+    ).find(
+      (row) => row.dataset.channelGroup === liveChannelGroupKey(channel.name),
+    );
     if (targetElement) {
-      const container = channelListRef.current;
-      const containerRect = container.getBoundingClientRect();
-      const elementRect = targetElement.getBoundingClientRect();
-      const scrollTop =
-        container.scrollTop +
-        (elementRect.top - containerRect.top) -
-        containerRect.height / 2 +
-        elementRect.height / 2;
-      container.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
-    }
-  };
-
-  // ----- 模拟点击分组 -----
-  const simulateGroupClick = (group: string, retryCount = 0) => {
-    if (!groupContainerRef.current) {
-      if (retryCount < 10) {
-        setTimeout(() => simulateGroupClick(group, retryCount + 1), 200);
-      }
-      return;
-    }
-    const targetButton = groupContainerRef.current.querySelector(
-      `[data-group="${group}"]`,
-    ) as HTMLButtonElement;
-    if (targetButton) {
-      setSelectedGroup(group);
-      targetButton.click();
+      scrollToVerticalCenter(channelListRef.current, targetElement);
     }
   };
 
@@ -268,6 +259,9 @@ export function useLiveSources({
       const channelsData = result.data;
       if (!channelsData || channelsData.length === 0) {
         setCurrentChannels([]);
+        setCurrentChannel(null);
+        currentChannelRef.current = null;
+        setVideoUrl('');
         setGroupedChannels({});
         setFilteredChannels([]);
         setLiveSources((prev) =>
@@ -281,6 +275,8 @@ export function useLiveSources({
 
       const channels: LiveChannel[] = channelsData.map((channel: any) => ({
         id: channel.id,
+        lineId: channel.lineId || '',
+        health: channel.health,
         tvgId: channel.tvgId || channel.name,
         name: channel.name,
         logo: channel.logo,
@@ -295,25 +291,23 @@ export function useLiveSources({
         ),
       );
 
-      let selectedChannel: LiveChannel | null = null;
-      if (channels.length > 0) {
-        if (needLoadChannel) {
-          const foundChannel = channels.find((c) => c.id === needLoadChannel);
-          if (foundChannel) {
-            selectedChannel = foundChannel;
-            setTimeout(() => scrollToChannel(foundChannel), 200);
-          } else {
-            selectedChannel = channels[0];
-          }
-        } else {
-          selectedChannel = channels[0];
-        }
-
-        if (selectedChannel) {
-          setCurrentChannel(selectedChannel);
-          setVideoUrl(selectedChannel.url);
-        }
-      }
+      const groups = groupLiveChannels(channels);
+      const requestedGroup = needLoadChannel
+        ? groups.find(
+            (group) =>
+              group.lines.some((line) => line.id === needLoadChannel) ||
+              liveGroupFavoriteId(group.groupKey).slice(5) === needLoadChannel,
+          )
+        : source.key === lastChannel?.sourceKey
+          ? groups.find((group) => group.groupKey === lastChannel.groupKey)
+          : undefined;
+      const selectedChannel = sortLiveLines(
+        (requestedGroup || groups[0]).lines,
+        readLiveLineResults(),
+      )[0];
+      setCurrentChannel(selectedChannel);
+      currentChannelRef.current = selectedChannel;
+      setVideoUrl(selectedChannel.url);
 
       // 按分组组织频道
       const grouped = channels.reduce<Record<string, LiveChannel[]>>(
@@ -329,20 +323,14 @@ export function useLiveSources({
       setGroupedChannels(grouped);
 
       // 确定目标分组
-      let targetGroup = '';
-      if (needLoadChannel) {
-        const foundChannel = channels.find((c) => c.id === needLoadChannel);
-        if (foundChannel) targetGroup = foundChannel.group || '其他';
-      }
-      if (!targetGroup || !grouped[targetGroup]) {
-        targetGroup = Object.keys(grouped)[0] || '';
-      }
+      const targetGroup = (requestedGroup || groups[0]).group || '其他';
+      setSelectedGroup(targetGroup);
 
       setFilteredChannels(targetGroup ? grouped[targetGroup] : channels);
 
       if (targetGroup) {
         setActiveTab('channels');
-        setTimeout(() => simulateGroupClick(targetGroup), 500);
+        setTimeout(() => scrollToChannel(selectedChannel), 100);
       }
 
       if (selectedChannel) {
@@ -394,7 +382,7 @@ export function useLiveSources({
 
       setLoadingStage('ready');
       setLoadingMessage('准备就绪');
-      setTimeout(() => setLoading(false), 1000);
+      setLoading(false);
     } catch (err) {
       if (!isAbortError(err)) setError(getErrorMessage(err, '加载失败'));
       setLoading(false);
@@ -405,9 +393,9 @@ export function useLiveSources({
       const newUrl = newSearchParams.toString()
         ? `?${newSearchParams.toString()}`
         : window.location.pathname;
-      router.replace(newUrl);
+      window.history.replaceState(null, '', newUrl);
     }
-  }, [initialSearchParamsString, needLoadSource, router]);
+  }, [initialSearchParamsString, needLoadSource]);
 
   // ----- 切换直播源 -----
   const handleSourceChange = async (source: LiveSource) => {
@@ -485,6 +473,7 @@ export function useLiveSources({
     cleanupPlayer();
     setUnsupportedType(null);
     setCurrentChannel(channel);
+    currentChannelRef.current = channel;
     setVideoUrl(channel.url);
 
     setTimeout(() => scrollToChannel(channel), 100);

@@ -398,7 +398,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
         ).toBe(false);
         expect(await storage.checkUserExist('page-bob')).toBe(true);
       });
-      it('migrates legacy rows once and atomically cleans removed references', async () => {
+      it('preserves access rows and atomically cleans removed references', async () => {
         await storage.setAdminConfig({
           ...config,
           SourceConfig: [
@@ -410,22 +410,26 @@ for (const backend of ['sqlite', 'mysql'] as const) {
             },
           ],
           UserConfig: {
-            ...config.UserConfig,
             Tags: [{ name: 'VIP', enabledApis: [] }],
           },
         } as AdminConfig);
-        const migrate = async () => {
+        await storage.updateUserAccess(['page-bob'], {
+          banned: true,
+          tags: ['VIP'],
+          enabledApis: ['source'],
+        });
+        const backfill = async () => {
           if (backend === 'sqlite') {
             new SqliteUserAccessStore(
               (storage as unknown as { db: Database.Database }).db,
-            ).migrate();
+            ).backfill();
           } else {
             const connection = await (
               storage as unknown as { pool: Pool }
             ).pool.getConnection();
             try {
               await connection.beginTransaction();
-              await new MysqlUserAccessStore(connection, true).migrate();
+              await new MysqlUserAccessStore(connection, true).backfill();
               await connection.commit();
             } catch (error) {
               await connection.rollback();
@@ -435,7 +439,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
             }
           }
         };
-        await Promise.all([migrate(), migrate()]);
+        await Promise.all([backfill(), backfill()]);
         expect(
           (await storage.getAdminConfig())?.UserConfig.Users,
         ).toBeUndefined();
@@ -445,7 +449,7 @@ for (const backend of ['sqlite', 'mysql'] as const) {
           enabledApis: ['source'],
         });
         await storage.updateUserAccess(['page-bob'], { banned: false });
-        await migrate();
+        await backfill();
         expect((await storage.getUserAccess('page-bob'))?.banned).toBe(false);
         const current = (await storage.getAdminConfig())!;
         expect(

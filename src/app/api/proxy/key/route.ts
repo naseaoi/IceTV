@@ -14,11 +14,17 @@ import {
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
+  classifyProxyFailure,
+  createProxyFailureDiagnostic,
+  logProxyFailure,
+} from '@/lib/proxy-diagnostics';
+import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -137,6 +143,17 @@ export async function GET(request: NextRequest) {
     });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
+      const diagnostic = createProxyFailureDiagnostic({
+        route: 'key',
+        source,
+        isLive: isLiveStream,
+        stage: 'upstream',
+        reason: 'upstream-http',
+        upstreamStatus: response.status,
+        targetUrl: validation.url,
+      });
+      logProxyFailure(diagnostic);
+      recordSourceProxyFailure(diagnostic);
       return NextResponse.json(
         { error: 'Failed to fetch key' },
         { status: response.status },
@@ -157,6 +174,16 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const busy = resourceLimitResponse(error);
     if (busy) return busy;
+    const diagnostic = classifyProxyFailure(error, {
+      route: 'key',
+      source,
+      isLive: isLiveStream,
+      targetUrl: validation.url,
+      stage: 'upstream',
+      reason: 'upstream-fetch',
+    });
+    logProxyFailure(diagnostic);
+    recordSourceProxyFailure(diagnostic);
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }

@@ -113,9 +113,7 @@ export async function requireActiveUserFromAuthInfo(
     authInfo.username,
   );
 
-  const isValid = await verifyAuthSignature(signData, authInfo.signature, {
-    allowLegacyOwnerPassword: true,
-  });
+  const isValid = await verifyAuthSignature(signData, authInfo.signature);
   if (!isValid) {
     return {
       response: NextResponse.json(

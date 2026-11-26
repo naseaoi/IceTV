@@ -1,9 +1,10 @@
-import { createAsyncSemaphore } from '@/lib/async-semaphore';
-import { getUpstreamSearchConcurrency } from '@/lib/cache-budget-profile';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
-import type { CachedSearchAggregateEntry } from '@/lib/search-cache';
+import {
+  type CachedSearchAggregateEntry,
+  setUpstreamSearchConcurrency,
+} from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
@@ -39,16 +40,12 @@ type SourceFailureCooldown = {
 
 const DEFAULT_SOURCE_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const DEFAULT_SOURCE_TIMEOUT_MS = 20_000;
-const SEARCH_GATE_MAX_WAITING_PER_SLOT = 32;
-const SEARCH_GATE_WAIT_TIMEOUT_MS = 30_000;
 const sourceFailureCooldowns = new Map<string, SourceFailureCooldown>();
+// 聚合级准入独立于回源槽位，页缓存等待也受有界请求数保护。
+const MAX_ACTIVE_AGGREGATIONS = 64;
+let activeAggregations = 0;
 
-// 跨请求共享：多人同时搜索时上游请求排队而不是叠加
-const upstreamSearchGate = createAsyncSemaphore(getUpstreamSearchConcurrency());
-
-export function getUpstreamSearchGateStats() {
-  return upstreamSearchGate.stats();
-}
+export { getUpstreamSearchGateStats } from '@/lib/search-cache';
 
 export async function runSearchAggregation({
   apiSites,
@@ -70,7 +67,11 @@ export async function runSearchAggregation({
       ? sourceTimeoutMs
       : DEFAULT_SOURCE_TIMEOUT_MS;
 
-  upstreamSearchGate.setLimit(sourceConcurrency);
+  if (activeAggregations >= MAX_ACTIVE_AGGREGATIONS) {
+    throw new ResourceLimitError(503, 1);
+  }
+  setUpstreamSearchConcurrency(sourceConcurrency);
+  activeAggregations++;
 
   const searchTasks = apiSites.map((site) => async () => {
     const cooldown = retryFailed
@@ -81,34 +82,20 @@ export async function runSearchAggregation({
       return [];
     }
 
-    // 先取闸门再起超时，排队时间不占用单源超时预算
-    let releaseGate: () => void;
-    try {
-      releaseGate = await upstreamSearchGate.acquire({
-        signal,
-        maxWaiting:
-          upstreamSearchGate.stats().limit * SEARCH_GATE_MAX_WAITING_PER_SLOT,
-        waitTimeoutMs: SEARCH_GATE_WAIT_TIMEOUT_MS,
-      });
-    } catch (error) {
-      // 本机排队繁忙或请求已取消，不是源站故障，不进入失败冷却
-      if (!signal?.aborted) onSourceError?.(site, error);
-      return [];
-    }
-    if (signal?.aborted || shouldContinue?.() === false) {
-      releaseGate();
-      return [];
-    }
+    if (signal?.aborted || shouldContinue?.() === false) return [];
 
+    let consumerSignal: AbortSignal | undefined;
     try {
       const results = await withAbortableTimeout(
-        (childSignal) =>
-          searchFromApi(site, query, {
+        (childSignal) => {
+          consumerSignal = childSignal;
+          return searchFromApi(site, query, {
             maxSearchPages,
             signal: childSignal,
             reportFailure: true,
             refreshFirstPage: retryFailed,
-          }),
+          });
+        },
         sourceHealthTiers?.get(site.key) === 'offline'
           ? Math.min(timeoutMs, SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS)
           : timeoutMs,
@@ -128,8 +115,9 @@ export async function runSearchAggregation({
         `搜索失败 ${site.name}:`,
         error instanceof Error ? error.message : error,
       );
-      // 单页失败已由页缓存短期记住；本站额度不足与上游 429 已由共享出口冷却处理，均不整源冷却
+      // 消费预算包含排队/共享等待；预算耗尽和本站限额均不能证明整源故障。
       if (
+        !consumerSignal?.aborted &&
         !signal?.aborted &&
         !(error instanceof SearchSourceUnavailableError) &&
         !(error instanceof ResourceLimitError)
@@ -138,20 +126,21 @@ export async function runSearchAggregation({
       }
       onSourceError?.(site, error);
       return [];
-    } finally {
-      releaseGate();
     }
   });
 
-  const results = await runWithConcurrency(
-    searchTasks,
-    sourceConcurrency,
-    shouldContinue,
-  );
-
-  return results
-    .filter((result) => result.status === 'fulfilled')
-    .flatMap((result) => result.value);
+  try {
+    const results = await runWithConcurrency(
+      searchTasks,
+      sourceConcurrency,
+      () => !signal?.aborted && shouldContinue?.() !== false,
+    );
+    return results
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+  } finally {
+    activeAggregations--;
+  }
 }
 
 // 聚合并记录失败源，供缓存与客户端区分“没搜到”和“没搜全”

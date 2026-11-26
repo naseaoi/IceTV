@@ -4,6 +4,12 @@ import { StringDecoder } from 'node:string_decoder';
 import { setImmediate as scheduleImmediate } from 'node:timers';
 import { createGunzip } from 'node:zlib';
 
+import { normalizeLiveChannelName } from '@/features/live/lib/liveChannelName';
+import {
+  createLiveLineId,
+  getLiveUserAgent,
+} from '@/features/live/lib/liveLineId.server';
+import type { LiveChannel } from '@/features/live/types';
 import { runWithConcurrency } from '@/lib/concurrency';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -16,7 +22,7 @@ import { createSwrCache } from '@/lib/server-cache';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 import type { AdminConfig } from '@/types/admin';
 
-const defaultUA = 'AptvPlayer/1.4.10';
+const defaultUA = getLiveUserAgent();
 const MAX_LIVE_PLAYLIST_BYTES = 5 * 1024 * 1024;
 const MAX_EPG_RESPONSE_BYTES = 50 * 1024 * 1024;
 const MAX_EPG_TEXT_BYTES = 100 * 1024 * 1024;
@@ -28,14 +34,7 @@ const DEFAULT_EPG_PROGRAMS_PER_CHANNEL = 240;
 
 export interface LiveChannels {
   channelNumber: number;
-  channels: {
-    id: string;
-    tvgId: string;
-    name: string;
-    logo: string;
-    group: string;
-    url: string;
-  }[];
+  channels: LiveChannel[];
   epgUrl: string;
   epgs: {
     [key: string]: {
@@ -164,7 +163,10 @@ function loadLiveChannels(
         await db.setLiveSourceChannelCount(liveInfo, channels.length);
       return {
         channelNumber: channels.length,
-        channels,
+        channels: channels.map((channel) => ({
+          ...channel,
+          lineId: createLiveLineId(liveInfo, channel.url),
+        })),
         epgUrl: liveInfo.epg?.trim() || tvgUrl,
         epgs: {},
       };
@@ -245,6 +247,7 @@ async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
 
   try {
     const response = await fetchWithUrlGuard(targetUrl.toString(), {
+      useProxyPool: false,
       headers: {
         'User-Agent': ua,
       },
@@ -304,6 +307,7 @@ async function fetchEpgData(
 
   try {
     const response = await fetchWithUrlGuard(targetUrl.toString(), {
+      useProxyPool: false,
       headers: {
         Accept: 'application/xml,text/xml,*/*',
         'User-Agent': ua,
@@ -511,6 +515,7 @@ class EpgXmlCollector {
   private buffer = '';
   private readonly result: Record<string, EpgProgram[]> = {};
   private readonly aliasToKeys: Map<string, Set<string>>;
+  private readonly exactAliasToKeys: Map<string, Set<string>>;
   private readonly epgChannelToKeys = new Map<string, Set<string>>();
   private readonly now: number;
   private readonly pastMs: number;
@@ -522,6 +527,7 @@ class EpgXmlCollector {
     options: EpgParseOptions = {},
   ) {
     this.aliasToKeys = buildEpgAliasMap(channels);
+    this.exactAliasToKeys = buildEpgAliasMap(channels, true);
     this.now = options.now ?? Date.now();
     this.pastMs =
       readPositiveNumber(options.pastHours, DEFAULT_EPG_PAST_HOURS) *
@@ -607,19 +613,26 @@ class EpgXmlCollector {
     const epgChannelId = getXmlAttr(openTag[1], 'id');
     if (!epgChannelId) return;
 
-    const matchedKeys = matchEpgKeys(this.aliasToKeys, epgChannelId);
+    const aliases = [epgChannelId];
     const displayNameRegex =
       /<display-name(?:\s+[^>]*)?>([\s\S]*?)<\/display-name>/gi;
     let displayNameMatch: RegExpExecArray | null;
     while ((displayNameMatch = displayNameRegex.exec(block))) {
       const displayName = stripXmlText(displayNameMatch[1]);
-      for (const key of matchEpgKeys(this.aliasToKeys, displayName)) {
-        matchedKeys.add(key);
-      }
+      aliases.push(displayName);
     }
 
+    // 精确 ID 优先，其次精确名称；有精确命中时不合并模糊别名。
+    const exactKeys = aliases
+      .map((alias) => this.exactAliasToKeys.get(alias))
+      .find((keys) => keys?.size);
+    const matchedKeys =
+      exactKeys ??
+      new Set(
+        aliases.flatMap((alias) => [...matchEpgKeys(this.aliasToKeys, alias)]),
+      );
     if (matchedKeys.size > 0) {
-      mergeKeySet(this.epgChannelToKeys, epgChannelId, matchedKeys);
+      this.epgChannelToKeys.set(epgChannelId, matchedKeys);
     }
   }
 
@@ -642,6 +655,7 @@ class EpgXmlCollector {
 
     const keys =
       this.epgChannelToKeys.get(epgChannelId) ||
+      this.exactAliasToKeys.get(epgChannelId) ||
       matchEpgKeys(this.aliasToKeys, epgChannelId);
     if (!keys || keys.size === 0) return;
 
@@ -717,12 +731,15 @@ function readPositiveNumber(value: number | undefined, fallback: number) {
     : fallback;
 }
 
-function buildEpgAliasMap(channels: { tvgId: string; name: string }[]) {
+function buildEpgAliasMap(
+  channels: { tvgId: string; name: string }[],
+  exact = false,
+) {
   const aliasToKeys = new Map<string, Set<string>>();
   for (const channel of channels) {
     const keys = getChannelResultKeys(channel);
     for (const value of [channel.tvgId, channel.name]) {
-      for (const alias of createEpgAliases(value)) {
+      for (const alias of exact ? [value.trim()] : createEpgAliases(value)) {
         mergeKeySet(aliasToKeys, alias, keys);
       }
     }
@@ -763,21 +780,12 @@ function createEpgAliases(value: string) {
 
   const normalizedValues = new Set<string>();
   for (const item of values) {
-    const normalized = normalizeEpgAlias(item);
+    const normalized = normalizeLiveChannelName(item);
     if (normalized) {
       normalizedValues.add(normalized);
     }
   }
   return normalizedValues;
-}
-
-function normalizeEpgAlias(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[\[(（【].*?[\])）】]/g, '')
-    .replace(/(4k|8k|1080p|720p|2160p|uhd|fhd|hd|sd)/gi, '')
-    .replace(/(高清|超清|标清|频道|综合|蓝光)/g, '')
-    .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
 }
 
 function mergeKeySet(

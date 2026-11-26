@@ -29,6 +29,11 @@ jest.mock('@/features/play/lib/sourceProbeStore', () => ({
   getOrProbe: (...args: unknown[]) => mockGetOrProbe(...args),
 }));
 
+const mockEmptyHealthSummary = {};
+jest.mock('@/features/play/lib/sourceHealthSummary', () => ({
+  useSourceHealthSummary: () => mockEmptyHealthSummary,
+}));
+
 function createSource(partial: Partial<SearchResult>): SearchResult {
   return {
     id: '1',

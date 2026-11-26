@@ -123,31 +123,6 @@ export function getInviteCodeRemainingUses(
   return Math.max(0, inviteCode.maxUses - (inviteCode.usedCount || 0));
 }
 
-export function findUsableInviteCode(
-  inviteCodes: InviteCode[],
-  rawCode: unknown,
-  now = Date.now(),
-): InviteCode | null {
-  const code = normalizeInviteCode(rawCode);
-  if (!code) return null;
-  const matched = inviteCodes.find((item) => item.code === code);
-  if (!matched || !isInviteCodeUsable(matched, now)) return null;
-  return matched;
-}
-
-// 数据库用量为准，缺行时回落到配置里的历史值
-export function mergeInviteCodeUsage(
-  inviteCodes: InviteCode[] | undefined,
-  usage: Record<string, number>,
-): InviteCode[] {
-  if (!inviteCodes) return [];
-  return inviteCodes.map((item) => {
-    if (!item.maxUses) return item;
-    const usedCount = usage[item.code] ?? item.usedCount ?? 0;
-    return { ...item, usedCount };
-  });
-}
-
 export function sanitizeInviteCodes(value: unknown): InviteCode[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();

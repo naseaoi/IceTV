@@ -9,7 +9,6 @@ import type {
 import type {
   MyVideoReviewPage,
   VideoReview,
-  VideoReviewRating,
   WorkReviewSummary,
 } from '@/lib/types';
 import {
@@ -114,14 +113,6 @@ export async function fetchMyVideoReviewCount(): Promise<number> {
   const res = await fetchWithAuth('/api/reviews/mine?view=count');
   const data = await res.json();
   return data.count;
-}
-
-export async function fetchMyVideoReviewRatings(): Promise<
-  VideoReviewRating[]
-> {
-  const res = await fetchWithAuth('/api/reviews/mine?view=ratings');
-  const data = await res.json();
-  return data.ratings;
 }
 
 export type { ReviewTarget } from '@/lib/types';

@@ -35,6 +35,7 @@ import {
 } from '@/lib/runtime-params';
 import {
   type SearchPageLoadResult,
+  acquireUpstreamSearchSlot,
   dedupeSearchLoad,
   getCachedSearchPage,
   loadSpecialSourceSearch,
@@ -167,6 +168,7 @@ async function fetchAndCacheSearchPage(
     return { results: [] };
   }
 
+  const releaseSearchSlot = await acquireUpstreamSearchSlot(signal);
   const abortState = createTimedAbortController(signal, timeoutMs);
   const startedAt = Date.now();
   let outcome: SourceSearchOutcome = 'error';
@@ -280,6 +282,7 @@ async function fetchAndCacheSearchPage(
     }
     return { results: [], failed: !abortedByParent };
   } finally {
+    releaseSearchSlot();
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
     if (page === 1 && !resourceLimited && !abortedByParent) {
@@ -347,6 +350,7 @@ async function searchSpecialSourceWithSample(
   search: SpecialSourceSearch,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
+  const releaseSearchSlot = await acquireUpstreamSearchSlot(signal);
   const startedAt = Date.now();
   let outcome: SourceSearchOutcome = 'error';
   let resourceLimited = false;
@@ -358,6 +362,7 @@ async function searchSpecialSourceWithSample(
     resourceLimited = error instanceof ResourceLimitError;
     throw error;
   } finally {
+    releaseSearchSlot();
     if (!resourceLimited && !signal?.aborted) {
       recordSourceSearchOutcome(apiSite.key, outcome, Date.now() - startedAt);
     }

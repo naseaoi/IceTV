@@ -1,7 +1,7 @@
 'use client';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import type { SourceRouteMode } from '@/lib/types';
+import type { SourceRouteMode, SourceRouteStatPhase } from '@/lib/types';
 
 type SourceOutcomePayload = {
   source: string;
@@ -10,6 +10,7 @@ type SourceOutcomePayload = {
 };
 type SourceRouteStatPayload = SourceOutcomePayload & {
   routeMode: SourceRouteMode;
+  phase: SourceRouteStatPhase;
 };
 type PendingReport = {
   username: string;
@@ -20,6 +21,9 @@ type PendingReport = {
 let pending: PendingReport[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 let listening = false;
+// 换源面板一次测速约 20 个源，同一网络条件下的重复样本只放大少数重度用户的权重
+const ROUTE_STAT_DEDUPE_MS = 10 * 60 * 1000;
+const recentRouteStats = new Map<string, number>();
 
 function flushReports(): void {
   if (flushTimer !== undefined) clearTimeout(flushTimer);
@@ -43,9 +47,20 @@ function flushReports(): void {
 function enqueueReport(
   kind: 'stat' | 'outcome',
   payload: SourceRouteStatPayload | SourceOutcomePayload,
+  dedupeKey?: string,
 ): void {
   const username = getAuthInfoFromBrowserCookie()?.username;
   if (!username || !payload.source) return;
+  if (dedupeKey) {
+    const key = `${username}|${dedupeKey}`;
+    const now = Date.now();
+    const last = recentRouteStats.get(key);
+    if (last !== undefined && now - last < ROUTE_STAT_DEDUPE_MS) return;
+    for (const [staleKey, at] of recentRouteStats) {
+      if (now - at >= ROUTE_STAT_DEDUPE_MS) recentRouteStats.delete(staleKey);
+    }
+    recentRouteStats.set(key, now);
+  }
   // 只配对同账号同源的异类事件；同类样本全部保留，不推导源级成败。
   const match = pending.find(
     (report) =>
@@ -78,15 +93,24 @@ export function reportSourcePlayOutcome(
   });
 }
 
+/**
+ * phase 区分首选线路与失败后的回落线路：自动模式下代理多为回落，
+ * 混在一起会把「直连失败后代理也救不回」误读成代理本身不可用。
+ */
 export function reportSourceRouteStat(
   source: string,
   routeMode: SourceRouteMode,
   success: boolean,
+  phase: SourceRouteStatPhase,
 ): void {
-  enqueueReport('stat', {
-    source: source.trim(),
-    routeMode,
-    success,
-    eventAt: Date.now(),
-  });
+  const trimmed = source.trim();
+  enqueueReport(
+    'stat',
+    { source: trimmed, routeMode, phase, success, eventAt: Date.now() },
+    `${trimmed}|${routeMode}|${phase}|${success ? 1 : 0}`,
+  );
+}
+
+export function resetSourceRouteStatDedupeForTests(): void {
+  recentRouteStats.clear();
 }

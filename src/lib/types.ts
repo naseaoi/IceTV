@@ -59,6 +59,18 @@ export interface PlayRecordPage {
   nextCursor: string | null;
 }
 
+export type MetadataRefreshKind = 'record' | 'favorite';
+
+export interface MetadataRefreshCursor {
+  key: string;
+  user: string;
+}
+
+export interface MetadataRefreshPage {
+  items: Array<MetadataRefreshCursor & { snapshot: string }>;
+  nextCursor: MetadataRefreshCursor | null;
+}
+
 export interface MetadataRecordPage<T> {
   items: Array<{
     key: string;
@@ -423,6 +435,13 @@ export interface SourcePlayReportInput {
   success: boolean;
 }
 
+export interface SourcePlayReporterDaily {
+  source: string;
+  bucketDate: string;
+  successReporterDays: number;
+  failureReporterDays: number;
+}
+
 export interface SourcePlayReporterSummary {
   source: string;
   successReporterDays: number;
@@ -430,17 +449,41 @@ export interface SourcePlayReporterSummary {
   lastSuccessDate: string | null;
 }
 
+export type SourceProxyFailureReason =
+  | 'http-403'
+  | 'http-404'
+  | 'http-4xx'
+  | 'http-5xx'
+  | 'timeout'
+  | 'connection'
+  | 'invalid-response';
+
+export interface SourceProxyFailureDelta {
+  source: string;
+  bucketDate: string;
+  reason: SourceProxyFailureReason;
+  failureCount: number;
+}
+
+export interface SourceProxyFailureItem {
+  source: string;
+  reason: SourceProxyFailureReason;
+  failureCount: number;
+}
+
 export type SourceRouteMode = 'browser' | 'server';
+export type SourceRouteStatPhase = 'primary' | 'fallback';
 
 // 数据库存储键隔离全程线路口径，API 仍使用 browser / server。
 export const SOURCE_ROUTE_STAT_STORAGE_MODES = {
-  browser: 'browser-v2',
-  server: 'server-v2',
+  browser: { primary: 'browser-v3', fallback: 'browser-fb-v3' },
+  server: { primary: 'server-v3', fallback: 'server-fb-v3' },
 } as const;
 
 export interface SourceRouteStatInput {
   source: string;
   routeMode: SourceRouteMode;
+  phase: SourceRouteStatPhase;
   success: boolean;
   eventAt: number;
 }
@@ -448,6 +491,7 @@ export interface SourceRouteStatInput {
 export interface SourceRouteStatsItem {
   source: string;
   routeMode: SourceRouteMode;
+  phase: SourceRouteStatPhase;
   successCount: number;
   failureCount: number;
 }
@@ -455,9 +499,7 @@ export interface SourceRouteStatsItem {
 // 源站路由统计原始行（按天粒度）
 export interface SourceRouteStatsBucket {
   source: string;
-  routeMode:
-    | SourceRouteMode
-    | (typeof SOURCE_ROUTE_STAT_STORAGE_MODES)[SourceRouteMode];
+  routeMode: (typeof SOURCE_ROUTE_STAT_STORAGE_MODES)[SourceRouteMode][SourceRouteStatPhase];
   bucketDate: string;
   successCount: number;
   failureCount: number;
@@ -619,6 +661,12 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     snapshot: string | null,
   ): Promise<boolean>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
+  getMetadataRefreshPage(
+    kind: MetadataRefreshKind,
+    limit: number,
+    cursor?: MetadataRefreshCursor,
+    workKey?: string,
+  ): Promise<MetadataRefreshPage>;
   getStalePlayRecordPage(
     userName: string,
     now: number,
@@ -887,6 +935,13 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     now: number,
     query?: import('@/lib/follow-review-identity').FollowReviewQuery,
   ): Promise<import('@/lib/message-types').FollowReviewUserMessage[]>;
+  getMessageSourceSummary(
+    kind: import('@/lib/message-source-summary').MessageSummarySource,
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<import('@/lib/message-source-summary').MessageSourceSummary>;
   getFollowReviewMessageCount(
     username: string,
     readAt: number,
@@ -998,7 +1053,6 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   // 登录活动相关
   recordUserLogin(userName: string, loginAt: number): Promise<void>;
   getUserLastLogin(userName: string): Promise<number | null>;
-  getAllUserLastLogins(): Promise<Record<string, number>>;
 
   getAllInviteCodes(): Promise<
     import('@/features/admin/services/inviteCodes').InviteCode[]
@@ -1021,8 +1075,6 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   ): Promise<number>;
   reserveInviteCodeUse(code: string): Promise<boolean>;
   releaseInviteCodeUse(code: string): Promise<void>;
-  getAllInviteCodeUsage(): Promise<Record<string, number>>;
-  deleteInviteCodeUsage(code: string): Promise<void>;
 
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;
@@ -1093,11 +1145,17 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   getSourceHealthSearchDaily(
     sinceDate: string,
   ): Promise<SourceHealthSearchDaily[]>;
+  getSourcePlayReporterDaily(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterDaily[]>;
   getSourcePlayReporterSummary(
     sinceDate: string,
   ): Promise<SourcePlayReporterSummary[]>;
   purgeSourceHealthBefore(beforeDate: string): Promise<void>;
 
+  recordSourceProxyFailureBatch(rows: SourceProxyFailureDelta[]): Promise<void>;
+  getSourceProxyFailures(sinceDate: string): Promise<SourceProxyFailureItem[]>;
+  purgeSourceProxyFailuresBefore(beforeDate: string): Promise<void>;
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;

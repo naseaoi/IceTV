@@ -3,14 +3,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { recordSourcePlayOutcome } from '@/lib/source-health.server';
 import type { SourceRouteStatInput } from '@/lib/types';
+import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
 const MAX_SOURCE_LENGTH = 191;
-type PlayOutcome = Omit<SourceRouteStatInput, 'routeMode'>;
+const limiter = new FixedWindowRateLimiter(120, 60_000);
+type PlayOutcome = Omit<SourceRouteStatInput, 'routeMode' | 'phase'>;
 
 function readOutcome(raw: unknown): PlayOutcome | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -35,9 +38,10 @@ function readOutcome(raw: unknown): PlayOutcome | null {
 function readStat(raw: unknown): SourceRouteStatInput | null {
   const outcome = readOutcome(raw);
   if (!outcome) return null;
-  const { routeMode } = raw as Record<string, unknown>;
+  const { routeMode, phase } = raw as Record<string, unknown>;
   if (routeMode !== 'browser' && routeMode !== 'server') return null;
-  return { ...outcome, routeMode };
+  if (phase !== 'primary' && phase !== 'fallback') return null;
+  return { ...outcome, routeMode, phase };
 }
 
 export async function POST(request: NextRequest) {
@@ -45,16 +49,35 @@ export async function POST(request: NextRequest) {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
+    const verdict = limiter.check(normalizeUsername(guardResult.username));
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        { error: '播放统计上报过于频繁，请稍后重试' },
+        {
+          status: 429,
+          headers: {
+            ...NO_STORE_HEADERS,
+            'Retry-After': String(verdict.retryAfterSeconds),
+          },
+        },
+      );
+    }
+
     const body: unknown = await request.json().catch(() => null);
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: '播放统计格式无效' }, { status: 400 });
     }
     const input = body as Record<string, unknown>;
-    const stat = 'stat' in input ? readStat(input.stat) : null;
+    const legacyStat =
+      input.stat !== null &&
+      typeof input.stat === 'object' &&
+      !Array.isArray(input.stat) &&
+      !('phase' in input.stat);
+    const stat = 'stat' in input && !legacyStat ? readStat(input.stat) : null;
     const outcome = 'outcome' in input ? readOutcome(input.outcome) : null;
     if (
-      (!stat && !outcome) ||
-      ('stat' in input && !stat) ||
+      (!stat && !outcome && !legacyStat) ||
+      ('stat' in input && !stat && !legacyStat) ||
       ('outcome' in input && !outcome)
     ) {
       return NextResponse.json({ error: '播放统计格式无效' }, { status: 400 });

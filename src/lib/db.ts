@@ -17,8 +17,11 @@ import {
   SkipConfig,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
+  SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
+  SourceProxyFailureDelta,
+  SourceProxyFailureItem,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -308,6 +311,12 @@ class DbManager {
     ...args: Parameters<IStorage['getReviewReportPage']>
   ): ReturnType<IStorage['getReviewReportPage']> {
     return (await this.getStorage()).getReviewReportPage(...args);
+  }
+
+  async getMessageSourceSummary(
+    ...args: Parameters<IStorage['getMessageSourceSummary']>
+  ): ReturnType<IStorage['getMessageSourceSummary']> {
+    return (await this.getStorage()).getMessageSourceSummary(...args);
   }
 
   async getFollowReviewMessageCount(
@@ -619,6 +628,12 @@ class DbManager {
   }> {
     const storage = await this.getStorage();
     return storage.getAllPlayRecords(userName);
+  }
+
+  async getMetadataRefreshPage(
+    ...args: Parameters<IStorage['getMetadataRefreshPage']>
+  ) {
+    return (await this.getStorage()).getMetadataRefreshPage(...args);
   }
 
   async getStalePlayRecordPage(
@@ -969,11 +984,6 @@ class DbManager {
     await storage.recordUserLogin(userName, activeAt);
   }
 
-  async getAllUserLastActive(): Promise<Record<string, number>> {
-    const storage = await this.getStorage();
-    return storage.getAllUserLastLogins();
-  }
-
   async listAnnouncements(
     ...args: Parameters<IStorage['listAnnouncements']>
   ): ReturnType<IStorage['listAnnouncements']> {
@@ -1061,16 +1071,6 @@ class DbManager {
   async releaseInviteCodeUse(code: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.releaseInviteCodeUse(code);
-  }
-
-  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
-    const storage = await this.getStorage();
-    return storage.getAllInviteCodeUsage();
-  }
-
-  async deleteInviteCodeUsage(code: string): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.deleteInviteCodeUsage(code);
   }
 
   async getUserNoticeMessages(
@@ -1277,6 +1277,13 @@ class DbManager {
     return storage.getSourceHealthSearchDaily(sinceDate);
   }
 
+  async getSourcePlayReporterDaily(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterDaily[]> {
+    const storage = await this.getStorage();
+    return storage.getSourcePlayReporterDaily(sinceDate);
+  }
+
   async getSourcePlayReporterSummary(
     sinceDate: string,
   ): Promise<SourcePlayReporterSummary[]> {
@@ -1287,6 +1294,25 @@ class DbManager {
   async purgeSourceHealthBefore(beforeDate: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.purgeSourceHealthBefore(beforeDate);
+  }
+
+  async recordSourceProxyFailureBatch(
+    rows: SourceProxyFailureDelta[],
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.recordSourceProxyFailureBatch(rows);
+  }
+
+  async getSourceProxyFailures(
+    sinceDate: string,
+  ): Promise<SourceProxyFailureItem[]> {
+    const storage = await this.getStorage();
+    return storage.getSourceProxyFailures(sinceDate);
+  }
+
+  async purgeSourceProxyFailuresBefore(beforeDate: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.purgeSourceProxyFailuresBefore(beforeDate);
   }
 
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {

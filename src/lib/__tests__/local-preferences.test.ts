@@ -6,7 +6,6 @@ import {
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
   PLAYBACK_RATE_STORAGE_KEY,
-  PREFERRED_QUALITY_STORAGE_KEY,
   readAggregateSearch,
   readAutoPlayNextEnabled,
   readAutoSwitchSource,
@@ -17,8 +16,6 @@ import {
   readEnableOptimization,
   readFluidSearch,
   readPlaybackRate,
-  readPreferredQualityHeight,
-  readPreferredQualityPreference,
   readSeenAnnouncement,
   readSourcePreferredQualityPreference,
   resetAggregateSearch,
@@ -39,7 +36,6 @@ import {
   writeEnableOptimization,
   writeFluidSearch,
   writePlaybackRate,
-  writePreferredQualityHeight,
   writeSeenAnnouncement,
   writeSourcePreferredQualityHeight,
 } from '../local-preferences';
@@ -196,26 +192,6 @@ describe('local preferences', () => {
     expect(document.cookie).not.toContain('cw_count=4');
   });
 
-  it('distinguishes unset, auto, and manual quality preferences', () => {
-    expect(readPreferredQualityPreference()).toEqual({ mode: 'default' });
-    expect(readPreferredQualityHeight()).toBeNull();
-
-    writePreferredQualityHeight(null);
-
-    expect(localStorage.getItem(PREFERRED_QUALITY_STORAGE_KEY)).toBe('auto');
-    expect(readPreferredQualityPreference()).toEqual({ mode: 'auto' });
-    expect(readPreferredQualityHeight()).toBeNull();
-
-    writePreferredQualityHeight(720);
-
-    expect(localStorage.getItem(PREFERRED_QUALITY_STORAGE_KEY)).toBe('720');
-    expect(readPreferredQualityPreference()).toEqual({
-      mode: 'manual',
-      height: 720,
-    });
-    expect(readPreferredQualityHeight()).toBe(720);
-  });
-
   it('stores quality preferences independently for each source', () => {
     writeSourcePreferredQualityHeight('xigua', null);
     writeSourcePreferredQualityHeight('future_source', 1080);
@@ -232,12 +208,9 @@ describe('local preferences', () => {
     });
   });
 
-  it('uses the legacy preference only for xigua', () => {
-    writePreferredQualityHeight(720);
-
+  it('uses the default when a source has no preference', () => {
     expect(readSourcePreferredQualityPreference('xigua')).toEqual({
-      mode: 'manual',
-      height: 720,
+      mode: 'default',
     });
     expect(readSourcePreferredQualityPreference('future_source')).toEqual({
       mode: 'default',

@@ -7,7 +7,6 @@ import { resetMysqlTestData } from '@/lib/__tests__/__fixtures__/mysql-test-data
 import { configSelfCheck } from '@/lib/config';
 import { stripConfigState, subscriptionFromConfig } from '@/lib/config-state';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
-import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import type { AdminConfig } from '@/types/admin';
 
 const source = {
@@ -74,40 +73,6 @@ describe('config state storage', () => {
     raw = (storage as unknown as { db: Database.Database }).db;
   });
   afterEach(() => raw.close());
-
-  it('migrates legacy fields once and preserves newer table state', async () => {
-    const legacy = legacyConfig();
-    await storage.setAdminConfig(legacy);
-    const state = new SqliteConfigStateStore(raw);
-    state.migrate();
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({ live: 12 });
-    expect(await storage.getAdminConfig()).toEqual(
-      stripConfigState(JSON.parse(JSON.stringify(legacy))),
-    );
-    state.saveSubscription({
-      ...subscriptionFromConfig(legacy),
-      ConfigFile: 'new',
-    });
-    state.setCount('live', 99);
-    state.migrate();
-    await storage.setAdminConfig(legacy);
-    state.migrate();
-    expect((await storage.getConfigSubscription()).ConfigFile).toBe('new');
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({ live: 99 });
-  });
-
-  it('rolls back both tables when migration CAS fails', async () => {
-    await storage.setAdminConfig(legacyConfig());
-    raw.exec(
-      "CREATE TRIGGER reject_config BEFORE UPDATE ON admin_config BEGIN SELECT RAISE(ABORT, 'conflict'); END",
-    );
-    expect(() => new SqliteConfigStateStore(raw).migrate()).toThrow('conflict');
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    expect((await storage.getConfigSubscription()).ConfigFile).toBe('');
-  });
 
   it('updates counts without touching config and rejects late refreshes after deletion or URL edits', async () => {
     const config = stripConfigState(legacyConfig());
@@ -185,24 +150,22 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
     await assertSubscriptionFailureState(storage);
   });
 
-  it('migrates idempotently and fences concurrent subscription/config writes', async () => {
-    const { MysqlConfigStateStore } =
-      await import('@/lib/mysql-config-state-store');
+  it('fences concurrent subscription/config writes', async () => {
     await resetMysqlTestData(storage);
     const legacy = legacyConfig();
-    await storage.setAdminConfig(legacy);
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await new MysqlConfigStateStore(connection).migrate();
-      await new MysqlConfigStateStore(connection).migrate();
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    await storage.setAdminConfig(
+      stripConfigState(JSON.parse(JSON.stringify(legacy))),
+    );
+    const current = (await storage.getAdminConfig())!;
+    expect(
+      await storage.compareAndSetAdminConfig(current, current, {
+        subscription: {
+          expected: await storage.getConfigSubscription(),
+          next: subscriptionFromConfig(legacy),
+        },
+        liveCounts: { live: 12 },
+      }),
+    ).toBe(true);
     expect(await storage.getConfigSubscription()).toEqual(
       subscriptionFromConfig(legacy),
     );

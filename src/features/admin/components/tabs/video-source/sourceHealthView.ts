@@ -88,8 +88,8 @@ export function describeSourceHealth(
   }
   lines.push(
     item.playSuccessRate !== null
-      ? `播放成功 ${formatPercent(item.playSuccessRate)} · ${item.playReporterDays} 人次`
-      : '播放 无样本',
+      ? `播放可用（含测速） ${formatPercent(item.playSuccessRate)} · ${item.playReporterDays} 上报者日`
+      : '播放可用（含测速） 无样本',
   );
   lines.push(`最近可用 ${formatLastOkDate(item.lastOkDate, now)}`);
   return lines.join('\n');

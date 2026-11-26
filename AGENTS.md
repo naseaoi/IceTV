@@ -35,7 +35,7 @@
 ## 鉴权与访问边界
 
 - 入口 `src/lib/api-auth.ts`。Guard 三档：`requireActiveUser`（任意登录用户）、`requireAdmin`（admin + owner）、`requireOwner`。
-- Cookie 与登录签名统一走 `src/lib/signing-secret.server.ts`，依赖 `AUTH_SECRET`。**不要再用站长密码生成新会话签名**。旧 cookie 兼容校验由 `LEGACY_COOKIE_CUTOFF_DATE` 控制。
+- Cookie 与登录签名统一走 `src/lib/signing-secret.server.ts`，会话签名与校验仅使用 `AUTH_SECRET`。
 - 根布局经 `src/lib/auth-session.server.ts` 校验后把初始会话注入 `AuthProvider`，客户端统一用 `useAuthSession()` 消费。`/api/auth/session` 只用于显式重新验证，首次渲染与普通路由切换不调用。登录态失效派发 `AUTH_SESSION_LOST_EVENT`，由 `AuthProvider` 统一处理。
 - 受保护路由在对应 `layout.tsx` 挂 `AuthenticatedRoute`，确保门禁先于 `loading.tsx` 和页面内 `Suspense`。
 - 游客点受保护入口时先进目标页展示统一登录提示，**不在入口组件直接跳 `/login`**。

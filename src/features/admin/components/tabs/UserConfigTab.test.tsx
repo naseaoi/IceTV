@@ -86,22 +86,10 @@ jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
 const mockIsLoading = jest.fn((_key: string) => false);
 const mockGetAuthInfo = jest.fn(() => ({ username: 'owner' }));
 
-jest.mock('@/components/modals/AlertModal', () => ({
-  __esModule: true,
-  default: () => null,
-}));
-
 jest.mock('@/features/admin/hooks/useSourceInsights', () => ({
   useSourceInsights: () => ({
     routeStats: [],
     health: new Map(),
-  }),
-}));
-
-jest.mock('@/features/admin/hooks/useUserActivity', () => ({
-  useUserActivity: () => ({
-    lastActiveAt: {},
-    refreshActivity: jest.fn(),
   }),
 }));
 
@@ -141,14 +129,6 @@ jest.mock('@/features/admin/hooks/useLoadingState', () => ({
     isLoading: mockIsLoading,
     withLoading: async (_key: string, action: () => Promise<unknown>) =>
       action(),
-  }),
-}));
-
-jest.mock('@/hooks/useAlertModal', () => ({
-  useAlertModal: () => ({
-    alertModal: { isOpen: false, type: 'success', title: '' },
-    showAlert: jest.fn(),
-    hideAlert: jest.fn(),
   }),
 }));
 

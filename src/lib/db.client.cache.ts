@@ -26,24 +26,6 @@ const LEGACY_CACHE_PREFIX = 'moontv_cache_';
 const CACHE_VERSION = '1.0.0';
 const CACHE_EXPIRE_TIME = 60 * 60 * 1000;
 
-function getStorageValueWithLegacy(
-  key: string,
-  legacyKey?: string,
-): string | null {
-  const raw = readStorage(key);
-  if (raw !== null) {
-    return raw;
-  }
-  if (!legacyKey) {
-    return null;
-  }
-  const legacyRaw = readStorage(legacyKey);
-  if (legacyRaw !== null) {
-    writeStorage(key, legacyRaw);
-  }
-  return legacyRaw;
-}
-
 class HybridCacheManager {
   private static instance: HybridCacheManager;
 
@@ -68,11 +50,7 @@ class HybridCacheManager {
 
     try {
       const cacheKey = this.getUserCacheKey(username);
-      const legacyCacheKey = cacheKey.replace(
-        CACHE_PREFIX,
-        LEGACY_CACHE_PREFIX,
-      );
-      const cached = getStorageValueWithLegacy(cacheKey, legacyCacheKey);
+      const cached = readStorage(cacheKey);
       return cached ? JSON.parse(cached) : {};
     } catch (error) {
       console.warn('获取用户缓存失败:', error);
@@ -212,7 +190,9 @@ class HybridCacheManager {
         return true;
       }
     });
-    keysToRemove.forEach(removeStorage);
+    [...keysToRemove, ...listStorageKeys(LEGACY_CACHE_PREFIX)].forEach(
+      removeStorage,
+    );
   }
 }
 

@@ -32,11 +32,6 @@ jest.mock('@/components/AuthProvider', () => ({
   }),
 }));
 
-jest.mock('@/components/modals/AlertModal', () => ({
-  __esModule: true,
-  default: () => null,
-}));
-
 jest.mock('@/components/modals/ConfirmModal', () => ({
   __esModule: true,
   default: ({
@@ -91,14 +86,6 @@ jest.mock('@/features/admin/components/tabs/SiteConfigTab', () => ({
   }: {
     onDirtyChange?: (dirty: boolean) => void;
   }) => <button onClick={() => onDirtyChange?.(true)}>SiteConfigTab</button>,
-}));
-
-jest.mock('@/hooks/useAlertModal', () => ({
-  useAlertModal: () => ({
-    alertModal: { isOpen: false, type: 'success', title: '' },
-    showAlert: jest.fn(),
-    hideAlert: jest.fn(),
-  }),
 }));
 
 type UseAdminPageActionsOptions = {

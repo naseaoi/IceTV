@@ -34,6 +34,7 @@ import {
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -76,9 +77,6 @@ async function handleGet(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const source = getProxySourceKey(searchParams);
-  // 判断是否直播：显式 icetv-live 标记（新）或仅凭 source 存在（旧兼容）。
-  // 点播场景下 m3u8 URL 现在也携带 source 做 CORS 能力探测，因此不能再把
-  // "有 source" 一律视为直播，否则点播分片会被标 no-cache 影响 HTTP 缓存。
   const isLiveStream = searchParams.get('icetv-live') === '1';
   const proxyMode = 'server-proxy';
   const userAction = searchParams.get('icetv-switch');
@@ -311,6 +309,7 @@ async function handleGet(request: NextRequest) {
         userInitiated,
       });
       logProxyFailure(diagnostic);
+      recordSourceProxyFailure(diagnostic);
       return NextResponse.json(toProxyFailurePayload(diagnostic), {
         status: diagnostic.status,
       });
@@ -377,6 +376,7 @@ async function handleGet(request: NextRequest) {
       userInitiated,
     });
     logProxyFailure(diagnostic);
+    recordSourceProxyFailure(diagnostic);
     return NextResponse.json(toProxyFailurePayload(diagnostic), {
       status: diagnostic.status,
     });

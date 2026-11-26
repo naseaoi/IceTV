@@ -1,7 +1,7 @@
+import { getLiveUserAgent } from '@/features/live/lib/liveLineId.server';
 import { getConfigForRead } from '@/lib/config';
 import type { AdminConfig } from '@/types/admin';
 
-const DEFAULT_LIVE_UA = 'AptvPlayer/1.4.10';
 const DEFAULT_BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
@@ -22,7 +22,7 @@ export async function resolveProxyUserAgent(
     ? resolvedConfig.LiveConfig?.find((s: any) => s.key === source)
     : null;
   if (liveSource) {
-    return liveSource.ua || DEFAULT_LIVE_UA;
+    return getLiveUserAgent(liveSource.ua);
   }
   return DEFAULT_BROWSER_UA;
 }

@@ -15,8 +15,12 @@ import {
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
+jest.mock('@/lib/source-proxy-failures.server', () => ({
+  recordSourceProxyFailure: jest.fn(),
+}));
 jest.unmock('@/lib/upstream-resource-guard.server');
 jest.mock('@/lib/config', () => ({
   getConfigForRead: jest.fn(async () => ({ SiteConfig: {} })),
@@ -84,6 +88,7 @@ describe('segment shared resource integration', () => {
   let storage: LocalSqliteStorage;
   const originalLimit = process.env.UPSTREAM_MEDIA_USER_CONCURRENCY;
   beforeEach(() => {
+    (recordSourceProxyFailure as jest.Mock).mockClear();
     (getConfigForRead as jest.Mock).mockResolvedValue({ SiteConfig: {} });
     (resolveProxyAuthorization as jest.Mock).mockResolvedValue({
       authorized: true,
@@ -381,6 +386,7 @@ describe('segment shared resource integration', () => {
     const response = await GET(request());
     expect(response.status).toBe(503);
     expect(response.headers.get('x-icetv-relay-paused')).toBe('1');
+    expect(recordSourceProxyFailure).not.toHaveBeenCalled();
     expect(mockOrigin).not.toHaveBeenCalled();
   });
 
@@ -400,6 +406,7 @@ describe('segment shared resource integration', () => {
     expect(first.status).toBe(200);
     const blocked = await GET(request());
     expect(blocked.status).toBe(429);
+    expect(recordSourceProxyFailure).not.toHaveBeenCalled();
     expect(blocked.headers.get('Retry-After')).toBeTruthy();
     expect(mockOrigin).toHaveBeenCalledTimes(1);
     await first.arrayBuffer();
@@ -426,6 +433,23 @@ describe('segment shared resource integration', () => {
     expect(mockOrigin).not.toHaveBeenCalled();
   });
 
+  it('records an upstream HTTP failure once at the final response', async () => {
+    mockOrigin.mockResolvedValueOnce(
+      new Response('forbidden', { status: 403 }),
+    );
+    const req = request();
+    Object.assign(req, { url: `${req.url}&source=sample` });
+    expect((await GET(req)).status).toBe(403);
+    expect(recordSourceProxyFailure).toHaveBeenCalledTimes(1);
+    expect(recordSourceProxyFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'sample',
+        reason: 'upstream-http',
+        upstreamStatus: 403,
+      }),
+    );
+  });
+
   it('cancels rejected content and frees the slot', async () => {
     const cancel = jest.fn();
     mockOrigin.mockResolvedValueOnce(
@@ -434,6 +458,10 @@ describe('segment shared resource integration', () => {
       }),
     );
     expect((await GET(request())).status).toBe(502);
+    expect(recordSourceProxyFailure).toHaveBeenCalledTimes(1);
+    expect(recordSourceProxyFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'content-type' }),
+    );
     expect(cancel).toHaveBeenCalled();
     await (await GET(request())).body!.cancel();
   });

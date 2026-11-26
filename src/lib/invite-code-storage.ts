@@ -3,7 +3,6 @@ import {
   INVITE_CODE_MAX_PAGE_SIZE,
   INVITE_CODE_PAGE_SIZE,
   MAX_INVITE_CODES,
-  sanitizeInviteCodes,
 } from '@/features/admin/services/inviteCodes';
 
 export { INVITE_CODE_MAX_PAGE_SIZE, INVITE_CODE_PAGE_SIZE };
@@ -83,16 +82,6 @@ export function inviteFromRow(row: InviteCodeRow): InviteCode {
     ...(row.max_uses === null ? {} : { maxUses: Number(row.max_uses) }),
     usedCount: Number(row.used_count),
   };
-}
-
-export function importedInviteCodes(
-  value: unknown,
-  usage: Record<string, number>,
-): InviteCode[] {
-  return sanitizeInviteCodes(value).map((item) => ({
-    ...item,
-    usedCount: Math.max(item.usedCount || 0, usage[item.code] || 0),
-  }));
 }
 
 export function invitePageStatements(query: InviteCodeQuery, now = Date.now()) {

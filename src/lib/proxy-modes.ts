@@ -1,3 +1,4 @@
+import { isSourceServerUnavailable } from '@/features/play/lib/relayFailureMemory';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { withAbortableTimeout } from '@/lib/concurrency';
 
@@ -172,6 +173,7 @@ export function getSourcePlaybackRoute(
   const useServerProxy =
     mode === 'server' ||
     (mode === 'auto' &&
+      !isSourceServerUnavailable(sourceKey, rawUrl) &&
       getRuntimeProxyOverride(sourceKey, rawUrl) === 'server');
   return {
     useServerProxy,

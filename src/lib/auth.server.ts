@@ -16,11 +16,13 @@ const SESSION_HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_SESSION_TTL_HOURS = 24 * 7;
 const PERMANENT_SESSION_EXPIRES_AT = Date.parse('2099-12-31T23:59:59.999Z');
 
+// Secure 只跟随实际协议：浏览器拒收普通 HTTP（localhost 除外）下的 Secure Cookie，
+// 按环境强制会让 http://IP:端口 访问登录后仍是游客。
+// 转发头可被客户端伪造，但只影响伪造者自己的 Cookie，因此无需 TRUSTED_PROXY_COUNT 把关。
 export function isSecureRequest(request: NextRequest): boolean {
   return (
-    process.env.NODE_ENV === 'production' ||
     request.nextUrl.protocol === 'https:' ||
-    request.headers.get('x-forwarded-proto') === 'https'
+    request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https'
   );
 }
 

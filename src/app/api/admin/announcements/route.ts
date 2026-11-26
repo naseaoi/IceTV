@@ -5,6 +5,7 @@ import { ANNOUNCEMENT_MAX_LENGTH } from '@/lib/announcement-identity';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { invalidateMessageAnnouncementSnapshot } from '@/lib/messages.server';
 
 export const runtime = 'nodejs';
 
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
       publishedAt: body.publish === true ? now : null,
     };
     await db.createAnnouncement(announcement);
+    invalidateMessageAnnouncementSnapshot();
     return NextResponse.json(
       { announcement },
       { status: 201, headers: NO_STORE_HEADERS },
@@ -122,6 +124,7 @@ export async function PATCH(request: NextRequest) {
     });
     if (!announcement)
       return NextResponse.json({ error: '公告不存在' }, { status: 404 });
+    invalidateMessageAnnouncementSnapshot();
     return NextResponse.json({ announcement }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('更新公告失败:', error);
@@ -137,6 +140,7 @@ export async function DELETE(request: NextRequest) {
     if (!id) return badRequest('参数格式错误');
     if (!(await db.deleteAnnouncement(id)))
       return NextResponse.json({ error: '公告不存在' }, { status: 404 });
+    invalidateMessageAnnouncementSnapshot();
     return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('删除公告失败:', error);

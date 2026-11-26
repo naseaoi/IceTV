@@ -20,7 +20,7 @@ export type RuntimeParamSettings = Pick<
 const UPSTREAM_SEARCH_CONCURRENCY_AUTO = 0;
 
 export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
-  SearchDownstreamMaxPage: Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
+  SearchDownstreamMaxPage: Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 2,
   SiteInterfaceCacheTime: 7200,
   VodPageTimeoutSeconds: 15,
   VodFragmentTimeoutSeconds: 10,

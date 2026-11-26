@@ -12,6 +12,7 @@ export function parseCronTask(requestUrl: string): CronTask | null {
   if (
     task === 'config' ||
     task === 'live' ||
+    task === 'live-health' ||
     task === 'metadata' ||
     task === 'source-health'
   ) {

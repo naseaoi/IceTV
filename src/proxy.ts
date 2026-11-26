@@ -105,9 +105,7 @@ export async function proxy(request: NextRequest) {
     authInfo.expiresAt,
     authInfo.username,
   );
-  const isValid = await verifyAuthSignature(signatureData, authInfo.signature, {
-    allowLegacyOwnerPassword: true,
-  });
+  const isValid = await verifyAuthSignature(signatureData, authInfo.signature);
 
   if (!isValid) {
     clearAuthCookies(response, request);

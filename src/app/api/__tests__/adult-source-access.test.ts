@@ -27,6 +27,9 @@ jest.mock('@/lib/source-health.server', () => ({
   getSourceHealthTiers: jest.fn(async () => new Map()),
 }));
 jest.mock('@/lib/search-cache', () => ({
+  makeSearchAggregateCacheKey:
+    jest.requireActual('@/lib/search-cache').makeSearchAggregateCacheKey,
+  persistCachedSearchAggregate: jest.fn(),
   peekCachedSearchAggregate: jest.fn(() => null),
   loadCachedSearchAggregate: jest.fn((_params, loader) => loader()),
   refreshCachedSearchAggregate: jest.fn((_params, loader) => loader()),

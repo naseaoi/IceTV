@@ -1,3 +1,9 @@
+import {
+  classifyRelayHostFailure,
+  readRelayHostFailure,
+  recordRelayHostResult,
+  RelayHostUnavailableError,
+} from '@/features/play/lib/relayHostHealth.server';
 import { createSharedPlaybackTask } from '@/features/play/lib/sharedPlaybackTask';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
@@ -236,6 +242,38 @@ async function fetchM3U8Data(
   isLive: boolean,
   context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
+  const remembered = await readRelayHostFailure(url, isLive);
+  if (remembered)
+    throw new RelayHostUnavailableError(remembered, url, source, isLive, true);
+  try {
+    const result = await fetchM3U8Origin(url, ua, source, isLive, context);
+    await recordRelayHostResult(url, isLive, null);
+    return result;
+  } catch (error) {
+    if (context.signal?.aborted) throw error;
+    const reason = classifyRelayHostFailure(error);
+    if (!reason) throw error;
+    const failure = await recordRelayHostResult(url, isLive, reason);
+    if (!failure) throw error;
+    const unavailable = new RelayHostUnavailableError(
+      failure,
+      url,
+      source,
+      isLive,
+      false,
+    );
+    unavailable.diagnostic.error = error;
+    throw unavailable;
+  }
+}
+
+async function fetchM3U8Origin(
+  url: string,
+  ua: string,
+  source: string | null,
+  isLive: boolean,
+  context: M3U8ProxyRequestContext,
+): Promise<M3U8LoadResult> {
   const timeoutMs = await getProxyRequestTimeoutMs(source);
   if (isLive) {
     const proxyUrl = getProxyUrlForTarget(new URL(url));
@@ -385,6 +423,14 @@ function assertM3U8Content(
   contentType: string,
   context: ConstructorParameters<typeof ProxyRouteError>[0],
 ): void {
+  if (!content.trim()) {
+    throw new ProxyRouteError({
+      ...context,
+      reason: 'upstream-fetch',
+      upstreamErrorType: 'EMPTY_RESPONSE',
+      status: 502,
+    });
+  }
   if (content.includes('#EXTM3U')) {
     return;
   }

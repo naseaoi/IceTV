@@ -3,6 +3,7 @@ import {
   createFragmentEntryFromResponse,
   isCacheableFragmentUrl,
 } from '@/features/play/lib/fragmentMemoryCache';
+import { isSourceServerUnavailable } from '@/features/play/lib/relayFailureMemory';
 import { throwIfPlaybackCancelled } from '@/features/play/lib/sharedPlaybackTask';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import {
@@ -763,6 +764,18 @@ export async function getVideoResolutionFromM3u8(
   sourceKey = '',
   signal?: AbortSignal,
 ): Promise<VideoProbeResult> {
+  throwIfPlaybackCancelled(signal);
+  if (isSourceServerUnavailable(sourceKey, m3u8Url)) {
+    if (route.useServerProxy && !route.allowAutoFallback) {
+      // 固定代理配置交由管理员更改；跳过请求也不重复上报线路样本。
+      throw new SourceProbeNetworkError('Server relay is cooling down');
+    }
+    route = {
+      useServerProxy: false,
+      directManifest: true,
+      allowAutoFallback: false,
+    };
+  }
   try {
     const result = await probeWithMode(m3u8Url, route, sourceKey, signal);
     throwIfPlaybackCancelled(signal);
@@ -770,6 +783,7 @@ export async function getVideoResolutionFromM3u8(
       sourceKey,
       route.useServerProxy ? 'server' : 'browser',
       true,
+      'primary',
     );
     if (!route.useServerProxy && sourceKey) {
       clearSourceProxyOverride(sourceKey, m3u8Url);
@@ -790,8 +804,14 @@ export async function getVideoResolutionFromM3u8(
         sourceKey,
         route.useServerProxy ? 'server' : 'browser',
         false,
+        'primary',
       );
-    if (networkFailure && sourceKey && route.allowAutoFallback) {
+    if (
+      networkFailure &&
+      sourceKey &&
+      route.allowAutoFallback &&
+      (route.useServerProxy || !isSourceServerUnavailable(sourceKey, m3u8Url))
+    ) {
       try {
         const fallbackResult = await probeWithMode(
           m3u8Url,
@@ -808,6 +828,7 @@ export async function getVideoResolutionFromM3u8(
           sourceKey,
           route.useServerProxy ? 'browser' : 'server',
           true,
+          'fallback',
         );
         if (route.useServerProxy) clearSourceProxyOverride(sourceKey, m3u8Url);
         else rememberSourceServerProxy(sourceKey, m3u8Url);
@@ -823,6 +844,7 @@ export async function getVideoResolutionFromM3u8(
             sourceKey,
             route.useServerProxy ? 'browser' : 'server',
             false,
+            'fallback',
           );
         const normalizedFallbackError = normalizeProbeError(fallbackError);
         const partial = pickBestPartial(

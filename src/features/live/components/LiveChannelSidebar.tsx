@@ -1,6 +1,16 @@
-﻿import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
-import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
+﻿import {
+  Clock,
+  LocateFixed,
+  Radio,
+  Search,
+  Star,
+  Target,
+  Tv,
+  X,
+} from 'lucide-react';
+import { MutableRefObject, useEffect, useRef, useState } from 'react';
 
+import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
 import { ListEmptyState, ListLoadingState } from '@/components/ListState';
 import LoadErrorState from '@/components/LoadErrorState';
 import {
@@ -9,26 +19,33 @@ import {
   PlayerPanelTabBar,
 } from '@/components/PlayerPanelTabBar';
 import Spinner from '@/components/Spinner';
-import { useVerticalScrollEdgeFade } from '@/features/live/hooks/useVerticalScrollEdgeFade';
+import { LiveLineHealthBadge } from '@/features/live/components/LiveLineHealthBadge';
+import { useLiveProgram } from '@/features/live/hooks/useLiveProgram';
 import {
-  formatTimeToHHMM,
-  parseCustomTimeFormat,
-} from '@/features/live/lib/time';
+  scrollToVerticalCenter,
+  useVerticalScrollEdgeFade,
+} from '@/features/live/hooks/useVerticalScrollEdgeFade';
+import {
+  type LiveChannelGroup,
+  liveChannelGroupKey,
+  sortLiveLines,
+} from '@/features/live/lib/liveChannelGroups';
+import { formatTimeToHHMM } from '@/features/live/lib/time';
 import type {
   EpgData,
-  EpgProgram,
   LiveChannel,
   LivePanelTab,
   LiveSource,
 } from '@/features/live/types';
+import { readLiveLineResults } from '@/lib/live-line-results';
 
 interface LiveChannelSidebarProps {
   activeTab: LivePanelTab;
   setActiveTab: (tab: LivePanelTab) => void;
   isSwitchingSource: boolean;
-  groupedChannels: Record<string, LiveChannel[]>;
+  groupedChannels: Record<string, LiveChannelGroup[]>;
   selectedGroup: string;
-  filteredChannels: LiveChannel[];
+  filteredChannels: LiveChannelGroup[];
   currentChannel: LiveChannel | null;
   currentSource: LiveSource | null;
   liveSources: LiveSource[];
@@ -36,12 +53,15 @@ interface LiveChannelSidebarProps {
   isEpgLoading: boolean;
   epgError?: string | null;
   retryEpg?: () => void;
-  favorited: boolean;
-  handleToggleFavorite: () => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  favoriteReady: boolean;
+  isGroupFavorited: (group: LiveChannelGroup) => boolean;
+  toggleGroupFavorite: (group: LiveChannelGroup) => void;
   groupContainerRef: MutableRefObject<HTMLDivElement | null>;
   channelListRef: MutableRefObject<HTMLDivElement | null>;
   handleGroupChange: (group: string) => void;
-  handleChannelChange: (channel: LiveChannel) => void;
+  handleChannelChange: (channel: LiveChannelGroup) => void;
   handleSourceChange: (source: LiveSource) => void;
 }
 
@@ -53,14 +73,49 @@ const tabs: { key: LivePanelTab; label: string }[] = [
   { key: 'sources', label: '直播源' },
 ];
 
-function isProgramLive(program: EpgProgram, currentTime: Date) {
-  try {
-    const start = parseCustomTimeFormat(program.start);
-    const end = parseCustomTimeFormat(program.end);
-    return currentTime >= start && currentTime < end;
-  } catch {
-    return false;
+const failedLogos = new Map<string, 'proxy' | 'failed'>();
+
+function rememberLogoFailure(url: string, state: 'proxy' | 'failed') {
+  failedLogos.delete(url);
+  failedLogos.set(url, state);
+  while (failedLogos.size > 512)
+    failedLogos.delete(failedLogos.keys().next().value!);
+}
+
+export function ChannelLogoImage({
+  url,
+  name,
+  source,
+}: {
+  url: string;
+  name: string;
+  source: string;
+}) {
+  const [stage, setStage] = useState(
+    () =>
+      failedLogos.get(url) || (/^https:\/\//i.test(url) ? 'direct' : 'proxy'),
+  );
+  if (!url || stage === 'failed' || failedLogos.get(url) === 'failed') {
+    return <Tv className='h-5 w-5 text-gray-400 dark:text-gray-500' />;
   }
+  return (
+    <img
+      src={
+        stage === 'direct'
+          ? url
+          : `/api/proxy/logo?url=${encodeURIComponent(url)}&source=${encodeURIComponent(source)}`
+      }
+      alt={name}
+      className='h-full w-full rounded object-contain'
+      loading='lazy'
+      referrerPolicy='no-referrer'
+      onError={() => {
+        const next = stage === 'direct' ? 'proxy' : 'failed';
+        rememberLogoFailure(url, next);
+        setStage(next);
+      }}
+    />
+  );
 }
 
 function ChannelLogo({
@@ -77,38 +132,14 @@ function ChannelLogo({
 
   return (
     <div
-      className={`${sizeClass} flex flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800`}
+      className={`${sizeClass} flex flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-700 dark:bg-gray-800`}
     >
-      {channel?.logo ? (
-        <img
-          src={`/api/proxy/logo?url=${encodeURIComponent(channel.logo)}&source=${source?.key || ''}`}
-          alt={channel.name}
-          className='h-full w-full rounded object-contain'
-          loading='lazy'
-        />
-      ) : (
-        <Tv className='h-5 w-5 text-gray-400 dark:text-gray-500' />
-      )}
-    </div>
-  );
-}
-
-function EmptyPanel({
-  icon,
-  title,
-  message,
-}: {
-  icon: ReactNode;
-  title: string;
-  message: string;
-}) {
-  return (
-    <div className='flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center'>
-      <div className='mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800'>
-        {icon}
-      </div>
-      <p className='font-medium text-gray-500 dark:text-gray-400'>{title}</p>
-      <p className='mt-1 text-sm text-gray-400 dark:text-gray-500'>{message}</p>
+      <ChannelLogoImage
+        key={`${source?.key || ''}:${channel?.logo || ''}`}
+        url={channel?.logo || ''}
+        name={channel?.name || ''}
+        source={source?.key || ''}
+      />
     </div>
   );
 }
@@ -120,8 +151,6 @@ function EpgTab({
   isEpgLoading,
   epgError,
   retryEpg,
-  favorited,
-  handleToggleFavorite,
 }: Pick<
   LiveChannelSidebarProps,
   | 'currentChannel'
@@ -130,14 +159,9 @@ function EpgTab({
   | 'isEpgLoading'
   | 'epgError'
   | 'retryEpg'
-  | 'favorited'
-  | 'handleToggleFavorite'
 >) {
-  const currentTime = useMemo(() => new Date(), []);
+  const { currentIndex } = useLiveProgram(epgData);
   const programs = epgData?.programs || [];
-  const currentIndex = programs.findIndex((program) =>
-    isProgramLive(program, currentTime),
-  );
   const programListRef = useRef<HTMLDivElement | null>(null);
   const currentProgramRef = useRef<HTMLDivElement | null>(null);
   const programScrollFade = useVerticalScrollEdgeFade({
@@ -157,9 +181,7 @@ function EpgTab({
         return;
       }
 
-      const top =
-        item.offsetTop - list.clientHeight / 2 + item.clientHeight / 2;
-      list.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      scrollToVerticalCenter(list, item);
     }, 80);
 
     return () => window.clearTimeout(timer);
@@ -167,10 +189,10 @@ function EpgTab({
 
   if (!currentChannel) {
     return (
-      <EmptyPanel
-        icon={<Tv className='h-8 w-8 text-gray-400 dark:text-gray-600' />}
-        title='未选择频道'
-        message='请先选择一个直播频道'
+      <ListEmptyState
+        icon={<Tv />}
+        label='请先选择一个直播频道'
+        className={EPG_STATE_CLASS}
       />
     );
   }
@@ -193,15 +215,6 @@ function EpgTab({
               .join(' · ')}
           </div>
         </div>
-        <button
-          onClick={handleToggleFavorite}
-          className='flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-500 dark:text-gray-300 dark:hover:bg-white/10'
-          title={favorited ? '取消收藏' : '收藏'}
-        >
-          <Heart
-            className={`h-5 w-5 ${favorited ? 'fill-red-500 text-red-500' : ''}`}
-          />
-        </button>
       </div>
 
       {isEpgLoading ? (
@@ -295,13 +308,16 @@ export function LiveChannelSidebar({
   isEpgLoading,
   epgError,
   retryEpg,
-  favorited,
-  handleToggleFavorite,
   groupContainerRef,
   channelListRef,
   handleGroupChange,
   handleChannelChange,
   handleSourceChange,
+  searchQuery,
+  onSearchChange,
+  favoriteReady,
+  isGroupFavorited,
+  toggleGroupFavorite,
 }: LiveChannelSidebarProps) {
   const groupButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const channelScrollFade = useVerticalScrollEdgeFade({
@@ -332,6 +348,27 @@ export function LiveChannelSidebar({
     container.scrollTo({ left: targetScrollLeft, behavior: 'smooth' });
   }, [selectedGroup, groupedChannels, groupContainerRef]);
 
+  const currentRowRef = useRef<HTMLDivElement | null>(null);
+  const [currentVisible, setCurrentVisible] = useState(true);
+  const currentKey = currentChannel
+    ? liveChannelGroupKey(currentChannel.name)
+    : '';
+  useEffect(() => {
+    const row = currentRowRef.current;
+    const root = channelListRef.current;
+    if (!row || !root || typeof IntersectionObserver === 'undefined') {
+      setCurrentVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setCurrentVisible(entry.isIntersecting),
+      { root, threshold: 0.8 },
+    );
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [activeTab, currentKey, filteredChannels, channelListRef]);
+  const localResults = readLiveLineResults();
+
   return (
     <div className={`flex h-full flex-col ${PLAYER_PANEL_SURFACE_CLASS}`}>
       <PlayerPanelTabBar
@@ -343,43 +380,73 @@ export function LiveChannelSidebar({
 
       <PlayerPanelContent>
         {activeTab === 'channels' && (
-          <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-            <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/70 px-3 py-2.5 dark:border-white/[0.06]'>
-              {isSwitchingSource && (
-                <div className='flex items-center gap-2 whitespace-nowrap text-xs text-amber-600 dark:text-amber-400'>
-                  <Spinner className='h-3 w-3' strokeWidth={6} />
-                  切换中
-                </div>
-              )}
-              <div
-                ref={groupContainerRef}
-                className='min-w-0 flex-1 overflow-x-auto'
-              >
-                <div className='flex min-w-max gap-1'>
-                  {Object.keys(groupedChannels).map((group, index) => (
-                    <button
-                      key={group}
-                      data-group={group}
-                      ref={(el) => {
-                        groupButtonRefs.current[index] = el;
-                      }}
-                      onClick={() => handleGroupChange(group)}
-                      disabled={isSwitchingSource}
-                      className={`max-w-[8rem] flex-shrink-0 rounded-full px-3 py-1 text-[13px] transition-colors ${
-                        isSwitchingSource
-                          ? 'cursor-not-allowed text-gray-400 opacity-50 dark:text-gray-600'
-                          : selectedGroup === group
-                            ? 'bg-gray-900/[0.07] font-medium text-gray-900 dark:bg-white/[0.1] dark:text-white'
-                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
-                      }`}
-                      title={group}
-                    >
-                      <span className='block truncate'>{group}</span>
-                    </button>
-                  ))}
-                </div>
+          <div className='relative flex min-h-0 flex-1 flex-col overflow-hidden'>
+            <div className='px-3 pt-3'>
+              <div className='flex items-center gap-2 rounded-lg bg-gray-100 px-3 dark:bg-gray-800'>
+                <Search className='h-4 w-4 shrink-0 text-gray-400' />
+                <input
+                  name='live-channel-search'
+                  aria-label='搜索频道'
+                  placeholder='搜索频道'
+                  value={searchQuery}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  className='min-w-0 flex-1 border-0 bg-transparent px-0 py-2 text-sm text-gray-900 focus:ring-0 dark:text-gray-100'
+                />
+                {searchQuery && (
+                  <button
+                    type='button'
+                    aria-label='清空搜索'
+                    onClick={() => onSearchChange('')}
+                    className='p-1 text-gray-500'
+                  >
+                    <X className='h-4 w-4' />
+                  </button>
+                )}
               </div>
             </div>
+            {!searchQuery.trim() && (
+              <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/70 px-3 py-2.5 dark:border-white/[0.06]'>
+                {isSwitchingSource && (
+                  <div className='flex items-center gap-2 whitespace-nowrap text-xs text-amber-600 dark:text-amber-400'>
+                    <Spinner className='h-3 w-3' strokeWidth={6} />
+                    切换中
+                  </div>
+                )}
+                <div
+                  ref={groupContainerRef}
+                  className='min-w-0 flex-1 overflow-x-auto'
+                >
+                  <div className='flex min-w-max gap-1'>
+                    {Object.keys(groupedChannels).map((group, index) => (
+                      <button
+                        key={group}
+                        data-group={group}
+                        ref={(el) => {
+                          groupButtonRefs.current[index] = el;
+                        }}
+                        onClick={() => handleGroupChange(group)}
+                        disabled={isSwitchingSource}
+                        className={`max-w-[8rem] flex-shrink-0 rounded-full px-3 py-1 text-[13px] transition-colors ${
+                          isSwitchingSource
+                            ? 'cursor-not-allowed text-gray-400 opacity-50 dark:text-gray-600'
+                            : selectedGroup === group
+                              ? 'bg-gray-900/[0.07] font-medium text-gray-900 dark:bg-white/[0.1] dark:text-white'
+                              : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                        }`}
+                        title={group}
+                      >
+                        <span className='block truncate'>
+                          {group}{' '}
+                          <span className='ml-1 tabular-nums text-gray-400'>
+                            {groupedChannels[group].length}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div
               ref={channelScrollFade.ref}
@@ -394,22 +461,24 @@ export function LiveChannelSidebar({
             >
               {filteredChannels.length > 0 ? (
                 filteredChannels.map((channel) => {
-                  const isActive = channel.id === currentChannel?.id;
+                  const isActive = channel.groupKey === currentKey;
+                  const favorited = isGroupFavorited(channel);
+                  const best = sortLiveLines(channel.lines, localResults)[0];
                   return (
-                    <button
-                      key={channel.id}
+                    <div
+                      key={channel.groupKey}
+                      ref={isActive ? currentRowRef : undefined}
                       data-channel-id={channel.id}
-                      onClick={() => handleChannelChange(channel)}
-                      disabled={isSwitchingSource}
-                      className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
-                        isSwitchingSource
-                          ? 'cursor-not-allowed opacity-50'
-                          : isActive
-                            ? 'bg-brand-500/10 dark:bg-brand-400/10'
-                            : 'hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.05]'
-                      }`}
+                      data-channel-group={channel.groupKey}
+                      className={`group flex items-center rounded-lg transition-colors ${isActive ? 'bg-brand-500/10 dark:bg-brand-400/10' : 'hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.05]'}`}
                     >
-                      <div className='flex items-center gap-3'>
+                      <button
+                        type='button'
+                        onClick={() => handleChannelChange(channel)}
+                        disabled={isSwitchingSource}
+                        aria-current={isActive ? 'true' : undefined}
+                        className='flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left disabled:opacity-50'
+                      >
                         <ChannelLogo
                           channel={channel}
                           source={currentSource}
@@ -420,23 +489,52 @@ export function LiveChannelSidebar({
                             {channel.name}
                           </div>
                           <div className='mt-1 truncate text-xs text-gray-500 dark:text-gray-400'>
-                            {channel.group}
+                            <LiveLineHealthBadge line={best} />
+                            {channel.lines.length > 1 &&
+                              ` · ${channel.lines.length} 条线路`}
                           </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type='button'
+                        aria-label={`${favorited ? '取消收藏' : '收藏'} ${channel.name}`}
+                        aria-pressed={favorited}
+                        disabled={!favoriteReady || isSwitchingSource}
+                        onClick={() => toggleGroupFavorite(channel)}
+                        className={`live-channel-favorite mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-gray-200 dark:hover:bg-gray-700 ${favorited ? 'text-amber-600 dark:text-amber-400' : 'live-channel-favorite-idle text-gray-400 dark:text-gray-500'}`}
+                      >
+                        <Star
+                          className={`h-4 w-4 ${favorited ? 'fill-current' : ''}`}
+                        />
+                      </button>
+                    </div>
                   );
                 })
               ) : (
-                <EmptyPanel
-                  icon={
-                    <Tv className='h-8 w-8 text-gray-400 dark:text-gray-600' />
-                  }
-                  title='暂无可用频道'
-                  message='请选择其他直播源或稍后再试'
+                <ListEmptyState
+                  icon={<Tv />}
+                  label={searchQuery.trim() ? '未找到频道' : '暂无可用频道'}
+                  className={EPG_STATE_CLASS}
                 />
               )}
             </div>
+            {!currentVisible && (
+              <button
+                type='button'
+                title='定位当前'
+                aria-label='定位当前'
+                className={`${FLOATING_CONTROL_CLASS} absolute bottom-4 right-4 h-10 w-10`}
+                onClick={() => {
+                  if (channelListRef.current && currentRowRef.current)
+                    scrollToVerticalCenter(
+                      channelListRef.current,
+                      currentRowRef.current,
+                    );
+                }}
+              >
+                <LocateFixed className='h-4 w-4' />
+              </button>
+            )}
           </div>
         )}
 
@@ -448,8 +546,6 @@ export function LiveChannelSidebar({
             isEpgLoading={isEpgLoading}
             epgError={epgError}
             retryEpg={retryEpg}
-            favorited={favorited}
-            handleToggleFavorite={handleToggleFavorite}
           />
         )}
 
@@ -491,7 +587,7 @@ export function LiveChannelSidebar({
                         <div className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
                           {!source.channelNumber || source.channelNumber === 0
                             ? '-'
-                            : `${source.channelNumber} 个频道`}
+                            : `${source.channelNumber} 条线路`}
                         </div>
                       </div>
                       {isCurrentSource && (
@@ -502,12 +598,10 @@ export function LiveChannelSidebar({
                 })}
               </div>
             ) : (
-              <EmptyPanel
-                icon={
-                  <Radio className='h-8 w-8 text-gray-400 dark:text-gray-600' />
-                }
-                title='暂无可用直播源'
-                message='请检查网络连接或联系管理员添加直播源'
+              <ListEmptyState
+                icon={<Radio />}
+                label='暂无可用直播源'
+                className={EPG_STATE_CLASS}
               />
             )}
           </div>

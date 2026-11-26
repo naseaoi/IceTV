@@ -143,6 +143,44 @@ beforeEach(() => {
   (adminGet as jest.Mock).mockResolvedValue({ stats: [] });
 });
 
+it('视频源检测完成后重新读取质量并刷新告警', async () => {
+  const originalEventSource = global.EventSource;
+  let connection: {
+    onmessage: ((event: { data: string }) => void) | null;
+    close: jest.Mock;
+  };
+  global.EventSource = jest.fn().mockImplementation(() => {
+    connection = { onmessage: null, close: jest.fn() };
+    return connection;
+  }) as unknown as typeof EventSource;
+  try {
+    await act(async () => {
+      render(<VideoSourceConfig config={config} refreshConfig={jest.fn()} />);
+    });
+    const healthCalls = () =>
+      (adminGet as jest.Mock).mock.calls.filter(([url]) =>
+        url.includes('/source-health'),
+      ).length;
+    expect(healthCalls()).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Alpha 视频 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '检测' }));
+    fireEvent.change(screen.getByPlaceholderText('请输入搜索关键词'), {
+      target: { value: '动画' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始检测' }));
+    });
+    await act(async () => {
+      connection!.onmessage!({ data: JSON.stringify({ type: 'complete' }) });
+    });
+    expect(healthCalls()).toBe(2);
+    expect(mockRefreshAlerts).toHaveBeenCalledTimes(1);
+    expect(connection!.close).toHaveBeenCalledTimes(1);
+  } finally {
+    global.EventSource = originalEventSource;
+  }
+});
+
 describe.each(cases)('$label列表搜索', (testCase) => {
   const { Component, label, first, second, firstId, secondId } = testCase;
 

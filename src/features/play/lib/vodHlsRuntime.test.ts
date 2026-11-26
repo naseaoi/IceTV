@@ -1,6 +1,7 @@
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { PLAYBACK_STALL_CONFIRMATION_DELAY_MS } from '@/features/play/lib/playbackStallRecovery';
 import { getVodStartupProgress } from '@/features/play/lib/playerLoading';
+import { isSourceServerUnavailable } from '@/features/play/lib/relayFailureMemory';
 import {
   createVodM3u8Loader,
   getVodRuntimeSourceUrl,
@@ -228,14 +229,18 @@ function setupRuntime() {
 describe('vodHlsRuntime 运行时释放', () => {
   it.each(
     [false, true].flatMap((autoFallback) =>
-      ['manifestLoadError', 'keyLoadError'].map((details) => ({
-        autoFallback,
-        details,
-      })),
+      ['manifestLoadError', 'keyLoadError'].flatMap((details) =>
+        [false, true].map((hostMarked) => ({
+          autoFallback,
+          details,
+          hostMarked,
+        })),
+      ),
     ),
   )(
-    'hands $details HTTP 403 to lazy refresh before normal recovery (auto fallback: $autoFallback)',
-    async ({ autoFallback, details }) => {
+    'hands $details HTTP 403 to lazy refresh before normal recovery (auto fallback: $autoFallback, host marked: $hostMarked)',
+    async ({ autoFallback, details, hostMarked }) => {
+      const url = `https://refresh-${autoFallback}-${details}-${hostMarked}.example/index.m3u8`;
       mockIsServerProxy.mockReturnValue(true);
       mockShouldAutoFallbackToServer.mockReturnValue(autoFallback);
       const runtime = setupRuntime();
@@ -247,34 +252,85 @@ describe('vodHlsRuntime 运行时释放', () => {
           }),
       );
       const video = createVideo();
-      runtime.load(video, EPISODE_1);
+      runtime.load(video, url);
       const hls = getFakeHls(video);
       const forbidden = {
         type: FakeHls.ErrorTypes.NETWORK_ERROR,
         details,
         fatal: details === 'manifestLoadError',
         response: { code: 403 },
+        networkDetails: {
+          getResponseHeader: (name: string) =>
+            hostMarked && name === 'X-IceTV-Relay-Failure'
+              ? 'host-forbidden'
+              : null,
+        },
       };
       hls.emit(FakeHls.Events.ERROR, forbidden);
       hls.emit(FakeHls.Events.ERROR, forbidden);
       expect(runtime.options.onPlaybackUrlForbidden).toHaveBeenCalledTimes(1);
       expect(runtime.options.onPlaybackUrlForbidden).toHaveBeenCalledWith(
-        EPISODE_1,
+        url,
         expect.any(AbortSignal),
       );
+      expect(isSourceServerUnavailable(DETAIL.source, url)).toBe(false);
       expect(hls.loadSource).toHaveBeenCalledTimes(1);
       expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
       expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
       finish(false);
       await Promise.resolve();
+      expect(isSourceServerUnavailable(DETAIL.source, url)).toBe(hostMarked);
       if (autoFallback) {
-        expect(hls.loadSource).toHaveBeenLastCalledWith(EPISODE_1);
+        expect(hls.loadSource).toHaveBeenLastCalledWith(url);
         expect(hls.loadSource).toHaveBeenCalledTimes(2);
         expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
       } else {
         expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
           `networkError:${details}`,
         );
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'reloads a refreshed URL before applying a repeated host-marked 403 (auto fallback: %s)',
+    async (autoFallback) => {
+      mockIsServerProxy.mockReturnValue(true);
+      mockShouldAutoFallbackToServer.mockReturnValue(autoFallback);
+      const runtime = setupRuntime();
+      const url = `https://refreshed-host-${autoFallback}.example/a?token=old`;
+      const freshUrl = url.replace('old', 'new');
+      runtime.options.onPlaybackUrlForbidden = jest
+        .fn()
+        .mockReturnValueOnce(Promise.resolve(true))
+        .mockReturnValue(null);
+      const video = createVideo();
+      runtime.load(video, url);
+      const forbidden = {
+        ...FATAL_MANIFEST_ERROR,
+        response: { code: 403 },
+        networkDetails: {
+          getResponseHeader: (name: string) =>
+            name === 'X-IceTV-Relay-Failure' ? 'host-forbidden' : null,
+        },
+      };
+      getFakeHls(video).emit(FakeHls.Events.ERROR, forbidden);
+      await Promise.resolve();
+      expect(isSourceServerUnavailable(DETAIL.source, freshUrl)).toBe(false);
+      expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      runtime.load(video, freshUrl);
+      const hls = getFakeHls(video);
+      expect(hls.loadSource.mock.calls.at(-1)?.[0]).toContain(
+        encodeURIComponent(freshUrl),
+      );
+      hls.emit(FakeHls.Events.ERROR, forbidden);
+      expect(runtime.options.onPlaybackUrlForbidden).toHaveBeenCalledTimes(2);
+      expect(isSourceServerUnavailable(DETAIL.source, freshUrl)).toBe(true);
+      if (autoFallback) {
+        expect(hls.loadSource).toHaveBeenLastCalledWith(freshUrl);
+        expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      } else {
+        expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
       }
     },
   );
@@ -635,6 +691,7 @@ describe('vodHlsRuntime 运行时释放', () => {
       DETAIL.source,
       'browser',
       true,
+      'primary',
     );
   });
 
@@ -716,6 +773,7 @@ describe('vodHlsRuntime 运行时释放', () => {
         DETAIL.source,
         'server',
         false,
+        'primary',
       );
     });
 
@@ -757,6 +815,7 @@ describe('vodHlsRuntime 运行时释放', () => {
           DETAIL.source,
           'server',
           true,
+          'primary',
         );
       },
     );
@@ -935,6 +994,35 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
 
   describe('自动线路单次切换', () => {
     beforeEach(() => mockShouldAutoFallbackToServer.mockReturnValue(true));
+    it('服务器主机拒绝后回落直连，新播放意图跳过已冷却的服务器线路', () => {
+      mockIsServerProxy.mockReturnValue(true);
+      const url = 'https://runtime-blocked.example/one.m3u8';
+      const first = setupRuntime();
+      const video = createVideo();
+      first.load(video, url);
+      const hls = getFakeHls(video);
+      hls.emit(FakeHls.Events.ERROR, {
+        ...FATAL_MANIFEST_ERROR,
+        networkDetails: {
+          getResponseHeader: (name: string) =>
+            name === 'Retry-After'
+              ? '600'
+              : name === 'X-IceTV-Relay-Failure'
+                ? 'host-forbidden'
+                : null,
+        },
+      });
+      expect(hls.loadSource).toHaveBeenCalledTimes(2);
+      expect(hls.loadSource).toHaveBeenLastCalledWith(url);
+      const second = setupRuntime();
+      const nextVideo = createVideo();
+      second.load(nextVideo, url);
+      const nextHls = getFakeHls(nextVideo);
+      expect(nextHls.loadSource).toHaveBeenLastCalledWith(url);
+      nextHls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      expect(nextHls.loadSource).toHaveBeenCalledTimes(1);
+      expect(second.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+    });
     it('清单失败快速直连转代理，第二路失败交给外层而不循环', () => {
       const { load, onPlaybackRecoveryExhausted } = setupRuntime();
       const video = createVideo();
@@ -1053,6 +1141,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
           'demo',
           'browser',
           false,
+          expect.anything(),
         );
       });
 
@@ -1081,6 +1170,19 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
         expect(hls.loadSource.mock.calls[1][0]).toContain('forceServer=true');
         expect(hls.nextLoadLevel).toBe(-1);
         expect(hls.autoLevelCapping).toBe(-1);
+        expect(mockReportSourceRouteStat).toHaveBeenCalledWith(
+          DETAIL.source,
+          'browser',
+          false,
+          'primary',
+        );
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(0, 1));
+        expect(mockReportSourceRouteStat).toHaveBeenLastCalledWith(
+          DETAIL.source,
+          'server',
+          true,
+          'fallback',
+        );
       });
 
       it('起播时高画质档两路都失败，代理线路兜底降档且不记代理成功', () => {
@@ -1322,6 +1424,7 @@ describe('vodHlsRuntime 缓冲配额', () => {
       DETAIL.source,
       'browser',
       false,
+      expect.anything(),
     );
   });
 

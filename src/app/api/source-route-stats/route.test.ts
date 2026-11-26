@@ -24,7 +24,7 @@ installWebPolyfills();
 const { POST } = require('./route') as typeof import('./route');
 const eventAt = Date.parse('2026-01-01T00:00:00Z');
 const outcome = { source: 'a', success: true, eventAt };
-const stat = { ...outcome, routeMode: 'browser' };
+const stat = { ...outcome, routeMode: 'browser', phase: 'primary' };
 const request = (body: unknown) => ({ json: async () => body }) as NextRequest;
 
 beforeEach(() => {
@@ -76,6 +76,8 @@ it.each([
   null,
   [],
   { stat: null },
+  { stat: { ...stat, phase: null }, outcome },
+  { stat: { ...stat, phase: 'invalid' }, outcome },
   { outcome: null },
   { stat, outcome: {} },
   { stat: { ...stat, routeMode: 'auto' } },
@@ -134,6 +136,42 @@ it('attempts the final outcome even when the route-stat write fails', async () =
   );
 });
 
+it('limits normalized usernames to 120 reports per minute before reading the body or writing', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-04T12:00:00Z'));
+  try {
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'Rate-Limited',
+    });
+    for (let i = 0; i < 120; i++) {
+      expect((await POST(request({ stat, outcome }))).status).toBe(200);
+    }
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: ' rate-limited ',
+    });
+    const json = jest.fn().mockResolvedValue({ stat, outcome });
+    const response = await POST({ json } as unknown as NextRequest);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.json()).toEqual({
+      error: '播放统计上报过于频繁，请稍后重试',
+    });
+    expect(json).not.toHaveBeenCalled();
+    expect(db.recordSourceRouteStat).toHaveBeenCalledTimes(120);
+    expect(recordSourcePlayOutcome).toHaveBeenCalledTimes(120);
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'another-user',
+    });
+    expect((await POST(request({ outcome }))).status).toBe(200);
+    jest.advanceTimersByTime(60_000);
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'rate-limited',
+    });
+    expect((await POST(request({ outcome }))).status).toBe(200);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('returns a generic error when recording the final outcome fails', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   (recordSourcePlayOutcome as jest.Mock).mockRejectedValue(
@@ -142,4 +180,23 @@ it('returns a generic error when recording the final outcome fails', async () =>
   const response = await POST(request({ outcome }));
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ error: '保存播放统计失败' });
+});
+
+it('ignores phase-less legacy stats and preserves their final outcome', async () => {
+  const legacyStat = { ...outcome, routeMode: 'server' };
+  expect((await POST(request({ stat: legacyStat, outcome }))).status).toBe(200);
+  expect(db.recordSourceRouteStat).not.toHaveBeenCalled();
+  expect(recordSourcePlayOutcome).toHaveBeenCalledWith(
+    'alice',
+    'a',
+    true,
+    eventAt,
+  );
+  expect((await POST(request({ stat: legacyStat }))).status).toBe(200);
+});
+
+it('records fallback attempts separately', async () => {
+  const fallback = { ...stat, routeMode: 'server', phase: 'fallback' };
+  expect((await POST(request({ stat: fallback }))).status).toBe(200);
+  expect(db.recordSourceRouteStat).toHaveBeenCalledWith(fallback);
 });

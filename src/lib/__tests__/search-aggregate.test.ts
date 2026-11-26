@@ -5,6 +5,7 @@ import {
   getUpstreamSearchGateStats,
   runSearchAggregation,
 } from '@/lib/search-aggregate';
+import { acquireUpstreamSearchSlot } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import {
   ResourceLimitError,
@@ -164,6 +165,16 @@ describe('runSearchAggregation', () => {
       '搜索失败 慢源:',
       '慢源 timeout',
     );
+    // 消费预算也包含闸门排队，不能让本机繁忙变成五分钟整源冷却。
+    (searchFromApi as jest.Mock).mockResolvedValue([]);
+    await runSearchAggregation({
+      apiSites: [{ key: 'slow', name: '慢源', api: 'https://api.example' }],
+      query: '慢',
+      maxSearchPages: 1,
+      disableYellowFilter: true,
+      sourceConcurrency: 1,
+    });
+    expect(searchFromApi).toHaveBeenCalledTimes(2);
   });
 
   it('闸门释放后后续搜索仍可正常发起', async () => {
@@ -273,11 +284,17 @@ describe('source health search budgets', () => {
 
   it('闸门排队超时按繁忙报错且不进入源失败冷却', async () => {
     let finishHolder: (value: SearchResult[]) => void = () => {};
-    (searchFromApi as jest.Mock).mockImplementationOnce(
-      () =>
-        new Promise<SearchResult[]>((resolve) => {
-          finishHolder = resolve;
-        }),
+    (searchFromApi as jest.Mock).mockImplementation(
+      async (_site, _query, options) => {
+        const release = await acquireUpstreamSearchSlot(options.signal);
+        try {
+          return await new Promise<SearchResult[]>((resolve) => {
+            finishHolder = resolve;
+          });
+        } finally {
+          release();
+        }
+      },
     );
     const base = {
       query: 'test',
@@ -313,7 +330,7 @@ describe('source health search budgets', () => {
       ...base,
       apiSites: [{ key: 'b', name: 'b', api: 'https://b.example' }],
     });
-    expect(searchFromApi).toHaveBeenCalledTimes(2);
+    expect(searchFromApi).toHaveBeenCalledTimes(3);
   });
 
   it('returns scheduling order despite reverse completion', async () => {

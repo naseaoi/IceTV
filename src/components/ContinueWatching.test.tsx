@@ -29,11 +29,6 @@ jest.mock('@/components/ScrollableRow', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
-// 消息摘要即使已清零，也不应覆盖播放记录的更新计数。
-jest.mock('@/components/messages/MessageCenterProvider', () => ({
-  useOptionalMessageCenter: () => ({ trackingUnreadCount: 0 }),
-}));
-
 const mockSnapshot = jest.mocked(getCachedPlayRecordsSnapshot);
 const mockPage = jest.mocked(getPlayRecordPage);
 const mockSubscribe = jest.mocked(subscribeToDataUpdates);

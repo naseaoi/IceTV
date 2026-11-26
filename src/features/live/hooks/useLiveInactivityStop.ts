@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   isLivePageEffectivelyHidden,
+  LIVE_IDLE_STOP_MS,
+  LIVE_IDLE_WARNING_MS,
   LIVE_INACTIVITY_CHECK_MS,
   shouldStopLiveForInactivity,
 } from '@/features/live/lib/liveInactivityPolicy';
@@ -25,6 +27,8 @@ export function useLiveInactivityStop({
   isStreaming: () => boolean;
   onStop: () => void;
 }) {
+  const [warning, setWarning] = useState(false);
+  const markActiveRef = useRef(() => {});
   const [stoppedKey, setStoppedKey] = useState<string | null>(null);
   const stopped = stoppedKey !== null && stoppedKey === streamKey;
   const isStreamingRef = useRef(isStreaming);
@@ -42,7 +46,10 @@ export function useLiveInactivityStop({
 
     const markActive = () => {
       lastActivityAt = Date.now();
+      setWarning(false);
     };
+    markActiveRef.current = markActive;
+    setWarning(false);
     const syncHidden = () => {
       if (!isLivePageEffectivelyHidden(document)) {
         hiddenSince = null;
@@ -56,7 +63,15 @@ export function useLiveInactivityStop({
     };
     const check = () => {
       syncHidden();
-      if (!isStreamingRef.current()) return;
+      if (!isStreamingRef.current()) {
+        setWarning(false);
+        return;
+      }
+      setWarning(
+        document.visibilityState === 'visible' &&
+          Date.now() - lastActivityAt >=
+            LIVE_IDLE_STOP_MS - LIVE_IDLE_WARNING_MS,
+      );
       if (
         !shouldStopLiveForInactivity({
           now: Date.now(),
@@ -67,6 +82,7 @@ export function useLiveInactivityStop({
         return;
       }
       clearInterval(timer);
+      setWarning(false);
       setStoppedKey(streamKeyRef.current);
       onStopRef.current();
     };
@@ -90,9 +106,14 @@ export function useLiveInactivityStop({
       document.removeEventListener('enterpictureinpicture', syncHidden, true);
       document.removeEventListener('leavepictureinpicture', syncHidden, true);
     };
-  }, [stopped]);
+  }, [stopped, streamKey]);
 
   const resume = useCallback(() => setStoppedKey(null), []);
 
-  return { stopped, resume };
+  return {
+    stopped,
+    resume,
+    warning,
+    continueWatching: () => markActiveRef.current(),
+  };
 }

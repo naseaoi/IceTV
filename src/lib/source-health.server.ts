@@ -8,6 +8,7 @@ import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 import {
   type SourceHealthReportItem,
   type SourceHealthTier,
+  buildSourceHealthDaily,
   normalizeSourceHealthDays,
   scoreSourceHealth,
   SOURCE_HEALTH_DEFAULT_DAYS,
@@ -18,6 +19,8 @@ import {
 import type {
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
+  SourcePlayReporterDaily,
+  SourcePlayReporterSummary,
 } from '@/lib/types';
 import { normalizeUsername } from '@/lib/username';
 
@@ -118,8 +121,8 @@ export function resetSourceHealthSearchForTests(): void {
   pendingCutoff = '';
   lastFlushAt = Date.now();
   inFlight = null;
-  tiersCache = null;
-  tiersInFlight = null;
+  reportCache = null;
+  reportInFlight = null;
 }
 
 export async function recordSourcePlayOutcome(
@@ -151,12 +154,16 @@ export async function getSourceHealthReport(
 ): Promise<SourceHealthReportItem[]> {
   await flushSourceHealthSearch();
   const now = new Date();
-  const sinceDate = utcDateDaysAgo(normalizeSourceHealthDays(days) - 1, now);
+  const windowDays = normalizeSourceHealthDays(days);
+  const dates = Array.from({ length: windowDays }, (_, index) =>
+    utcDateDaysAgo(windowDays - index - 1, now),
+  );
+  const sinceDate = dates[0];
   const retentionDate = utcDateDaysAgo(SOURCE_HEALTH_RETENTION_DAYS, now);
   const [config, searchRows, playWindow, playRetention] = await Promise.all([
     getConfigForRead(),
     db.getSourceHealthSearchDaily(retentionDate),
-    db.getSourcePlayReporterSummary(sinceDate),
+    db.getSourcePlayReporterDaily(sinceDate),
     db.getSourcePlayReporterSummary(retentionDate),
   ]);
   const searchBySource = new Map<string, SourceHealthSearchDaily[]>();
@@ -179,48 +186,84 @@ export async function getSourceHealthReport(
   for (const row of playRetention) {
     setLastOk(row.source, row.lastSuccessDate);
   }
-  const playBySource = new Map(playWindow.map((row) => [row.source, row]));
+  const playBySource = new Map<string, SourcePlayReporterSummary>();
+  const playDailyBySource = new Map<string, SourcePlayReporterDaily[]>();
+  for (const row of playWindow) {
+    const rows = playDailyBySource.get(row.source) ?? [];
+    rows.push(row);
+    playDailyBySource.set(row.source, rows);
+    const summary = playBySource.get(row.source) ?? {
+      source: row.source,
+      successReporterDays: 0,
+      failureReporterDays: 0,
+      lastSuccessDate: null,
+    };
+    summary.successReporterDays += row.successReporterDays;
+    summary.failureReporterDays += row.failureReporterDays;
+    playBySource.set(row.source, summary);
+  }
   return config.SourceConfig.map((source) =>
     scoreSourceHealth(
       source.key,
       searchBySource.get(source.key) ?? [],
       playBySource.get(source.key),
       lastOkBySource.get(source.key) ?? null,
+      buildSourceHealthDaily(
+        dates,
+        searchBySource.get(source.key) ?? [],
+        playDailyBySource.get(source.key) ?? [],
+      ),
     ),
   );
 }
 
-let tiersCache: {
-  tiers: Map<string, SourceHealthTier>;
+let reportCache: {
+  report: SourceHealthReportItem[] | null;
   expiresAt: number;
 } | null = null;
-let tiersInFlight: Promise<Map<string, SourceHealthTier>> | null = null;
+let reportInFlight: Promise<SourceHealthReportItem[] | null> | null = null;
+
+// null 缓存读取失败：排序降级，用户接口仍可区分失败与空报告。
+export async function getCachedSourceHealthReport(): Promise<
+  SourceHealthReportItem[] | null
+> {
+  if (reportCache && reportCache.expiresAt > Date.now()) {
+    return cloneReport(reportCache.report);
+  }
+  if (!reportInFlight) {
+    reportInFlight = getSourceHealthReport(SOURCE_HEALTH_DEFAULT_DAYS)
+      .catch((error) => {
+        console.warn('Failed to load source health report', error);
+        return null;
+      })
+      .then((report) => {
+        reportCache = {
+          report,
+          expiresAt: Date.now() + SOURCE_HEALTH_TIERS_CACHE_TTL_MS,
+        };
+        return report;
+      })
+      .finally(() => {
+        reportInFlight = null;
+      });
+  }
+  return cloneReport(await reportInFlight);
+}
+
+function cloneReport(report: SourceHealthReportItem[] | null) {
+  return (
+    report?.map((item) => ({
+      ...item,
+      daily: item.daily.map((point) => ({ ...point })),
+    })) ?? null
+  );
+}
 
 export async function getSourceHealthTiers(): Promise<
   Map<string, SourceHealthTier>
 > {
-  if (tiersCache && tiersCache.expiresAt > Date.now()) {
-    return new Map(tiersCache.tiers);
-  }
-  if (!tiersInFlight) {
-    tiersInFlight = getSourceHealthReport(SOURCE_HEALTH_DEFAULT_DAYS)
-      .then((report) => new Map(report.map((item) => [item.source, item.tier])))
-      .catch((error) => {
-        console.warn('Failed to load source health tiers', error);
-        return new Map<string, SourceHealthTier>();
-      })
-      .then((tiers) => {
-        tiersCache = {
-          tiers,
-          expiresAt: Date.now() + SOURCE_HEALTH_TIERS_CACHE_TTL_MS,
-        };
-        return tiers;
-      })
-      .finally(() => {
-        tiersInFlight = null;
-      });
-  }
-  return new Map(await tiersInFlight);
+  const report = await getCachedSourceHealthReport();
+  return new Map(report?.map((item) => [item.source, item.tier]));
 }
 
 export async function cleanupSourceHealth(): Promise<void> {

@@ -10,12 +10,18 @@ import {
 } from '@/features/live/lib/live';
 import { getConfigForRead, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import * as urlGuard from '@/lib/url-guard';
 import {
   clearUrlGuardDnsCacheForTests,
   resetUrlGuardDnsLookupForTests,
   setUrlGuardDnsLookupForTests,
   UrlValidationError,
 } from '@/lib/url-guard';
+
+jest.mock('@/lib/url-guard', () => {
+  const actual = jest.requireActual('@/lib/url-guard');
+  return { ...actual, fetchWithUrlGuard: jest.fn(actual.fetchWithUrlGuard) };
+});
 
 jest.mock('@/lib/http-proxy-json', () => ({
   getProxyUrlForTarget: () => undefined,
@@ -83,6 +89,32 @@ describe('refreshLiveChannels', () => {
       delete process.env.LIVE_REFRESH_CONCURRENCY;
     } else {
       process.env.LIVE_REFRESH_CONCURRENCY = originalLiveRefreshConcurrency;
+    }
+  });
+
+  it('直播订阅与节目单回源关闭代理池', async () => {
+    const guardedFetch = jest.mocked(urlGuard.fetchWithUrlGuard).mockClear();
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(
+        createTextResponse('CCTV5,https://example.com/live.m3u8'),
+      )
+      .mockResolvedValueOnce(createTextResponse('<tv></tv>'));
+    await refreshLiveChannels({
+      key: 'epg-stream',
+      name: 'EPG',
+      from: 'custom',
+      url: 'https://example.com/live.m3u',
+      epg: 'https://example.com/epg.xml',
+    });
+    expect(guardedFetch).toHaveBeenCalledTimes(2);
+    for (const url of [
+      'https://example.com/live.m3u',
+      'https://example.com/epg.xml',
+    ]) {
+      expect(guardedFetch).toHaveBeenCalledWith(
+        url,
+        expect.objectContaining({ useProxyPool: false }),
+      );
     }
   });
 
@@ -815,6 +847,58 @@ describe('parseLivePlaylist', () => {
 });
 
 describe('parseEpgXmlForChannels', () => {
+  const now = Date.parse('2026-06-27T00:15:00+08:00');
+  const programme = (id: string, title: string) =>
+    `<programme start="20260627000000 +0800" stop="20260627003000 +0800" channel="${id}"><title>${title}</title></programme>`;
+
+  it.each(['CCTV-5', 'CCTV5 高清'])(
+    '区分 CCTV5 与 CCTV5+，保留 %s 别名匹配',
+    (name) => {
+      const result = parseEpgXmlForChannels(
+        `<tv><channel id="sports"><display-name>CCTV5</display-name></channel><channel id="sports-plus"><display-name>CCTV5+</display-name></channel>${programme('sports', '体育新闻')}${programme('sports-plus', '赛事直播')}</tv>`,
+        [
+          { tvgId: 'five', name },
+          { tvgId: 'five-plus', name: 'CCTV5＋ 高清' },
+        ],
+        { now },
+      );
+      expect(result.five?.map((program) => program.title)).toEqual([
+        '体育新闻',
+      ]);
+      expect(result['five-plus']?.map((program) => program.title)).toEqual([
+        '赛事直播',
+      ]);
+    },
+  );
+
+  it('精确 tvg-id 命中优先于其他频道的名称与模糊别名', () => {
+    const result = parseEpgXmlForChannels(
+      `<tv><channel id="CCTV5+"><display-name>CCTV5</display-name></channel>${programme('CCTV5+', '赛事直播')}</tv>`,
+      [
+        { tvgId: 'CCTV5', name: '体育' },
+        { tvgId: 'CCTV5+', name: '体育赛事' },
+      ],
+      { now },
+    );
+    expect(result['CCTV5+']?.map((program) => program.title)).toEqual([
+      '赛事直播',
+    ]);
+    expect(result.CCTV5).toBeUndefined();
+  });
+
+  it('精确名称命中优先于频道 ID 的模糊匹配', () => {
+    const result = parseEpgXmlForChannels(
+      `<tv><channel id="CCTV-5"><display-name>CCTV5+</display-name></channel>${programme('CCTV-5', '赛事直播')}</tv>`,
+      [
+        { tvgId: 'five', name: 'CCTV5' },
+        { tvgId: 'plus', name: 'CCTV5+' },
+      ],
+      { now },
+    );
+    expect(result.plus?.map((program) => program.title)).toEqual(['赛事直播']);
+    expect(result.five).toBeUndefined();
+  });
+
   it('通过 display-name 匹配第三方 EPG 频道', () => {
     const result = parseEpgXmlForChannels(
       [
@@ -830,7 +914,7 @@ describe('parseEpgXmlForChannels', () => {
       ].join('\n'),
       [
         { tvgId: 'CCTV1.cn@HD', name: 'CCTV-1 (1080p)' },
-        { tvgId: '', name: 'CCTV1' },
+        { tvgId: '', name: 'CCTV1 HD' },
       ],
       { now: Date.parse('2026-06-27T00:15:00+08:00') },
     );
@@ -843,6 +927,6 @@ describe('parseEpgXmlForChannels', () => {
       },
     ]);
     expect(result['CCTV-1 (1080p)']).toEqual(result['CCTV1.cn@HD']);
-    expect(result.CCTV1).toEqual(result['CCTV1.cn@HD']);
+    expect(result['CCTV1 HD']).toEqual(result['CCTV1.cn@HD']);
   });
 });

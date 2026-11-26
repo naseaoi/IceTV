@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { getCachedLiveChannels } from '@/features/live/lib/live';
+import { attachLiveHealth } from '@/features/live/lib/liveHealthSnapshot.server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { canUserWatchLive } from '@/lib/live-access.server';
@@ -33,10 +34,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '频道信息未找到' }, { status: 404 });
     }
 
-    return NextResponse.json({
-      success: true,
-      data: channelData.channels,
-    });
+    let channels = channelData.channels;
+    try {
+      channels = await attachLiveHealth(sourceKey, channels);
+    } catch (error) {
+      console.warn('[live-health] 读取快照失败', error);
+    }
+    return NextResponse.json(
+      {
+        success: true,
+        data: channels,
+      },
+      { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } },
+    );
   } catch {
     return NextResponse.json({ error: '获取频道信息失败' }, { status: 500 });
   }
