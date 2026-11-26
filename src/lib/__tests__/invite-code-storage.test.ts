@@ -4,7 +4,6 @@ import Database from 'better-sqlite3';
 
 import { inviteCodeFilterContract } from '@/lib/__tests__/__fixtures__/invite-code-contract';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
-import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
 
 const makeCode = (code: string, extra = {}) => ({
   code,
@@ -25,7 +24,7 @@ describe('邀请码未使用筛选（SQLite）', () => {
   inviteCodeFilterContract(() => storage);
 });
 
-describe('邀请码数据库分页及迁移', () => {
+describe('邀请码数据库分页', () => {
   it('同创建时间按码倒序分页，游标绑定筛选', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await storage.createInviteCodes(
@@ -82,44 +81,5 @@ describe('邀请码数据库分页及迁移', () => {
     );
     expect(results.filter((item) => item === 'created')).toHaveLength(199);
     expect(await storage.countActiveInviteCodes()).toBe(200);
-  });
-
-  it('启动迁移取历史用量较大值、移除配置字段、重跑不复活已删码', () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const database = (storage as unknown as { db: Database.Database }).db;
-    const config = {
-      UserConfig: {
-        InviteCodes: [
-          makeCode('LEGACY', { maxUses: 10, usedCount: 2 }),
-          makeCode('CONFIG', { usedCount: 5 }),
-        ],
-      },
-    };
-    database
-      .prepare('INSERT INTO admin_config (id, config_json) VALUES (1, ?)')
-      .run(JSON.stringify(config));
-    database
-      .prepare('INSERT INTO invite_code_usage(code, used_count) VALUES (?, ?)')
-      .run('LEGACY', 4);
-    const store = new SqliteInviteCodeStore(database);
-    store.migrate();
-    expect(store.all().find((item) => item.code === 'LEGACY')?.usedCount).toBe(
-      4,
-    );
-    expect(store.all().find((item) => item.code === 'CONFIG')?.usedCount).toBe(
-      5,
-    );
-    const persisted = database
-      .prepare('SELECT config_json FROM admin_config')
-      .get() as { config_json: string };
-    expect(
-      JSON.parse(persisted.config_json).UserConfig.InviteCodes,
-    ).toBeUndefined();
-    expect(database.prepare('SELECT * FROM invite_code_usage').all()).toEqual(
-      [],
-    );
-    store.delete('LEGACY');
-    store.migrate();
-    expect(store.all().map((item) => item.code)).toEqual(['CONFIG']);
   });
 });

@@ -12,7 +12,7 @@ const config = {
   UserConfig: { Tags: [{ name: 'first' }, { name: 'second' }] },
 } as AdminConfig;
 
-describe('user access migration and transactional updates', () => {
+describe('user access invariants and transactional updates', () => {
   let storage: LocalSqliteStorage;
   let raw: Database.Database;
   beforeEach(() => {
@@ -21,36 +21,26 @@ describe('user access migration and transactional updates', () => {
   });
   afterEach(() => raw.close());
 
-  it('migrates legacy permissions once, preserves group order, and repairs missing rows', async () => {
+  it('preserves permissions and group order while repairing missing rows', async () => {
     await storage.registerUser('Alice', 'password');
     await storage.registerUser('bob', 'password');
-    await storage.setAdminConfig({
-      ...config,
-      UserConfig: {
-        ...config.UserConfig,
-        Users: [
-          {
-            username: ' ALICE ',
-            role: 'admin',
-            banned: true,
-            tags: ['second', 'first'],
-            enabledApis: ['one'],
-          },
-        ],
-      },
+    await storage.updateUserAccess(['alice'], {
+      role: 'admin',
+      banned: true,
+      tags: ['second', 'first'],
+      enabledApis: ['one'],
     });
     const access = new SqliteUserAccessStore(raw);
-    access.migrate();
+    access.backfill();
     expect(await storage.getUserAccess('ALICE')).toMatchObject({
       role: 'admin',
       banned: true,
       tags: ['second', 'first'],
       enabledApis: ['one'],
     });
-    expect((await storage.getAdminConfig())?.UserConfig.Users).toBeUndefined();
     await storage.updateUserAccess(['alice'], { role: 'user', banned: false });
     raw.prepare('DELETE FROM user_access WHERE username = ?').run('bob');
-    access.migrate();
+    access.backfill();
     expect(await storage.getUserAccess('alice')).toMatchObject({
       role: 'user',
       banned: false,
@@ -67,24 +57,6 @@ describe('user access migration and transactional updates', () => {
       role: 'user',
       tags: ['second'],
     });
-  });
-
-  it('rolls back migration data if config CAS fails', () => {
-    raw
-      .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
-      .run('alice', 'hash');
-    raw.prepare('INSERT INTO admin_config (id, config_json) VALUES (1, ?)').run(
-      JSON.stringify({
-        UserConfig: { Users: [{ username: 'alice', role: 'admin' }] },
-      }),
-    );
-    raw.exec(
-      "CREATE TRIGGER reject_config BEFORE UPDATE ON admin_config BEGIN SELECT RAISE(ABORT, 'conflict'); END",
-    );
-    expect(() => new SqliteUserAccessStore(raw).migrate()).toThrow('conflict');
-    expect(
-      raw.prepare('SELECT COUNT(*) AS count FROM user_access').get(),
-    ).toEqual({ count: 0 });
   });
 
   it('does not authenticate stale metadata without a users row', () => {

@@ -113,15 +113,11 @@ type FakeState = ListFakeState & {
   watchBuckets: Record<string, any>[];
   watchTotals: Map<string, number>;
   levelEvents: Record<string, any>[];
-  levelMigrated: boolean;
-  historyMigrated: boolean;
-  reviewPublishedMigrated: boolean;
   searchHistory: SearchHistoryRow[];
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
-  inviteCodeUsage: Map<string, number>;
   inviteCodeRedemptions: Map<string, string>;
   inviteCodes: Map<string, Record<string, any>>;
   danmakuEpisodes: Map<string, Map<string, number>>;
@@ -173,15 +169,11 @@ function cloneState(state: FakeState): FakeState {
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
     watchTotals: new Map(state.watchTotals),
     levelEvents: state.levelEvents.map((row) => ({ ...row })),
-    levelMigrated: state.levelMigrated,
-    historyMigrated: state.historyMigrated,
-    reviewPublishedMigrated: state.reviewPublishedMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
-    inviteCodeUsage: new Map(state.inviteCodeUsage),
     inviteCodeRedemptions: new Map(state.inviteCodeRedemptions),
     inviteCodes: new Map(
       [...state.inviteCodes].map(([code, item]) => [code, { ...item }]),
@@ -230,15 +222,11 @@ function createState(): FakeState {
     watchBuckets: [],
     watchTotals: new Map(),
     levelEvents: [],
-    levelMigrated: false,
-    historyMigrated: false,
-    reviewPublishedMigrated: false,
     searchHistory: [],
     sourceRouteStats: [],
     adminConfig: null,
     messageStates: new Map(),
     loginActivities: new Map(),
-    inviteCodeUsage: new Map(),
     inviteCodeRedemptions: new Map(),
     inviteCodes: new Map(),
     danmakuEpisodes: new Map(),
@@ -620,21 +608,6 @@ function createFakePool() {
       currentState.levelEvents = currentState.levelEvents.filter(
         (row) => row.username !== params[0],
       );
-      return [{ affectedRows: 1 }, []];
-    }
-    if (normalized.startsWith('INSERT IGNORE INTO storage_migrations'))
-      return [{ affectedRows: 0 }, []];
-    if (normalized.startsWith('UPDATE video_reviews SET first_published_at')) {
-      for (const row of currentState.videoReviews.values())
-        row.first_published_at ??= row.review.updated_at;
-      return [{ affectedRows: 1 }, []];
-    }
-    if (normalized.startsWith('UPDATE storage_migrations')) {
-      if (params[1] === 'review_first_published_v1')
-        currentState.reviewPublishedMigrated = true;
-      else if (params[1] === 'watch_level_v1')
-        currentState.levelMigrated = true;
-      else currentState.historyMigrated = true;
       return [{ affectedRows: 1 }, []];
     }
     if (normalized.startsWith('DELETE FROM watch_history WHERE username = ?')) {
@@ -1235,62 +1208,6 @@ function createFakePool() {
         [],
       ];
     }
-    if (
-      normalized ===
-      'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)'
-    ) {
-      const [code, usedCount] = params as [string, number];
-      if (!currentState.inviteCodeUsage.has(code)) {
-        currentState.inviteCodeUsage.set(code, Number(usedCount));
-      }
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (
-      normalized ===
-      'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?'
-    ) {
-      const [code, maxUses] = params as [string, number];
-      const usedCount = currentState.inviteCodeUsage.get(code);
-      if (usedCount === undefined || usedCount >= Number(maxUses)) {
-        return [{ affectedRows: 0 }, []];
-      }
-      currentState.inviteCodeUsage.set(code, usedCount + 1);
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (
-      normalized ===
-      'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?'
-    ) {
-      const [code] = params as [string];
-      const usedCount = currentState.inviteCodeUsage.get(code);
-      if (usedCount === undefined) return [{ affectedRows: 0 }, []];
-      currentState.inviteCodeUsage.set(code, usedCount + 1);
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (
-      normalized ===
-      'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0'
-    ) {
-      const [code] = params as [string];
-      const usedCount = currentState.inviteCodeUsage.get(code);
-      if (!usedCount) return [{ affectedRows: 0 }, []];
-      currentState.inviteCodeUsage.set(code, usedCount - 1);
-      return [{ affectedRows: 1 }, []];
-    }
-
-    if (normalized === 'DELETE FROM invite_code_usage WHERE code = ?') {
-      const [code] = params as [string];
-      currentState.inviteCodeUsage.delete(code);
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM invite_code_usage') {
-      currentState.inviteCodeUsage.clear();
-      return [[], []];
-    }
 
     if (
       normalized ===
@@ -1855,12 +1772,6 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
     if (
-      normalized ===
-      "SHOW COLUMNS FROM config_subscription LIKE 'failure_since'"
-    ) {
-      return [[{ Field: 'failure_since' }], []];
-    }
-    if (
       normalized.startsWith(
         'SELECT id, recipient_username, payload_json FROM user_notice_events',
       )
@@ -1933,11 +1844,6 @@ function createFakePool() {
         [],
       ];
     }
-    if (
-      normalized ===
-      "SHOW INDEX FROM playback_sessions WHERE Key_name = 'idx_playback_sessions_started_at'"
-    )
-      return [[{ Key_name: 'idx_playback_sessions_started_at' }], []];
     if (normalized === "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'")
       return [[{ Field: 'value_bytes' }], []];
     if (
@@ -1945,16 +1851,6 @@ function createFakePool() {
       "SHOW INDEX FROM shared_cache WHERE Key_name = 'idx_shared_cache_budget'"
     )
       return [[{ Key_name: 'idx_shared_cache_budget' }], []];
-    if (normalized === "SHOW COLUMNS FROM list_likes LIKE 'list_name'")
-      return [[{ Field: 'list_name' }], []];
-    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'like_count'")
-      return [[{ Field: 'like_count' }], []];
-    if (normalized === "SHOW COLUMNS FROM user_lists LIKE 'view_count'")
-      return [[{ Field: 'view_count' }], []];
-    if (normalized === "SHOW COLUMNS FROM users LIKE 'password_set'")
-      return [[{ Field: 'password_set' }], []];
-    if (normalized.startsWith('SHOW COLUMNS FROM user_danmaku'))
-      return [[{ Field: normalized.includes('title') ? 'title' : 'year' }], []];
     if (
       normalized ===
       'SELECT password, password_set FROM users WHERE username = ? FOR UPDATE'
@@ -2127,29 +2023,6 @@ function createFakePool() {
       normalized === 'SELECT source_key, channel_number FROM live_source_state'
     )
       return [[...currentState.liveCounts.values()], []];
-    if (normalized === 'SHOW COLUMNS FROM video_reviews')
-      return [[{ Field: 'first_published_at' }], []];
-    if (normalized === 'SHOW COLUMNS FROM playback_sessions')
-      return [[{ Field: 'measurement_version' }], []];
-    if (normalized.startsWith('SELECT completed_at FROM storage_migrations'))
-      return [
-        [
-          {
-            completed_at: (
-              params[0] === 'review_first_published_v1'
-                ? currentState.reviewPublishedMigrated
-                : params[0] === 'watch_level_v1'
-                  ? currentState.levelMigrated
-                  : currentState.historyMigrated
-            )
-              ? 1
-              : 0,
-          },
-        ],
-        [],
-      ];
-    if (normalized.startsWith('SELECT ranked.*, p.record_json'))
-      return [[], []];
     if (
       normalized ===
       'SELECT username, id FROM playback_sessions WHERE updated_at < ? ORDER BY updated_at LIMIT ? FOR UPDATE'
@@ -2248,21 +2121,10 @@ function createFakePool() {
       );
       return [rows.slice(0, Number(params.at(-1))), []];
     }
-    if (normalized === 'SHOW COLUMNS FROM favorites')
-      return [
-        [
-          'title_norm',
-          'year_norm',
-          'year_number',
-          'search_text',
-          'saved_at',
-          'library_valid',
-          'watch_status',
-          'watched_at',
-          'projection_version',
-        ].map((Field) => ({ Field })),
-        [],
-      ];
+    if (normalized === 'SHOW INDEX FROM playback_sessions')
+      return [[{ Key_name: 'idx_playback_sessions_started_at' }], []];
+    if (normalized === 'SHOW INDEX FROM video_reviews')
+      return [[{ Key_name: 'idx_review_author_public_time' }], []];
     if (normalized === 'SHOW INDEX FROM play_records')
       return [[{ Key_name: 'idx_records_metadata_work' }], []];
     if (normalized === 'SHOW INDEX FROM favorites')
@@ -2275,11 +2137,6 @@ function createFakePool() {
         ].map((Key_name) => ({ Key_name })),
         [],
       ];
-    if (
-      normalized ===
-      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250'
-    )
-      return [[], []];
     if (
       normalized.startsWith(
         'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a',
@@ -3315,15 +3172,6 @@ function createFakePool() {
       ];
     }
 
-    if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
-      return [
-        Array.from(currentState.inviteCodeUsage.entries()).map(
-          ([code, usedCount]) => ({ code, used_count: usedCount }),
-        ),
-        [],
-      ];
-    }
-
     if (
       normalized ===
         'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1' ||
@@ -3334,20 +3182,6 @@ function createFakePool() {
       const lastLoginAt = currentState.loginActivities.get(username);
       return [
         lastLoginAt === undefined ? [] : [{ last_login_at: lastLoginAt }],
-        [],
-      ];
-    }
-
-    if (
-      normalized === 'SELECT username, last_login_at FROM user_login_activity'
-    ) {
-      return [
-        Array.from(currentState.loginActivities.entries()).map(
-          ([username, lastLoginAt]) => ({
-            username,
-            last_login_at: lastLoginAt,
-          }),
-        ),
         [],
       ];
     }
@@ -4123,9 +3957,9 @@ describe('mysql storage contract', () => {
     await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(false);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      LIMITED: 2,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'LIMITED', usedCount: 2 }),
+    ]);
   });
 
   it('maxUses 为 0 表示不限次数', async () => {
@@ -4142,12 +3976,12 @@ describe('mysql storage contract', () => {
 
     await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      FREE: 2,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'FREE', usedCount: 2 }),
+    ]);
   });
 
-  it('首次占用以配置里的历史用量为种子', async () => {
+  it('占用从当前邀请码的已用次数继续累加', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
     await storage.createInviteCode({
@@ -4161,9 +3995,9 @@ describe('mysql storage contract', () => {
 
     await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(false);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      SEEDED: 3,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'SEEDED', usedCount: 3 }),
+    ]);
   });
 
   it('回滚邀请码次数且不会减到负数', async () => {
@@ -4180,17 +4014,17 @@ describe('mysql storage contract', () => {
 
     await storage.reserveInviteCodeUse('ROLLBACK');
     await storage.releaseInviteCodeUse('ROLLBACK');
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      ROLLBACK: 0,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'ROLLBACK', usedCount: 0 }),
+    ]);
 
     await storage.releaseInviteCodeUse('ROLLBACK');
-    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
-      ROLLBACK: 0,
-    });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'ROLLBACK', usedCount: 0 }),
+    ]);
   });
 
-  it('删除邀请码用量后重建从零开始', async () => {
+  it('删除邀请码后重建从零开始', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
     await storage.createInviteCode({
@@ -4203,10 +4037,12 @@ describe('mysql storage contract', () => {
     });
 
     await storage.reserveInviteCodeUse('RECREATED');
-    await storage.deleteInviteCodeUsage('RECREATED');
+    await storage.deleteInviteCode('RECREATED');
 
     await expect(
-      (await storage.getAllInviteCodeUsage()).RECREATED,
+      (await storage.getAllInviteCodes()).find(
+        (item) => item.code === 'RECREATED',
+      ),
     ).toBeUndefined();
     await storage.createInviteCode({
       code: 'RECREATED',
@@ -4292,9 +4128,6 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );
-    await expect(storage.getAllUserLastLogins()).resolves.toEqual({
-      'demo-user': 1700000000000,
-    });
 
     await storage.deleteUser('demo-user');
 
@@ -4315,7 +4148,6 @@ describe('mysql storage contract', () => {
       storage.getDanmakuEnabledPreference('demo-user'),
     ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
-    await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
 
   it('筛选分页与追更计数及客户端判定保持一致', async () => {

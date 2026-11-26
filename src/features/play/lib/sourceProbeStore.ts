@@ -449,10 +449,6 @@ export function resetProbes(preservePlayerKeys: Iterable<string> = []) {
   emit();
 }
 
-export function invalidateProbe(key: string) {
-  deleteEntry(key);
-}
-
 export function seedProbeResults(
   results: Iterable<readonly [string, VideoInfo]>,
   now = Date.now(),

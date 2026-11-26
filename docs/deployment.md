@@ -152,7 +152,7 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
 | `ICETV_USERNAME` / `ICETV_PASSWORD` | 站长账号不来自普通用户表，密码须使用强随机值                                               |
 | `AUTH_SECRET`                       | 会话签名密钥，不用站长密码代替；各实例保持一致                                             |
-| `CRON_SECRET`                       | 定时接口凭证，Docker 启动时必填；不要依赖旧兼容变量名                                      |
+| `CRON_SECRET`                       | 定时接口凭证，Docker 启动时必填，仅接受 `CRON_SECRET`                                      |
 | `LOCAL_DB_PATH`                     | Docker 默认在 `/data`；本地开发路径以 `.env.example` 为准                                  |
 | `TRUSTED_PROXY_COUNT`               | 填实际代理层数，如 Nginx 为 1、Cloudflare + Nginx 为 2；默认 0 不能防伪造转发头            |
 | `CACHE_PROFILE`                     | 默认 `small` 仅限制业务缓存，不限制 Node、SQLite、sharp 等进程总内存                       |
@@ -323,6 +323,8 @@ docker compose -f compose.yml -f compose.updater.yml up -d
 ## 升级与备份
 
 Docker 升级使用 `docker compose pull`、`docker compose up -d`，保留原数据卷；Vercel 重新部署时保留原数据库连接。带弹幕叠加文件的部署须带同一组 `-f` 参数。
+
+支持从 v0.7.4 及以上版本直接升级；更早版本先升级到 v0.7.4 并启动一次完成数据库初始化，再升级到当前版本，见[初始化与升级基线](data-storage.md#初始化与升级基线)。SQLite 的 `LOCAL_DB_PATH` 指向实际 `.sqlite` 文件，仍写 `.json` 路径的部署升级前改为对应的 `.sqlite` 路径。
 
 SQLite 不直接复制正在写入的主文件。停止 IceTV 后备份整个数据目录，或使用数据库在线备份；备份路径使用新的空目录：
 

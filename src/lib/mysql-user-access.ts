@@ -1,10 +1,5 @@
 import { randomUUID } from 'crypto';
-import type {
-  Pool,
-  PoolConnection,
-  ResultSetHeader,
-  RowDataPacket,
-} from 'mysql2/promise';
+import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { getOwnerUsername } from '@/lib/env.server';
 import {
@@ -170,38 +165,5 @@ export class MysqlUserAccessStore {
       "INSERT IGNORE INTO user_access (username, role, banned, updated_at) SELECT username, 'user', 0, ? FROM users",
       [Date.now()],
     );
-  }
-
-  async importConfig(config: AdminConfig): Promise<AdminConfig> {
-    for (const user of config.UserConfig?.Users || [])
-      if (normalizeUsername(user.username)) await this.put(user);
-    const clean = { ...config, UserConfig: { ...config.UserConfig } };
-    delete clean.UserConfig.Users;
-    await this.backfill();
-    return clean;
-  }
-
-  async migrate(): Promise<void> {
-    const [rows] = await this.db.query<RowDataPacket[]>(
-      'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE',
-    );
-    if (rows[0]) {
-      const raw = rows[0].config_json;
-      const config = (
-        typeof raw === 'string' ? JSON.parse(raw) : raw
-      ) as AdminConfig;
-      if (Array.isArray(config.UserConfig?.Users)) {
-        const clean = await this.importConfig(config);
-        const [result] = await this.db.execute<ResultSetHeader>(
-          'UPDATE admin_config SET config_json = ? WHERE id = 1 AND CAST(config_json AS CHAR) = CAST(? AS CHAR)',
-          [
-            JSON.stringify(clean),
-            typeof raw === 'string' ? raw : JSON.stringify(raw),
-          ],
-        );
-        if (result.affectedRows !== 1) throw new Error('用户权限迁移配置冲突');
-      }
-    }
-    await this.backfill();
   }
 }

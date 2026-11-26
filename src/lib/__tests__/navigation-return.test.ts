@@ -22,9 +22,7 @@ describe('navigation return', () => {
     '/\\example.com/path',
     '/play?title=test',
   ])('拒绝非法或循环返回路径 %s', (value) => {
-    expect(normalizeInternalReturnPath(value, '/categories')).toBe(
-      '/categories',
-    );
+    expect(normalizeInternalReturnPath(value, '/douban')).toBe('/douban');
   });
 
   it('为点播地址写入来源页面', () => {

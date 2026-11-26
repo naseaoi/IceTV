@@ -62,7 +62,7 @@
 ## 通用组件
 
 - 下拉统一用 `src/components/Select.tsx`（`field` 表单整宽、`pill` 工具栏胶囊），`AdminSelect` 只是 `field` 的包装。下拉层挂到 `body` 上按触发器 `fixed` 定位，放在弹窗等滚动容器内不会被裁切，下方空间不足时向上展开；`field` 与触发器等宽，`pill` 随最长选项自适应。“更多”操作菜单统一用 `src/components/MoreMenu.tsx`，同样挂 `body`。
-- 操作结果、错误与提醒的轻提示统一调 `showToast()`（`src/lib/toast.ts`），由根布局的 `ToastViewport` 渲染；`triggerGlobalError()`、消息中心新消息提醒、站长的新版本提醒都走这条路径。只需告知结果的场景不用 `AlertModal` 加 `timer`，弹窗留给需要用户确认的情况。
+- 操作结果、错误与提醒的轻提示统一调 `showToast()`（`src/lib/toast.ts`），由根布局的 `ToastViewport` 渲染；`triggerGlobalError()`、消息中心新消息提醒、站长的新版本提醒都走这条路径。结果告知使用轻提示，确认操作使用 `ConfirmModal`，其他居中弹窗使用 `ModalShell`。
   - 同一 `key` 的提示原地更新文案并重新计时，同时播放一次回弹，不叠加；默认 `key` 为语气加文案，所以连续重复同一操作只会回弹不会刷屏。轮询类提醒传固定 `key`，需要主动收起时调 `dismissToast(key)`。
   - `notice` 用于需要用户留意的提醒，可带一个 `action`；点击后执行回调并收起提示。
   - 离场动画时长由 CSS 的 `.toast-*` 动画决定，`TOAST_LEAVE_MS` 必须与之一致，否则节点会在动画结束前被移除或残留。
@@ -79,7 +79,7 @@
 ## 后台
 
 - 新增 tab：在 `src/features/admin/lib/admin-tabs.ts` 注册，在 `AdminTabContent.tsx` 挂载；`useAdminTab.ts` 经注册表解析，无需改动。
-- 弹窗复用 `ConfirmModal` / `AlertModal`，普通失败不用 `AlertModal`，统一走 `showError(err, fallback)`（`src/features/admin/lib/notifications.ts`，内部为 error 轻提示）。`withLoading()` 只设置状态、不防重，防重复提交靠按钮禁用或调用方的 ref。表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）。
+- 确认操作复用 `ConfirmModal`，其他弹窗复用 `ModalShell`；普通失败统一走 `showError(err, fallback)`（`src/features/admin/lib/notifications.ts`，内部为 error 轻提示）。`withLoading()` 只设置状态、不防重，防重复提交靠按钮禁用或调用方的 ref。表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）。
 - 设置类内容用 `AdminSettings.tsx` 的 `AdminSettingsGroup` / `AdminSettingRow`，开关用 `AdminStatusSwitch`，列表行操作收进 `MoreMenu`。`AdminSettingRow` 的 `description` 放标题下方的说明，测试结果、致谢链接等短状态用 `labelAddon` 与标题同行。
 - 后台列表工具栏统一用 `AdminListToolbar`：搜索在左，筛选、视图切换、排序与操作按钮依次在右；批量选择放在列表外框表头行。
 - `ADMIN_PANEL_CLASS` 外框不裁切溢出，行内下拉才能伸出；贴边底色的子元素自行加圆角，不要给外框补 `overflow-hidden`。

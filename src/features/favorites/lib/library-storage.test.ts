@@ -9,7 +9,6 @@ import {
 } from '@/features/favorites/lib/library-mutations';
 import type { FavoriteLibraryPage } from '@/features/favorites/lib/library-query';
 import {
-  favoriteProjection,
   InvalidFavoriteLibraryQuery,
   libraryStatements,
   validateLibraryQuery,
@@ -36,9 +35,6 @@ const liveUrl = process.env.MYSQL_TEST_URL?.trim();
 
 type InternalSqlite = {
   db: Database.Database;
-  backfillFavoriteProjection(): void;
-  migrateFavoriteProjection(): void;
-  migrateLegacyUsernameCasing(): void;
 };
 
 it.each([0, -1, 1.5, NaN, Infinity, FAVORITE_RENDER_CHUNK + 1])(
@@ -580,80 +576,6 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       ).toBe(0);
     });
 
-    it('restarts projection backfill without overwriting a concurrent favorite edit', async () => {
-      await storage.setFavorite(username, 'source+legacy', favorite);
-      if (backend === 'sqlite') {
-        const internal = storage as unknown as InternalSqlite;
-        internal.db
-          .prepare(
-            'UPDATE favorites SET projection_version = 1, title_norm = NULL WHERE username = ?',
-          )
-          .run(username);
-        internal.migrateFavoriteProjection();
-        internal.backfillFavoriteProjection();
-        internal.backfillFavoriteProjection();
-        expect(
-          (
-            await storage.getFavoriteLibraryPage(username, {
-              ...query,
-              query: 'demo',
-            })
-          ).total,
-        ).toBe(1);
-      } else {
-        const internal = storage as unknown as {
-          migrateFavoriteProjection(): Promise<void>;
-          pool: {
-            execute(sql: string, params?: unknown[]): Promise<unknown>;
-            query(
-              sql: string,
-              params?: unknown[],
-            ): Promise<[Record<string, unknown>[], unknown]>;
-          };
-        };
-        await internal.pool.execute(
-          'UPDATE favorites SET projection_version = 1, title_norm = NULL WHERE username = ?',
-          [username],
-        );
-        const execute = internal.pool.execute.bind(internal.pool);
-        let interleaved = false;
-        const spy = jest
-          .spyOn(internal.pool, 'execute')
-          .mockImplementation(async (sql, params) => {
-            if (
-              !interleaved &&
-              sql.startsWith('UPDATE favorites SET title_norm')
-            ) {
-              interleaved = true;
-              await storage.setFavorite(username, 'source+legacy', {
-                ...favorite,
-                title: 'Concurrent edit',
-              });
-            }
-            return execute(sql, params);
-          });
-        try {
-          await internal.migrateFavoriteProjection();
-        } finally {
-          spy.mockRestore();
-        }
-        await internal.migrateFavoriteProjection();
-        expect(
-          (
-            await storage.getFavoriteLibraryPage(username, {
-              ...query,
-              query: 'concurrent',
-            })
-          ).total,
-        ).toBe(1);
-        const [rows] = await internal.pool.query(
-          'SELECT projection_version FROM favorites WHERE username = ?',
-          [username],
-        );
-        expect(rows[0].projection_version).toBe(2);
-      }
-    });
-
     it('优先手动状态，按 1 基最后一集及组内进度推导完成', async () => {
       const scenarios: Array<{
         key: string;
@@ -1043,68 +965,3 @@ for (const backend of ['sqlite', 'mysql'] as const) {
     });
   });
 }
-
-describe('favorite projection backfill', () => {
-  it('recomputes the winning JSON projection during username casing merge', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const internal = storage as unknown as InternalSqlite;
-    try {
-      await storage.setFavorite('alice', 'source+1', favorite);
-      internal.db
-        .prepare(
-          'INSERT INTO favorites(username, favorite_key, favorite_json) VALUES (?, ?, ?)',
-        )
-        .run(
-          'Alice',
-          'source+1',
-          JSON.stringify({ ...favorite, title: 'New Winner', save_time: 2000 }),
-        );
-      internal.migrateLegacyUsernameCasing();
-      const result = await storage.getFavoriteLibraryPage('alice', {
-        ...query,
-        query: 'winner',
-      });
-      expect(result.total).toBe(1);
-      expect(result.items[0].favorite.save_time).toBe(2000);
-    } finally {
-      internal.db.close();
-    }
-  });
-  it('resumes batches, marks malformed rows, and is idempotent without changing JSON', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const internal = storage as unknown as InternalSqlite;
-    try {
-      const insert = internal.db.prepare(
-        'INSERT INTO favorites(username, favorite_key, favorite_json) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < 501; i++)
-        insert.run('backfill', `source+${i}`, JSON.stringify(favorite));
-      insert.run('backfill', 'bad-key', '{bad');
-      internal.migrateFavoriteProjection();
-      internal.backfillFavoriteProjection();
-      internal.migrateFavoriteProjection();
-      internal.backfillFavoriteProjection();
-      expect(
-        internal.db
-          .prepare(
-            'SELECT COUNT(*) AS count FROM favorites WHERE projection_version = 0',
-          )
-          .get(),
-      ).toEqual({ count: 0 });
-      expect(
-        (await storage.getFavoriteLibraryPage('backfill', query)).total,
-      ).toBe(501);
-      expect((await storage.getAllFavorites('backfill'))['source+0']).toEqual(
-        favorite,
-      );
-      expect(
-        favoriteProjection(
-          'source+1',
-          JSON.stringify({ ...favorite, year: 'unknown' }),
-        )[2],
-      ).toBeNull();
-    } finally {
-      internal.db.close();
-    }
-  });
-});

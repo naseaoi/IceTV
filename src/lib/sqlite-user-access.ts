@@ -171,36 +171,4 @@ export class SqliteUserAccessStore {
       )
       .run(Date.now());
   }
-
-  importConfig(config: AdminConfig): AdminConfig {
-    for (const user of config.UserConfig?.Users || [])
-      if (normalizeUsername(user.username)) this.put(user);
-    const clean = { ...config, UserConfig: { ...config.UserConfig } };
-    delete clean.UserConfig.Users;
-    this.backfill();
-    return clean;
-  }
-
-  migrate(): void {
-    this.db
-      .transaction(() => {
-        const row = this.db
-          .prepare('SELECT config_json FROM admin_config WHERE id = 1')
-          .get() as { config_json: string } | undefined;
-        if (row) {
-          const config = JSON.parse(row.config_json) as AdminConfig;
-          if (Array.isArray(config.UserConfig?.Users)) {
-            const clean = this.importConfig(config);
-            const result = this.db
-              .prepare(
-                'UPDATE admin_config SET config_json = ? WHERE id = 1 AND config_json = ?',
-              )
-              .run(JSON.stringify(clean), row.config_json);
-            if (result.changes !== 1) throw new Error('用户权限迁移配置冲突');
-          }
-        }
-        this.backfill();
-      })
-      .immediate();
-  }
 }

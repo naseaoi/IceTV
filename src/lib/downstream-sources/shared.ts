@@ -95,20 +95,6 @@ export function uniqueOrigins(
     });
 }
 
-export function prioritizeOrigins(
-  origins: string[],
-  preferredOrigin: string,
-  disabledOrigins: ReadonlySet<string> = new Set(),
-): string[] {
-  return uniqueOrigins(
-    [
-      preferredOrigin,
-      ...origins.filter((origin) => origin !== preferredOrigin),
-    ],
-    disabledOrigins,
-  );
-}
-
 export async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   concurrency: number,

@@ -205,7 +205,3 @@ export function useMessageCenter() {
   }
   return context;
 }
-
-export function useOptionalMessageCenter() {
-  return useContext(MessageCenterContext);
-}

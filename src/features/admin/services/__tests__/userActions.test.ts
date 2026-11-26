@@ -36,7 +36,6 @@ jest.mock('@/lib/db', () => ({
     getUserAccess: jest.fn(),
     updateUserAccess: jest.fn(),
     deleteUser: jest.fn(),
-    getAllUserLastActive: jest.fn(),
     createInviteCodes: jest.fn(),
     deleteInviteCode: jest.fn(),
     purgeInviteCodes: jest.fn(),
@@ -74,7 +73,6 @@ beforeEach(() => {
     async (names: string[]) => names.length,
   );
   (db.deleteUser as jest.Mock).mockResolvedValue(undefined);
-  (db.getAllUserLastActive as jest.Mock).mockResolvedValue({});
 });
 
 describe('批量用户组服务端选择', () => {
@@ -191,7 +189,6 @@ describe('handleAdminUserAction 配置读取时机', () => {
       expect(result.status).toBe(400);
       expect(result.body).toEqual({ error: '页面已更新，请刷新后重试' });
       expect(db.deleteUser).not.toHaveBeenCalled();
-      expect(db.getAllUserLastActive).not.toHaveBeenCalled();
     },
   );
 

@@ -290,8 +290,6 @@ async function getInitConfig(
       EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
-        SearchDownstreamMaxPage:
-          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       }),
       DoubanProxyType:
@@ -557,8 +555,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
-        SearchDownstreamMaxPage:
-          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: 7200,
       }),
       DoubanProxyType:

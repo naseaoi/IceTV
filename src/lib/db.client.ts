@@ -35,7 +35,6 @@ import {
   MAX_READ_PLAY_RECORD_KEYS,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
-  selectRecentPlayRecords,
 } from './play-records';
 import type {
   EpisodeProgressEntry,
@@ -244,40 +243,6 @@ export function readPlayRecordsForPlayback(
 
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
   return _getAllPlayRecords();
-}
-
-export async function getRecentPlayRecords(
-  limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
-): Promise<Record<string, PlayRecord>> {
-  const normalizedLimit = normalizePlayRecordLimit(limit);
-  const cachedRecords = cacheManager.getCachedPlayRecords();
-  const requestRecentRecords = () =>
-    fetchFromApi<Record<string, PlayRecord>>(
-      `/api/playrecords?limit=${normalizedLimit}`,
-    );
-
-  if (cachedRecords) {
-    void requestRecentRecords()
-      .then((freshRecords) => {
-        window.dispatchEvent(
-          new CustomEvent('recentPlayRecordsUpdated', {
-            detail: freshRecords,
-          }),
-        );
-      })
-      .catch((error) => {
-        console.warn('后台同步最近播放记录失败:', error);
-      });
-
-    return selectRecentPlayRecords(cachedRecords, normalizedLimit);
-  }
-
-  try {
-    return await requestRecentRecords();
-  } catch (error) {
-    console.error('获取最近播放记录失败:', error);
-    return {};
-  }
 }
 
 export async function getPlayRecordPage(

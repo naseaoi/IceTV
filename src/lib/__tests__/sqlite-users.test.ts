@@ -85,25 +85,47 @@ describe('sqlite user storage', () => {
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
   });
 
-  it('迁移时第三方自动建号的账号可首次设密，绑定账号保留旧密码校验，重复初始化不覆盖设密状态', async () => {
+  it('新装表带密码状态，第三方首次设密与普通账号校验在重新初始化后保持', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'icetv-oauth-password-'));
     const path = join(dir, 'test.db');
-    const raw = new Database(path);
-    raw.exec(`CREATE TABLE users (username TEXT PRIMARY KEY, password TEXT NOT NULL);
-      INSERT INTO users VALUES ('legacy', 'random-password');
-      INSERT INTO users VALUES ('bound', 'existing-password');
-      CREATE TABLE oauth_identities (
-        provider VARCHAR(32), provider_user_id VARCHAR(191), username VARCHAR(191),
-        provider_username VARCHAR(191), auto_created INTEGER, created_at BIGINT,
-        PRIMARY KEY(provider, provider_user_id), UNIQUE(provider, username));
-      INSERT INTO oauth_identities VALUES ('linuxdo', 'old', 'legacy', 'Legacy', 1, 1);
-      INSERT INTO oauth_identities VALUES ('linuxdo', 'kept', 'bound', 'Bound', 0, 1);`);
-    raw.close();
     let storage: LocalSqliteStorage | undefined;
     const close = () =>
       (storage as unknown as { db: Database.Database } | undefined)?.db.close();
     try {
       storage = new LocalSqliteStorage(path);
+      const raw = (storage as unknown as { db: Database.Database }).db;
+      expect(raw.prepare('PRAGMA table_info(users)').all()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'password_set',
+            notnull: 1,
+            dflt_value: '1',
+          }),
+        ]),
+      );
+      await storage.registerUser(
+        'legacy',
+        'random-password',
+        undefined,
+        undefined,
+        {
+          provider: 'linuxdo',
+          providerUserId: 'legacy',
+          username: 'legacy',
+          providerUsername: 'Legacy',
+          autoCreated: true,
+          createdAt: Date.now(),
+        },
+      );
+      await storage.registerUser('bound', 'existing-password');
+      await storage.bindOAuthIdentity({
+        provider: 'linuxdo',
+        providerUserId: 'bound',
+        username: 'bound',
+        providerUsername: 'Bound',
+        autoCreated: false,
+        createdAt: Date.now(),
+      });
       expect(await storage.isPasswordSet('legacy')).toBe(false);
       expect(await storage.isPasswordSet('bound')).toBe(true);
       expect(

@@ -200,8 +200,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS,
     );
     const recordMaxItems = readPositiveInteger(
-      process.env.CRON_METADATA_RECORD_MAX_ITEMS ||
-        process.env.CRON_METADATA_MAX_ITEMS,
+      process.env.CRON_METADATA_RECORD_MAX_ITEMS,
       DEFAULT_METADATA_RECORD_MAX_ITEMS,
     );
     const favoriteMaxItems = readPositiveInteger(

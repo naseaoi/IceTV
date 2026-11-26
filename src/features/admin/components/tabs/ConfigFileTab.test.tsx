@@ -9,21 +9,8 @@ jest.mock('@/lib/toast', () => ({
   dismissToast: jest.fn(),
 }));
 
-jest.mock('@/components/modals/AlertModal', () => ({
-  __esModule: true,
-  default: () => null,
-}));
-
 jest.mock('@/features/admin/lib/api', () => ({
   adminPost: jest.fn(),
-}));
-
-jest.mock('@/hooks/useAlertModal', () => ({
-  useAlertModal: () => ({
-    alertModal: { isOpen: false, type: 'success', title: '' },
-    showAlert: jest.fn(),
-    hideAlert: jest.fn(),
-  }),
 }));
 
 jest.mock('@/features/admin/hooks/useLoadingState', () => ({

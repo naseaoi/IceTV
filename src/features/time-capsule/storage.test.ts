@@ -233,21 +233,12 @@ it('限制待送达100封，已有送达不占名额，正文和时间校验在�
     ),
   ).toThrow();
 });
-it('SQLite 用户名合并保留全部信件并合并庆祝标记，删除用户清除两表', async () => {
+it('删除用户清除信件与庆祝标记', async () => {
   await storage.registerUser('alice', 'password');
-  const letter = await storage.createCapsule('alice', input, now);
-  sql
-    .prepare('UPDATE time_capsules SET username = ? WHERE id = ?')
-    .run('ALICE', letter.id);
+  await storage.createCapsule('alice', input, now);
   sql
     .prepare('INSERT INTO work_completions VALUES (?, ?, ?, ?)')
-    .run('ALICE', '作品a', '2026', 100);
-  sql
-    .prepare('INSERT INTO work_completions VALUES (?, ?, ?, ?)')
-    .run('alice', '作品a', '2026', 200);
-  (
-    storage as unknown as { migrateLegacyUsernameCasing(): void }
-  ).migrateLegacyUsernameCasing();
+    .run('alice', '作品a', '2026', 100);
   expect((await storage.getCapsules('alice', null, now)).pending).toHaveLength(
     1,
   );

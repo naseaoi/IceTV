@@ -177,7 +177,6 @@ async function runMetadataTask() {
 describe('cron route', () => {
   const originalCronSecret = process.env.CRON_SECRET;
   const originalMetadataRefreshTtlMs = process.env.CRON_METADATA_REFRESH_TTL_MS;
-  const originalMetadataMaxItems = process.env.CRON_METADATA_MAX_ITEMS;
   const originalMetadataRecordMaxItems =
     process.env.CRON_METADATA_RECORD_MAX_ITEMS;
   const originalMetadataFavoriteMaxItems =
@@ -190,7 +189,6 @@ describe('cron route', () => {
   beforeEach(() => {
     process.env.CRON_SECRET = 'test-secret';
     delete process.env.CRON_METADATA_REFRESH_TTL_MS;
-    delete process.env.CRON_METADATA_MAX_ITEMS;
     delete process.env.CRON_METADATA_RECORD_MAX_ITEMS;
     delete process.env.CRON_METADATA_FAVORITE_MAX_ITEMS;
     delete process.env.CRON_METADATA_PAGE_SIZE;
@@ -231,10 +229,6 @@ describe('cron route', () => {
     restoreEnvironmentVariable(
       'CRON_METADATA_REFRESH_TTL_MS',
       originalMetadataRefreshTtlMs,
-    );
-    restoreEnvironmentVariable(
-      'CRON_METADATA_MAX_ITEMS',
-      originalMetadataMaxItems,
     );
     restoreEnvironmentVariable(
       'CRON_METADATA_RECORD_MAX_ITEMS',
@@ -508,7 +502,7 @@ describe('cron route', () => {
   });
 
   it('播放记录条目上限不影响收藏的独立预算', async () => {
-    process.env.CRON_METADATA_MAX_ITEMS = '1';
+    process.env.CRON_METADATA_RECORD_MAX_ITEMS = '1';
     mockGetAllUsers.mockResolvedValue(['user']);
     mockGetAllPlayRecords.mockResolvedValue({
       'source+1': createPlayRecord(),

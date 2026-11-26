@@ -6,7 +6,6 @@ import {
   type InviteCodePurge,
   type InviteCodeQuery,
   type InviteCodeRow,
-  importedInviteCodes,
   INVITE_ACTIVE_SQL,
   INVITE_INSERT_SQL,
   inviteFromRow,
@@ -16,47 +15,9 @@ import {
   inviteValues,
   MAX_INVITE_CODES,
 } from '@/lib/invite-code-storage';
-import type { AdminConfig } from '@/types/admin';
 
 export class SqliteInviteCodeStore {
   constructor(private readonly db: Database.Database) {}
-
-  migrate() {
-    this.db
-      .transaction(() => {
-        const row = this.db
-          .prepare('SELECT config_json FROM admin_config WHERE id = 1')
-          .get() as { config_json: string } | undefined;
-        if (!row) return;
-        const config = JSON.parse(row.config_json) as AdminConfig;
-        if (!Object.hasOwn(config.UserConfig || {}, 'InviteCodes')) return;
-        const usage = Object.fromEntries(
-          (
-            this.db
-              .prepare('SELECT code, used_count FROM invite_code_usage')
-              .all() as InviteCodeRow[]
-          ).map((item) => [item.code, Number(item.used_count)]),
-        );
-        for (const item of importedInviteCodes(
-          config.UserConfig.InviteCodes,
-          usage,
-        )) {
-          this.db
-            .prepare(
-              INVITE_INSERT_SQL.replace('INSERT INTO', 'INSERT OR IGNORE INTO'),
-            )
-            .run(...inviteValues(item));
-        }
-        delete config.UserConfig.InviteCodes;
-        this.db
-          .prepare(
-            'UPDATE admin_config SET config_json = ? WHERE id = 1 AND config_json = ?',
-          )
-          .run(JSON.stringify(config), row.config_json);
-        this.db.prepare('DELETE FROM invite_code_usage').run();
-      })
-      .immediate();
-  }
 
   all(): InviteCode[] {
     return (

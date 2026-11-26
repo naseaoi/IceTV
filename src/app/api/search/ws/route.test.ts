@@ -5,6 +5,7 @@ import type { NextRequest } from 'next/server';
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { clearSearchSourceFailureCooldownsForTests } from '@/lib/search-aggregate';
 import {
   clearSearchCachesForTests,
@@ -118,7 +119,7 @@ it('同键并发共享各源任务，后到者回放已完成源并收到后续�
     peekCachedSearchAggregate({
       query: 'test',
       apiSites: sites,
-      maxSearchPages: 5,
+      maxSearchPages: DEFAULT_RUNTIME_PARAMS.SearchDownstreamMaxPage,
       disableYellowFilter: true,
     })?.entry.results,
   ).toHaveLength(2);
@@ -136,7 +137,7 @@ it('同键并发共享各源任务，后到者回放已完成源并收到后续�
     makeSearchAggregateCacheKey({
       query: 'test',
       apiSites: sites,
-      maxSearchPages: 5,
+      maxSearchPages: DEFAULT_RUNTIME_PARAMS.SearchDownstreamMaxPage,
       disableYellowFilter: true,
     }),
     loader,
@@ -211,7 +212,7 @@ it('全部取消停止尚未启动的源调度', async () => {
     peekCachedSearchAggregate({
       query: 'test',
       apiSites: sites,
-      maxSearchPages: 5,
+      maxSearchPages: DEFAULT_RUNTIME_PARAMS.SearchDownstreamMaxPage,
       disableYellowFilter: true,
     }),
   ).toBeNull();

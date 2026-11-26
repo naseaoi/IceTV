@@ -174,12 +174,7 @@ function executeCronJob(task, retryCount = 0) {
 }
 
 function getCronSecret() {
-  return (
-    process.env.CRON_SECRET ||
-    process.env.ICETV_CRON_SECRET ||
-    process.env.VERCEL_CRON_SECRET ||
-    ''
-  );
+  return process.env.CRON_SECRET || '';
 }
 
 function warnMissingCronSecret() {
@@ -188,7 +183,7 @@ function warnMissingCronSecret() {
   }
 
   console.warn(
-    '⚠️ CRON_SECRET is not configured. Internal cron requests will return 401 until CRON_SECRET, ICETV_CRON_SECRET, or VERCEL_CRON_SECRET is set.',
+    '⚠️ CRON_SECRET is not configured. Internal cron requests will return 401 until CRON_SECRET is set.',
   );
 }
 
@@ -199,12 +194,12 @@ function warnWeakAuthSecret() {
   }
 
   console.warn(
-    '⚠️ AUTH_SECRET is missing or shorter than 32 characters. Configure AUTH_SECRET or ICETV_AUTH_SECRET with a high-entropy value.',
+    '⚠️ AUTH_SECRET is missing or shorter than 32 characters. Configure AUTH_SECRET with a high-entropy value.',
   );
 }
 
 function getAuthSecret() {
-  return process.env.AUTH_SECRET || process.env.ICETV_AUTH_SECRET || '';
+  return process.env.AUTH_SECRET || '';
 }
 
 function readPositiveInteger(value, fallback) {

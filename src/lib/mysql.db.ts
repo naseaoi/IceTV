@@ -154,17 +154,13 @@ import {
   VideoReviewRow,
 } from '@/lib/video-reviews';
 import { WATCH_LEVEL_BUCKET_CAP_MS, watchLevelForMs } from '@/lib/watch-level';
-import type {
-  WatchLevelBackfillRow,
-  WatchLevelEventRow,
-} from '@/lib/watch-level-storage';
+import type { WatchLevelEventRow } from '@/lib/watch-level-storage';
 import {
   levelEventValues,
   levelUpForDelta,
   mapWatchLevelEvent,
   newlyReachedLevels,
   WATCH_LEVEL_EVENT_INSERT,
-  watchLevelBackfillSql,
 } from '@/lib/watch-level-storage';
 import type {
   WatchLevelResponse,
@@ -501,6 +497,29 @@ export class MySqlStorage implements IStorage {
 
   private async initializeSchema(): Promise<void> {
     const statements = [
+      `CREATE TABLE IF NOT EXISTS user_watch_totals (
+      username VARCHAR(191) PRIMARY KEY, counted_ms BIGINT NOT NULL, updated_at BIGINT NOT NULL
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS user_level_events (
+      username VARCHAR(191) NOT NULL, level INT NOT NULL, reached_at BIGINT NOT NULL,
+      source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL,
+      year VARCHAR(32) NOT NULL, episode_index INT NOT NULL, PRIMARY KEY(username, level)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS playback_watch_buckets (
+      username VARCHAR(191) NOT NULL, session_id VARCHAR(80) NOT NULL, bucket_start BIGINT NOT NULL,
+      watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
+      KEY idx_watch_buckets_user_time(username, bucket_start)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS watch_history (
+      username VARCHAR(191) NOT NULL, id VARCHAR(80) NOT NULL, source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL,
+      title VARCHAR(255) NOT NULL, source_name VARCHAR(255) NOT NULL, cover TEXT NOT NULL, year VARCHAR(32) NOT NULL,
+      episode_index INT NOT NULL, total_episodes INT NOT NULL,
+      group_label VARCHAR(255), group_index INT, group_total INT,
+      position DOUBLE NOT NULL, duration DOUBLE NOT NULL,
+      first_watched_at BIGINT NOT NULL, last_watched_at BIGINT NOT NULL,
+      PRIMARY KEY(username, id), UNIQUE KEY idx_watch_history_work(username, source, video_id),
+      KEY idx_watch_history_page(username, last_watched_at, id)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       OAUTH_SCHEMA + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
       ...userNoticeSchema('mysql'),
       ...socialSchema('mysql'),
@@ -523,6 +542,18 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL,
         favorite_key VARCHAR(255) NOT NULL,
         favorite_json LONGTEXT NOT NULL,
+        title_norm TEXT COLLATE utf8mb4_bin,
+        year_norm TEXT COLLATE utf8mb4_bin,
+        year_number DOUBLE,
+        search_text LONGTEXT COLLATE utf8mb4_bin,
+        saved_at DOUBLE,
+        watch_status VARCHAR(16) COLLATE utf8mb4_bin,
+        watched_at DOUBLE,
+        library_valid TINYINT NOT NULL DEFAULT 0,
+        projection_version INT NOT NULL DEFAULT 0,
+        KEY idx_favorites_saved (username, saved_at, favorite_key),
+        KEY idx_favorites_work (username, title_norm(191), year_norm(16)),
+        KEY idx_favorites_projection (projection_version),
         PRIMARY KEY (username, favorite_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS video_reviews (
@@ -532,7 +563,9 @@ export class MySqlStorage implements IStorage {
         review_json MEDIUMTEXT NOT NULL,
         is_public TINYINT NOT NULL,
         updated_at BIGINT NOT NULL,
+        first_published_at BIGINT NULL,
         PRIMARY KEY (username, title_norm, year),
+        KEY idx_review_author_public_time (username, is_public, first_published_at),
         KEY idx_video_reviews_work (title_norm, is_public, updated_at),
         KEY idx_video_reviews_public (is_public, updated_at)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
@@ -566,6 +599,8 @@ export class MySqlStorage implements IStorage {
         total_time INT NOT NULL,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
+        measurement_version INT NOT NULL DEFAULT 1,
+        KEY idx_playback_sessions_started_at (started_at),
         KEY idx_playback_sessions_user_started_at (username, started_at),
         KEY idx_playback_sessions_user_video (username, source, video_id),
         KEY idx_playback_sessions_updated_at (updated_at)
@@ -584,7 +619,8 @@ export class MySqlStorage implements IStorage {
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS config_subscription (
         id TINYINT PRIMARY KEY, url TEXT NOT NULL, auto_update TINYINT NOT NULL,
-        last_check TEXT NOT NULL, config_file LONGTEXT NOT NULL
+        last_check TEXT NOT NULL, config_file LONGTEXT NOT NULL,
+        failure_since VARCHAR(32) NOT NULL DEFAULT ''
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS live_source_state (
         source_key VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
@@ -608,10 +644,6 @@ export class MySqlStorage implements IStorage {
         KEY idx_invite_codes_created (created_at, code),
         KEY idx_invite_codes_active (expires_at, max_uses, used_count)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
-      `CREATE TABLE IF NOT EXISTS invite_code_usage (
-        code VARCHAR(191) NOT NULL PRIMARY KEY,
-        used_count INT NOT NULL DEFAULT 0
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS invite_code_redemptions (
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         code VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
@@ -725,107 +757,14 @@ export class MySqlStorage implements IStorage {
         if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
       }
     }
-    const [userColumns] = await this.pool.query<RowDataPacket[]>(
-      "SHOW COLUMNS FROM users LIKE 'password_set'",
-    );
-    // 存量第三方自动建号的账号只有随机密码，迁移时标为未设密，用户可直接首次设置
-    if (!userColumns.length) {
-      try {
-        await this.pool.execute(
-          'ALTER TABLE users ADD COLUMN password_set TINYINT NOT NULL DEFAULT 1',
-        );
-        await this.pool.execute(
-          'UPDATE users SET password_set = 0 WHERE username IN (SELECT username FROM oauth_identities WHERE auto_created = 1)',
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-          throw error;
-      }
-    }
-    for (const column of ['view_count', 'like_count']) {
-      const [listColumns] = await this.pool.query<RowDataPacket[]>(
-        `SHOW COLUMNS FROM user_lists LIKE '${column}'`,
-      );
-      if (!listColumns.length) {
-        try {
-          await this.pool.execute(
-            `ALTER TABLE user_lists ADD COLUMN ${column} INT NOT NULL DEFAULT 0`,
-          );
-        } catch (error) {
-          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-            throw error;
-        }
-      }
-    }
-    const [likeColumns] = await this.pool.query<RowDataPacket[]>(
-      "SHOW COLUMNS FROM list_likes LIKE 'list_name'",
-    );
-    if (!likeColumns.length) {
-      try {
-        await this.pool.execute(
-          "ALTER TABLE list_likes ADD COLUMN list_name VARCHAR(30) NOT NULL DEFAULT ''",
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-          throw error;
-      }
-    }
-    await this.pool.execute(
-      "UPDATE list_likes k JOIN user_lists l ON l.id = k.list_id SET k.list_name = l.name WHERE k.list_name = ''",
-    );
-    await new MysqlConfigStateStore(this.pool).migrateSchema();
-
-    for (const [name, size] of [
-      ['title', 191],
-      ['year', 16],
-    ] as const) {
-      const [columns] = await this.pool.query<RowDataPacket[]>(
-        `SHOW COLUMNS FROM user_danmaku LIKE '${name}'`,
-      );
-      if (!columns.length) {
-        try {
-          await this.pool.execute(
-            `ALTER TABLE user_danmaku ADD COLUMN ${name} VARCHAR(${size}) NOT NULL DEFAULT ''`,
-          );
-        } catch (error) {
-          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-            throw error;
-        }
-      }
-    }
-    for (const [name, definition] of [
-      ['bio', 'VARCHAR(240)'],
-      ['watch_time_public', 'INTEGER NOT NULL DEFAULT 0'],
-    ]) {
-      const [fields] = await this.pool.query<RowDataPacket[]>(
-        `SHOW COLUMNS FROM user_profiles LIKE '${name}'`,
-      );
-      if (!fields.length) {
-        try {
-          await this.pool.execute(
-            `ALTER TABLE user_profiles ADD COLUMN ${name} ${definition}`,
-          );
-        } catch (error) {
-          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-            throw error;
-        }
-      }
-    }
-    const [columns] = await this.pool.query<RowDataPacket[]>(
-      "SHOW COLUMNS FROM user_profiles LIKE 'avatar_seed'",
-    );
-    if (columns.length === 0) {
-      try {
-        await this.pool.execute(
-          'ALTER TABLE user_profiles ADD COLUMN avatar_seed VARCHAR(24)',
-        );
-      } catch (error) {
-        // 多实例同时初始化时，其他实例可能已完成加列。
-        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-          throw error;
-      }
-    }
+    // 这些索引包含 v0.7.4 之后的增量，已有表仍须按需补齐。
     for (const [table, index, columns] of [
+      ['playback_sessions', 'idx_playback_sessions_started_at', 'started_at'],
+      [
+        'video_reviews',
+        'idx_review_author_public_time',
+        'username, is_public, first_published_at',
+      ],
       ['play_records', 'idx_records_metadata_work', 'record_key, username'],
       [
         'video_review_replies',
@@ -856,185 +795,18 @@ export class MySqlStorage implements IStorage {
         if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
       }
     }
-    await this.migratePlaybackSchema();
-    await this.migrateReviewFirstPublished();
-    const [reviewIndexes] = await this.pool.query<RowDataPacket[]>(
-      'SHOW INDEX FROM video_reviews',
-    );
-    if (
-      !reviewIndexes.some(
-        (row) => row.Key_name === 'idx_review_author_public_time',
-      )
-    ) {
-      try {
-        await this.pool.execute(
-          'CREATE INDEX idx_review_author_public_time ON video_reviews (username, is_public, first_published_at)',
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
-      }
-    }
-    await this.migrateWatchHistory();
-    await this.migrateWatchLevel();
-    await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
     await this.backfillUserProfiles();
     const accessConnection = await this.pool.getConnection();
     try {
       await accessConnection.beginTransaction();
-      await new MysqlUserAccessStore(accessConnection, true).migrate();
-      await new MysqlConfigStateStore(accessConnection).migrate();
+      await new MysqlUserAccessStore(accessConnection, true).backfill();
       await accessConnection.commit();
     } catch (error) {
       await accessConnection.rollback();
       throw error;
     } finally {
       accessConnection.release();
-    }
-    await this.invites.migrate();
-  }
-
-  private async migrateReviewFirstPublished(): Promise<void> {
-    const [columns] = await this.pool.query<RowDataPacket[]>(
-      'SHOW COLUMNS FROM video_reviews',
-    );
-    if (!columns.some((column) => column.Field === 'first_published_at')) {
-      try {
-        await this.pool.execute(
-          'ALTER TABLE video_reviews ADD COLUMN first_published_at BIGINT NULL',
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-          throw error;
-      }
-    }
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.execute(
-        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
-        ['review_first_published_v1'],
-      );
-      const [marker] = await connection.query<RowDataPacket[]>(
-        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
-        ['review_first_published_v1'],
-      );
-      if (!Number(marker[0]?.completed_at)) {
-        await connection.execute(
-          'UPDATE video_reviews SET first_published_at = updated_at WHERE first_published_at IS NULL',
-        );
-        await connection.execute(
-          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
-          [Date.now(), 'review_first_published_v1'],
-        );
-      }
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  private async migratePlaybackSchema(): Promise<void> {
-    const [indexes] = await this.pool.query<RowDataPacket[]>(
-      "SHOW INDEX FROM playback_sessions WHERE Key_name = 'idx_playback_sessions_started_at'",
-    );
-    if (!indexes.length) {
-      try {
-        await this.pool.execute(
-          'CREATE INDEX idx_playback_sessions_started_at ON playback_sessions (started_at)',
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
-      }
-    }
-    const [columns] = await this.pool.query<RowDataPacket[]>(
-      'SHOW COLUMNS FROM playback_sessions',
-    );
-    if (!columns.some((column) => column.Field === 'measurement_version')) {
-      try {
-        await this.pool.execute(
-          'ALTER TABLE playback_sessions ADD COLUMN measurement_version INT NOT NULL DEFAULT 1',
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-          throw error;
-      }
-    }
-    // 旧表 id 只有 64 字符；接口接受 80，身份键统一逐字匹配。
-    if (
-      columns.some(
-        (column) => column.Field === 'id' && column.Type === 'varchar(64)',
-      )
-    )
-      await this.pool.execute(
-        'ALTER TABLE playback_sessions MODIFY id VARCHAR(80) COLLATE utf8mb4_bin NOT NULL',
-      );
-    await this.pool.execute(`CREATE TABLE IF NOT EXISTS storage_migrations (
-      name VARCHAR(191) PRIMARY KEY, completed_at BIGINT NOT NULL
-    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
-    await this.pool.execute(`CREATE TABLE IF NOT EXISTS user_watch_totals (
-      username VARCHAR(191) PRIMARY KEY, counted_ms BIGINT NOT NULL, updated_at BIGINT NOT NULL
-    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
-    await this.pool.execute(`CREATE TABLE IF NOT EXISTS user_level_events (
-      username VARCHAR(191) NOT NULL, level INT NOT NULL, reached_at BIGINT NOT NULL,
-      source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL,
-      year VARCHAR(32) NOT NULL, episode_index INT NOT NULL, PRIMARY KEY(username, level)
-    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
-    await this.pool.execute(`CREATE TABLE IF NOT EXISTS playback_watch_buckets (
-      username VARCHAR(191) NOT NULL, session_id VARCHAR(80) NOT NULL, bucket_start BIGINT NOT NULL,
-      watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
-      KEY idx_watch_buckets_user_time(username, bucket_start)
-    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
-    await this.pool.execute(`CREATE TABLE IF NOT EXISTS watch_history (
-      username VARCHAR(191) NOT NULL, id VARCHAR(80) NOT NULL, source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL,
-      title VARCHAR(255) NOT NULL, source_name VARCHAR(255) NOT NULL, cover TEXT NOT NULL, year VARCHAR(32) NOT NULL,
-      episode_index INT NOT NULL, total_episodes INT NOT NULL,
-      group_label VARCHAR(255), group_index INT, group_total INT,
-      position DOUBLE NOT NULL, duration DOUBLE NOT NULL,
-      first_watched_at BIGINT NOT NULL, last_watched_at BIGINT NOT NULL,
-      PRIMARY KEY(username, id), UNIQUE KEY idx_watch_history_work(username, source, video_id),
-      KEY idx_watch_history_page(username, last_watched_at, id)
-    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
-  }
-
-  private async migrateWatchLevel(): Promise<void> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.execute(
-        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
-        ['watch_level_v1'],
-      );
-      const [marker] = await connection.query<RowDataPacket[]>(
-        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
-        ['watch_level_v1'],
-      );
-      if (!Number(marker[0]?.completed_at)) {
-        const [rows] = await connection.query<
-          (RowDataPacket & WatchLevelBackfillRow)[]
-        >(watchLevelBackfillSql);
-        for (const row of rows)
-          await this.addWatchLevel(
-            connection,
-            row.username,
-            Number(row.counted_ms),
-            row,
-            Number(row.reached_at),
-          );
-        await connection.execute(
-          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
-          [Date.now(), 'watch_level_v1'],
-        );
-      }
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
     }
   }
 
@@ -1097,137 +869,6 @@ export class MySqlStorage implements IStorage {
         events: events.map(mapWatchLevelEvent),
       };
     });
-  }
-
-  private async migrateWatchHistory(): Promise<void> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      // 标记行同时作为多实例迁移锁；回填和完成状态原子提交。
-      await connection.execute(
-        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
-        ['watch_history_v1'],
-      );
-      const [marker] = await connection.query<RowDataPacket[]>(
-        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
-        ['watch_history_v1'],
-      );
-      if (!Number(marker[0]?.completed_at)) {
-        const [rows] = await connection.query<
-          RowDataPacket[]
-        >(`SELECT ranked.*, p.record_json FROM (
-          SELECT s.*, MIN(started_at) OVER (PARTITION BY username, BINARY source, BINARY video_id) AS first_watched_at,
-            ROW_NUMBER() OVER (PARTITION BY username, BINARY source, BINARY video_id ORDER BY updated_at DESC, BINARY id DESC) AS row_num
-          FROM playback_sessions s WHERE watch_seconds > 0
-        ) ranked LEFT JOIN play_records p ON p.username = ranked.username AND BINARY p.record_key = BINARY CONCAT(ranked.source, '+', ranked.video_id)
-        WHERE ranked.row_num = 1`);
-        for (const row of rows) {
-          let record: Partial<PlayRecord> = {};
-          try {
-            record = JSON.parse(row.record_json || '{}') ?? {};
-          } catch {
-            // 无效旧记录不阻塞迁移。
-          }
-          await connection.execute(
-            `INSERT INTO watch_history (
-            username, id, source, video_id, title, source_name, cover, year, episode_index,
-            total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id`,
-            [
-              row.username,
-              randomUUID(),
-              row.source,
-              row.video_id,
-              row.title,
-              row.source_name,
-              row.cover,
-              row.year,
-              row.episode_index,
-              record.total_episodes || Math.max(1, Number(row.episode_index)),
-              record.group_label ?? null,
-              record.group_index ?? null,
-              record.group_total ?? null,
-              row.last_position,
-              row.total_time,
-              row.first_watched_at,
-              row.updated_at,
-            ],
-          );
-        }
-        await connection.execute(
-          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
-          [Date.now(), 'watch_history_v1'],
-        );
-      }
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  private async migrateFavoriteProjection(): Promise<void> {
-    const [columns] = await this.pool.query<RowDataPacket[]>(
-      'SHOW COLUMNS FROM favorites',
-    );
-    for (const [name, type] of Object.entries({
-      title_norm: 'TEXT COLLATE utf8mb4_bin',
-      year_norm: 'TEXT COLLATE utf8mb4_bin',
-      year_number: 'DOUBLE',
-      search_text: 'LONGTEXT COLLATE utf8mb4_bin',
-      saved_at: 'DOUBLE',
-      watch_status: 'VARCHAR(16) COLLATE utf8mb4_bin',
-      watched_at: 'DOUBLE',
-      library_valid: 'TINYINT NOT NULL DEFAULT 0',
-      projection_version: 'INT NOT NULL DEFAULT 0',
-    })) {
-      if (columns.some((column) => column.Field === name)) continue;
-      try {
-        await this.pool.execute(
-          `ALTER TABLE favorites ADD COLUMN ${name} ${type}`,
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
-          throw error;
-      }
-    }
-    const [indexes] = await this.pool.query<RowDataPacket[]>(
-      'SHOW INDEX FROM favorites',
-    );
-    for (const [name, columns] of Object.entries({
-      idx_favorites_saved: 'username, saved_at, favorite_key',
-      idx_favorites_work: 'username, title_norm(191), year_norm(16)',
-      idx_favorites_projection: 'projection_version',
-    })) {
-      if (indexes.some((index) => index.Key_name === name)) continue;
-      try {
-        await this.pool.execute(
-          `CREATE INDEX ${name} ON favorites (${columns})`,
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
-      }
-    }
-    for (;;) {
-      const [rows] = await this.pool.query<RowDataPacket[]>(
-        'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250',
-      );
-      if (rows.length === 0) break;
-      for (const row of rows) {
-        // CAS 防止回填覆盖同时发生的收藏更新；另一实例已经完成的行同样跳过。
-        await this.pool.execute(
-          `UPDATE favorites SET ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE username = ? AND favorite_key = ? AND projection_version < 2 AND BINARY favorite_json = BINARY ?`,
-          [
-            ...favoriteProjection(row.favorite_key, row.favorite_json),
-            row.username,
-            row.favorite_key,
-            row.favorite_json,
-          ],
-        );
-      }
-    }
   }
 
   private async backfillUserProfiles(
@@ -3216,20 +2857,6 @@ export class MySqlStorage implements IStorage {
     return value === undefined || value === null ? null : Number(value);
   }
 
-  async getAllUserLastLogins(): Promise<Record<string, number>> {
-    await this.ensureInitialized();
-    const [rows] = await this.pool.query<JsonRow[]>(
-      'SELECT username, last_login_at FROM user_login_activity',
-    );
-    const result: Record<string, number> = {};
-    for (const row of rows) {
-      if (typeof row.username === 'string') {
-        result[row.username] = Number(row.last_login_at || 0);
-      }
-    }
-    return result;
-  }
-
   async listAnnouncements(limit: number): Promise<SiteAnnouncement[]> {
     await this.ensureInitialized();
     const [rows] = await this.pool.query<(RowDataPacket & AnnouncementRow)[]>(
@@ -3345,19 +2972,6 @@ export class MySqlStorage implements IStorage {
   async releaseInviteCodeUse(code: string): Promise<void> {
     await this.ensureInitialized();
     await this.invites.release(code);
-  }
-
-  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
-    return Object.fromEntries(
-      (await this.getAllInviteCodes()).map((item) => [
-        item.code,
-        item.usedCount || 0,
-      ]),
-    );
-  }
-
-  async deleteInviteCodeUsage(code: string): Promise<void> {
-    await this.deleteInviteCode(code);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {

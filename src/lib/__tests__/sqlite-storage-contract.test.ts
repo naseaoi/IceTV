@@ -1,5 +1,9 @@
 /** @jest-environment node */
 
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
+
 import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
@@ -28,6 +32,7 @@ import {
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
+import { watchLevelSession } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
@@ -487,9 +492,6 @@ describe('sqlite storage contract', () => {
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );
-    await expect(storage.getAllUserLastLogins()).resolves.toEqual({
-      'demo-user': 1700000000000,
-    });
 
     await storage.deleteUser('demo-user');
 
@@ -510,7 +512,6 @@ describe('sqlite storage contract', () => {
       storage.getDanmakuEnabledPreference('demo-user'),
     ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
-    await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
 
   it('建号即写入活跃记录', async () => {
@@ -539,7 +540,9 @@ describe('sqlite storage contract', () => {
     await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(false);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 2 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'CODE', usedCount: 2 }),
+    ]);
   });
 
   it('并发占用邀请码不会超发', async () => {
@@ -559,7 +562,9 @@ describe('sqlite storage contract', () => {
     );
 
     expect(results.filter(Boolean)).toHaveLength(5);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ RUSH: 5 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'RUSH', usedCount: 5 }),
+    ]);
   });
 
   it('maxUses 为 0 表示不限次数', async () => {
@@ -576,10 +581,12 @@ describe('sqlite storage contract', () => {
 
     await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ FREE: 2 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'FREE', usedCount: 2 }),
+    ]);
   });
 
-  it('首次占用以配置里的历史用量为种子', async () => {
+  it('占用从当前邀请码的已用次数继续累加', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
     await storage.createInviteCode({
@@ -593,7 +600,9 @@ describe('sqlite storage contract', () => {
 
     await expect(storage.reserveInviteCodeUse('OLD')).resolves.toBe(true);
     await expect(storage.reserveInviteCodeUse('OLD')).resolves.toBe(false);
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ OLD: 3 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'OLD', usedCount: 3 }),
+    ]);
   });
 
   it('种子值只在建行时生效，不会重复累加', async () => {
@@ -611,7 +620,9 @@ describe('sqlite storage contract', () => {
     await storage.reserveInviteCodeUse('SEED');
     await storage.reserveInviteCodeUse('SEED');
 
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ SEED: 3 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'SEED', usedCount: 3 }),
+    ]);
   });
 
   it('回滚邀请码次数且不会减到负数', async () => {
@@ -628,10 +639,14 @@ describe('sqlite storage contract', () => {
 
     await storage.reserveInviteCodeUse('CODE');
     await storage.releaseInviteCodeUse('CODE');
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'CODE', usedCount: 0 }),
+    ]);
 
     await storage.releaseInviteCodeUse('CODE');
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([
+      expect.objectContaining({ code: 'CODE', usedCount: 0 }),
+    ]);
   });
 
   it('回滚不存在的邀请码静默返回', async () => {
@@ -640,10 +655,10 @@ describe('sqlite storage contract', () => {
     await expect(
       storage.releaseInviteCodeUse('MISSING'),
     ).resolves.toBeUndefined();
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([]);
   });
 
-  it('删除邀请码用量后重建从零开始', async () => {
+  it('删除邀请码后重建从零开始', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
     await storage.createInviteCode({
@@ -656,9 +671,9 @@ describe('sqlite storage contract', () => {
     });
 
     await storage.reserveInviteCodeUse('CODE');
-    await storage.deleteInviteCodeUsage('CODE');
+    await storage.deleteInviteCode('CODE');
 
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+    await expect(storage.getAllInviteCodes()).resolves.toEqual([]);
     await storage.createInviteCode({
       code: 'CODE',
       createdAt: 2,
@@ -1281,129 +1296,12 @@ describe('sqlite storage contract', () => {
   });
 });
 
-describe('sqlite social username migration', () => {
-  it('adds avatar_seed to legacy profiles idempotently without changing identity', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const internal = storage as unknown as {
-      db: import('better-sqlite3').Database;
-      migrateUserProfileAvatarSeed(): void;
-    };
-    try {
-      internal.db.exec(`DROP TABLE user_profiles;
-        CREATE TABLE user_profiles (username TEXT PRIMARY KEY, profile_id VARCHAR(12) UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, favorites_public INTEGER DEFAULT 0, updated_at INTEGER);
-        INSERT INTO user_profiles VALUES ('alice', 'Alice0123456', 'Alice', 'alice', 1, 123);`);
-      internal.migrateUserProfileAvatarSeed();
-      expect(await storage.getUserProfile('alice')).toEqual({
-        username: 'alice',
-        profile_id: 'Alice0123456',
-        nickname: 'Alice',
-        avatar_seed: null,
-        level: 1,
-        favorites_public: 1 as const,
-        bio: null,
-        watch_time_public: false,
-        counted_ms: 0,
-        updated_at: 123,
-      });
-      await storage.updateUserProfile('alice', { avatarSeed: 'Avatar012345' });
-      internal.migrateUserProfileAvatarSeed();
-      expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
-        'Avatar012345',
-      );
-    } finally {
-      internal.db.close();
-    }
-  });
-  it('merges every username column while retaining canonical profile identity', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const internal = storage as unknown as {
-      db: import('better-sqlite3').Database;
-      migrateLegacyUsernameCasing(): void;
-      backfillUserProfiles(): void;
-    };
-    await storage.ensureUserProfile('alice');
-    await storage.ensureUserProfile('bob');
-    await storage.updateUserProfile('alice', { avatarSeed: 'Canon0123456' });
-    const canonical = await storage.getUserProfile('alice');
-    internal.db
-      .prepare(
-        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, 0, 1)',
-      )
-      .run('Alice', 'Legacy012345', 'Legacy', 'legacy', 'LegacyAvatar');
-    internal.db
-      .prepare(
-        'INSERT INTO user_profiles (username, profile_id, avatar_seed, updated_at) VALUES (?, ?, ?, ?)',
-      )
-      .run('Carol', 'Carol0123456', 'CarolAvatar1', 1);
-    internal.db.exec(
-      "INSERT INTO user_follows VALUES ('Alice', 'Bob', 1); INSERT INTO video_review_likes VALUES ('Bob', 'work', '2026', 'Alice', 1); INSERT INTO video_review_reports VALUES ('Alice', 'work', '2026', 'Bob', 'spam', '', 1);",
-    );
-    internal.db.exec(
-      "INSERT INTO user_profile_showcase VALUES ('alice', 0, 'vod+canonical'), ('Alice', 0, 'vod+legacy'), ('Alice', 1, 'vod+second'), ('OnlyShowcase', 0, 'vod+orphan');",
-    );
-    internal.migrateLegacyUsernameCasing();
-    expect(
-      internal.db
-        .prepare(
-          'SELECT username, position, favorite_key FROM user_profile_showcase ORDER BY username, position',
-        )
-        .all(),
-    ).toEqual([
-      { username: 'alice', position: 0, favorite_key: 'vod+canonical' },
-      { username: 'alice', position: 1, favorite_key: 'vod+second' },
-      { username: 'onlyshowcase', position: 0, favorite_key: 'vod+orphan' },
-    ]);
-    expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
-      'Canon0123456',
-    );
-    expect((await storage.getUserProfile('carol'))?.avatar_seed).toBe(
-      'CarolAvatar1',
-    );
-    expect((await storage.getUserProfile('alice'))?.profile_id).toBe(
-      canonical?.profile_id,
-    );
-    expect(
-      internal.db.prepare('SELECT follower, followee FROM user_follows').all(),
-    ).toEqual([{ follower: 'alice', followee: 'bob' }]);
-    expect(
-      internal.db.prepare('SELECT author, liker FROM video_review_likes').all(),
-    ).toEqual([{ author: 'bob', liker: 'alice' }]);
-    expect(
-      internal.db
-        .prepare('SELECT author, reporter FROM video_review_reports')
-        .all(),
-    ).toEqual([{ author: 'alice', reporter: 'bob' }]);
-    internal.db
-      .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
-      .run('missing', 'hash');
-    internal.backfillUserProfiles();
-    expect(await storage.getUserProfile('missing')).not.toBeNull();
-    internal.db.close();
-  });
-});
-
 describe('sqlite video review contract', () => {
   videoReviewContract(() => new LocalSqliteStorage(':memory:'));
 });
 
 describe('sqlite user danmaku contract', () => {
   userDanmakuContract(() => new LocalSqliteStorage(':memory:'));
-});
-
-test('normalizes legacy danmaku usernames even without a users row', async () => {
-  const storage = new LocalSqliteStorage(':memory:');
-  const internal = storage as unknown as {
-    db: import('better-sqlite3').Database;
-    migrateLegacyUsernameCasing(): void;
-  };
-  internal.db
-    .prepare(
-      'INSERT INTO user_danmaku (id, episode_key, username, time_ms, text, mode, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    )
-    .run('legacy-id', 'dandan:1', 'Alice', 0, 'text', 0, '#ffffff', 1);
-  internal.migrateLegacyUsernameCasing();
-  expect((await storage.getAllUserDanmaku('alice'))[0].username).toBe('alice');
-  internal.db.close();
 });
 
 describe('SQLite OAuth 身份契约', () => {
@@ -1414,83 +1312,8 @@ describe('SQLite announcements', () => {
   announcementContract(() => new LocalSqliteStorage(':memory:'));
 });
 
-it('merges annual recap username casing and retains the latest snapshot', async () => {
-  const storage = new LocalSqliteStorage(':memory:');
-  const internal = storage as unknown as {
-    db: import('better-sqlite3').Database;
-    migrateLegacyUsernameCasing(): void;
-  };
-  try {
-    const insert = internal.db.prepare(
-      'INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    );
-    insert.run('Alice', 2025, 'UTC', 1, '{}', 100, 300);
-    insert.run('alice', 2025, 'UTC', 0, '{}', 50, 200);
-    insert.run('OnlyRecap', 2024, 'UTC', 1, '{}', 100, 300);
-    internal.migrateLegacyUsernameCasing();
-    expect(await storage.getAnnualRecap('alice', 2025)).toMatchObject({
-      hideRhythm: true,
-      publishedAt: 100,
-      updatedAt: 300,
-    });
-    expect(await storage.getAnnualRecapYears('onlyrecap')).toEqual([2024]);
-    expect(
-      internal.db
-        .prepare('SELECT username FROM user_annual_recaps ORDER BY username')
-        .all(),
-    ).toEqual([{ username: 'alice' }, { username: 'onlyrecap' }]);
-  } finally {
-    internal.db.close();
-  }
-});
-
 describe('SQLite 管理通知契约', () => {
   userNoticeContract(() => new LocalSqliteStorage(':memory:'));
-});
-
-it('通知写入失败回滚评价删除，用户名合并迁移通知并解决幂等冲突', async () => {
-  const storage = new LocalSqliteStorage(':memory:');
-  const raw = (storage as unknown as { db: import('better-sqlite3').Database })
-    .db;
-  const { videoReview } =
-    await import('@/lib/__tests__/__fixtures__/video-review-contract');
-  await storage.setVideoReview('alice', videoReview);
-  raw.exec(
-    "CREATE TRIGGER fail_notice BEFORE INSERT ON user_notice_events BEGIN SELECT RAISE(ABORT, 'notice failed'); END",
-  );
-  await expect(
-    storage.deleteVideoReview(
-      'alice',
-      videoReview.title_norm,
-      videoReview.year,
-      true,
-    ),
-  ).rejects.toThrow('notice failed');
-  expect(
-    await storage.getVideoReview(
-      'alice',
-      videoReview.title_norm,
-      videoReview.year,
-    ),
-  ).not.toBeNull();
-  raw.exec('DROP TRIGGER fail_notice');
-  await storage.deleteVideoReview(
-    'alice',
-    videoReview.title_norm,
-    videoReview.year,
-    true,
-  );
-  raw
-    .prepare('UPDATE user_notice_events SET recipient_username = ?')
-    .run('Alice');
-  (
-    storage as unknown as { migrateLegacyUsernameCasing(): void }
-  ).migrateLegacyUsernameCasing();
-  expect(await storage.getUserNoticeCount('alice', 0, [], Date.now())).toBe(1);
-  expect(
-    raw.prepare('SELECT recipient_username FROM user_notice_events').get(),
-  ).toEqual({ recipient_username: 'alice' });
-  raw.close();
 });
 
 it('播放记录会话序号与并发 CAS 契约', async () => {
@@ -1499,4 +1322,73 @@ it('播放记录会话序号与并发 CAS 契约', async () => {
 
 it('每集进度换源继承、逐集写入与迟到保护契约', async () => {
   await assertPlayRecordEpisodeProgress(new LocalSqliteStorage(':memory:'));
+});
+
+it('reopening preserves business state and repairs missing user rows', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'icetv-init-'));
+  const filename = path.join(directory, 'test.sqlite');
+  let storage = new LocalSqliteStorage(filename);
+  const raw = () =>
+    (storage as unknown as { db: import('better-sqlite3').Database }).db;
+  try {
+    await storage.registerUser('alice', 'password');
+    await storage.registerUser('bob', 'password');
+    await storage.updateUserAccess(['alice'], { role: 'admin' });
+    await storage.setPlaybackSession('alice', {
+      ...watchLevelSession,
+      watch_seconds: 30,
+    });
+    const level = await storage.getWatchLevel('alice');
+    raw().exec(
+      "DELETE FROM user_access WHERE username = 'bob'; DELETE FROM user_profiles WHERE username = 'bob'; DELETE FROM user_login_activity WHERE username = 'bob'",
+    );
+    raw().exec(
+      "CREATE TABLE invite_code_usage (code TEXT PRIMARY KEY, used_count INTEGER); INSERT INTO invite_code_usage VALUES ('retired', 7); CREATE TABLE storage_migrations (name TEXT PRIMARY KEY, completed_at INTEGER); INSERT INTO storage_migrations VALUES ('watch_history_v1', 1)",
+    );
+    raw().close();
+    storage = new LocalSqliteStorage(filename);
+    expect((await storage.getUserAccess('alice'))?.role).toBe('admin');
+    expect((await storage.getUserAccess('bob'))?.role).toBe('user');
+    expect(await storage.getUserProfile('bob')).not.toBeNull();
+    expect(await storage.getUserLastLogin('bob')).not.toBeNull();
+    expect(await storage.getWatchLevel('alice')).toEqual(level);
+    expect(await storage.getWatchHistoryPage('alice', { limit: 10 })).toEqual(
+      [],
+    );
+    expect(await storage.getAllInviteCodes()).toEqual([]);
+    expect(
+      raw().prepare('SELECT used_count FROM invite_code_usage').get(),
+    ).toEqual({ used_count: 7 });
+    expect(
+      raw().prepare('SELECT completed_at FROM storage_migrations').get(),
+    ).toEqual({ completed_at: 1 });
+  } finally {
+    if (raw().open) raw().close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it('写历史失败时会话和时间桶同时回滚', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const raw = (storage as unknown as { db: import('better-sqlite3').Database })
+    .db;
+  try {
+    raw.exec(
+      "CREATE TRIGGER interrupt_history BEFORE INSERT ON watch_history BEGIN SELECT RAISE(ABORT, 'interrupt'); END;",
+    );
+    await expect(
+      storage.saveWatchSessionReport(
+        'alice',
+        watchLevelSession,
+        [{ start: 900000, watch_ms: 1000 }],
+        { total_episodes: 3 },
+      ),
+    ).rejects.toMatchObject({ message: 'interrupt' });
+    expect(raw.prepare('SELECT * FROM playback_sessions').all()).toEqual([]);
+    expect(raw.prepare('SELECT * FROM playback_watch_buckets').all()).toEqual(
+      [],
+    );
+  } finally {
+    raw.close();
+  }
 });

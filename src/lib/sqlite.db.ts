@@ -2,7 +2,7 @@ import 'server-only';
 
 import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { mkdirSync } from 'fs';
 import path from 'path';
 
 import type { InviteCode } from '@/features/admin/services/inviteCodes';
@@ -154,17 +154,13 @@ import {
   VideoReviewRow,
 } from '@/lib/video-reviews';
 import { WATCH_LEVEL_BUCKET_CAP_MS, watchLevelForMs } from '@/lib/watch-level';
-import type {
-  WatchLevelBackfillRow,
-  WatchLevelEventRow,
-} from '@/lib/watch-level-storage';
+import type { WatchLevelEventRow } from '@/lib/watch-level-storage';
 import {
   levelEventValues,
   levelUpForDelta,
   mapWatchLevelEvent,
   newlyReachedLevels,
   WATCH_LEVEL_EVENT_INSERT,
-  watchLevelBackfillSql,
 } from '@/lib/watch-level-storage';
 import type {
   WatchLevelResponse,
@@ -225,11 +221,6 @@ import {
   WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
-import {
-  mergeSearchKeywords,
-  pickNewerJson,
-  planUsernameMigration,
-} from './username-migration';
 
 const REVIEW_SQL = reviewSql('sqlite');
 
@@ -333,15 +324,6 @@ function runWithBusyRetry<T>(label: string, task: () => T): T {
   }
 }
 
-type LocalDbSchema = {
-  users: Record<string, string>;
-  playRecords: Record<string, Record<string, PlayRecord>>;
-  favorites: Record<string, Record<string, Favorite>>;
-  searchHistory: Record<string, string[]>;
-  skipConfigs: Record<string, Record<string, SkipConfig>>;
-  adminConfig: AdminConfig | null;
-};
-
 type PlaybackWatchTotalsRow = {
   total_watch_seconds: number | null;
   period_watch_seconds: number | null;
@@ -353,34 +335,6 @@ type SourceRouteStatsRow = {
   success_count: number | null;
   failure_count: number | null;
 };
-
-function ensureObject<T>(value: unknown, fallback: T): T {
-  if (value && typeof value === 'object') {
-    return value as T;
-  }
-  return fallback;
-}
-
-function normalizeDbData(raw: unknown): LocalDbSchema {
-  const db = ensureObject<Partial<LocalDbSchema>>(raw, {});
-  return {
-    users: ensureObject<Record<string, string>>(db.users, {}),
-    playRecords: ensureObject<Record<string, Record<string, PlayRecord>>>(
-      db.playRecords,
-      {},
-    ),
-    favorites: ensureObject<Record<string, Record<string, Favorite>>>(
-      db.favorites,
-      {},
-    ),
-    searchHistory: ensureObject<Record<string, string[]>>(db.searchHistory, {}),
-    skipConfigs: ensureObject<Record<string, Record<string, SkipConfig>>>(
-      db.skipConfigs,
-      {},
-    ),
-    adminConfig: db.adminConfig || null,
-  };
-}
 
 function parseJsonValue<T>(raw: string | null | undefined): T | null {
   if (!raw) {
@@ -495,7 +449,6 @@ export class LocalSqliteStorage implements IStorage {
     return (this.resourceStore ??= new SqliteResourceStore(this.db));
   }
   private readonly dbPath: string;
-  private readonly legacyJsonPaths: string[];
   private readonly db: Database.Database;
 
   // 预编译的 Prepared Statements
@@ -569,7 +522,6 @@ export class LocalSqliteStorage implements IStorage {
     deleteUserMessageStateByUser: Database.Statement;
     recordUserLogin: Database.Statement;
     getUserLastLogin: Database.Statement;
-    getAllUserLastLogins: Database.Statement;
     deleteLoginActivityByUser: Database.Statement;
     backfillLoginActivity: Database.Statement;
     getDanmakuEpisodeId: Database.Statement;
@@ -602,30 +554,11 @@ export class LocalSqliteStorage implements IStorage {
     const defaultSqlitePath = process.env.DOCKER_ENV
       ? '/data/icetv-data.sqlite'
       : path.resolve(process.cwd(), 'data', 'icetv-data.sqlite');
-    const defaultJsonPath = process.env.DOCKER_ENV
-      ? '/data/icetv-data.json'
-      : path.resolve(process.cwd(), 'data', 'icetv-data.json');
-    const legacyJsonPath = process.env.DOCKER_ENV
-      ? '/data/moontv-data.json'
-      : path.resolve(process.cwd(), 'data', 'moontv-data.json');
-
     const configuredPath =
       dbPath || process.env.LOCAL_DB_PATH || defaultSqlitePath;
 
     const isMemoryDb = configuredPath === ':memory:';
-    const isLegacyJsonPath = configuredPath.toLowerCase().endsWith('.json');
-    this.dbPath = isMemoryDb
-      ? configuredPath
-      : isLegacyJsonPath
-        ? configuredPath.replace(/\.json$/i, '.sqlite')
-        : configuredPath;
-
-    const candidates = [defaultJsonPath, legacyJsonPath];
-    if (!isMemoryDb && isLegacyJsonPath) {
-      candidates.unshift(configuredPath);
-    }
-    this.legacyJsonPaths = isMemoryDb ? [] : Array.from(new Set(candidates));
-
+    this.dbPath = configuredPath;
     if (!isMemoryDb) {
       mkdirSync(path.dirname(this.dbPath), { recursive: true });
     }
@@ -660,160 +593,24 @@ export class LocalSqliteStorage implements IStorage {
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });
-    const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as {
-      name: string;
-    }[];
-    // 存量第三方自动建号的账号只有随机密码，迁移时标为未设密，用户可直接首次设置
-    if (!userColumns.some((column) => column.name === 'password_set'))
-      this.db.transaction(() => {
-        this.db.exec(
-          'ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1',
-        );
-        this.db.exec(
-          'UPDATE users SET password_set = 0 WHERE username IN (SELECT username FROM oauth_identities WHERE auto_created = 1)',
-        );
-      })();
-    for (const name of ['title', 'year']) {
-      const columns = this.db
-        .prepare('PRAGMA table_info(user_danmaku)')
-        .all() as { name: string }[];
-      if (!columns.some((column) => column.name === name))
-        this.db.exec(
-          `ALTER TABLE user_danmaku ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`,
-        );
-    }
     for (const statement of userNoticeSchema('sqlite')) this.db.exec(statement);
     for (const statement of viewingHappinessSchema('sqlite'))
       this.db.exec(statement);
     for (const statement of listSchema('sqlite')) this.db.exec(statement);
-    this.migrateListSchema();
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
-    runWithBusyRetry('迁移 SQLite 用户头像', () => {
-      this.migrateUserProfileAvatarSeed();
-    });
-    this.migrateFavoriteProjection();
-    this.migratePlaybackSchema();
-    this.migrateReviewFirstPublished();
     this.db.exec(
       'CREATE INDEX IF NOT EXISTS idx_review_author_public_time ON video_reviews (username, is_public, first_published_at)',
     );
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
-      runWithBusyRetry('迁移 SQLite 历史数据', () => {
-        this.migrateFromLegacyJsonIfNeeded();
-      });
-      runWithBusyRetry('归一化 SQLite 用户名', () => {
-        this.migrateLegacyUsernameCasing();
-      });
       runWithBusyRetry('补齐 SQLite 用户活跃记录', () => {
         this.backfillMissingLoginActivity();
       });
       this.checkpointWal();
     }
-    this.migrateWatchHistory();
-    this.migrateWatchLevel();
-    this.backfillFavoriteProjection();
     this.backfillUserProfiles();
-    new SqliteUserAccessStore(this.db).migrate();
-    this.invites.migrate();
-    new SqliteConfigStateStore(this.db).migrate();
-  }
-
-  private migrateReviewFirstPublished(): void {
-    this.db
-      .transaction(() => {
-        const columns = this.db.pragma('table_info(video_reviews)') as {
-          name: string;
-        }[];
-        if (!columns.some((column) => column.name === 'first_published_at'))
-          this.db.exec(
-            'ALTER TABLE video_reviews ADD COLUMN first_published_at INTEGER',
-          );
-        if (
-          this.db
-            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
-            .get('review_first_published_v1')
-        )
-          return;
-        this.db.exec(
-          'UPDATE video_reviews SET first_published_at = updated_at WHERE first_published_at IS NULL',
-        );
-        this.db
-          .prepare(
-            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
-          )
-          .run('review_first_published_v1', Date.now());
-      })
-      .immediate();
-  }
-
-  private migratePlaybackSchema(): void {
-    this.db
-      .transaction(() => {
-        const columns = this.db.pragma('table_info(playback_sessions)') as {
-          name: string;
-        }[];
-        if (!columns.some((column) => column.name === 'measurement_version'))
-          this.db.exec(
-            'ALTER TABLE playback_sessions ADD COLUMN measurement_version INTEGER NOT NULL DEFAULT 1',
-          );
-        this.db.exec(`
-        CREATE TABLE IF NOT EXISTS storage_migrations (name TEXT PRIMARY KEY, completed_at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS user_watch_totals (
-          username TEXT PRIMARY KEY, counted_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS user_level_events (
-          username TEXT NOT NULL, level INTEGER NOT NULL, reached_at INTEGER NOT NULL,
-          source TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, year TEXT NOT NULL,
-          episode_index INTEGER NOT NULL, PRIMARY KEY (username, level)
-        );
-        CREATE TABLE IF NOT EXISTS playback_watch_buckets (
-          username TEXT NOT NULL, session_id TEXT NOT NULL, bucket_start INTEGER NOT NULL,
-          watch_ms INTEGER NOT NULL, PRIMARY KEY (username, session_id, bucket_start)
-        );
-        CREATE INDEX IF NOT EXISTS idx_watch_buckets_user_time ON playback_watch_buckets(username, bucket_start);
-        CREATE TABLE IF NOT EXISTS watch_history (
-          username TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, video_id TEXT NOT NULL,
-          title TEXT NOT NULL, source_name TEXT NOT NULL, cover TEXT NOT NULL, year TEXT NOT NULL,
-          episode_index INTEGER NOT NULL, total_episodes INTEGER NOT NULL,
-          group_label TEXT, group_index INTEGER, group_total INTEGER,
-          position REAL NOT NULL, duration REAL NOT NULL,
-          first_watched_at INTEGER NOT NULL, last_watched_at INTEGER NOT NULL,
-          PRIMARY KEY (username, id), UNIQUE (username, source, video_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_watch_history_page ON watch_history(username, last_watched_at, id);
-      `);
-      })
-      .immediate();
-  }
-
-  private migrateWatchLevel(): void {
-    this.db
-      .transaction(() => {
-        if (
-          this.db
-            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
-            .get('watch_level_v1')
-        )
-          return;
-        const rows = this.db
-          .prepare(watchLevelBackfillSql)
-          .all() as WatchLevelBackfillRow[];
-        for (const row of rows)
-          this.addWatchLevel(
-            row.username,
-            Number(row.counted_ms),
-            row,
-            Number(row.reached_at),
-          );
-        this.db
-          .prepare(
-            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
-          )
-          .run('watch_level_v1', Date.now());
-      })
-      .immediate();
+    new SqliteUserAccessStore(this.db).backfill();
   }
 
   private addWatchLevel(
@@ -863,151 +660,6 @@ export class LocalSqliteStorage implements IStorage {
         events: events.map(mapWatchLevelEvent),
       };
     })();
-  }
-
-  private migrateWatchHistory(): void {
-    // 完成标记与回填同事务提交，重启不会复活已删除的历史。
-    this.db
-      .transaction(() => {
-        if (
-          this.db
-            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
-            .get('watch_history_v1')
-        )
-          return;
-        const rows = this.db
-          .prepare(
-            `SELECT ranked.*, p.record_json FROM (
-        SELECT s.*, MIN(started_at) OVER (PARTITION BY username, source, video_id) AS first_watched_at,
-          ROW_NUMBER() OVER (PARTITION BY username, source, video_id ORDER BY updated_at DESC, id DESC) AS row_num
-        FROM playback_sessions s WHERE watch_seconds > 0
-      ) ranked LEFT JOIN play_records p ON p.username = ranked.username AND p.record_key = ranked.source || '+' || ranked.video_id
-      WHERE ranked.row_num = 1`,
-          )
-          .all() as (PlaybackSession & {
-          username: string;
-          first_watched_at: number;
-          record_json: string | null;
-        })[];
-        for (const row of rows) {
-          let record: Partial<PlayRecord> = {};
-          try {
-            record = JSON.parse(row.record_json || '{}') ?? {};
-          } catch {
-            // 无效旧记录不阻塞迁移。
-          }
-          this.db
-            .prepare(
-              `INSERT INTO watch_history (
-          username, id, source, video_id, title, source_name, cover, year, episode_index,
-          total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT DO NOTHING`,
-            )
-            .run(
-              row.username,
-              randomUUID(),
-              row.source,
-              row.video_id,
-              row.title,
-              row.source_name,
-              row.cover,
-              row.year,
-              row.episode_index,
-              record.total_episodes || Math.max(1, row.episode_index),
-              record.group_label ?? null,
-              record.group_index ?? null,
-              record.group_total ?? null,
-              row.last_position,
-              row.total_time,
-              row.first_watched_at,
-              row.updated_at,
-            );
-        }
-        this.db
-          .prepare(
-            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
-          )
-          .run('watch_history_v1', Date.now());
-      })
-      .immediate();
-  }
-
-  private migrateFavoriteProjection(): void {
-    this.db
-      .transaction(() => {
-        const columns = this.db.pragma('table_info(favorites)') as {
-          name: string;
-        }[];
-        for (const [name, type] of Object.entries({
-          title_norm: 'TEXT',
-          year_norm: 'TEXT',
-          year_number: 'REAL',
-          search_text: 'TEXT',
-          saved_at: 'REAL',
-          watch_status: 'TEXT',
-          watched_at: 'REAL',
-          library_valid: 'INTEGER NOT NULL DEFAULT 0',
-          projection_version: 'INTEGER NOT NULL DEFAULT 0',
-        })) {
-          if (!columns.some((column) => column.name === name))
-            this.db.exec(`ALTER TABLE favorites ADD COLUMN ${name} ${type}`);
-        }
-        this.db
-          .exec(`CREATE INDEX IF NOT EXISTS idx_favorites_saved ON favorites(username, saved_at, favorite_key);
-        CREATE INDEX IF NOT EXISTS idx_favorites_work ON favorites(username, title_norm, year_norm);
-        CREATE INDEX IF NOT EXISTS idx_favorites_projection ON favorites(projection_version);`);
-      })
-      .immediate();
-  }
-
-  private backfillFavoriteProjection(): void {
-    const read = this.db.prepare(
-      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250',
-    );
-    const update = this.db.prepare(
-      'UPDATE favorites SET title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, watch_status = ?, watched_at = ?, projection_version = ? WHERE username = ? AND favorite_key = ?',
-    );
-    const batch = this.db.transaction(() => {
-      const rows = read.all() as {
-        username: string;
-        favorite_key: string;
-        favorite_json: string;
-      }[];
-      for (const row of rows)
-        update.run(
-          ...favoriteProjection(row.favorite_key, row.favorite_json),
-          row.username,
-          row.favorite_key,
-        );
-      return rows.length;
-    });
-    while (batch.immediate() > 0) {
-      /* 每批提交，进程中断后从剩余行继续 */
-    }
-  }
-
-  private migrateUserProfileAvatarSeed(): void {
-    this.db
-      .transaction(() => {
-        const columns = this.db.pragma('table_info(user_profiles)') as {
-          name: string;
-        }[];
-        for (const [name, definition] of [
-          ['bio', 'VARCHAR(240)'],
-          ['watch_time_public', 'INTEGER NOT NULL DEFAULT 0'],
-        ]) {
-          if (!columns.some((column) => column.name === name))
-            this.db.exec(
-              `ALTER TABLE user_profiles ADD COLUMN ${name} ${definition}`,
-            );
-        }
-        if (!columns.some((column) => column.name === 'avatar_seed'))
-          this.db.exec(
-            'ALTER TABLE user_profiles ADD COLUMN avatar_seed VARCHAR(24)',
-          );
-      })
-      .immediate();
   }
 
   private insertUserProfile(username: string, nickname?: string): void {
@@ -1063,33 +715,6 @@ export class LocalSqliteStorage implements IStorage {
     }
   }
 
-  private migrateListSchema(): void {
-    runWithBusyRetry('迁移 SQLite 片单结构', () => {
-      this.db
-        .transaction(() => {
-          const columns = this.db.pragma('table_info(user_lists)') as {
-            name: string;
-          }[];
-          for (const column of ['view_count', 'like_count'])
-            if (!columns.some((entry) => entry.name === column))
-              this.db.exec(
-                `ALTER TABLE user_lists ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
-              );
-          const likeColumns = this.db.pragma('table_info(list_likes)') as {
-            name: string;
-          }[];
-          if (!likeColumns.some((entry) => entry.name === 'list_name'))
-            this.db.exec(
-              "ALTER TABLE list_likes ADD COLUMN list_name VARCHAR(30) NOT NULL DEFAULT ''",
-            );
-          this.db.exec(
-            "UPDATE list_likes SET list_name = (SELECT name FROM user_lists WHERE id = list_id) WHERE list_name = '' AND EXISTS (SELECT 1 FROM user_lists WHERE id = list_id)",
-          );
-        })
-        .immediate();
-    });
-  }
-
   private initializeSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -1109,6 +734,15 @@ export class LocalSqliteStorage implements IStorage {
         username TEXT NOT NULL,
         favorite_key TEXT NOT NULL,
         favorite_json TEXT NOT NULL,
+        title_norm TEXT,
+        year_norm TEXT,
+        year_number REAL,
+        search_text TEXT,
+        saved_at REAL,
+        watch_status TEXT,
+        watched_at REAL,
+        library_valid INTEGER NOT NULL DEFAULT 0,
+        projection_version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (username, favorite_key)
       );
 
@@ -1123,10 +757,15 @@ export class LocalSqliteStorage implements IStorage {
         review_json TEXT NOT NULL,
         is_public INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
+        first_published_at INTEGER,
         PRIMARY KEY (username, title_norm, year)
       );
       CREATE INDEX IF NOT EXISTS idx_video_reviews_work ON video_reviews (title_norm, is_public, updated_at);
       CREATE INDEX IF NOT EXISTS idx_video_reviews_public ON video_reviews (is_public, updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_favorites_saved ON favorites(username, saved_at, favorite_key);
+      CREATE INDEX IF NOT EXISTS idx_favorites_work ON favorites(username, title_norm, year_norm);
+      CREATE INDEX IF NOT EXISTS idx_favorites_projection ON favorites(projection_version);
 
       ${OAUTH_SCHEMA};
       CREATE TABLE IF NOT EXISTS search_history (
@@ -1159,8 +798,33 @@ export class LocalSqliteStorage implements IStorage {
         last_position INTEGER NOT NULL,
         total_time INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        updated_at INTEGER NOT NULL,
+        measurement_version INTEGER NOT NULL DEFAULT 1
       );
+
+        CREATE TABLE IF NOT EXISTS user_watch_totals (
+          username TEXT PRIMARY KEY, counted_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS user_level_events (
+          username TEXT NOT NULL, level INTEGER NOT NULL, reached_at INTEGER NOT NULL,
+          source TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, year TEXT NOT NULL,
+          episode_index INTEGER NOT NULL, PRIMARY KEY (username, level)
+        );
+        CREATE TABLE IF NOT EXISTS playback_watch_buckets (
+          username TEXT NOT NULL, session_id TEXT NOT NULL, bucket_start INTEGER NOT NULL,
+          watch_ms INTEGER NOT NULL, PRIMARY KEY (username, session_id, bucket_start)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_buckets_user_time ON playback_watch_buckets(username, bucket_start);
+        CREATE TABLE IF NOT EXISTS watch_history (
+          username TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, video_id TEXT NOT NULL,
+          title TEXT NOT NULL, source_name TEXT NOT NULL, cover TEXT NOT NULL, year TEXT NOT NULL,
+          episode_index INTEGER NOT NULL, total_episodes INTEGER NOT NULL,
+          group_label TEXT, group_index INTEGER, group_total INTEGER,
+          position REAL NOT NULL, duration REAL NOT NULL,
+          first_watched_at INTEGER NOT NULL, last_watched_at INTEGER NOT NULL,
+          PRIMARY KEY (username, id), UNIQUE (username, source, video_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_history_page ON watch_history(username, last_watched_at, id);
 
       CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_started_at
         ON playback_sessions (username, started_at);
@@ -1191,7 +855,8 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE TABLE IF NOT EXISTS config_subscription (
         id INTEGER PRIMARY KEY CHECK (id = 1), url TEXT NOT NULL,
-        auto_update INTEGER NOT NULL, last_check TEXT NOT NULL, config_file TEXT NOT NULL
+        auto_update INTEGER NOT NULL, last_check TEXT NOT NULL, config_file TEXT NOT NULL,
+        failure_since TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS live_source_state (
         source_key TEXT PRIMARY KEY, channel_number INTEGER NOT NULL, updated_at INTEGER NOT NULL
@@ -1215,11 +880,6 @@ export class LocalSqliteStorage implements IStorage {
       );
       CREATE INDEX IF NOT EXISTS idx_invite_codes_created ON invite_codes(created_at, code);
       CREATE INDEX IF NOT EXISTS idx_invite_codes_active ON invite_codes(expires_at, max_uses, used_count);
-
-      CREATE TABLE IF NOT EXISTS invite_code_usage (
-        code TEXT PRIMARY KEY,
-        used_count INTEGER NOT NULL DEFAULT 0
-      );
 
       CREATE TABLE IF NOT EXISTS invite_code_redemptions (
         username TEXT PRIMARY KEY,
@@ -1623,9 +1283,6 @@ export class LocalSqliteStorage implements IStorage {
       getUserLastLogin: this.db.prepare(
         'SELECT last_login_at FROM user_login_activity WHERE username = ?',
       ),
-      getAllUserLastLogins: this.db.prepare(
-        'SELECT username, last_login_at FROM user_login_activity',
-      ),
       deleteLoginActivityByUser: this.db.prepare(
         'DELETE FROM user_login_activity WHERE username = ?',
       ),
@@ -1697,505 +1354,6 @@ export class LocalSqliteStorage implements IStorage {
          )`,
       ),
     };
-  }
-
-  private hasAnyData(): boolean {
-    const checks = [
-      'SELECT 1 AS v FROM users LIMIT 1',
-      'SELECT 1 AS v FROM play_records LIMIT 1',
-      'SELECT 1 AS v FROM favorites LIMIT 1',
-      'SELECT 1 AS v FROM search_history LIMIT 1',
-      'SELECT 1 AS v FROM skip_configs LIMIT 1',
-      'SELECT 1 AS v FROM playback_sessions LIMIT 1',
-      'SELECT 1 AS v FROM watch_history LIMIT 1',
-      'SELECT 1 AS v FROM playback_watch_buckets LIMIT 1',
-      'SELECT 1 AS v FROM admin_config LIMIT 1',
-      'SELECT 1 AS v FROM user_danmaku_settings LIMIT 1',
-    ];
-    return checks.some((sql) => Boolean(this.db.prepare(sql).get()));
-  }
-
-  private readLegacyJsonData(): LocalDbSchema | null {
-    for (const legacyPath of this.legacyJsonPaths) {
-      if (!existsSync(legacyPath)) {
-        continue;
-      }
-      try {
-        const content = readFileSync(legacyPath, 'utf-8');
-        const parsed = JSON.parse(content) as unknown;
-        return normalizeDbData(parsed);
-      } catch (error) {
-        console.error(`读取旧 JSON 数据失败: ${legacyPath}`, error);
-      }
-    }
-    return null;
-  }
-
-  private migrateFromLegacyJsonIfNeeded(): void {
-    if (this.hasAnyData()) {
-      return;
-    }
-
-    const legacyData = this.readLegacyJsonData();
-    if (!legacyData) {
-      return;
-    }
-
-    const migrate = this.db.transaction(() => {
-      const insertUser = this.db.prepare(
-        'INSERT OR REPLACE INTO users (username, password) VALUES (?, ?)',
-      );
-      const insertPlayRecord = this.db.prepare(
-        'INSERT OR REPLACE INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
-      );
-      const insertFavorite = this.db.prepare(
-        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, watch_status, watched_at, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      const insertHistory = this.db.prepare(
-        'INSERT OR REPLACE INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
-      );
-      const insertSkipConfig = this.db.prepare(
-        'INSERT OR REPLACE INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?)',
-      );
-      const insertAdminConfig = this.db.prepare(
-        'INSERT OR REPLACE INTO admin_config (id, config_json) VALUES (1, ?)',
-      );
-
-      for (const [userName, password] of Object.entries(legacyData.users)) {
-        const username = assertValidUsernameFormat(userName);
-        insertUser.run(username, password);
-      }
-
-      for (const [userName, records] of Object.entries(
-        legacyData.playRecords,
-      )) {
-        const username = assertValidUsernameFormat(userName);
-        for (const [key, record] of Object.entries(records)) {
-          insertPlayRecord.run(username, key, JSON.stringify(record));
-        }
-      }
-
-      for (const [userName, favorites] of Object.entries(
-        legacyData.favorites,
-      )) {
-        const username = assertValidUsernameFormat(userName);
-        for (const [key, favorite] of Object.entries(favorites)) {
-          insertFavorite.run(
-            username,
-            key,
-            JSON.stringify(favorite),
-            ...favoriteProjection(key, JSON.stringify(favorite)),
-          );
-        }
-      }
-
-      for (const [userName, keywords] of Object.entries(
-        legacyData.searchHistory,
-      )) {
-        const username = assertValidUsernameFormat(userName);
-        if (!Array.isArray(keywords)) {
-          continue;
-        }
-        keywords.slice(0, SEARCH_HISTORY_LIMIT).forEach((keyword, index) => {
-          insertHistory.run(username, keyword, index);
-        });
-      }
-
-      for (const [userName, configs] of Object.entries(
-        legacyData.skipConfigs,
-      )) {
-        const username = assertValidUsernameFormat(userName);
-        for (const [key, config] of Object.entries(configs)) {
-          insertSkipConfig.run(username, key, JSON.stringify(config));
-        }
-      }
-
-      if (legacyData.adminConfig) {
-        insertAdminConfig.run(JSON.stringify(legacyData.adminConfig));
-      }
-    });
-
-    migrate();
-    console.log(`检测到旧 JSON 数据，已迁移到 SQLite: ${this.dbPath}`);
-  }
-
-  // 归一化上线前写入的大小写混杂用户名，否则查询侧归一化后永远匹配不到这些行
-  private migrateLegacyUsernameCasing(): void {
-    const usernames = this.collectDistinctUsernames();
-    const plan = planUsernameMigration(usernames);
-    if (plan.length === 0) {
-      return;
-    }
-
-    const migrate = this.db.transaction(() => {
-      for (const { legacy, canonical } of plan) {
-        this.db
-          .prepare('UPDATE time_capsules SET username = ? WHERE username = ?')
-          .run(canonical, legacy);
-        this.db
-          .prepare(
-            'INSERT INTO work_completions (username, title_norm, year, celebrated_at) SELECT ?, title_norm, year, celebrated_at FROM work_completions WHERE username = ? ON CONFLICT(username, title_norm, year) DO UPDATE SET celebrated_at = MIN(work_completions.celebrated_at, excluded.celebrated_at)',
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM work_completions WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare(
-            `INSERT INTO user_watch_totals (username, counted_ms, updated_at)
-          SELECT ?, counted_ms, updated_at FROM user_watch_totals WHERE username = ?
-          ON CONFLICT(username) DO UPDATE SET counted_ms = counted_ms + excluded.counted_ms, updated_at = MAX(updated_at, excluded.updated_at)`,
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare(
-            `INSERT INTO user_level_events (username, level, reached_at, source, video_id, title, year, episode_index)
-          SELECT ?, level, reached_at, source, video_id, title, year, episode_index FROM user_level_events WHERE username = ?
-          ON CONFLICT(username, level) DO UPDATE SET reached_at = excluded.reached_at, source = excluded.source, video_id = excluded.video_id,
-          title = excluded.title, year = excluded.year, episode_index = excluded.episode_index WHERE excluded.reached_at < user_level_events.reached_at`,
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM user_watch_totals WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare('DELETE FROM user_level_events WHERE username = ?')
-          .run(legacy);
-        this.mergeUserRow(legacy, canonical);
-        this.mergeSocialUsername(legacy, canonical);
-        const likedLists = this.db
-          .prepare('SELECT list_id FROM list_likes WHERE username = ?')
-          .all(legacy) as { list_id: string }[];
-        this.db
-          .prepare(
-            'UPDATE OR IGNORE list_likes SET username = ? WHERE username = ?',
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM list_likes WHERE username = ?')
-          .run(legacy);
-        for (const { list_id } of likedLists)
-          this.db
-            .prepare(
-              'UPDATE user_lists SET like_count = (SELECT COUNT(*) FROM list_likes WHERE list_id = ?) WHERE id = ?',
-            )
-            .run(list_id, list_id);
-        this.db
-          .prepare('UPDATE user_lists SET username = ? WHERE username = ?')
-          .run(canonical, legacy);
-        this.db
-          .prepare(
-            `INSERT INTO user_annual_recaps (username, year, time_zone, hide_rhythm, report_json, published_at, updated_at)
-          SELECT ?, year, time_zone, hide_rhythm, report_json, published_at, updated_at FROM user_annual_recaps WHERE username = ?
-          ON CONFLICT(username, year) DO UPDATE SET time_zone = excluded.time_zone, hide_rhythm = excluded.hide_rhythm, report_json = excluded.report_json, published_at = excluded.published_at, updated_at = excluded.updated_at
-          WHERE excluded.updated_at > user_annual_recaps.updated_at`,
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare(
-            'UPDATE OR IGNORE oauth_identities SET username = ? WHERE username = ?',
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM oauth_identities WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare('UPDATE user_danmaku SET username = ? WHERE username = ?')
-          .run(canonical, legacy);
-        this.db
-          .prepare(
-            'UPDATE OR IGNORE user_access SET username = ? WHERE username = ?',
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM user_access WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare(
-            'UPDATE OR IGNORE user_group_members SET username = ? WHERE username = ?',
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM user_group_members WHERE username = ?')
-          .run(legacy);
-        this.mergeKeyedTable(
-          'play_records',
-          'record_key',
-          'record_json',
-          legacy,
-          canonical,
-        );
-        this.mergeKeyedTable(
-          'favorites',
-          'favorite_key',
-          'favorite_json',
-          legacy,
-          canonical,
-        );
-        this.mergeKeyedTable(
-          'skip_configs',
-          'config_key',
-          'config_json',
-          legacy,
-          canonical,
-        );
-        this.db
-          .prepare(
-            `INSERT INTO video_reviews
-          (username, title_norm, year, review_json, is_public, updated_at, first_published_at)
-          SELECT ?, title_norm, year, review_json, is_public, updated_at, first_published_at FROM video_reviews WHERE username = ?
-          ON CONFLICT(username, title_norm, year) DO UPDATE SET
-            review_json = excluded.review_json, is_public = excluded.is_public, updated_at = excluded.updated_at,
-            first_published_at = CASE WHEN video_reviews.first_published_at IS NULL THEN excluded.first_published_at WHEN excluded.first_published_at IS NULL THEN video_reviews.first_published_at ELSE MIN(video_reviews.first_published_at, excluded.first_published_at) END
-          WHERE excluded.updated_at > video_reviews.updated_at`,
-          )
-          .run(canonical, legacy);
-        this.stmts.deleteVideoReviewsByUser.run(legacy);
-        this.mergeSearchHistory(legacy, canonical);
-        this.mergeSingleRowTable(
-          'user_message_state',
-          'state_json',
-          legacy,
-          canonical,
-        );
-        this.mergeSingleRowTable(
-          'user_danmaku_settings',
-          'enabled',
-          legacy,
-          canonical,
-        );
-        this.db
-          .prepare(
-            `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
-          SELECT ?, session_id, bucket_start, watch_ms FROM playback_watch_buckets WHERE username = ?
-          ON CONFLICT(username, session_id, bucket_start) DO UPDATE SET watch_ms = MAX(watch_ms, excluded.watch_ms)`,
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM playback_watch_buckets WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare(
-            `DELETE FROM watch_history AS canonical WHERE username = ? AND EXISTS (
-          SELECT 1 FROM watch_history AS legacy WHERE legacy.username = ?
-          AND (legacy.id = canonical.id OR (legacy.source = canonical.source AND legacy.video_id = canonical.video_id))
-          AND legacy.last_watched_at > canonical.last_watched_at
-        )`,
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare(
-            'UPDATE OR IGNORE watch_history SET username = ? WHERE username = ?',
-          )
-          .run(canonical, legacy);
-        this.db
-          .prepare('DELETE FROM watch_history WHERE username = ?')
-          .run(legacy);
-        this.db
-          .prepare(
-            'UPDATE playback_sessions SET username = ? WHERE username = ?',
-          )
-          .run(canonical, legacy);
-      }
-    });
-
-    migrate();
-    const detail = plan
-      .map(({ legacy, canonical }) => `${legacy} -> ${canonical}`)
-      .join(', ');
-    console.log(`已归一化 SQLite 遗留用户名: ${detail}`);
-  }
-
-  private mergeSocialUsername(legacy: string, canonical: string): void {
-    const existing = this.db
-      .prepare('SELECT username FROM user_profiles WHERE username = ?')
-      .get(canonical);
-    if (existing)
-      this.db
-        .prepare('DELETE FROM user_profiles WHERE username = ?')
-        .run(legacy);
-    else
-      this.db
-        .prepare('UPDATE user_profiles SET username = ? WHERE username = ?')
-        .run(canonical, legacy);
-    for (const [table, columns] of [
-      ['user_profile_showcase', ['username']],
-      ['user_notice_events', ['recipient_username']],
-      ['user_follows', ['follower', 'followee']],
-      ['video_review_likes', ['author', 'liker']],
-      ['video_review_reports', ['author', 'reporter']],
-      ['video_review_replies', ['author', 'username', 'reply_to']],
-      ['video_review_reply_reports', ['reporter']],
-    ] as const) {
-      for (const column of columns) {
-        this.db
-          .prepare(
-            `UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`,
-          )
-          .run(canonical, legacy);
-        this.db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(legacy);
-      }
-    }
-    this.db.exec(
-      'DELETE FROM user_follows WHERE follower = followee; DELETE FROM video_review_likes WHERE author = liker; DELETE FROM video_review_reports WHERE author = reporter;',
-    );
-  }
-
-  private collectDistinctUsernames(): string[] {
-    const tables = [
-      'users',
-      'play_records',
-      'favorites',
-      'video_reviews',
-      'oauth_identities',
-      'user_danmaku',
-      'user_profiles',
-      'user_profile_showcase',
-      'user_lists',
-      'list_likes',
-      'user_access',
-      'user_group_members',
-      'search_history',
-      'skip_configs',
-      'playback_sessions',
-      'watch_history',
-      'user_watch_totals',
-      'user_level_events',
-      'playback_watch_buckets',
-      'user_message_state',
-      'user_annual_recaps',
-      'time_capsules',
-      'work_completions',
-      'user_danmaku_settings',
-    ];
-    const usernames = new Set<string>();
-    for (const table of tables) {
-      const rows = this.db
-        .prepare(`SELECT DISTINCT username FROM ${table}`)
-        .all() as { username: string }[];
-      for (const row of rows) {
-        if (row.username) {
-          if (row.username) usernames.add(row.username);
-        }
-      }
-    }
-    for (const [table, columns] of [
-      ['user_profile_showcase', ['username']],
-      ['user_notice_events', ['recipient_username']],
-      ['user_follows', ['follower', 'followee']],
-      ['video_review_likes', ['author', 'liker']],
-      ['video_review_reports', ['author', 'reporter']],
-      ['video_review_replies', ['author', 'username', 'reply_to']],
-      ['video_review_reply_reports', ['reporter']],
-    ] as const) {
-      for (const column of columns)
-        for (const row of this.db
-          .prepare(`SELECT DISTINCT ${column} AS username FROM ${table}`)
-          .all() as { username: string }[])
-          if (row.username) usernames.add(row.username);
-    }
-    return [...usernames];
-  }
-
-  // 规范行已存在时保留其密码，避免覆盖用户当前在用的凭据
-  private mergeUserRow(legacy: string, canonical: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO users (username, password, password_set)
-         SELECT ?, password, password_set FROM users WHERE username = ?
-         ON CONFLICT(username) DO NOTHING`,
-      )
-      .run(canonical, legacy);
-    this.db.prepare('DELETE FROM users WHERE username = ?').run(legacy);
-  }
-
-  private mergeKeyedTable(
-    table: string,
-    keyColumn: string,
-    jsonColumn: string,
-    legacy: string,
-    canonical: string,
-  ): void {
-    const legacyRows = this.db
-      .prepare(
-        `SELECT ${keyColumn} AS key, ${jsonColumn} AS json FROM ${table} WHERE username = ?`,
-      )
-      .all(legacy) as { key: string; json: string }[];
-    if (legacyRows.length === 0) {
-      return;
-    }
-
-    const readCanonical = this.db.prepare(
-      `SELECT ${jsonColumn} AS json FROM ${table} WHERE username = ? AND ${keyColumn} = ?`,
-    );
-    const upsert = this.db.prepare(
-      `INSERT OR REPLACE INTO ${table} (username, ${keyColumn}, ${jsonColumn}) VALUES (?, ?, ?)`,
-    );
-    for (const row of legacyRows) {
-      const canonicalRow = readCanonical.get(canonical, row.key) as
-        | { json: string }
-        | undefined;
-      const json = pickNewerJson(canonicalRow?.json, row.json);
-      if (table === 'favorites') {
-        this.stmts.setFavorite.run(
-          canonical,
-          row.key,
-          json,
-          ...favoriteProjection(row.key, json),
-        );
-      } else {
-        upsert.run(canonical, row.key, json);
-      }
-    }
-    this.db.prepare(`DELETE FROM ${table} WHERE username = ?`).run(legacy);
-  }
-
-  private mergeSearchHistory(legacy: string, canonical: string): void {
-    const readKeywords = this.db.prepare(
-      'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC',
-    );
-    const legacyKeywords = (
-      readKeywords.all(legacy) as { keyword: string }[]
-    ).map((row) => row.keyword);
-    if (legacyKeywords.length === 0) {
-      return;
-    }
-
-    const canonicalKeywords = (
-      readKeywords.all(canonical) as { keyword: string }[]
-    ).map((row) => row.keyword);
-    const merged = mergeSearchKeywords(
-      canonicalKeywords,
-      legacyKeywords,
-      SEARCH_HISTORY_LIMIT,
-    );
-
-    this.db
-      .prepare('DELETE FROM search_history WHERE username IN (?, ?)')
-      .run(legacy, canonical);
-    const insert = this.db.prepare(
-      'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
-    );
-    merged.forEach((keyword, index) => insert.run(canonical, keyword, index));
-  }
-
-  private mergeSingleRowTable(
-    table: string,
-    jsonColumn: string,
-    legacy: string,
-    canonical: string,
-  ): void {
-    this.db
-      .prepare(
-        `INSERT INTO ${table} (username, ${jsonColumn})
-         SELECT ?, ${jsonColumn} FROM ${table} WHERE username = ?
-         ON CONFLICT(username) DO NOTHING`,
-      )
-      .run(canonical, legacy);
-    this.db.prepare(`DELETE FROM ${table} WHERE username = ?`).run(legacy);
   }
 
   private checkpointWal(): void {
@@ -3810,18 +2968,6 @@ export class LocalSqliteStorage implements IStorage {
     return row ? Number(row.last_login_at) : null;
   }
 
-  async getAllUserLastLogins(): Promise<Record<string, number>> {
-    const rows = this.stmts.getAllUserLastLogins.all() as {
-      username: string;
-      last_login_at: number;
-    }[];
-    const result: Record<string, number> = {};
-    for (const row of rows) {
-      result[row.username] = Number(row.last_login_at);
-    }
-    return result;
-  }
-
   async listAnnouncements(limit: number): Promise<SiteAnnouncement[]> {
     const rows = this.db
       .prepare(ANNOUNCEMENT_LIST_SQL)
@@ -3915,16 +3061,6 @@ export class LocalSqliteStorage implements IStorage {
   }
   async releaseInviteCodeUse(code: string): Promise<void> {
     this.invites.release(code);
-  }
-
-  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
-    return Object.fromEntries(
-      this.invites.all().map((item) => [item.code, item.usedCount || 0]),
-    );
-  }
-
-  async deleteInviteCodeUsage(code: string): Promise<void> {
-    this.invites.delete(code);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {

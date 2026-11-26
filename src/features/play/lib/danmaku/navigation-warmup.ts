@@ -12,7 +12,6 @@ import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   buildDanmakuScopeKey,
   readDanmakuEpisodeSearchTitle,
-  readStoredDanmakuEnabled,
 } from '@/lib/local-preferences';
 import { getRuntimeConfig } from '@/lib/runtime-config';
 
@@ -183,10 +182,7 @@ function readAccountPreference(username: string): Promise<boolean> {
     .then(async (response) => {
       if (!response.ok) return false;
       const payload = (await response.json()) as { enabled?: unknown };
-      const enabled =
-        typeof payload.enabled === 'boolean'
-          ? payload.enabled
-          : (readStoredDanmakuEnabled() ?? false);
+      const enabled = payload.enabled === true;
       if (preferenceRequest?.promise === promise) {
         preference = { username, enabled };
       }

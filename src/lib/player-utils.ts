@@ -128,43 +128,6 @@ function resolveBufferDefaults() {
 }
 
 // ---------------------------------------------------------------------------
-// HLS 起播码率策略
-// ---------------------------------------------------------------------------
-
-function resolveStartLevel(): number | undefined {
-  if (typeof navigator === 'undefined') return undefined;
-
-  const conn = (navigator as Navigator & { connection?: NetworkInfoLike })
-    .connection;
-
-  if (!conn) return undefined;
-  if (conn.saveData) return undefined;
-
-  const slowTypes = new Set(['slow-2g', '2g', '3g']);
-  if (conn.effectiveType && slowTypes.has(conn.effectiveType)) return undefined;
-
-  if (typeof conn.downlink === 'number') {
-    if (conn.downlink >= 10) return Number.MAX_SAFE_INTEGER;
-    if (conn.downlink >= 5) return Number.MAX_SAFE_INTEGER - 1;
-  }
-  return undefined;
-}
-
-export function pickStartLevelFromStrategy(
-  marker: number | undefined,
-  levelCount: number,
-): number | undefined {
-  if (marker === undefined || levelCount <= 0) return undefined;
-  if (marker === Number.MAX_SAFE_INTEGER) return levelCount - 1;
-  if (marker === Number.MAX_SAFE_INTEGER - 1) {
-    return Math.max(0, levelCount - 2);
-  }
-  return Math.min(Math.max(0, marker), levelCount - 1);
-}
-
-export const HLS_START_LEVEL_STRATEGY = resolveStartLevel();
-
-// ---------------------------------------------------------------------------
 // HLS 配置工厂
 // ---------------------------------------------------------------------------
 

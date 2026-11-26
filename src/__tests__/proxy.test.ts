@@ -87,14 +87,12 @@ const ORIGINAL_ENV = {
   AUTH_SECRET: process.env.AUTH_SECRET,
   ICETV_PASSWORD: process.env.ICETV_PASSWORD,
   AUTH_SESSION_TTL_HOURS: process.env.AUTH_SESSION_TTL_HOURS,
-  LEGACY_COOKIE_CUTOFF_DATE: process.env.LEGACY_COOKIE_CUTOFF_DATE,
 };
 
 describe('proxy middleware session handling', () => {
   beforeEach(() => {
     process.env.AUTH_SECRET = AUTH_SECRET;
     process.env.ICETV_PASSWORD = 'owner-pass';
-    process.env.LEGACY_COOKIE_CUTOFF_DATE = '2099-01-01T00:00:00.000Z';
     delete process.env.AUTH_SESSION_TTL_HOURS;
   });
 
@@ -141,36 +139,6 @@ describe('proxy middleware session handling', () => {
     ).resolves.toBe(true);
   });
 
-  it('migrates legacy owner-password session to AUTH_SECRET on refresh', async () => {
-    const cookie = await buildAuthCookie('owner-pass', Date.now() + HOUR_MS);
-    const consoleWarnSpy = jest
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
-
-    const response = (await proxy(createRequest(cookie))) as MockResponse;
-
-    const authCall = response.cookieCalls.find((call) => call.name === 'auth');
-    expect(authCall).toBeDefined();
-    const refreshed = parseAuthCookie(authCall!.value);
-    await expect(
-      verifySignature(
-        getSignatureData('account', refreshed.expiresAt, 'alice'),
-        refreshed.signature,
-        AUTH_SECRET,
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      verifySignature(
-        getSignatureData('account', refreshed.expiresAt, 'alice'),
-        refreshed.signature,
-        'owner-pass',
-      ),
-    ).resolves.toBe(false);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
-    );
-  });
-
   it('clears cookies when signature is invalid', async () => {
     const expiresAt = Date.now() + HOUR_MS;
     const cookie = encodeURIComponent(
@@ -193,18 +161,22 @@ describe('proxy middleware session handling', () => {
     });
   });
 
-  it('accepts legacy session without re-signing when AUTH_SECRET is missing', async () => {
-    delete process.env.AUTH_SECRET;
-    const cookie = await buildAuthCookie('owner-pass', Date.now() + HOUR_MS);
-    const consoleWarnSpy = jest
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
+  it.each([AUTH_SECRET, undefined])(
+    'clears owner-password-signed cookies when AUTH_SECRET is %s',
+    async (secret) => {
+      if (secret) process.env.AUTH_SECRET = secret;
+      else delete process.env.AUTH_SECRET;
+      const cookie = await buildAuthCookie('owner-pass', Date.now() + HOUR_MS);
 
-    const response = (await proxy(createRequest(cookie))) as MockResponse;
+      const response = (await proxy(createRequest(cookie))) as MockResponse;
 
-    expect(response.cookieCalls).toHaveLength(0);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
-    );
-  });
+      expect(response.cookieCalls.map((call) => call.name)).toEqual(
+        expect.arrayContaining(['auth', 'auth_meta']),
+      );
+      response.cookieCalls.forEach((call) => {
+        expect(call.value).toBe('');
+        expect(call.options.expires?.getTime()).toBe(0);
+      });
+    },
+  );
 });

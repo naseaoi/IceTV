@@ -1053,7 +1053,6 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   // 登录活动相关
   recordUserLogin(userName: string, loginAt: number): Promise<void>;
   getUserLastLogin(userName: string): Promise<number | null>;
-  getAllUserLastLogins(): Promise<Record<string, number>>;
 
   getAllInviteCodes(): Promise<
     import('@/features/admin/services/inviteCodes').InviteCode[]
@@ -1076,8 +1075,6 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   ): Promise<number>;
   reserveInviteCodeUse(code: string): Promise<boolean>;
   releaseInviteCodeUse(code: string): Promise<void>;
-  getAllInviteCodeUsage(): Promise<Record<string, number>>;
-  deleteInviteCodeUsage(code: string): Promise<void>;
 
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;

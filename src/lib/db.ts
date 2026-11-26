@@ -984,11 +984,6 @@ class DbManager {
     await storage.recordUserLogin(userName, activeAt);
   }
 
-  async getAllUserLastActive(): Promise<Record<string, number>> {
-    const storage = await this.getStorage();
-    return storage.getAllUserLastLogins();
-  }
-
   async listAnnouncements(
     ...args: Parameters<IStorage['listAnnouncements']>
   ): ReturnType<IStorage['listAnnouncements']> {
@@ -1076,16 +1071,6 @@ class DbManager {
   async releaseInviteCodeUse(code: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.releaseInviteCodeUse(code);
-  }
-
-  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
-    const storage = await this.getStorage();
-    return storage.getAllInviteCodeUsage();
-  }
-
-  async deleteInviteCodeUsage(code: string): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.deleteInviteCodeUsage(code);
   }
 
   async getUserNoticeMessages(

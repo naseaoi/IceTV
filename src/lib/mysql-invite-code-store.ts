@@ -6,7 +6,6 @@ import {
   type InviteCodePurge,
   type InviteCodeQuery,
   type InviteCodeRow,
-  importedInviteCodes,
   INVITE_ACTIVE_SQL,
   INVITE_INSERT_SQL,
   inviteFromRow,
@@ -16,7 +15,6 @@ import {
   inviteValues,
   MAX_INVITE_CODES,
 } from '@/lib/invite-code-storage';
-import type { AdminConfig } from '@/types/admin';
 
 type Row = InviteCodeRow & RowDataPacket;
 
@@ -38,39 +36,6 @@ export class MysqlInviteCodeStore {
     } finally {
       connection.release();
     }
-  }
-
-  async migrate(): Promise<void> {
-    await this.transaction(async (connection) => {
-      const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE',
-      );
-      if (!rows.length) return;
-      const original = rows[0].config_json as string;
-      const config = JSON.parse(original) as AdminConfig;
-      if (!Object.hasOwn(config.UserConfig || {}, 'InviteCodes')) return;
-      const [usageRows] = await connection.query<Row[]>(
-        'SELECT code, used_count FROM invite_code_usage',
-      );
-      const usage = Object.fromEntries(
-        usageRows.map((row) => [row.code, Number(row.used_count)]),
-      );
-      for (const item of importedInviteCodes(
-        config.UserConfig.InviteCodes,
-        usage,
-      )) {
-        await connection.execute(
-          INVITE_INSERT_SQL.replace('INSERT INTO', 'INSERT IGNORE INTO'),
-          inviteValues(item),
-        );
-      }
-      delete config.UserConfig.InviteCodes;
-      await connection.execute(
-        'UPDATE admin_config SET config_json = ? WHERE id = 1 AND BINARY config_json = BINARY ?',
-        [JSON.stringify(config), original],
-      );
-      await connection.execute('DELETE FROM invite_code_usage');
-    });
   }
 
   async all(): Promise<InviteCode[]> {

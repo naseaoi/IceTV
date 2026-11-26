@@ -77,11 +77,3 @@ export const inputStyles = {
 /** Admin 表单勾选框样式 */
 export const checkboxStyles =
   'h-4 w-4 rounded border-gray-300 bg-gray-100 text-brand-600 accent-brand-600 checked:border-brand-600 checked:bg-brand-600 focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-brand-500 dark:ring-offset-gray-800 dark:checked:border-brand-500 dark:checked:bg-brand-500 dark:focus:ring-brand-600';
-
-/** 状态徽章样式（启用/禁用标识） */
-export const statusBadgeStyles = {
-  enabled:
-    'rounded-full px-2 py-1 text-xs bg-brand-100 text-brand-800 dark:bg-brand-900/20 dark:text-brand-300',
-  disabled:
-    'rounded-full px-2 py-1 text-xs bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300',
-};
