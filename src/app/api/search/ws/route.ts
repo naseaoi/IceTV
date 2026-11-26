@@ -304,6 +304,8 @@ function createSearchStreamResponse(body: BodyInit) {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
+      // Nginx 反代默认缓冲上游响应，事件会成批到达；此头让其逐条转发，部署者无需改反代配置
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET',
