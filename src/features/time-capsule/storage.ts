@@ -415,6 +415,17 @@ export class ViewingHappinessPlans {
     const username = normalizeUsername(user);
     const where =
       'c.username = ? AND c.deliver_at <= ? AND c.opened_at IS NULL';
+    if (limit === 1 && !before) {
+      const rows = yield query(
+        `${CAPSULE_SELECT.replace('SELECT c.*', 'SELECT COUNT(*) OVER () AS total, c.*')} WHERE ${where} ORDER BY c.deliver_at DESC, c.id DESC LIMIT 1`,
+        username,
+        now,
+      );
+      return {
+        items: rows.map((row) => capsuleMessage(delivered(row))),
+        total: Number(rows[0]?.total ?? 0),
+      };
+    }
     const [count] = yield query(
       `SELECT COUNT(*) AS total FROM time_capsules c WHERE ${where}`,
       username,

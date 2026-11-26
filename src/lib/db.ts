@@ -313,6 +313,12 @@ class DbManager {
     return (await this.getStorage()).getReviewReportPage(...args);
   }
 
+  async getMessageSourceSummary(
+    ...args: Parameters<IStorage['getMessageSourceSummary']>
+  ): ReturnType<IStorage['getMessageSourceSummary']> {
+    return (await this.getStorage()).getMessageSourceSummary(...args);
+  }
+
   async getFollowReviewMessageCount(
     ...args: Parameters<IStorage['getFollowReviewMessageCount']>
   ): Promise<number> {
@@ -622,6 +628,12 @@ class DbManager {
   }> {
     const storage = await this.getStorage();
     return storage.getAllPlayRecords(userName);
+  }
+
+  async getMetadataRefreshPage(
+    ...args: Parameters<IStorage['getMetadataRefreshPage']>
+  ) {
+    return (await this.getStorage()).getMetadataRefreshPage(...args);
   }
 
   async getStalePlayRecordPage(

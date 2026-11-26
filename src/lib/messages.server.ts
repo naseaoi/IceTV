@@ -33,6 +33,7 @@ import {
   hasUnreadPlayRecordMessage,
   markPlayRecordMessageRead,
 } from '@/lib/play-records';
+import { createSwrCache } from '@/lib/server-cache';
 import { PlayRecord, SiteAnnouncement, UserMessageState } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 import { ReviewValidationError } from '@/lib/video-reviews';
@@ -42,6 +43,17 @@ const READ_ALL_BATCH_SIZE = 200;
 const ANNOUNCEMENT_UNREAD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const ANNOUNCEMENT_UNREAD_LIMIT = 50;
 const ANNOUNCEMENT_HISTORY_LIMIT = 20;
+const announcementSnapshot = createSwrCache<SiteAnnouncement[]>({
+  name: 'message-announcements',
+  freshMs: 5000,
+  staleMs: 0,
+  maxSize: 1,
+  maxWeightBytes: 1024 * 1024,
+});
+
+export function invalidateMessageAnnouncementSnapshot(): void {
+  announcementSnapshot.clear();
+}
 
 function hashValue(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 20);
@@ -96,17 +108,22 @@ async function getAnnouncementContext(userName: string): Promise<{
   state: UserMessageState;
 }> {
   const [rows, state] = await Promise.all([
-    db.getPublishedAnnouncements({
-      since: Date.now() - ANNOUNCEMENT_UNREAD_WINDOW_MS,
-      limit: ANNOUNCEMENT_UNREAD_LIMIT,
-    }),
+    announcementSnapshot.getOrLoad('published', () =>
+      db.getPublishedAnnouncements({
+        since: Date.now() - ANNOUNCEMENT_UNREAD_WINDOW_MS,
+        limit: ANNOUNCEMENT_UNREAD_LIMIT,
+      }),
+    ),
     db.getUserMessageState(userName),
   ]);
   const readAt = state.announcementReadAt ?? 0;
   const readIds = new Set(state.announcementReadIds ?? []);
   const announcements = rows.flatMap((row) => {
     const message = toAnnouncementMessage(row);
-    return message && message.createdAt > readAt && !readIds.has(message.id)
+    return message &&
+      message.createdAt > Date.now() - ANNOUNCEMENT_UNREAD_WINDOW_MS &&
+      message.createdAt > readAt &&
+      !readIds.has(message.id)
       ? [message]
       : [];
   });
@@ -335,13 +352,98 @@ export async function getUserMessagePage(
   };
 }
 
+async function getSummarySources(userName: string, state: UserMessageState) {
+  const muted = new Set(state.mutedKinds ?? []);
+  const now = Date.now();
+  const social = (
+    kind: import('@/lib/message-source-summary').MessageSummarySource,
+    readAt: number | undefined,
+    readIds: string[] | undefined,
+    disabled = false,
+  ) =>
+    disabled
+      ? Promise.resolve({ items: [] as UserMessage[], total: 0 })
+      : db.getMessageSourceSummary(
+          kind,
+          userName,
+          readAt ?? 0,
+          readIds ?? [],
+          now,
+        );
+  const [
+    tracking,
+    favorites,
+    followed,
+    recaps,
+    replies,
+    followers,
+    likes,
+    notices,
+    capsules,
+  ] = await Promise.all([
+    muted.has('tracking-update')
+      ? { items: {}, total: 0 }
+      : db.getUnreadTrackingPlayRecordPage(userName, 1),
+    muted.has('tracking-update')
+      ? { items: [], total: 0 }
+      : db.getFavoriteUpdateMessagePage(userName, 1),
+    social(
+      'follow-review',
+      state.followReviewReadAt,
+      state.followReviewReadIds,
+      muted.has('follow-review'),
+    ),
+    social(
+      'follow-recap',
+      state.followReviewReadAt,
+      state.followReviewReadIds,
+      muted.has('follow-review'),
+    ),
+    social(
+      'review-reply',
+      state.reviewReplyReadAt,
+      state.reviewReplyReadIds,
+      muted.has('review-reply'),
+    ),
+    social(
+      'new-follower',
+      state.newFollowerReadAt,
+      state.newFollowerReadIds,
+      muted.has('new-follower'),
+    ),
+    social(
+      'review-like',
+      state.reviewLikeReadAt,
+      state.reviewLikeReadIds,
+      muted.has('review-like'),
+    ),
+    social('user-notice', state.userNoticeReadAt, state.userNoticeReadIds),
+    db.getCapsuleMessages(userName, 1, undefined, now),
+  ]);
+  return {
+    tracking,
+    favorites,
+    capsules,
+    followed: [...followed.items, ...recaps.items],
+    followCount: followed.total + recaps.total,
+    replies: replies.items,
+    replyCount: replies.total,
+    followers: followers.items,
+    followerCount: followers.total,
+    likes: likes.items,
+    likeCount: likes.total,
+    notices: notices.items,
+    noticeCount: notices.total,
+  };
+}
+
 export async function getUserMessageSummary(
   userName: string,
   timeZone = 'UTC',
 ): Promise<UserMessageSummary> {
   const { announcements, state } = await getAnnouncementContext(userName);
   const [sources, annualReport] = await Promise.all([
-    getVisibleMessageSources(userName, state, 1),
+    getSummarySources(userName, state),
     getAnnualReportMessage(userName, state, timeZone),
   ]);
   const latestTracking =

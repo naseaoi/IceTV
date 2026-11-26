@@ -73,6 +73,51 @@ const tabs: { key: LivePanelTab; label: string }[] = [
   { key: 'sources', label: '直播源' },
 ];
 
+const failedLogos = new Map<string, 'proxy' | 'failed'>();
+
+function rememberLogoFailure(url: string, state: 'proxy' | 'failed') {
+  failedLogos.delete(url);
+  failedLogos.set(url, state);
+  while (failedLogos.size > 512)
+    failedLogos.delete(failedLogos.keys().next().value!);
+}
+
+export function ChannelLogoImage({
+  url,
+  name,
+  source,
+}: {
+  url: string;
+  name: string;
+  source: string;
+}) {
+  const [stage, setStage] = useState(
+    () =>
+      failedLogos.get(url) || (/^https:\/\//i.test(url) ? 'direct' : 'proxy'),
+  );
+  if (!url || stage === 'failed' || failedLogos.get(url) === 'failed') {
+    return <Tv className='h-5 w-5 text-gray-400 dark:text-gray-500' />;
+  }
+  return (
+    <img
+      src={
+        stage === 'direct'
+          ? url
+          : `/api/proxy/logo?url=${encodeURIComponent(url)}&source=${encodeURIComponent(source)}`
+      }
+      alt={name}
+      className='h-full w-full rounded object-contain'
+      loading='lazy'
+      referrerPolicy='no-referrer'
+      onError={() => {
+        const next = stage === 'direct' ? 'proxy' : 'failed';
+        rememberLogoFailure(url, next);
+        setStage(next);
+      }}
+    />
+  );
+}
+
 function ChannelLogo({
   channel,
   source,
@@ -89,16 +134,12 @@ function ChannelLogo({
     <div
       className={`${sizeClass} flex flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-700 dark:bg-gray-800`}
     >
-      {channel?.logo ? (
-        <img
-          src={`/api/proxy/logo?url=${encodeURIComponent(channel.logo)}&source=${source?.key || ''}`}
-          alt={channel.name}
-          className='h-full w-full rounded object-contain'
-          loading='lazy'
-        />
-      ) : (
-        <Tv className='h-5 w-5 text-gray-400 dark:text-gray-500' />
-      )}
+      <ChannelLogoImage
+        key={`${source?.key || ''}:${channel?.logo || ''}`}
+        url={channel?.logo || ''}
+        name={channel?.name || ''}
+        source={source?.key || ''}
+      />
     </div>
   );
 }

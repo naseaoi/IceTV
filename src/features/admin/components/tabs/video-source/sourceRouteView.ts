@@ -178,6 +178,14 @@ export function getSourceRouteAdvice(
   }
 
   if (mode === 'server' && enough(server) && server.successRate < 0.2) {
+    if (top?.reason === 'http-403' || top?.reason === 'connection') {
+      return {
+        kind: 'mode',
+        target: 'browser',
+        label: '建议直连',
+        detail: `代理成功率 ${ratio(server)}${failureClause(view)}；改为直连可避开服务器出口拒绝，实际可用性以浏览器播放为准`,
+      };
+    }
     return {
       kind: 'mode',
       target: 'auto',

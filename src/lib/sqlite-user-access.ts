@@ -9,6 +9,8 @@ import {
   UserAccess,
   userAccessFromRow,
   UserAccessGuard,
+  UserAccessJoinedRow,
+  userAccessListFromRows,
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
@@ -47,6 +49,17 @@ export class SqliteUserAccessStore {
       rows[0],
       rows.flatMap((row) => (row.group_name === null ? [] : [row.group_name])),
     );
+  }
+
+  list(): UserAccess[] {
+    const rows = this.db
+      .prepare(
+        'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a LEFT JOIN user_group_members m ON m.username = a.username WHERE (a.username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = a.username)) ORDER BY a.username, m.position, m.group_name',
+      )
+      .all(
+        normalizeUsername(getOwnerUsername() || ''),
+      ) as UserAccessJoinedRow[];
+    return userAccessListFromRows(rows);
   }
 
   put(user: UserAccess): void {
@@ -124,29 +137,31 @@ export class SqliteUserAccessStore {
   }
 
   removeSource(source: string): void {
-    this.db
-      .transaction(() => {
-        const rows = this.db
-          .prepare(
-            'SELECT username, enabled_apis FROM user_access WHERE enabled_apis IS NOT NULL',
-          )
-          .all() as { username: string; enabled_apis: string }[];
-        for (const row of rows) {
-          const sources = (JSON.parse(row.enabled_apis) as string[]).filter(
-            (key) => key !== source,
-          );
-          this.db
-            .prepare(
-              'UPDATE user_access SET enabled_apis = ?, updated_at = ? WHERE username = ?',
-            )
-            .run(
-              sources.length ? JSON.stringify(sources) : null,
-              Date.now(),
-              row.username,
-            );
-        }
-      })
-      .immediate();
+    this.db.transaction(() => this.removeSources([source])).immediate();
+  }
+
+  removeSources(sources: string[]): void {
+    if (!sources.length) return;
+    const removed = new Set(sources);
+    const rows = this.db
+      .prepare(
+        'SELECT username, enabled_apis FROM user_access WHERE enabled_apis IS NOT NULL',
+      )
+      .all() as { username: string; enabled_apis: string }[];
+    const update = this.db.prepare(
+      'UPDATE user_access SET enabled_apis = ?, updated_at = ? WHERE username = ?',
+    );
+    const now = Date.now();
+    for (const row of rows) {
+      const before = JSON.parse(row.enabled_apis) as string[];
+      const after = before.filter((key) => !removed.has(key));
+      if (after.length !== before.length)
+        update.run(
+          after.length ? JSON.stringify(after) : null,
+          now,
+          row.username,
+        );
+    }
   }
 
   backfill(): void {

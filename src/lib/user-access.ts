@@ -94,6 +94,27 @@ export function userAccessFromRow(
   });
 }
 
+export type UserAccessJoinedRow = Parameters<typeof userAccessFromRow>[0] & {
+  group_name: string | null;
+};
+
+export function userAccessListFromRows(
+  rows: UserAccessJoinedRow[],
+): UserAccess[] {
+  const users = new Map<string, { row: UserAccessJoinedRow; tags: string[] }>();
+  for (const row of rows) {
+    let user = users.get(row.username);
+    if (!user) {
+      user = { row, tags: [] };
+      users.set(row.username, user);
+    }
+    if (row.group_name !== null) user.tags.push(row.group_name);
+  }
+  return [...users.values()].map(({ row, tags }) =>
+    userAccessFromRow(row, tags),
+  );
+}
+
 export function removedAccessReferences(
   previous: AdminConfig | null,
   next: AdminConfig,

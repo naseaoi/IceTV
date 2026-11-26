@@ -6,9 +6,15 @@ import {
   COVER_IMAGE_WIDTHS,
   DEFAULT_COVER_IMAGE_QUALITY,
 } from '@/lib/cover-image-variants';
+import { ResponseSizeLimitError } from '@/lib/proxy-response-limits';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 
-const MAX_COVER_IMAGE_PIXELS = 40_000_000;
-// 排队任务各持有一份原图，等待者需有上限；下载阶段已受回源连接预算约束
+const MAX_COVER_IMAGE_PIXELS = 25_000_000;
+export const MAX_COVER_IMAGE_BYTES = 10 * 1024 * 1024;
+const SOURCE_BYTE_BUDGET = 64 * 1024 * 1024;
+// 下载前按单图上限预留，完成后缩减为实际字节；覆盖下载、排队和转码。
+let reservedSourceBytes = 0;
+let activeImageTasks = 0;
 const RESIZE_CONCURRENCY = 4;
 const RESIZE_MAX_WAITING = 16;
 const RESIZE_WAIT_TIMEOUT_MS = 10_000;
@@ -54,6 +60,33 @@ export function parseCoverImageResizeOptions(
   }
 
   return { width, quality };
+}
+
+export async function downloadAndResizeCoverImage(
+  download: () => Promise<ArrayBuffer>,
+  options: CoverImageResizeOptions,
+): Promise<ArrayBuffer> {
+  if (
+    activeImageTasks >= RESIZE_CONCURRENCY + RESIZE_MAX_WAITING ||
+    reservedSourceBytes + MAX_COVER_IMAGE_BYTES > SOURCE_BYTE_BUDGET
+  ) {
+    throw new ResourceLimitError(503, 2);
+  }
+  activeImageTasks += 1;
+  let reservation = MAX_COVER_IMAGE_BYTES;
+  reservedSourceBytes += reservation;
+  try {
+    const source = await download();
+    if (source.byteLength > MAX_COVER_IMAGE_BYTES) {
+      throw new ResponseSizeLimitError(MAX_COVER_IMAGE_BYTES);
+    }
+    reservedSourceBytes -= reservation - source.byteLength;
+    reservation = source.byteLength;
+    return await resizeCoverImage(source, options);
+  } finally {
+    reservedSourceBytes -= reservation;
+    activeImageTasks -= 1;
+  }
 }
 
 export async function resizeCoverImage(

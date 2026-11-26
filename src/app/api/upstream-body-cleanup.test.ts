@@ -58,7 +58,8 @@ jest.mock('@/lib/server-proxy-guard', () => ({
 jest.mock('@/lib/cover-image-resize', () => ({
   CoverImageResizeParamError: class extends Error {},
   parseCoverImageResizeOptions: () => null,
-  resizeCoverImage: jest.fn(),
+  downloadAndResizeCoverImage: jest.fn(),
+  MAX_COVER_IMAGE_BYTES: 10 * 1024 * 1024,
 }));
 jest.mock('@/lib/cover-image-resize-cache.server', () => ({
   loadResizedCoverImage: jest.fn(),
@@ -81,7 +82,7 @@ const request = {
 
 it.each([
   ['key', keyRoute.GET, 503],
-  ['logo', logoRoute.GET, 503],
+  ['logo', logoRoute.GET, 502],
   ['precheck', precheckRoute.GET, 500],
   ['subscription', subscriptionRoute.POST, 503],
 ] as const)(
@@ -132,20 +133,26 @@ it.each([
 );
 
 it.each([
-  ['logo', logoRoute.GET],
-  ['precheck', precheckRoute.GET],
-] as const)('%s 直播元数据回源关闭代理池', async (_name, handle) => {
-  mockFetch.mockClear().mockResolvedValue({
-    ok: false,
-    status: 503,
-    body: { cancel: jest.fn().mockResolvedValue(undefined) },
-  });
-  await handle(request);
-  expect(mockFetch).toHaveBeenCalledWith(
-    'https://example.com/image.jpg',
-    expect.objectContaining({ useProxyPool: false }),
-  );
-});
+  ['logo', logoRoute.GET, true],
+  ['precheck', precheckRoute.GET, false],
+] as const)(
+  '%s 直播元数据沿用对应出口策略',
+  async (_name, handle, useProxyPool) => {
+    mockFetch.mockClear().mockResolvedValue({
+      ok: false,
+      status: 503,
+      body: { cancel: jest.fn().mockResolvedValue(undefined) },
+    });
+    await handle({
+      ...request,
+      url: request.url.replace('image.jpg', 'pool.jpg'),
+    } as NextRequest);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://example.com/pool.jpg',
+      expect.objectContaining({ useProxyPool }),
+    );
+  },
+);
 
 it('logo 成功响应只允许浏览器私有缓存', async () => {
   mockFetch.mockResolvedValue({
@@ -154,12 +161,46 @@ it('logo 成功响应只允许浏览器私有缓存', async () => {
     body: null,
     arrayBuffer: async () => new Uint8Array([1, 2]).buffer,
   });
-  const response = await logoRoute.GET(request);
+  const response = await logoRoute.GET({
+    ...request,
+    url: request.url.replace('image.jpg', 'success.jpg'),
+  } as NextRequest);
   expect(response.status).toBe(200);
   expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400');
   expect(response.headers.has('CDN-Cache-Control')).toBe(false);
   expect(response.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
 });
+
+it.each(['network', 'http'])(
+  'logo %s 失败短期缓存且不重复回源',
+  async (kind) => {
+    mockFetch.mockReset();
+    if (kind === 'network')
+      mockFetch.mockRejectedValue(new Error('connection failed'));
+    else
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 403,
+        body: { cancel: jest.fn() },
+      });
+    const target = {
+      ...request,
+      url: request.url.replace('image.jpg', `negative-${kind}.jpg`),
+    } as NextRequest;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await logoRoute.GET(target);
+      expect(response.status).toBe(502);
+      expect(response.headers.get('Cache-Control')).toBe(
+        'private, max-age=120',
+      );
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 120_001);
+    await logoRoute.GET(target);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    clock.mockRestore();
+  },
+);
 
 it('直播预检成功仅读取响应头并取消正文', async () => {
   const cancel = jest.fn().mockResolvedValue(undefined);

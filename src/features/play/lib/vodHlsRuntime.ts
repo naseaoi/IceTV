@@ -26,6 +26,10 @@ import {
   registerStartupStateDescriber,
 } from '@/features/play/lib/playerLoading';
 import {
+  isSourceServerUnavailable,
+  rememberRelayFailure,
+} from '@/features/play/lib/relayFailureMemory';
+import {
   type ResumeMode,
   resolvePendingResumeTime,
 } from '@/features/play/lib/resumePlayback';
@@ -418,6 +422,12 @@ export function createVodM3u8Loader({
     let currentUseServerProxy = previousRoute
       ? previousRoute === 'server'
       : playbackRoute.useServerProxy;
+    if (
+      !previousRoute &&
+      allowAutoFallback &&
+      isSourceServerUnavailable(sourceKey, url)
+    )
+      currentUseServerProxy = false;
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
     const segmentPrebufferController = createVodSegmentPrebufferController({
@@ -555,6 +565,7 @@ export function createVodM3u8Loader({
       allowAutoFallback &&
       !!sourceKey &&
       !attempt.routeSwitched &&
+      (currentUseServerProxy || !isSourceServerUnavailable(sourceKey, url)) &&
       !attempt.triedRoutes.has(routeKey(!currentUseServerProxy));
 
     const switchRoute = (_reason: string) => {
@@ -816,7 +827,10 @@ export function createVodM3u8Loader({
     video.addEventListener('playing', onPlaying);
     video.addEventListener('timeupdate', onTimeUpdate);
 
-    const tryRefreshForbiddenUrl = (reason: string) => {
+    const tryRefreshForbiddenUrl = (
+      reason: string,
+      rememberHostFailure: () => boolean,
+    ) => {
       if (!onPlaybackUrlForbidden) return false;
       const controller = new AbortController();
       const pending = onPlaybackUrlForbidden(url, controller.signal);
@@ -847,9 +861,12 @@ export function createVodM3u8Loader({
         vodRuntimeResourceWaits.delete(video);
         if (handled) {
           runManagedVideoCleanup(video);
-        } else if (!switchRoute(reason)) {
-          reportRouteStat(false);
-          failCurrentSource(reason);
+        } else {
+          if (rememberHostFailure()) reportRouteStat(false);
+          if (!switchRoute(reason)) {
+            reportRouteStat(false);
+            failCurrentSource(reason);
+          }
         }
       };
       const { idleMs } = resolveVodStartupTimeouts(
@@ -929,12 +946,33 @@ export function createVodM3u8Loader({
         return;
       }
       const isRouteNetworkError = isVodRouteNetworkError(data);
+      const rememberHostFailure = () =>
+        currentUseServerProxy &&
+        isRouteNetworkError &&
+        rememberRelayFailure(sourceKey, url, (name) => {
+          try {
+            return (
+              data?.networkDetails?.getResponseHeader?.(name) ??
+              data?.networkDetails?.headers?.get?.(name) ??
+              null
+            );
+          } catch {
+            return null;
+          }
+        });
+      // 明确 403 先给当前集一次强刷机会，失败后才写会话冷却并回落。
       if (
         isRouteNetworkError &&
         getHlsErrorStatus(data) === 403 &&
-        tryRefreshForbiddenUrl(errorReason)
+        tryRefreshForbiddenUrl(errorReason, rememberHostFailure)
       )
         return;
+      if (rememberHostFailure()) {
+        reportRouteStat(false);
+        if (switchRoute(errorReason)) return;
+        failCurrentSource(errorReason);
+        return;
+      }
       const isFragNetworkError =
         isRouteNetworkError && /frag|segment/i.test(errorDetails);
       const isFragOrLevelNetworkError =
@@ -1138,6 +1176,10 @@ export function createVodM3u8Loader({
     video.addEventListener('loadeddata', tryReportVideoInfo);
 
     managedVideo.hls = hls;
+    if (currentUseServerProxy && isSourceServerUnavailable(sourceKey, url)) {
+      failCurrentSource('server-relay-unavailable');
+      return;
+    }
     startupProgress = beginMediaLoad();
     hls.loadSource(targetUrl);
     if (!canReuseHls) {

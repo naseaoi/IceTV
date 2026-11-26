@@ -82,6 +82,18 @@ describe('getSourceRouteAdvice', () => {
     ).toMatchObject({ kind: 'mode', target: 'server' });
   });
 
+  it('固定代理被服务器出口拒绝时建议直连', () => {
+    expect(
+      getSourceRouteAdvice(
+        'server',
+        view(
+          [stat('server', 'primary', 0, 30)],
+          [{ reason: 'http-403', failureCount: 30 }],
+        ),
+      ),
+    ).toMatchObject({ kind: 'mode', target: 'browser' });
+  });
+
   it('固定代理成功率过低时建议自动', () => {
     expect(
       getSourceRouteAdvice('server', view([stat('server', 'primary', 2, 28)])),

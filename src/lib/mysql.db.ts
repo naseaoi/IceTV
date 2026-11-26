@@ -57,9 +57,13 @@ import {
 } from '@/features/lists/lib/list-storage';
 import { annualActivityPlan } from '@/features/playback-stats/lib/annual-activity-storage';
 import {
+  PLAYBACK_RETENTION_BATCH_SIZE,
+  runPlaybackRetention,
+} from '@/features/playback-stats/lib/retention';
+import {
+  type AggregatedSourceUsageRow,
   type PlaybackSourceUsage,
-  type PlaybackSourceUsageRow,
-  aggregateSourceUsage,
+  sourceUsageFromAggregates,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
 import { SEARCH_HISTORY_LIMIT } from '@/features/search/lib/searchQuery';
@@ -81,9 +85,14 @@ import {
   sameSubscription,
 } from '@/lib/config-state';
 import {
+  buildMetadataRefreshPage,
+  metadataRefreshPageQuery,
+} from '@/lib/cron/metadata-candidates';
+import {
   type InviteCodePurge,
   type InviteCodeQuery,
 } from '@/lib/invite-code-storage';
+import { readMessageSourceSummary } from '@/lib/message-source-summary';
 import { MysqlConfigStateStore } from '@/lib/mysql-config-state-store';
 import { MysqlInviteCodeStore } from '@/lib/mysql-invite-code-store';
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
@@ -125,18 +134,15 @@ import {
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
-import {
-  accessPermissionChanges,
-  accessPermissions,
-  configPermissionsChanged,
-} from '@/lib/user-notice';
+import { configPermissionsChanged } from '@/lib/user-notice';
 import {
   type NoticeMutation,
+  configPermissionChanges,
+  mysqlPermissionNoticeBatches,
   noticeInsert,
   NoticeModeration,
   pendingPermissionNotices,
   pendingPermissionNoticesQuery,
-  permissionNoticeWrite,
   userNoticeSchema,
   UserNoticeStorage,
 } from '@/lib/user-notice-storage';
@@ -820,6 +826,13 @@ export class MySqlStorage implements IStorage {
       }
     }
     for (const [table, index, columns] of [
+      ['play_records', 'idx_records_metadata_work', 'record_key, username'],
+      [
+        'video_review_replies',
+        'idx_reply_author_recipient',
+        'author, reply_to, created_at, id',
+      ],
+      ['favorites', 'idx_favorites_metadata_work', 'favorite_key, username'],
       [
         'user_follows',
         'idx_follow_notifications',
@@ -845,6 +858,22 @@ export class MySqlStorage implements IStorage {
     }
     await this.migratePlaybackSchema();
     await this.migrateReviewFirstPublished();
+    const [reviewIndexes] = await this.pool.query<RowDataPacket[]>(
+      'SHOW INDEX FROM video_reviews',
+    );
+    if (
+      !reviewIndexes.some(
+        (row) => row.Key_name === 'idx_review_author_public_time',
+      )
+    ) {
+      try {
+        await this.pool.execute(
+          'CREATE INDEX idx_review_author_public_time ON video_reviews (username, is_public, first_published_at)',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
+      }
+    }
     await this.migrateWatchHistory();
     await this.migrateWatchLevel();
     await this.migrateFavoriteProjection();
@@ -909,6 +938,18 @@ export class MySqlStorage implements IStorage {
   }
 
   private async migratePlaybackSchema(): Promise<void> {
+    const [indexes] = await this.pool.query<RowDataPacket[]>(
+      "SHOW INDEX FROM playback_sessions WHERE Key_name = 'idx_playback_sessions_started_at'",
+    );
+    if (!indexes.length) {
+      try {
+        await this.pool.execute(
+          'CREATE INDEX idx_playback_sessions_started_at ON playback_sessions (started_at)',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
+      }
+    }
     const [columns] = await this.pool.query<RowDataPacket[]>(
       'SHOW COLUMNS FROM playback_sessions',
     );
@@ -1467,6 +1508,23 @@ export class MySqlStorage implements IStorage {
     return result;
   }
 
+  async getMetadataRefreshPage(
+    ...args: Parameters<IStorage['getMetadataRefreshPage']>
+  ): ReturnType<IStorage['getMetadataRefreshPage']> {
+    await this.ensureInitialized();
+    const query = metadataRefreshPageQuery(
+      args[0],
+      args[1],
+      args[2],
+      args[3],
+      'mysql',
+    );
+    const [rows] = await this.pool.query<
+      (RowDataPacket & { user: string; work_key: string; snapshot: string })[]
+    >(query.sql, query.params);
+    return buildMetadataRefreshPage(rows, query.limit);
+  }
+
   async getStalePlayRecordPage(
     userName: string,
     now: number,
@@ -1561,6 +1619,19 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const hasCursor = cursorTime !== undefined && !!cursorKey;
+    if (limit === 1 && !hasCursor) {
+      const [rows] = await this.pool.query<JsonRow[]>(
+        `SELECT record_key, record_json, COUNT(*) OVER () AS total
+        FROM play_records WHERE username = ? AND ${MYSQL_UNREAD_TRACKING_WHERE}
+        ORDER BY ${MYSQL_TRACKING_CREATED_AT} DESC, record_key DESC LIMIT 2`,
+        [username],
+      );
+      return buildTrackingPlayRecordPage(
+        rows,
+        Number(rows[0]?.total ?? 0),
+        limit,
+      );
+    }
     const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT record_key, record_json
@@ -1640,6 +1711,19 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const sql = favoriteMessageQueries('mysql', username, limit, before);
+    if (limit === 1 && !before) {
+      const [rows] = await this.pool.query<
+        (RowDataPacket & {
+          favorite_key: string;
+          favorite_json: string;
+          total: number;
+        })[]
+      >(sql.summary, [username]);
+      return {
+        items: favoriteMessagesFromRows(rows),
+        total: Number(rows[0]?.total ?? 0),
+      };
+    }
     const [[rows], [counts]] = await Promise.all([
       this.pool.query<
         (RowDataPacket & { favorite_key: string; favorite_json: string })[]
@@ -2139,6 +2223,26 @@ export class MySqlStorage implements IStorage {
     ...args: Parameters<IStorage['reorderListItems']>
   ): ReturnType<IStorage['reorderListItems']> {
     return this.runListPlan(new ListPlans('mysql').reorderListItems(...args));
+  }
+
+  async getMessageSourceSummary(
+    ...args: Parameters<IStorage['getMessageSourceSummary']>
+  ): ReturnType<IStorage['getMessageSourceSummary']> {
+    await this.ensureInitialized();
+    return readMessageSourceSummary(
+      {
+        dialect: 'mysql',
+        rows: async <T>(sql: string, params: unknown[] = []) =>
+          (await this.pool.query(sql, params as ExecuteValues))[0] as T[],
+        run: async (sql, params = []) =>
+          (
+            (
+              await this.pool.execute(sql, params as ExecuteValues)
+            )[0] as import('mysql2/promise').ResultSetHeader
+          ).affectedRows,
+      },
+      ...args,
+    );
   }
 
   private socialFor(
@@ -3378,25 +3482,13 @@ export class MySqlStorage implements IStorage {
       )
         return false;
       const noticeAccess = new MysqlUserAccessStore(connection, true);
-      const [noticeRows] = configPermissionsChanged(current, config)
-        ? await connection.query<RowDataPacket[]>(
-            'SELECT username FROM user_access ORDER BY username FOR UPDATE',
-          )
-        : [[]];
-      const noticeUsers = [];
-      for (const row of noticeRows) {
-        const user = await noticeAccess.get(String(row.username));
-        // 站长与管理员可在后台直接看到源配置，配置改动不再通知他们
-        if (user?.role === 'user' && current)
-          noticeUsers.push({
-            user,
-            permissions: accessPermissions(user, current),
-          });
-      }
+      const noticeUsers = configPermissionsChanged(current, config)
+        ? await noticeAccess.list()
+        : [];
       const removed = removedAccessReferences(current, config);
       const access = new MysqlUserAccessStore(connection, true);
       for (const group of removed.groups) await access.removeGroup(group);
-      for (const source of removed.sources) await access.removeSource(source);
+      await access.removeSources(removed.sources);
       const now = Date.now();
       // 待发权限通知只在这里写入，配置写事务已由 admin_config 行锁串行，无需再锁通知表
       const pendingQuery = pendingPermissionNoticesQuery(now);
@@ -3410,24 +3502,12 @@ export class MySqlStorage implements IStorage {
             )[0],
           )
         : new Map();
-      for (const { user, permissions } of noticeUsers) {
-        const next = await noticeAccess.get(user.username);
-        const payload = next
-          ? accessPermissionChanges(
-              permissions,
-              accessPermissions(next, config),
-            )
-          : null;
-        const write = payload
-          ? permissionNoticeWrite(
-              'mysql',
-              user.username,
-              payload,
-              pending.get(user.username),
-              now,
-            )
-          : null;
-        if (write) await connection.execute(write.sql, write.params);
+      for (const write of mysqlPermissionNoticeBatches(
+        configPermissionChanges(noticeUsers, current, config),
+        pending,
+        now,
+      )) {
+        await connection.execute(write.sql, write.params);
       }
       await stateStore.prune(current, config);
       for (const [key, count] of Object.entries(state?.liveCounts || {})) {
@@ -4106,23 +4186,27 @@ export class MySqlStorage implements IStorage {
     const cutoff = Number.isFinite(updatedBefore)
       ? Math.max(0, Math.floor(updatedBefore))
       : 0;
-    return this.withTransaction(async (connection) => {
-      // 锁定待删会话，阻止并发心跳在删桶和删会话之间续写。
-      const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT id FROM playback_sessions WHERE updated_at < ? FOR UPDATE',
-        [cutoff],
-      );
-      for (const row of rows) {
-        await connection.execute(
-          'DELETE FROM playback_watch_buckets WHERE session_id = ?',
-          [row.id],
+    return runPlaybackRetention(() =>
+      this.withTransaction(async (connection) => {
+        // 每批锁住候选，桶与会话同事务删除；桶删除命中 (username, session_id) 主键前缀。
+        const [rows] = await connection.query<RowDataPacket[]>(
+          'SELECT username, id FROM playback_sessions WHERE updated_at < ? ORDER BY updated_at LIMIT ? FOR UPDATE',
+          [cutoff, PLAYBACK_RETENTION_BATCH_SIZE],
         );
-        await connection.execute('DELETE FROM playback_sessions WHERE id = ?', [
-          row.id,
-        ]);
-      }
-      return rows.length;
-    });
+        if (!rows.length) return 0;
+        const pairs = rows.map(() => '(?, ?)').join(', ');
+        const params = rows.flatMap((row) => [row.username, row.id]);
+        await connection.execute(
+          `DELETE FROM playback_watch_buckets WHERE (username, session_id) IN (${pairs})`,
+          params,
+        );
+        await connection.execute(
+          `DELETE FROM playback_sessions WHERE id IN (${rows.map(() => '?').join(', ')})`,
+          rows.map((row) => row.id),
+        );
+        return rows.length;
+      }),
+    );
   }
 
   async getPlaybackWatchTotals(
@@ -4163,9 +4247,9 @@ export class MySqlStorage implements IStorage {
       : [start, end];
     await this.ensureInitialized();
     const [rows] = await this.pool.query<
-      (RowDataPacket & PlaybackSourceUsageRow)[]
-    >(sourceUsageSql(personal), params);
-    return aggregateSourceUsage(rows);
+      (RowDataPacket & AggregatedSourceUsageRow)[]
+    >(sourceUsageSql(personal, 'mysql'), params);
+    return sourceUsageFromAggregates(rows);
   }
 
   async getPlaybackPeriodSessions(

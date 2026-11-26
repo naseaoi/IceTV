@@ -10,7 +10,7 @@ import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
   mergeRetriedSearchAggregate,
   peekCachedSearchAggregate,
-  setCachedSearchAggregate,
+  persistCachedSearchAggregate,
 } from '@/lib/search-cache';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 
@@ -47,10 +47,12 @@ jest.mock('@/lib/search-aggregate', () => {
   };
 });
 jest.mock('@/lib/search-cache', () => ({
+  makeSearchAggregateCacheKey:
+    jest.requireActual('@/lib/search-cache').makeSearchAggregateCacheKey,
   peekCachedSearchAggregate: jest.fn(),
   loadCachedSearchAggregate: jest.fn((_params, loader) => loader()),
   refreshCachedSearchAggregate: jest.fn((_params, loader) => loader()),
-  setCachedSearchAggregate: jest.fn(),
+  persistCachedSearchAggregate: jest.fn(),
   mergeRetriedSearchAggregate: jest.fn(),
 }));
 jest.mock('@/lib/downstream', () => ({ searchFirstPageFromApi: jest.fn() }));
@@ -168,7 +170,7 @@ it('streams completion order immediately and supplies canonical source order on 
       .at(-1)[0]
       .apiSites.map((site: { key: string }) => site.key),
   ).toEqual(['good-z', 'good-a', 'unknown', 'offline']);
-  expect(setCachedSearchAggregate).toHaveBeenCalledWith(expect.anything(), {
+  expect(persistCachedSearchAggregate).toHaveBeenCalledWith(expect.anything(), {
     results: [video('good-z'), video('offline')],
     failedSources: [],
   });
@@ -269,7 +271,7 @@ it('retries only the requested available sources and merges them into the cached
     expect.objectContaining({ apiSites: [sites[0]], retryFailed: true }),
   );
   expect(events[0]).toMatchObject({ type: 'start', totalSources: 1 });
-  expect(setCachedSearchAggregate).not.toHaveBeenCalled();
+  expect(persistCachedSearchAggregate).not.toHaveBeenCalled();
   expect(mergeRetriedSearchAggregate).toHaveBeenCalledWith(
     expect.objectContaining({
       apiSites: [sites[1], sites[2], sites[3], sites[0]],

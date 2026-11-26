@@ -1,4 +1,8 @@
-import { getServerCacheBudget } from '@/lib/cache-budget-profile';
+import { createAsyncSemaphore } from '@/lib/async-semaphore';
+import {
+  getServerCacheBudget,
+  getUpstreamSearchConcurrency,
+} from '@/lib/cache-budget-profile';
 import type { ApiSite } from '@/lib/config';
 import { createSwrCache } from '@/lib/server-cache';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
@@ -88,6 +92,25 @@ const SEARCH_AGGREGATE_LOAD_INFLIGHT: Map<
 
 const SEARCH_INFLIGHT: Map<string, Promise<SearchPageLoadResult>> = new Map();
 
+// 只在缓存/共享租约选中真实 loader 后申请，排队不计入回源超时。
+const upstreamSearchGate = createAsyncSemaphore(getUpstreamSearchConcurrency());
+
+export function setUpstreamSearchConcurrency(limit: number): void {
+  upstreamSearchGate.setLimit(limit);
+}
+
+export function getUpstreamSearchGateStats() {
+  return upstreamSearchGate.stats();
+}
+
+export function acquireUpstreamSearchSlot(signal?: AbortSignal) {
+  return upstreamSearchGate.acquire({
+    signal,
+    maxWaiting: upstreamSearchGate.stats().limit * 32,
+    waitTimeoutMs: 30_000,
+  });
+}
+
 function makeSearchCacheKey(
   sourceKey: string,
   query: string,
@@ -96,7 +119,7 @@ function makeSearchCacheKey(
   return `${sourceKey}::${query.trim()}::${page}`;
 }
 
-function makeSearchAggregateCacheKey(
+export function makeSearchAggregateCacheKey(
   params: SearchAggregateCacheParams,
 ): string {
   const sourceKey = JSON.stringify(
@@ -132,6 +155,21 @@ export function setCachedSearchAggregate(
 
   const key = makeSearchAggregateCacheKey(params);
   SEARCH_AGGREGATE_CACHE.set(key, entry);
+}
+
+// 流式任务自行推送逐源事件，完成后用共享层租约发布完整结果。
+export async function persistCachedSearchAggregate(
+  params: SearchAggregateCacheParams,
+  entry: CachedSearchAggregateEntry,
+): Promise<void> {
+  if (entry.results.length === 0) return;
+  await SEARCH_AGGREGATE_CACHE.refresh(
+    makeSearchAggregateCacheKey(params),
+    () => Promise.resolve(entry),
+  );
+  if (peekCachedSearchAggregate(params)?.entry !== entry) {
+    setCachedSearchAggregate(params, entry);
+  }
 }
 
 // 只重搜失败源后，用新结果替换这些源在已缓存聚合中的部分；没有缓存时不凭局部结果新建

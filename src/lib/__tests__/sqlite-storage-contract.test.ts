@@ -4,6 +4,7 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertMessageSummaries } from '@/lib/__tests__/__fixtures__/message-summary-contract';
 import {
   assertPlayRecordEpisodeProgress,
   assertPlayRecordOrdering,
@@ -11,6 +12,7 @@ import {
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
+  assertMetadataRefreshPages,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import {
@@ -45,6 +47,17 @@ import {
   videoReview,
   videoReviewContract,
 } from './__fixtures__/video-review-contract';
+
+it('combines message counts with the latest item without delaying read state', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  try {
+    await assertMessageSummaries(storage);
+  } finally {
+    (
+      storage as unknown as { db: import('better-sqlite3').Database }
+    ).db.close();
+  }
+});
 
 it.each([null, 20 * 3_600_000])(
   'public references read current watch totals: %s',
@@ -790,6 +803,67 @@ describe('sqlite storage contract', () => {
         })
       ).total,
     ).toBe(6);
+  });
+
+  it('四万条元数据按索引有界扫描并支持单作品范围读取', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const sql = (
+      storage as unknown as { db: import('better-sqlite3').Database }
+    ).db;
+    const insert = sql.prepare(
+      'INSERT INTO play_records(username, record_key, record_json) VALUES (?, ?, ?)',
+    );
+    const snapshot = JSON.stringify(playRecord);
+    sql.transaction(() => {
+      for (let work = 0; work < 2000; work += 1) {
+        for (let user = 0; user < 20; user += 1) {
+          insert.run(
+            `user-${user}`,
+            `source+${String(work).padStart(4, '0')}`,
+            snapshot,
+          );
+        }
+      }
+    })();
+    let cursor: { key: string; user: string } | undefined;
+    let total = 0;
+    let pages = 0;
+    do {
+      const page = await storage.getMetadataRefreshPage('record', 1000, cursor);
+      expect(page.items.length).toBeLessThanOrEqual(500);
+      total += page.items.length;
+      pages += 1;
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(total).toBe(40_000);
+    expect(pages).toBe(80);
+    expect(
+      (
+        await storage.getMetadataRefreshPage(
+          'record',
+          100,
+          undefined,
+          'source+0500',
+        )
+      ).items,
+    ).toHaveLength(20);
+    const plan = sql
+      .prepare(
+        'EXPLAIN QUERY PLAN SELECT record_json FROM play_records WHERE record_key = ? AND username > ? ORDER BY record_key, username LIMIT 100',
+      )
+      .all('source+0500', 'user-0') as Array<{ detail: string }>;
+    expect(
+      plan.some(
+        ({ detail }) =>
+          detail.includes('SEARCH') &&
+          detail.includes('idx_records_metadata_work'),
+      ),
+    ).toBe(true);
+  });
+
+  it('全局元数据分页跨用户并按作品读取全部关联快照', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await assertMetadataRefreshPages(storage);
   });
 
   it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {

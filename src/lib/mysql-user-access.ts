@@ -14,6 +14,8 @@ import {
   UserAccess,
   userAccessFromRow,
   UserAccessGuard,
+  UserAccessJoinedRow,
+  userAccessListFromRows,
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
@@ -51,6 +53,14 @@ export class MysqlUserAccessStore {
         row.group_name == null ? [] : [String(row.group_name)],
       ),
     );
+  }
+
+  async list(): Promise<UserAccess[]> {
+    const [rows] = await this.db.query<(RowDataPacket & UserAccessJoinedRow)[]>(
+      `SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a LEFT JOIN user_group_members m ON m.username = a.username WHERE (a.username = ? OR EXISTS (SELECT 1 FROM users WHERE users.username = a.username)) ORDER BY a.username, m.position, m.group_name${this.lock ? ' FOR UPDATE' : ''}`,
+      [normalizeUsername(getOwnerUsername() || '')],
+    );
+    return userAccessListFromRows(rows);
   }
 
   async put(user: UserAccess): Promise<void> {
@@ -120,19 +130,36 @@ export class MysqlUserAccessStore {
   }
 
   async removeSource(source: string): Promise<void> {
+    await this.removeSources([source]);
+  }
+
+  async removeSources(sources: string[]): Promise<void> {
+    if (!sources.length) return;
+    const removed = new Set(sources);
     const [rows] = await this.db.query<RowDataPacket[]>(
       'SELECT username, enabled_apis FROM user_access WHERE enabled_apis IS NOT NULL FOR UPDATE',
     );
-    for (const row of rows) {
-      const sources = (JSON.parse(String(row.enabled_apis)) as string[]).filter(
-        (key) => key !== source,
-      );
+    const changes = rows.flatMap((row) => {
+      const before = JSON.parse(String(row.enabled_apis)) as string[];
+      const after = before.filter((key) => !removed.has(key));
+      return after.length === before.length
+        ? []
+        : [
+            {
+              username: String(row.username),
+              apis: after.length ? JSON.stringify(after) : null,
+            },
+          ];
+    });
+    const now = Date.now();
+    for (let offset = 0; offset < changes.length; offset += 500) {
+      const batch = changes.slice(offset, offset + 500);
       await this.db.execute(
-        'UPDATE user_access SET enabled_apis = ?, updated_at = ? WHERE username = ?',
+        `UPDATE user_access SET enabled_apis = CASE username ${batch.map(() => 'WHEN ? THEN ?').join(' ')} END, updated_at = ? WHERE username IN (${batch.map(() => '?').join(', ')})`,
         [
-          sources.length ? JSON.stringify(sources) : null,
-          Date.now(),
-          row.username,
+          ...batch.flatMap((row) => [row.username, row.apis]),
+          now,
+          ...batch.map((row) => row.username),
         ],
       );
     }

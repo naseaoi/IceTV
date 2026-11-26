@@ -21,6 +21,10 @@ import {
   assertPlayRecordTitleLookup,
 } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
+import {
+  assertPlaybackRetentionBatches,
+  assertSourceUsageAggregation,
+} from '@/lib/__tests__/__fixtures__/playback-maintenance-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import {
   assertSourceProxyFailures,
@@ -405,6 +409,7 @@ function createFakePool() {
   let state = createState();
   let transactionQueue = Promise.resolve();
   let queryCount = 0;
+  let transactionSql: string[] = [];
 
   const runExecute = async (
     sql: string,
@@ -439,29 +444,104 @@ function createFakePool() {
         ];
       }
     }
+    if (
+      normalized.startsWith(
+        'DELETE FROM playback_watch_buckets WHERE (username, session_id) IN',
+      )
+    ) {
+      const before = currentState.watchBuckets.length;
+      currentState.watchBuckets = currentState.watchBuckets.filter(
+        (row) =>
+          !params.some(
+            (value, index) =>
+              index % 2 === 0 &&
+              row.username === value &&
+              row.session_id === params[index + 1],
+          ),
+      );
+      return [{ affectedRows: before - currentState.watchBuckets.length }, []];
+    }
+    if (normalized.startsWith('DELETE FROM playback_sessions WHERE id IN')) {
+      let count = 0;
+      for (const id of params) {
+        if (currentState.playbackSessions.delete(String(id))) count++;
+      }
+      return [{ affectedRows: count }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE user_access SET enabled_apis = CASE username',
+      )
+    ) {
+      const size = (params.length - 1) / 3;
+      for (let index = 0; index < size; index++) {
+        const row = currentState.userAccess.get(String(params[index * 2]));
+        if (row) {
+          row.enabled_apis = params[index * 2 + 1];
+          row.updated_at = params[size * 2];
+        }
+      }
+      return [{ affectedRows: size }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE user_notice_events SET payload_json = CASE id',
+      )
+    ) {
+      const size = (params.length - 1) / 3;
+      for (let index = 0; index < size; index++) {
+        const row = (currentState.social.user_notice_events ?? []).find(
+          (item) => item.id === params[index * 2],
+        );
+        if (row) {
+          row.payload_json = params[index * 2 + 1];
+          row.created_at = params[size * 2];
+        }
+      }
+      return [{ affectedRows: size }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_notice_events WHERE id IN')) {
+      const rows = currentState.social.user_notice_events ?? [];
+      currentState.social.user_notice_events = rows.filter(
+        (row) => !params.includes(row.id),
+      );
+      return [
+        {
+          affectedRows:
+            rows.length - currentState.social.user_notice_events.length,
+        },
+        [],
+      ];
+    }
     if (normalized.startsWith('INSERT IGNORE INTO user_notice_events')) {
       const rows = (currentState.social.user_notice_events ??= []);
-      if (
-        rows.some(
-          (row) =>
-            row.recipient_username === params[1] && row.event_key === params[2],
+      let count = 0;
+      for (let offset = 0; offset < params.length; offset += 7) {
+        const values = params.slice(offset, offset + 7);
+        if (
+          rows.some(
+            (row) =>
+              row.recipient_username === values[1] &&
+              row.event_key === values[2],
+          )
         )
-      )
-        return [{ affectedRows: 0 }, []];
-      rows.push(
-        Object.fromEntries(
-          [
-            'id',
-            'recipient_username',
-            'event_key',
-            'kind',
-            'action',
-            'payload_json',
-            'created_at',
-          ].map((key, index) => [key, params[index]]),
-        ),
-      );
-      return [{ affectedRows: 1 }, []];
+          continue;
+        rows.push(
+          Object.fromEntries(
+            [
+              'id',
+              'recipient_username',
+              'event_key',
+              'kind',
+              'action',
+              'payload_json',
+              'created_at',
+            ].map((key, index) => [key, values[index]]),
+          ),
+        );
+        count++;
+      }
+      return [{ affectedRows: count }, []];
     }
     if (
       normalized.startsWith(
@@ -1780,6 +1860,84 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (
+      normalized.startsWith(
+        'SELECT id, recipient_username, payload_json FROM user_notice_events',
+      )
+    )
+      return [
+        (currentState.social.user_notice_events ?? [])
+          .filter(
+            (row) =>
+              row.kind === 'account-change' &&
+              row.action === 'permissions-changed' &&
+              Number(row.created_at) > Number(params[0]),
+          )
+          .sort((a, b) => Number(a.created_at) - Number(b.created_at)),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT username, enabled_apis FROM user_access WHERE enabled_apis IS NOT NULL',
+      )
+    )
+      return [
+        [...currentState.userAccess.values()].filter(
+          (row) => row.enabled_apis !== null,
+        ),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'WITH filtered AS (SELECT id, CAST(username AS BINARY)',
+      )
+    ) {
+      const personal = normalized.includes('WHERE username = ? AND started_at');
+      const start = Number(params[personal ? 1 : 0]);
+      const end = Number(params[personal ? 2 : 1]);
+      const rows = [...currentState.playbackSessions.values()].filter(
+        (row) =>
+          (!personal || row.username === params[0]) &&
+          Number(row.started_at) >= start &&
+          Number(row.started_at) < end &&
+          Number(row.watch_seconds) > 0,
+      );
+      const groups = new Map<string, Record<string, unknown>[]>();
+      for (const row of rows)
+        groups.set(String(row.source), [
+          ...(groups.get(String(row.source)) ?? []),
+          row,
+        ]);
+      return [
+        [...groups.values()].flatMap((items) => {
+          const latest = [...items].sort(
+            (a, b) =>
+              Number(b.started_at) - Number(a.started_at) ||
+              String(b.id).localeCompare(String(a.id)),
+          )[0];
+          const works = new Map(
+            items.map((row) => [JSON.stringify([row.title, row.year]), row]),
+          );
+          return [...works.values()].map((row) => ({
+            source: row.source,
+            title: row.title,
+            year: row.year,
+            watch_seconds: items.reduce(
+              (sum, item) => sum + Number(item.watch_seconds),
+              0,
+            ),
+            user_count: new Set(items.map((item) => item.username)).size,
+            source_name: latest.source_name,
+          }));
+        }),
+        [],
+      ];
+    }
+    if (
+      normalized ===
+      "SHOW INDEX FROM playback_sessions WHERE Key_name = 'idx_playback_sessions_started_at'"
+    )
+      return [[{ Key_name: 'idx_playback_sessions_started_at' }], []];
     if (normalized === "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'")
       return [[{ Field: 'value_bytes' }], []];
     if (
@@ -1994,12 +2152,13 @@ function createFakePool() {
       return [[], []];
     if (
       normalized ===
-      'SELECT id FROM playback_sessions WHERE updated_at < ? FOR UPDATE'
+      'SELECT username, id FROM playback_sessions WHERE updated_at < ? ORDER BY updated_at LIMIT ? FOR UPDATE'
     )
       return [
-        [...currentState.playbackSessions.values()].filter(
-          (row) => Number(row.updated_at) < Number(params[0]),
-        ),
+        [...currentState.playbackSessions.values()]
+          .filter((row) => Number(row.updated_at) < Number(params[0]))
+          .sort((a, b) => Number(a.updated_at) - Number(b.updated_at))
+          .slice(0, Number(params[1])),
         [],
       ];
     if (
@@ -2104,12 +2263,15 @@ function createFakePool() {
         ].map((Field) => ({ Field })),
         [],
       ];
+    if (normalized === 'SHOW INDEX FROM play_records')
+      return [[{ Key_name: 'idx_records_metadata_work' }], []];
     if (normalized === 'SHOW INDEX FROM favorites')
       return [
         [
           'idx_favorites_saved',
           'idx_favorites_work',
           'idx_favorites_projection',
+          'idx_favorites_metadata_work',
         ].map((Key_name) => ({ Key_name })),
         [],
       ];
@@ -2123,6 +2285,30 @@ function createFakePool() {
         'SELECT a.username, a.role, a.banned, a.enabled_apis, m.group_name FROM user_access a',
       )
     ) {
+      const all = normalized.includes('WHERE (a.username = ?');
+      const selected = all
+        ? [...currentState.userAccess.values()].filter(
+            (row) =>
+              row.username === params[0] ||
+              currentState.users.has(String(row.username)),
+          )
+        : [];
+      if (all)
+        return [
+          selected.flatMap((row) => {
+            const groups = currentState.userGroups
+              .filter((group) => group.username === row.username)
+              .sort(
+                (a, b) =>
+                  a.position - b.position ||
+                  String(a.group_name).localeCompare(String(b.group_name)),
+              );
+            return (groups.length ? groups : [{ group_name: null }]).map(
+              (group) => ({ ...row, group_name: group.group_name }),
+            );
+          }),
+          [],
+        ];
       const username = String(params[0]);
       const row = currentState.userAccess.get(username);
       if (!row || (username !== params[1] && !currentState.users.has(username)))
@@ -2653,6 +2839,23 @@ function createFakePool() {
       return [rows.slice(0, limit), []];
     }
 
+    if (
+      normalized.startsWith(
+        'SELECT record_key, record_json, COUNT(*) OVER () AS total FROM play_records',
+      )
+    ) {
+      const rows = selectUnreadTrackingRows(
+        currentState,
+        params[0] as string,
+        undefined,
+        undefined,
+        true,
+      );
+      return [
+        rows.slice(0, 2).map((row) => ({ ...row, total: rows.length })),
+        [],
+      ];
+    }
     if (
       normalized.startsWith(
         'SELECT record_key, record_json FROM play_records',
@@ -3369,6 +3572,12 @@ function createFakePool() {
       state = createState();
       queryCount = 0;
     },
+    resetTransactionSql() {
+      transactionSql = [];
+    },
+    getTransactionSql() {
+      return transactionSql;
+    },
     async getConnection() {
       let transactionState = cloneState(state);
       let unlock = () => {};
@@ -3382,6 +3591,7 @@ function createFakePool() {
           transactionState = cloneState(state);
         },
         async query(sql: string, params?: unknown[]) {
+          transactionSql.push(normalizeSql(sql));
           return runQuery(sql, params, transactionState);
         },
         async commit() {
@@ -3392,6 +3602,7 @@ function createFakePool() {
           unlock();
         },
         async execute(sql: string, params?: unknown[]) {
+          transactionSql.push(normalizeSql(sql));
           return runExecute(sql, params, transactionState);
         },
         release() {},
@@ -3475,6 +3686,123 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it.each(['record', 'favorite'] as const)(
+    'metadata %s lookup retains index equality and rejects case variants',
+    async (kind) => {
+      const storage = new MySqlStorage(
+        'mysql://demo:demo@localhost:3306/icetv',
+      );
+      await storage.getAllPlayRecords('metadata-init');
+      const column = kind === 'record' ? 'record_key' : 'favorite_key';
+      const rows = [
+        { user: 'a', work_key: 'site+Ab1', snapshot: '{}' },
+        { user: 'b', work_key: 'site+ab1', snapshot: '{}' },
+      ];
+      const query = jest
+        .spyOn(fakePool, 'query')
+        .mockImplementation(async (sql, params = []) => {
+          expect(sql).toContain(
+            `${column} = ? AND BINARY ${column} = BINARY ?`,
+          );
+          expect(params).toEqual(['site+Ab1', 'site+Ab1', 11]);
+          return [rows.filter((row) => row.work_key === params[1]), []];
+        });
+      try {
+        const page = await storage.getMetadataRefreshPage(
+          kind,
+          10,
+          undefined,
+          'site+Ab1',
+        );
+        expect(page.items.map((row) => row.user)).toEqual(['a']);
+      } finally {
+        query.mockRestore();
+      }
+    },
+  );
+  it('uses one permission snapshot and bounded notice writes for 501 recipients', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const before = {
+      SourceConfig: [{ key: 'a' }, { key: 'b' }],
+      UserConfig: { Tags: [] },
+    } as unknown as AdminConfig;
+    await storage.setAdminConfig(before);
+    for (let index = 0; index < 501; index++) {
+      const username = `notice-batch-${index}`;
+      await fakePool.execute(
+        'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)',
+        [username, 'unused', 1],
+      );
+      await fakePool.execute(
+        'INSERT INTO user_access (username, role, banned, enabled_apis, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [username, 'user', 0, null, 0],
+      );
+    }
+    fakePool.resetTransactionSql();
+    const next = {
+      ...before,
+      SourceConfig: [{ key: 'a' }, { key: 'b', disabled: true }],
+    } as AdminConfig;
+    expect(await storage.compareAndSetAdminConfig(before, next)).toBe(true);
+    const statements = fakePool.getTransactionSql();
+    expect(
+      statements.filter((sql) => sql.startsWith('SELECT a.username')),
+    ).toHaveLength(1);
+    expect(statements.filter((sql) => sql.startsWith('SELECT'))).toHaveLength(
+      3,
+    );
+    expect(
+      statements.filter((sql) =>
+        sql.startsWith('INSERT IGNORE INTO user_notice_events'),
+      ),
+    ).toHaveLength(2);
+    const read = () =>
+      fakePool.query(
+        "SELECT id, recipient_username, payload_json FROM user_notice_events WHERE kind = 'account-change' AND action = 'permissions-changed' AND created_at > ? ORDER BY created_at",
+        [0],
+      );
+    const [notices] = await read();
+    expect(notices).toHaveLength(501);
+    expect(
+      (notices as Record<string, unknown>[]).map((row) =>
+        JSON.parse(String(row.payload_json)),
+      ),
+    ).toEqual(
+      Array.from({ length: 501 }, () => ({
+        sourcesAdded: 0,
+        sourcesRemoved: 1,
+        sourceKeysAdded: [],
+        sourceKeysRemoved: ['b'],
+      })),
+    );
+    const disabled = {
+      ...next,
+      SourceConfig: next.SourceConfig.map((source) => ({
+        ...source,
+        disabled: true,
+      })),
+    };
+    expect(await storage.compareAndSetAdminConfig(next, disabled)).toBe(true);
+    const [merged] = await read();
+    expect(
+      (merged as Record<string, unknown>[]).every(
+        (row) => JSON.parse(String(row.payload_json)).sourcesRemoved === 2,
+      ),
+    ).toBe(true);
+    // 同一静默期回滚源设置，所有待发通知净变化归零并批量删除。
+    expect(await storage.compareAndSetAdminConfig(disabled, before)).toBe(true);
+    expect((await read())[0]).toHaveLength(0);
+  });
+  it('aggregates source usage with the shared identity contract', async () => {
+    await assertSourceUsageAggregation(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+  it('cleans playback sessions and buckets in bounded batches', async () => {
+    await assertPlaybackRetentionBatches(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
   it.each(['none', 'any', 'provider:linuxdo'] as const)(
     'builds composable admin user predicates for login=%s',
     (login) => {

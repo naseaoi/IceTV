@@ -5,9 +5,13 @@ import { validateSourceSearch } from '@/features/admin/lib/source-search-validat
 import { buildCmsSearchUrl } from '@/lib/cms-search.server';
 import { probeSourceSearch, searchFromApi } from '@/lib/downstream';
 import {
+  acquireUpstreamSearchSlot,
   clearSearchCachesForTests,
   getCachedSearchPage,
+  getUpstreamSearchGateStats,
   peekCachedSearchPage,
+  setCachedSearchPage,
+  setUpstreamSearchConcurrency,
 } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { simplifySearchText } from '@/lib/search-text';
@@ -52,6 +56,40 @@ afterEach(() => {
   global.fetch = originalFetch;
   clearSearchCachesForTests();
   jest.restoreAllMocks();
+});
+
+it('页缓存命中和等待同一 loader 均不占额外回源槽', async () => {
+  setUpstreamSearchConcurrency(1);
+  const release = await acquireUpstreamSearchSlot();
+  setCachedSearchPage(getSourceCacheKey(site), 'cached', 1, 'ok', [], 1);
+  try {
+    await expect(searchFromApi(site, 'cached')).resolves.toEqual([]);
+    expect(getUpstreamSearchGateStats()).toMatchObject({
+      active: 1,
+      waiting: 0,
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  } finally {
+    release();
+  }
+
+  let finish!: (response: Response) => void;
+  (global.fetch as jest.Mock).mockImplementation(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const first = searchFromApi(site, '龙珠');
+  const second = searchFromApi(site, '龙珠');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(getUpstreamSearchGateStats()).toMatchObject({ active: 1, waiting: 0 });
+  finish(response({ list: [item], pagecount: 1 }));
+  const [left, right] = await Promise.all([first, second]);
+  expect(left).toEqual(right);
+  expect(getUpstreamSearchGateStats()).toMatchObject({ active: 0, waiting: 0 });
+  setUpstreamSearchConcurrency(12);
 });
 
 it('检测、第一页与健康探测使用一致的 URL，分页保留源参数与关键词编码', async () => {

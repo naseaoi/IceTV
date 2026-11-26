@@ -115,6 +115,7 @@ export function favoriteMessageQueries(
       : "CONCAT('favorite-tracking:', f.favorite_key)";
   const where = `FROM favorites f WHERE f.username = ? AND ${unread}`;
   return {
+    summary: `SELECT f.favorite_key, f.favorite_json, COUNT(*) OVER () AS total ${where} ORDER BY ${createdAt} DESC, f.favorite_key DESC LIMIT 1`,
     count: `SELECT COUNT(*) AS count ${where}`,
     page: `SELECT f.favorite_key, f.favorite_json ${where}${before ? ` AND (${createdAt} < ? OR (${createdAt} = ? AND ${sortKey} < ?))` : ''} ORDER BY ${createdAt} DESC, f.favorite_key DESC LIMIT ?`,
     params: [

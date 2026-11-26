@@ -2,15 +2,44 @@ import { createHash, randomUUID } from 'crypto';
 
 import type { MessageCursor } from '@/lib/message-cursor.server';
 import type { SocialExecutor } from '@/lib/review-social-storage';
+import { type UserAccess, removedAccessReferences } from '@/lib/user-access';
 import {
   type UserNoticeKind,
   type UserNoticeMessage,
   type UserNoticePayload,
+  accessPermissionChanges,
+  accessPermissions,
   mergeAccessPermissionChanges,
   parseUserNoticeId,
   publicNoticePayload,
 } from '@/lib/user-notice';
 import { normalizeUsername } from '@/lib/username';
+import type { AdminConfig } from '@/types/admin';
+
+// 服务端专用：依赖 user-access 的站长身份判断，放在 user-notice.ts 会把 env.server 带进客户端包。
+export function configPermissionChanges(
+  users: UserAccess[],
+  previous: AdminConfig | null,
+  next: AdminConfig,
+): { username: string; payload: UserNoticePayload }[] {
+  const removed = removedAccessReferences(previous, next);
+  const groups = new Set(removed.groups);
+  const sources = new Set(removed.sources);
+  return users.flatMap((user) => {
+    // 配置修改只通知普通用户；清理后的空个人源列表仍表示不限制。
+    if (user.role !== 'user') return [];
+    const after = {
+      ...user,
+      tags: user.tags?.filter((tag) => !groups.has(tag)),
+      enabledApis: user.enabledApis?.filter((source) => !sources.has(source)),
+    };
+    const payload = accessPermissionChanges(
+      accessPermissions(user, previous),
+      accessPermissions(after, next),
+    );
+    return payload ? [{ username: user.username, payload }] : [];
+  });
+}
 
 export const USER_NOTICE_WINDOW_MS = 30 * 86400000;
 export function userNoticeSchema(dialect: 'sqlite' | 'mysql'): string[] {
@@ -105,6 +134,50 @@ export function permissionNoticeWrite(
         params: [pending.id],
       };
 }
+export function mysqlPermissionNoticeBatches(
+  changes: { username: string; payload: UserNoticePayload }[],
+  pending: ReturnType<typeof pendingPermissionNotices>,
+  now: number,
+): { sql: string; params: (string | number)[] }[] {
+  const writes = changes.map(({ username, payload }) =>
+    permissionNoticeWrite(
+      'mysql',
+      username,
+      payload,
+      pending.get(username),
+      now,
+    ),
+  );
+  const result: typeof writes = [];
+  for (const action of ['INSERT', 'UPDATE', 'DELETE']) {
+    const selected = writes.filter((write) => write.sql.startsWith(action));
+    for (let offset = 0; offset < selected.length; offset += 500) {
+      const batch = selected.slice(offset, offset + 500);
+      if (action === 'INSERT') {
+        result.push({
+          sql: `${batch[0].sql.split(' VALUES ')[0]} VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+          params: batch.flatMap((write) => write.params),
+        });
+      } else if (action === 'UPDATE') {
+        result.push({
+          sql: `UPDATE user_notice_events SET payload_json = CASE id ${batch.map(() => 'WHEN ? THEN ?').join(' ')} END, created_at = ? WHERE id IN (${batch.map(() => '?').join(', ')})`,
+          params: [
+            ...batch.flatMap(({ params }) => [params[2], params[0]]),
+            now + PERMISSION_NOTICE_QUIET_MS,
+            ...batch.map(({ params }) => params[2]),
+          ],
+        });
+      } else {
+        result.push({
+          sql: `DELETE FROM user_notice_events WHERE id IN (${batch.map(() => '?').join(', ')})`,
+          params: batch.flatMap((write) => write.params),
+        });
+      }
+    }
+  }
+  return result;
+}
+
 export interface UserNoticeQuery {
   limit: number;
   before?: MessageCursor | null;

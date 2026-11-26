@@ -5,6 +5,59 @@ import {
 } from '@/lib/play-records';
 import type { IStorage, PlayRecord } from '@/lib/types';
 
+export async function assertMetadataRefreshPages(
+  storage: IStorage,
+): Promise<void> {
+  const record: PlayRecord = {
+    title: '元数据分页',
+    source_name: '源',
+    cover: '',
+    year: '2026',
+    index: 1,
+    total_episodes: 12,
+    play_time: 0,
+    total_time: 0,
+    save_time: 1,
+    metadata_checked_at: Date.now(),
+  };
+  for (const user of ['metadata-a', 'metadata-b', 'metadata-owner']) {
+    await storage.setPlayRecord(user, 'source+a', record);
+    await storage.setFavorite(user, 'source+a', record);
+  }
+  await storage.setPlayRecord('metadata-a', 'source+b', record);
+  await storage.setFavorite('metadata-a', 'source+b', record);
+  for (const kind of ['record', 'favorite'] as const) {
+    const first = await storage.getMetadataRefreshPage(kind, 2);
+    const second = await storage.getMetadataRefreshPage(
+      kind,
+      2,
+      first.nextCursor!,
+    );
+    expect(first.items.map(({ key, user }) => [key, user])).toEqual([
+      ['source+a', 'metadata-a'],
+      ['source+a', 'metadata-b'],
+    ]);
+    expect(second.items.map(({ key, user }) => [key, user])).toEqual([
+      ['source+a', 'metadata-owner'],
+      ['source+b', 'metadata-a'],
+    ]);
+    expect(second.nextCursor).toBeNull();
+    expect(JSON.parse(first.items[0].snapshot)).toMatchObject(record);
+    const related = await storage.getMetadataRefreshPage(
+      kind,
+      2,
+      first.nextCursor!,
+      'source+a',
+    );
+    expect(related.items.map(({ user }) => user)).toEqual(['metadata-owner']);
+    expect(related.nextCursor).toBeNull();
+    expect(
+      (await storage.getMetadataRefreshPage(kind, 2, undefined, 'missing'))
+        .items,
+    ).toEqual([]);
+  }
+}
+
 export async function assertUpdatedPlayRecordPage(
   storage: IStorage,
 ): Promise<void> {

@@ -4,8 +4,9 @@ import { getConfigForRead } from '@/lib/config';
 import {
   type CoverImageResizeOptions,
   CoverImageResizeParamError,
+  downloadAndResizeCoverImage,
+  MAX_COVER_IMAGE_BYTES,
   parseCoverImageResizeOptions,
-  resizeCoverImage,
 } from '@/lib/cover-image-resize';
 import { loadResizedCoverImage } from '@/lib/cover-image-resize-cache.server';
 import {
@@ -40,7 +41,7 @@ import {
 
 export const runtime = 'nodejs';
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGE_BYTES = MAX_COVER_IMAGE_BYTES;
 
 const ORIGIN_FETCH_HEADERS = {
   Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
@@ -182,21 +183,15 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     if (method === 'GET' && resizeOptions) {
       const resizeTarget = resizeOptions;
       const originUrl = validation.url;
-      const resized = await loadResizedCoverImage(
-        originUrl,
-        resizeTarget,
-        async () => {
+      const resized = await loadResizedCoverImage(originUrl, resizeTarget, () =>
+        downloadAndResizeCoverImage(async () => {
           const { response } = await fetchImageOrigin(
             originUrl,
             method,
             originTimeoutMs,
           );
-          const source = await readArrayBufferLimited(
-            response,
-            MAX_IMAGE_BYTES,
-          );
-          return resizeCoverImage(source, resizeTarget);
-        },
+          return readArrayBufferLimited(response, MAX_IMAGE_BYTES);
+        }, resizeTarget),
       );
 
       const headers = createImageProxyCacheHeaders();

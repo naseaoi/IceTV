@@ -51,9 +51,13 @@ import {
 } from '@/features/lists/lib/list-storage';
 import { annualActivityPlan } from '@/features/playback-stats/lib/annual-activity-storage';
 import {
+  PLAYBACK_RETENTION_BATCH_SIZE,
+  runPlaybackRetention,
+} from '@/features/playback-stats/lib/retention';
+import {
+  type AggregatedSourceUsageRow,
   type PlaybackSourceUsage,
-  type PlaybackSourceUsageRow,
-  aggregateSourceUsage,
+  sourceUsageFromAggregates,
   sourceUsageSql,
 } from '@/features/playback-stats/lib/source-usage';
 import { SEARCH_HISTORY_LIMIT } from '@/features/search/lib/searchQuery';
@@ -75,9 +79,14 @@ import {
   sameSubscription,
 } from '@/lib/config-state';
 import {
+  buildMetadataRefreshPage,
+  metadataRefreshPageQuery,
+} from '@/lib/cron/metadata-candidates';
+import {
   type InviteCodePurge,
   type InviteCodeQuery,
 } from '@/lib/invite-code-storage';
+import { readMessageSourceSummary } from '@/lib/message-source-summary';
 import {
   type OAuthBindResult,
   type OAuthIdentity,
@@ -124,13 +133,10 @@ import {
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
-import {
-  accessPermissionChanges,
-  accessPermissions,
-  configPermissionsChanged,
-} from '@/lib/user-notice';
+import { configPermissionsChanged } from '@/lib/user-notice';
 import {
   type NoticeMutation,
+  configPermissionChanges,
   noticeInsert,
   NoticeModeration,
   pendingPermissionNotices,
@@ -549,7 +555,6 @@ export class LocalSqliteStorage implements IStorage {
     deleteSkipConfig: Database.Statement;
     getAllSkipConfigs: Database.Statement;
     setPlaybackSession: Database.Statement;
-    deletePlaybackSessionsBefore: Database.Statement;
     // admin_config
     getAdminConfig: Database.Statement;
     setAdminConfig: Database.Statement;
@@ -690,6 +695,9 @@ export class LocalSqliteStorage implements IStorage {
     this.migrateFavoriteProjection();
     this.migratePlaybackSchema();
     this.migrateReviewFirstPublished();
+    this.db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_review_author_public_time ON video_reviews (username, is_public, first_published_at)',
+    );
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -1104,6 +1112,9 @@ export class LocalSqliteStorage implements IStorage {
         PRIMARY KEY (username, favorite_key)
       );
 
+      CREATE INDEX IF NOT EXISTS idx_records_metadata_work ON play_records(record_key, username);
+      CREATE INDEX IF NOT EXISTS idx_favorites_metadata_work ON favorites(favorite_key, username);
+
       ${userDanmakuSchema('sqlite').join(';')};
       CREATE TABLE IF NOT EXISTS video_reviews (
         username TEXT NOT NULL,
@@ -1156,6 +1167,9 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_video
         ON playback_sessions (username, source, video_id);
+
+      CREATE INDEX IF NOT EXISTS idx_playback_sessions_started_at
+        ON playback_sessions (started_at);
 
       CREATE INDEX IF NOT EXISTS idx_playback_sessions_updated_at
         ON playback_sessions (updated_at);
@@ -1570,9 +1584,6 @@ export class LocalSqliteStorage implements IStorage {
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
         WHERE playback_sessions.username = excluded.username AND playback_sessions.measurement_version = 1`,
-      ),
-      deletePlaybackSessionsBefore: this.db.prepare(
-        'DELETE FROM playback_sessions WHERE updated_at < ?',
       ),
       // admin_config
       getAdminConfig: this.db.prepare(
@@ -2385,6 +2396,18 @@ export class LocalSqliteStorage implements IStorage {
     return result;
   }
 
+  async getMetadataRefreshPage(
+    ...args: Parameters<IStorage['getMetadataRefreshPage']>
+  ): ReturnType<IStorage['getMetadataRefreshPage']> {
+    const query = metadataRefreshPageQuery(...args);
+    const rows = this.db.prepare(query.sql).all(...query.params) as Array<{
+      user: string;
+      work_key: string;
+      snapshot: string;
+    }>;
+    return buildMetadataRefreshPage(rows, query.limit);
+  }
+
   async getStalePlayRecordPage(
     userName: string,
     now: number,
@@ -2482,6 +2505,24 @@ export class LocalSqliteStorage implements IStorage {
     cursorKey?: string,
   ): Promise<PlayRecordPage> {
     const username = normalizeUsername(userName);
+    if (limit === 1 && cursorTime === undefined) {
+      const rows = this.db
+        .prepare(
+          `SELECT record_key, record_json, COUNT(*) OVER () AS total
+        FROM play_records WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+        ORDER BY ${SQLITE_TRACKING_CREATED_AT} DESC, record_key DESC LIMIT 2`,
+        )
+        .all(username) as Array<{
+        record_key: string;
+        record_json: string;
+        total: number;
+      }>;
+      return buildTrackingPlayRecordPage(
+        rows,
+        Number(rows[0]?.total ?? 0),
+        limit,
+      );
+    }
     const rows = (
       cursorTime !== undefined && cursorKey
         ? this.stmts.getUnreadTrackingPlayRecordPageAfter.all(
@@ -2530,6 +2571,17 @@ export class LocalSqliteStorage implements IStorage {
   ) {
     const username = normalizeUsername(userName);
     const sql = favoriteMessageQueries('sqlite', username, limit, before);
+    if (limit === 1 && !before) {
+      const rows = this.db.prepare(sql.summary).all(username) as {
+        favorite_key: string;
+        favorite_json: string;
+        total: number;
+      }[];
+      return {
+        items: favoriteMessagesFromRows(rows),
+        total: Number(rows[0]?.total ?? 0),
+      };
+    }
     const rows = this.db.prepare(sql.page).all(...sql.params) as {
       favorite_key: string;
       favorite_json: string;
@@ -2912,6 +2964,21 @@ export class LocalSqliteStorage implements IStorage {
     ...args: Parameters<IStorage['reorderListItems']>
   ): ReturnType<IStorage['reorderListItems']> {
     return this.runListPlan(new ListPlans('sqlite').reorderListItems(...args));
+  }
+
+  async getMessageSourceSummary(
+    ...args: Parameters<IStorage['getMessageSourceSummary']>
+  ): ReturnType<IStorage['getMessageSourceSummary']> {
+    return readMessageSourceSummary(
+      {
+        dialect: 'sqlite',
+        rows: async <T>(sql: string, params: unknown[] = []) =>
+          this.db.prepare(sql).all(...params) as T[],
+        run: async (sql, params = []) =>
+          this.db.prepare(sql).run(...params).changes,
+      },
+      ...args,
+    );
   }
 
   private get social() {
@@ -3961,22 +4028,12 @@ export class LocalSqliteStorage implements IStorage {
           return false;
         const noticeAccess = new SqliteUserAccessStore(this.db);
         const noticeUsers = configPermissionsChanged(current, config)
-          ? (
-              this.db
-                .prepare('SELECT username FROM user_access ORDER BY username')
-                .all() as { username: string }[]
-            ).flatMap((row) => {
-              const user = noticeAccess.get(row.username);
-              // 站长与管理员可在后台直接看到源配置，配置改动不再通知他们
-              return user?.role === 'user'
-                ? [{ user, permissions: accessPermissions(user, current) }]
-                : [];
-            })
+          ? noticeAccess.list()
           : [];
         const removed = removedAccessReferences(current, config);
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
-        for (const source of removed.sources) access.removeSource(source);
+        access.removeSources(removed.sources);
         const now = Date.now();
         const pendingQuery = pendingPermissionNoticesQuery(now);
         const pending = noticeUsers.length
@@ -3986,24 +4043,25 @@ export class LocalSqliteStorage implements IStorage {
                 .all(...pendingQuery.params) as Record<string, unknown>[],
             )
           : new Map();
-        for (const { user, permissions } of noticeUsers) {
-          const next = noticeAccess.get(user.username);
-          const payload = next
-            ? accessPermissionChanges(
-                permissions,
-                accessPermissions(next, config),
-              )
-            : null;
-          const write = payload
-            ? permissionNoticeWrite(
-                'sqlite',
-                user.username,
-                payload,
-                pending.get(user.username),
-                now,
-              )
-            : null;
-          if (write) this.db.prepare(write.sql).run(...write.params);
+        const statements = new Map<string, Database.Statement>();
+        for (const { username, payload } of configPermissionChanges(
+          noticeUsers,
+          current,
+          config,
+        )) {
+          const write = permissionNoticeWrite(
+            'sqlite',
+            username,
+            payload,
+            pending.get(username),
+            now,
+          );
+          let statement = statements.get(write.sql);
+          if (!statement) {
+            statement = this.db.prepare(write.sql);
+            statements.set(write.sql, statement);
+          }
+          statement.run(...write.params);
         }
         stateStore.prune(current, config);
         for (const [key, count] of Object.entries(state?.liveCounts || {})) {
@@ -4548,19 +4606,27 @@ export class LocalSqliteStorage implements IStorage {
     const cutoff = Number.isFinite(updatedBefore)
       ? Math.max(0, Math.floor(updatedBefore))
       : 0;
-    return this.db
-      .transaction(() => {
-        this.db
-          .prepare(
-            `DELETE FROM playback_watch_buckets WHERE session_id IN
-        (SELECT id FROM playback_sessions WHERE updated_at < ?)`,
-          )
-          .run(cutoff);
-        return Number(
-          this.stmts.deletePlaybackSessionsBefore.run(cutoff).changes,
-        );
-      })
-      .immediate();
+    const select = this.db.prepare(
+      'SELECT username, id FROM playback_sessions WHERE updated_at < ? ORDER BY updated_at LIMIT ?',
+    );
+    const deleteBuckets = this.db.prepare(
+      'DELETE FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+    );
+    const deleteSession = this.db.prepare(
+      'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
+    );
+    const batch = this.db.transaction(() => {
+      const rows = select.all(cutoff, PLAYBACK_RETENTION_BATCH_SIZE) as {
+        username: string;
+        id: string;
+      }[];
+      for (const row of rows) {
+        deleteBuckets.run(row.username, row.id);
+        deleteSession.run(row.username, row.id);
+      }
+      return rows.length;
+    });
+    return runPlaybackRetention(async () => batch.immediate());
   }
 
   async getPlaybackWatchTotals(
@@ -4599,9 +4665,9 @@ export class LocalSqliteStorage implements IStorage {
       ? [normalizeUsername(userName), start, end]
       : [start, end];
     const rows = this.db
-      .prepare(sourceUsageSql(personal))
-      .all(...params) as PlaybackSourceUsageRow[];
-    return aggregateSourceUsage(rows);
+      .prepare(sourceUsageSql(personal, 'sqlite'))
+      .all(...params) as AggregatedSourceUsageRow[];
+    return sourceUsageFromAggregates(rows);
   }
 
   async getPlaybackPeriodSessions(

@@ -1114,8 +1114,10 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
     const ids = readIds
       .map(parseFollowReviewMessageId)
       .filter((id) => id !== null);
+    // SQLite 无统计信息时会从全站公开评价起扫；固定先取当前用户关注范围。
+    const reviewJoin = this.sql.dialect === 'sqlite' ? 'CROSS JOIN' : 'JOIN';
     return {
-      from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username LEFT JOIN user_watch_totals wt ON wt.username = p.username
+      from: `FROM user_follows f ${reviewJoin} video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username LEFT JOIN user_watch_totals wt ON wt.username = p.username
         WHERE f.follower = ? AND v.is_public = 1 AND v.first_published_at > f.created_at AND v.first_published_at > ?
         ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?)').join(' ')}`,
       params: [

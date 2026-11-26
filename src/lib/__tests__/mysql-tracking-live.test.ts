@@ -4,6 +4,7 @@ import {
   assertAnnualRecapMessages,
   assertAnnualRecapStorage,
 } from '@/lib/__tests__/__fixtures__/annual-recap-contract';
+import { assertMessageSummaries } from '@/lib/__tests__/__fixtures__/message-summary-contract';
 import {
   assertPlayRecordEpisodeProgress,
   assertPlayRecordOrdering,
@@ -11,6 +12,7 @@ import {
 import {
   assertBatchDeletePlayRecords,
   assertBatchReadPlayRecords,
+  assertMetadataRefreshPages,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import {
@@ -18,6 +20,10 @@ import {
   assertPlayRecordTitleLookup,
 } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
+import {
+  assertPlaybackRetentionBatches,
+  assertSourceUsageAggregation,
+} from '@/lib/__tests__/__fixtures__/playback-maintenance-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
@@ -80,11 +86,67 @@ const baseFavorite: Favorite = {
 describeLive('MySQL 追更查询（真实实例）', () => {
   let storage: MySqlStorage;
 
-  beforeAll(() => {
-    storage = new MySqlStorage(liveUrl);
+  it('combines message counts with the latest item without delaying read state', async () => {
+    await assertMessageSummaries(storage);
   });
 
+  it('aggregates source usage with byte-exact grouping and normalized work identities', async () => {
+    await assertSourceUsageAggregation(storage);
+  });
+  it('cleans multiple bounded playback batches and their buckets', async () => {
+    await assertPlaybackRetentionBatches(storage);
+  }, 30000);
+
+  // 首次读取触发建表与迁移，真实 MySQL 冷启动会超过单个钩子的默认超时。
+  beforeAll(async () => {
+    storage = new MySqlStorage(liveUrl);
+    await storage.getAdminConfig();
+  }, 60000);
+
   beforeEach(async () => resetMysqlTestData(storage));
+
+  it('全局元数据分页跨用户并按作品读取全部关联快照', async () => {
+    await assertMetadataRefreshPages(storage);
+  });
+
+  it.each(['record', 'favorite'] as const)(
+    '大小写变体的 %s 关联读取独立且 ci keyset 跨页完整',
+    async (kind) => {
+      const keys = ['site+Ab1', 'site+ab1', 'site+Ab1', 'site+ab1'];
+      for (const [index, key] of keys.entries()) {
+        const user = `case-${index}`;
+        if (kind === 'record')
+          await storage.setPlayRecord(user, key, basePlayRecord);
+        else await storage.setFavorite(user, key, baseFavorite);
+      }
+      const all = [];
+      let cursor: import('../types').MetadataRefreshCursor | undefined;
+      do {
+        const page = await storage.getMetadataRefreshPage(kind, 1, cursor);
+        all.push(...page.items.map(({ user, key }) => [user, key]));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      expect(all).toEqual(keys.map((key, index) => [`case-${index}`, key]));
+      for (const key of ['site+Ab1', 'site+ab1']) {
+        const users = [];
+        cursor = undefined;
+        do {
+          const page = await storage.getMetadataRefreshPage(
+            kind,
+            1,
+            cursor,
+            key,
+          );
+          expect(page.items.every((row) => row.key === key)).toBe(true);
+          users.push(...page.items.map((row) => row.user));
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
+        expect(users).toEqual(
+          key === 'site+Ab1' ? ['case-0', 'case-2'] : ['case-1', 'case-3'],
+        );
+      }
+    },
+  );
 
   afterAll(async () => {
     await (

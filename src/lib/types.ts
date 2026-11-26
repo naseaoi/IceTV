@@ -59,6 +59,18 @@ export interface PlayRecordPage {
   nextCursor: string | null;
 }
 
+export type MetadataRefreshKind = 'record' | 'favorite';
+
+export interface MetadataRefreshCursor {
+  key: string;
+  user: string;
+}
+
+export interface MetadataRefreshPage {
+  items: Array<MetadataRefreshCursor & { snapshot: string }>;
+  nextCursor: MetadataRefreshCursor | null;
+}
+
 export interface MetadataRecordPage<T> {
   items: Array<{
     key: string;
@@ -649,6 +661,12 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     snapshot: string | null,
   ): Promise<boolean>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
+  getMetadataRefreshPage(
+    kind: MetadataRefreshKind,
+    limit: number,
+    cursor?: MetadataRefreshCursor,
+    workKey?: string,
+  ): Promise<MetadataRefreshPage>;
   getStalePlayRecordPage(
     userName: string,
     now: number,
@@ -917,6 +935,13 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
     now: number,
     query?: import('@/lib/follow-review-identity').FollowReviewQuery,
   ): Promise<import('@/lib/message-types').FollowReviewUserMessage[]>;
+  getMessageSourceSummary(
+    kind: import('@/lib/message-source-summary').MessageSummarySource,
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<import('@/lib/message-source-summary').MessageSourceSummary>;
   getFollowReviewMessageCount(
     username: string,
     readAt: number,

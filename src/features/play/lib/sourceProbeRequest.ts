@@ -1,4 +1,8 @@
 import {
+  isSourceServerUnavailable,
+  rememberRelayFailure,
+} from '@/features/play/lib/relayFailureMemory';
+import {
   SOURCE_PROBE_HEADER,
   SourceProbeDeferredError,
   SourceProbeNetworkError,
@@ -38,10 +42,28 @@ export async function fetchSourceProbe(
       Math.ceil((cooldownUntil - Date.now()) / 1000),
     );
   }
+  const target = new URL(
+    url,
+    typeof window === 'undefined' ? 'http://localhost' : window.location.href,
+  );
+  const source = target.searchParams.get('icetv-source') || '';
+  const rawUrl = target.searchParams.get('url') || '';
+  const isRelay =
+    target.pathname.startsWith('/api/proxy/') &&
+    target.searchParams.get('forceServer') === 'true';
+  if (isRelay && isSourceServerUnavailable(source, rawUrl)) {
+    throw new SourceProbeNetworkError('Server relay is cooling down');
+  }
   const response = await request({
     ...init,
     headers: { ...init.headers, [SOURCE_PROBE_HEADER]: '1' },
   });
+  if (isRelay)
+    rememberRelayFailure(
+      source,
+      rawUrl,
+      (name) => response.headers?.get(name) ?? null,
+    );
   if (response.status === 429 || response.status === 503) {
     const retryAfter = Number(response.headers?.get('Retry-After'));
     const seconds =

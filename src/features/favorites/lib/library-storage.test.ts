@@ -79,12 +79,14 @@ for (const backend of ['sqlite', 'mysql'] as const) {
   suite(`${backend} favorite library`, () => {
     let storage: IStorage;
     const username = `favorite-library-${backend}`;
-    beforeAll(() => {
+    // 首次读取触发建表与迁移，真实 MySQL 冷启动会超过单个用例的默认超时。
+    beforeAll(async () => {
       storage =
         backend === 'sqlite'
           ? new LocalSqliteStorage(':memory:')
           : new MySqlStorage(liveUrl!);
-    });
+      await storage.getAdminConfig();
+    }, 60000);
     beforeEach(async () => {
       await storage.deleteUser(username);
     });

@@ -5,6 +5,7 @@ import type { NextRequest } from 'next/server';
 import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { createFragmentMemoryCache } from '@/features/play/lib/fragmentMemoryCache';
+import { recordRelayHostResult } from '@/features/play/lib/relayHostHealth.server';
 import { normalizeSegmentCacheKey } from '@/lib/segment-cache-key';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getUpstreamRoutes } from '@/lib/upstream-proxy-pool.server';
@@ -87,7 +88,8 @@ describe('signed playback sticky context', () => {
   const originalSecret = process.env.AUTH_SECRET;
   const originalPool = process.env.UPSTREAM_PROXY_POOL;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await recordRelayHostResult('https://cdn.example', false, null);
     process.env.AUTH_SECRET = 'sticky-test-secret-with-at-least-32-chars';
     process.env.UPSTREAM_PROXY_POOL =
       'http://proxy-a.example:8000,http://proxy-b.example:8000';

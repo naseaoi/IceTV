@@ -35,6 +35,26 @@ const mockUpdatePlayRecord = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getMessageSourceSummary: async (kind: string, ...args: unknown[]) => {
+      const pair =
+        kind === 'follow-review'
+          ? [mockGetFollowReviewMessages, mockGetFollowReviewMessageCount]
+          : kind === 'follow-recap'
+            ? [mockGetFollowRecapMessages, mockGetFollowRecapMessageCount]
+            : kind === 'review-reply'
+              ? [mockGetReviewReplyMessages, mockGetReviewReplyMessageCount]
+              : kind === 'user-notice'
+                ? [mockGetUserNoticeMessages, mockGetUserNoticeCount]
+                : [mockGetSocialNotifications, mockGetSocialNotificationCount];
+      const params =
+        kind === 'new-follower' || kind === 'review-like'
+          ? [kind, ...args]
+          : args;
+      return {
+        items: await pair[0](...params, { limit: 1 }),
+        total: await pair[1](...params),
+      };
+    },
     getCapsuleMessages: (...args: unknown[]) => mockGetCapsuleMessages(...args),
     openCapsule: (...args: unknown[]) => mockOpenCapsule(...args),
     readAllCapsules: (...args: unknown[]) => mockReadAllCapsules(...args),
@@ -82,6 +102,7 @@ import {
   getAnnouncementHistory,
   getUserMessagePage,
   getUserMessageSummary,
+  invalidateMessageAnnouncementSnapshot,
   readAllUserMessages,
   readUserMessage,
 } from '@/lib/messages.server';
@@ -252,6 +273,7 @@ describe('messages server', () => {
   });
 
   beforeEach(() => {
+    invalidateMessageAnnouncementSnapshot();
     jest.clearAllMocks();
     mockGetCapsuleMessages.mockResolvedValue({ items: [], total: 0 });
     mockOpenCapsule.mockResolvedValue(null);
@@ -271,6 +293,7 @@ describe('messages server', () => {
     mockGetFollowReviewMessages.mockResolvedValue([]);
     mockGetFollowReviewMessageCount.mockResolvedValue(0);
     mockGetPublishedAnnouncements.mockResolvedValue([announcementRow]);
+    jest.spyOn(Date, 'now').mockReturnValue(10000);
     mockGetAnnouncement.mockResolvedValue(announcementRow);
     mockGetAllPlayRecords.mockResolvedValue({
       'source-a+video-1': updatedRecord,
@@ -296,6 +319,19 @@ describe('messages server', () => {
         return next;
       },
     );
+  });
+
+  it('shares published announcements but reads user state on every summary', async () => {
+    usePersistedUserMessageState();
+    const first = await getUserMessageSummary('reader');
+    await readUserMessage('reader', ANNOUNCEMENT_ID);
+    const next = await getUserMessageSummary('reader');
+    expect(next.unreadCount).toBe(first.unreadCount - 1);
+    expect(mockGetPublishedAnnouncements).toHaveBeenCalledTimes(1);
+    expect(mockGetUserMessageState).toHaveBeenCalledTimes(2);
+    invalidateMessageAnnouncementSnapshot();
+    await getUserMessageSummary('reader');
+    expect(mockGetPublishedAnnouncements).toHaveBeenCalledTimes(2);
   });
 
   it('收藏与播放同毫秒分页不重漏，摘要和已读使用收藏消息水位', async () => {
@@ -482,6 +518,7 @@ describe('messages server', () => {
     expect(muted.latestUnreadAt).toBe(5000);
     expect(muted.latestUnread?.type).toBe('announcement');
     mockGetPublishedAnnouncements.mockResolvedValue([]);
+    invalidateMessageAnnouncementSnapshot();
     mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
       items: {},
       total: 0,
@@ -799,12 +836,7 @@ describe('messages server', () => {
     expect(summary.unreadCount).toBe(1);
     expect(summary.announcement).toBeNull();
     expect(summary.latestTracking?.type).toBe('tracking-update');
-    expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenCalledWith(
-      'demo',
-      1,
-      undefined,
-      undefined,
-    );
+    expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenCalledWith('demo', 1);
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
@@ -1052,6 +1084,7 @@ describe('messages server', () => {
 
 describe('annual report messages', () => {
   beforeEach(() => {
+    invalidateMessageAnnouncementSnapshot();
     jest.clearAllMocks();
     mockGetCapsuleMessages.mockResolvedValue({ items: [], total: 0 });
     mockOpenCapsule.mockResolvedValue(null);

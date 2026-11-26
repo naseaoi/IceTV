@@ -222,7 +222,7 @@ export function getUpstreamFailureStatus(error: unknown): 502 | 504 {
 
 export function toProxyFailurePayload(diagnostic: ProxyFailureDiagnostic) {
   return {
-    error: diagnostic.message,
+    error: getDefaultProxyFailureMessage(diagnostic.reason),
     code: diagnostic.code,
     reason: diagnostic.reason,
     stage: diagnostic.stage,

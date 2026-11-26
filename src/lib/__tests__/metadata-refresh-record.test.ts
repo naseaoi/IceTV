@@ -404,6 +404,28 @@ describe('refreshMetadataCandidates', () => {
     jest.restoreAllMocks();
   });
 
+  it.each([true, false])(
+    '关联写回按原始作品键隔离（详情成功=%s）',
+    async (success) => {
+      const selected = createCandidate('site+Ab1');
+      const other = { ...createCandidate('site+ab1'), user: 'other' };
+      const { saved, target } = createTarget();
+      const save = jest.spyOn(target, 'saveIfUnchanged');
+      target.loadRelated = async () => [selected, other];
+      const budget = createBudget({ maxItems: 1 });
+      await refreshMetadataCandidates(
+        [selected, selected],
+        budget,
+        jest.fn().mockResolvedValue(success ? sevenEpisodes : null),
+        target,
+      );
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save.mock.calls[0].slice(0, 3)).toEqual(['user', 'site', 'Ab1']);
+      expect(saved).toHaveLength(1);
+      expect(budget.processed).toBe(1);
+    },
+  );
+
   it('获取失败的条目在本轮末尾重试一次，成功后记录新集数', async () => {
     const getDetail = jest
       .fn()

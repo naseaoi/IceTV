@@ -48,7 +48,10 @@ jest.mock('@/lib/proxy-response-limits', () => ({
 
 jest.mock('@/lib/cover-image-resize', () => ({
   ...jest.requireActual('@/lib/cover-image-resize'),
-  resizeCoverImage: (...args: unknown[]) => mockResizeCoverImage(...args),
+  downloadAndResizeCoverImage: async (
+    download: () => Promise<ArrayBuffer>,
+    options: unknown,
+  ) => mockResizeCoverImage(await download(), options),
 }));
 
 const { GET } = require('./route') as typeof import('./route');

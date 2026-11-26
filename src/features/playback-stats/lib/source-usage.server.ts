@@ -12,7 +12,7 @@ const cache = createSharedServerCache<PlaybackSourceUsage[]>({
   maxSize: 200,
 });
 
-// 全站查询没有用户名索引前缀，五分钟共享缓存限制整表范围扫描频率。
+// 五分钟共享缓存合并同窗口读取，限制 SQL 范围聚合的执行频率。
 export function getPlaybackSourceUsage(
   days: number,
   username?: string,

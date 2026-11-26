@@ -49,8 +49,8 @@ export class SocialNotificationStorage {
         JOIN video_review_likes latest ON latest.author = g.author AND latest.title_norm = g.title_norm AND latest.year = g.year AND latest.created_at = g.created_at AND latest.liker <> g.author
         JOIN user_profiles liker ON liker.username = latest.liker
         LEFT JOIN user_watch_totals wt ON wt.username = liker.username
-        WHERE NOT EXISTS (SELECT 1 FROM video_review_likes tie WHERE tie.author = g.author AND tie.title_norm = g.title_norm AND tie.year = g.year AND tie.created_at = g.created_at AND tie.liker <> g.author AND tie.liker > latest.liker)) n`,
-      params: [username, username, now - 30 * 86400000] as unknown[],
+        WHERE v.username = ? AND NOT EXISTS (SELECT 1 FROM video_review_likes tie WHERE tie.author = g.author AND tie.title_norm = g.title_norm AND tie.year = g.year AND tie.created_at = g.created_at AND tie.liker <> g.author AND tie.liker > latest.liker)) n`,
+      params: [username, username, now - 30 * 86400000, username] as unknown[],
     };
   }
 

@@ -308,10 +308,14 @@ export function querySocial(
   }
   if (
     sql.startsWith('SHOW INDEX FROM user_follows') ||
+    sql.startsWith('SHOW INDEX FROM video_review_replies') ||
+    sql.startsWith('SHOW INDEX FROM video_reviews') ||
     sql.startsWith('SHOW INDEX FROM video_review_likes')
   )
     return [
       { Key_name: 'idx_follow_notifications' },
+      { Key_name: 'idx_reply_author_recipient' },
+      { Key_name: 'idx_review_author_public_time' },
       { Key_name: 'idx_like_notifications' },
     ];
   if (sql.startsWith('SHOW COLUMNS FROM user_profiles'))

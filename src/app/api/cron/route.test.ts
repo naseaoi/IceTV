@@ -3,7 +3,11 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
-import type { MetadataRecordPage } from '@/lib/types';
+import type {
+  MetadataRefreshCursor,
+  MetadataRefreshKind,
+  MetadataRefreshPage,
+} from '@/lib/types';
 
 installWebPolyfills();
 
@@ -11,6 +15,7 @@ const mockGetConfig = jest.fn();
 const mockGetAllUsers = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetAllFavorites = jest.fn();
+const mockGetMetadataRefreshPage = jest.fn();
 const mockGetStalePlayRecordPage = jest.fn();
 const mockGetStaleFavoritePage = jest.fn();
 const mockSavePlayRecordIfUnchanged = jest.fn();
@@ -54,6 +59,8 @@ jest.mock('@/lib/db', () => ({
     getAllUsers: (...args: unknown[]) => mockGetAllUsers(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
+    getMetadataRefreshPage: (...args: unknown[]) =>
+      mockGetMetadataRefreshPage(...args),
     getStalePlayRecordPage: (...args: unknown[]) =>
       mockGetStalePlayRecordPage(...args),
     getStaleFavoritePage: (...args: unknown[]) =>
@@ -118,31 +125,43 @@ function createFavorite(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function buildMockMetadataPage<T>(
-  values: Record<string, T>,
+async function buildMockMetadataPage(
+  kind: MetadataRefreshKind,
   limit: number,
-  cursorKey?: string,
-): MetadataRecordPage<T> {
-  const entries = Object.entries(values).sort(([left], [right]) =>
-    left.localeCompare(right),
-  );
-  const start =
-    cursorKey === undefined ? 0 : entries.findIndex(([key]) => key > cursorKey);
-  if (start < 0) {
-    return { items: [], nextCursor: null };
+  cursor?: MetadataRefreshCursor,
+  workKey?: string,
+): Promise<MetadataRefreshPage> {
+  const users = new Set<string>(await mockGetAllUsers());
+  const owner = mockGetOwnerUsername();
+  if (owner) users.add(owner.toLowerCase());
+  const rows: MetadataRefreshPage['items'] = [];
+  for (const user of users) {
+    const values = await (kind === 'record'
+      ? mockGetAllPlayRecords(user)
+      : mockGetAllFavorites(user));
+    for (const [key, item] of Object.entries(values)) {
+      if (workKey !== undefined && key !== workKey) continue;
+      if (
+        cursor &&
+        !(key > cursor.key || (key === cursor.key && user > cursor.user))
+      )
+        continue;
+      rows.push({ user, key, snapshot: JSON.stringify(item) });
+    }
   }
-
-  const rows = entries.slice(start, start + limit + 1);
+  rows.sort(
+    (a, b) => a.key.localeCompare(b.key) || a.user.localeCompare(b.user),
+  );
+  const items = rows.slice(0, limit);
+  const last = items[items.length - 1];
   return {
-    items: rows
-      .slice(0, limit)
-      .map(([key, item]) => ({ key, item, snapshot: JSON.stringify(item) })),
-    nextCursor: rows.length > limit ? rows[limit - 1][0] : null,
+    items,
+    nextCursor: rows.length > limit ? { key: last.key, user: last.user } : null,
   };
 }
 
 async function flushBackgroundTask() {
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 100; index += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
@@ -183,34 +202,9 @@ describe('cron route', () => {
     mockGetAllFavorites.mockReset().mockResolvedValue({});
     mockGetStalePlayRecordPage.mockReset();
     mockGetStaleFavoritePage.mockReset();
-    mockGetStalePlayRecordPage.mockImplementation(
-      async (
-        user: string,
-        _now: number,
-        _ttlMs: number,
-        limit: number,
-        cursorKey?: string,
-      ) =>
-        buildMockMetadataPage(
-          await mockGetAllPlayRecords(user),
-          limit,
-          cursorKey,
-        ),
-    );
-    mockGetStaleFavoritePage.mockImplementation(
-      async (
-        user: string,
-        _now: number,
-        _ttlMs: number,
-        limit: number,
-        cursorKey?: string,
-      ) =>
-        buildMockMetadataPage(
-          await mockGetAllFavorites(user),
-          limit,
-          cursorKey,
-        ),
-    );
+    mockGetMetadataRefreshPage
+      .mockReset()
+      .mockImplementation(buildMockMetadataPage);
     mockSavePlayRecordIfUnchanged.mockReset().mockResolvedValue(true);
     mockSaveFavoriteIfUnchanged.mockReset().mockResolvedValue(true);
     mockDeletePlaybackSessionsBefore.mockReset().mockResolvedValue(0);
@@ -262,6 +256,100 @@ describe('cron route', () => {
       'CRON_PLAYBACK_STATS_RETENTION_DAYS',
       originalPlaybackStatsRetentionDays,
     );
+  });
+
+  it('扫描超时后两类游标独立推进，尾部与回绕前段均可入选', async () => {
+    const { refreshRecordAndFavorites } =
+      await import('@/lib/cron/metadata-refresh');
+    await refreshRecordAndFavorites();
+    process.env.CRON_METADATA_TIME_BUDGET_MS = '1000';
+    process.env.CRON_METADATA_PAGE_SIZE = '1';
+    let now = 100_000_000;
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const rows = Object.fromEntries(
+      (['record', 'favorite'] as const).map((kind) => [
+        kind,
+        ['a', 'b', 'c', 'd', 'e'].map((id) => ({
+          user: 'user',
+          key: `${kind}+${id}`,
+          snapshot: JSON.stringify(
+            createPlayRecord({ metadata_checked_at: id === 'e' ? 0 : now }),
+          ),
+        })),
+      ]),
+    ) as Record<MetadataRefreshKind, MetadataRefreshPage['items']>;
+    const starts: Array<[MetadataRefreshKind, string | undefined]> = [];
+    mockGetMetadataRefreshPage.mockImplementation(
+      async (
+        kind: MetadataRefreshKind,
+        _limit: number,
+        cursor?: MetadataRefreshCursor,
+        workKey?: string,
+      ) => {
+        if (workKey !== undefined)
+          return {
+            items: rows[kind].filter((row) => row.key === workKey),
+            nextCursor: null,
+          };
+        starts.push([kind, cursor?.key]);
+        now += 60;
+        const remaining = rows[kind].filter(
+          (row) => !cursor || row.key > cursor.key,
+        );
+        const items = remaining.slice(0, 1);
+        return {
+          items,
+          nextCursor:
+            remaining.length > 1
+              ? { key: items[0].key, user: items[0].user }
+              : null,
+        };
+      },
+    );
+    mockFetchVideoDetail.mockResolvedValue({
+      episodes: ['ep'],
+      title: 'refreshed',
+    });
+    try {
+      await refreshRecordAndFavorites();
+      expect(mockFetchVideoDetail).not.toHaveBeenCalled();
+      starts.length = 0;
+      await refreshRecordAndFavorites();
+      expect(starts).toEqual([
+        ['record', 'record+b'],
+        ['record', 'record+c'],
+        ['favorite', 'favorite+b'],
+        ['favorite', 'favorite+c'],
+      ]);
+      expect(mockFetchVideoDetail).not.toHaveBeenCalled();
+      for (const kind of ['record', 'favorite'] as const) {
+        rows[kind][0].snapshot = JSON.stringify(
+          createPlayRecord({ metadata_checked_at: 0 }),
+        );
+      }
+      starts.length = 0;
+      await refreshRecordAndFavorites();
+      expect(starts).toEqual([
+        ['record', 'record+d'],
+        ['record', undefined],
+        ['favorite', 'favorite+d'],
+        ['favorite', undefined],
+      ]);
+      expect(
+        mockFetchVideoDetail.mock.calls
+          .map(([request]) => `${request.source}+${request.id}`)
+          .sort(),
+      ).toEqual(['favorite+a', 'favorite+e', 'record+a', 'record+e']);
+      // 放宽预算完成一整圈，回绕重遇同一作品时只回源一次。
+      process.env.CRON_METADATA_TIME_BUDGET_MS = '10000';
+      mockFetchVideoDetail.mockClear();
+      await refreshRecordAndFavorites();
+      expect(mockFetchVideoDetail).toHaveBeenCalledTimes(4);
+    } finally {
+      clock.mockRestore();
+      mockGetMetadataRefreshPage.mockImplementation(buildMockMetadataPage);
+      await refreshRecordAndFavorites();
+    }
   });
 
   it('同一进程内拒绝重叠执行', async () => {
@@ -474,7 +562,12 @@ describe('cron route', () => {
       expect.anything(),
       expect.any(String),
     );
-    expect(mockGetStalePlayRecordPage).toHaveBeenCalledTimes(2);
+    expect(mockGetStalePlayRecordPage).not.toHaveBeenCalled();
+    expect(
+      mockGetMetadataRefreshPage.mock.calls.filter(
+        ([kind, , , key]) => kind === 'record' && key === undefined,
+      ),
+    ).toHaveLength(2);
   });
 
   it('元数据任务不回退到全量读取接口', async () => {
@@ -485,11 +578,7 @@ describe('cron route', () => {
     mockGetAllFavorites.mockImplementation(() => {
       throw new Error('不应调用全量收藏读取');
     });
-    mockGetStalePlayRecordPage.mockResolvedValue({
-      items: [],
-      nextCursor: null,
-    });
-    mockGetStaleFavoritePage.mockResolvedValue({
+    mockGetMetadataRefreshPage.mockResolvedValue({
       items: [],
       nextCursor: null,
     });
@@ -498,8 +587,98 @@ describe('cron route', () => {
 
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
     expect(mockGetAllFavorites).not.toHaveBeenCalled();
-    expect(mockGetStalePlayRecordPage).toHaveBeenCalledTimes(1);
-    expect(mockGetStaleFavoritePage).toHaveBeenCalledTimes(1);
+    expect(mockGetAllUsers).not.toHaveBeenCalled();
+    expect(mockGetStalePlayRecordPage).not.toHaveBeenCalled();
+    expect(mockGetStaleFavoritePage).not.toHaveBeenCalled();
+    expect(mockGetMetadataRefreshPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('同一作品跨 162 个用户只占一份预算，并同步新鲜记录与收藏', async () => {
+    process.env.CRON_METADATA_RECORD_MAX_ITEMS = '1';
+    process.env.CRON_METADATA_FAVORITE_MAX_ITEMS = '1';
+    const users = Array.from(
+      { length: 162 },
+      (_, index) => `user-${String(index).padStart(3, '0')}`,
+    );
+    mockGetAllUsers.mockResolvedValue(users);
+    mockGetAllPlayRecords.mockImplementation(async (user: string) => ({
+      'source+1': createPlayRecord({
+        metadata_checked_at: user === users[0] ? 1 : Date.now(),
+      }),
+      'source+2': createPlayRecord({ metadata_checked_at: 2 }),
+    }));
+    mockGetAllFavorites.mockImplementation(async (user: string) =>
+      user === users[0]
+        ? {
+            'source+1': createFavorite(),
+            'source+3': createFavorite(),
+          }
+        : {},
+    );
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '新标题',
+      poster: 'new.jpg',
+      year: '2026',
+      episodes: ['1', '2'],
+    });
+
+    await runMetadataTask();
+
+    expect(mockFetchVideoDetail).toHaveBeenCalledTimes(2);
+    expect(mockFetchVideoDetail.mock.calls.map(([input]) => input.id)).toEqual([
+      '1',
+      '3',
+    ]);
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledTimes(162);
+    expect(
+      new Set(mockSavePlayRecordIfUnchanged.mock.calls.map(([user]) => user)),
+    ).toEqual(new Set(users));
+    for (const [, , id, next, snapshot] of mockSavePlayRecordIfUnchanged.mock
+      .calls) {
+      expect(id).toBe('1');
+      expect(next).toMatchObject({
+        total_episodes: 2,
+        update_baseline_episodes: 1,
+        update_detected_at: expect.any(Number),
+      });
+      expect(JSON.parse(snapshot).total_episodes).toBe(1);
+    }
+    expect(mockSaveFavoriteIfUnchanged).toHaveBeenCalledTimes(2);
+    expect(mockGetStalePlayRecordPage).not.toHaveBeenCalled();
+    expect(mockGetStaleFavoritePage).not.toHaveBeenCalled();
+  });
+
+  it('候选收集达到预算后停止翻页，并给刷新保留时间', async () => {
+    process.env.CRON_METADATA_TIME_BUDGET_MS = '100';
+    let currentTime = 1000;
+    const nowSpy = jest
+      .spyOn(Date, 'now')
+      .mockImplementation(() => currentTime);
+    mockGetMetadataRefreshPage.mockImplementation(
+      async (kind, _limit, _cursor, key) => {
+        if (kind === 'favorite') return { items: [], nextCursor: null };
+        const row = {
+          user: 'user',
+          key: 'source+1',
+          snapshot: JSON.stringify(createPlayRecord()),
+        };
+        if (key) return { items: [row], nextCursor: null };
+        currentTime += 11;
+        return { items: [row], nextCursor: { key: 'source+1', user: 'user' } };
+      },
+    );
+    mockFetchVideoDetail.mockResolvedValue({ episodes: ['1'] });
+    try {
+      await runMetadataTask();
+      expect(
+        mockGetMetadataRefreshPage.mock.calls.filter(
+          ([kind, , , key]) => kind === 'record' && !key,
+        ),
+      ).toHaveLength(1);
+      expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('达到时间预算后不再处理后续条目', async () => {

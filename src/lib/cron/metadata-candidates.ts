@@ -1,7 +1,73 @@
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
-import type { Favorite, PlayRecord } from '@/lib/types';
+import type {
+  Favorite,
+  MetadataRefreshCursor,
+  MetadataRefreshKind,
+  MetadataRefreshPage,
+  PlayRecord,
+} from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
+
+// 全局扫描与单作品关联读取共用 (作品键, 用户名) 索引和游标；不按用户枚举。
+export function metadataRefreshPageQuery(
+  kind: MetadataRefreshKind,
+  limit: number,
+  cursor?: MetadataRefreshCursor,
+  workKey?: string,
+  dialect: 'sqlite' | 'mysql' = 'sqlite',
+): { sql: string; params: Array<string | number>; limit: number } {
+  const table = kind === 'record' ? 'play_records' : 'favorites';
+  const key = kind === 'record' ? 'record_key' : 'favorite_key';
+  const json = kind === 'record' ? 'record_json' : 'favorite_json';
+  const pageLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (workKey !== undefined) {
+    conditions.push(`${key} = ?`);
+    params.push(workKey);
+    if (dialect === 'mysql') {
+      // 保留原列等值条件用于索引定位，再逐字节区分大小写与尾部空格。
+      conditions.push(`BINARY ${key} = BINARY ?`);
+      params.push(workKey);
+    }
+    if (cursor) {
+      conditions.push('username > ?');
+      params.push(cursor.user);
+    }
+  } else if (cursor) {
+    // 显式首列下界让两后端均从游标附近开始索引范围扫描。
+    conditions.push(
+      `${key} >= ? AND (${key} > ? OR (${key} = ? AND username > ?))`,
+    );
+    params.push(cursor.key, cursor.key, cursor.key, cursor.user);
+  }
+  params.push(pageLimit + 1);
+  return {
+    sql: `SELECT username AS user, ${key} AS work_key, ${json} AS snapshot
+      FROM ${table}${conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''}
+      ORDER BY ${key} ASC, username ASC LIMIT ?`,
+    params,
+    limit: pageLimit,
+  };
+}
+
+export function buildMetadataRefreshPage(
+  rows: Array<{ user: string; work_key: string; snapshot: string }>,
+  limit: number,
+): MetadataRefreshPage {
+  const items = rows.slice(0, limit).map((row) => ({
+    user: row.user,
+    key: row.work_key,
+    snapshot: row.snapshot,
+  }));
+  const last = items[items.length - 1];
+  return {
+    items,
+    nextCursor:
+      rows.length > limit && last ? { key: last.key, user: last.user } : null,
+  };
+}
 
 export const ENDED_SERIES_METADATA_REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 

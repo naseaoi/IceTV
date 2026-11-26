@@ -52,6 +52,7 @@ export function replySchema(dialect: 'sqlite' | 'mysql'): string[] {
     `CREATE TABLE IF NOT EXISTS video_review_reply_reports (reply_id VARCHAR(36) NOT NULL, reporter ${text} NOT NULL, reason VARCHAR(16) NOT NULL, detail VARCHAR(200) NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (reply_id, reporter))${suffix}`,
     ...(dialect === 'sqlite'
       ? [
+          'CREATE INDEX IF NOT EXISTS idx_reply_author_recipient ON video_review_replies (author, reply_to, created_at, id)',
           'CREATE INDEX IF NOT EXISTS idx_review_replies_target ON video_review_replies (author, title_norm, year, created_at, id)',
           'CREATE INDEX IF NOT EXISTS idx_review_replies_recipient ON video_review_replies (reply_to, created_at, id)',
           'CREATE INDEX IF NOT EXISTS idx_review_replies_user ON video_review_replies (username)',
