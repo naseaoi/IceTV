@@ -1,11 +1,22 @@
 import { Star } from 'lucide-react';
 
+import SkeletonText from '@/components/SkeletonText';
 import {
   liveHealthDescription,
   LiveLineHealthBadge,
 } from '@/features/live/components/LiveLineHealthBadge';
 import type { LiveChannelGroup } from '@/features/live/lib/liveChannelGroups';
 import type { LiveChannel } from '@/features/live/types';
+
+const LIVE_CHANNEL_ACTIONS_CLASS = 'flex min-h-9 min-w-0 items-center gap-2';
+
+export function LiveChannelActionsSkeleton() {
+  return (
+    <div className={LIVE_CHANNEL_ACTIONS_CLASS}>
+      <SkeletonText className='text-xs' barClassName='h-2.5 w-24 rounded' />
+    </div>
+  );
+}
 
 export function LiveChannelActions({
   group,
@@ -23,7 +34,7 @@ export function LiveChannelActions({
   onFavorite: () => void;
 }) {
   return (
-    <div className='flex min-w-0 items-center gap-2'>
+    <div className={LIVE_CHANNEL_ACTIONS_CLASS}>
       <div className='flex min-w-0 items-center gap-1 overflow-x-auto py-1'>
         {group.lines.length === 1 ? (
           <span className='text-xs text-gray-500 dark:text-gray-400'>

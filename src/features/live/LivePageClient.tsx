@@ -21,19 +21,24 @@ import {
 } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
-import { ListLoadingState } from '@/components/ListState';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import { MODAL_PRIMARY_BUTTON_CLASS } from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import PageLayout from '@/components/PageLayout';
 import { PlayerPageLayout } from '@/components/PlayerPageLayout';
-import { PLAYER_PANEL_SURFACE_CLASS } from '@/components/PlayerPanelTabBar';
 import PlayerStateOverlay, {
   PLAYER_OVERLAY_PRIMARY_BUTTON_CLASS,
 } from '@/components/PlayerStateOverlay';
-import SkeletonText from '@/components/SkeletonText';
-import { LiveChannelActions } from '@/features/live/components/LiveChannelActions';
+import {
+  LiveChannelActions,
+  LiveChannelActionsSkeleton,
+} from '@/features/live/components/LiveChannelActions';
 import { LiveChannelSidebar } from '@/features/live/components/LiveChannelSidebar';
+import LivePageLoading, {
+  LiveHeaderDescriptionSkeleton,
+  LiveHeaderTagsSkeleton,
+  LiveSidebarLoading,
+} from '@/features/live/components/LivePageLoading';
 import { useLiveFavorite } from '@/features/live/hooks/useLiveFavorite';
 import { useLiveLineSelection } from '@/features/live/hooks/useLiveLineSelection';
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
@@ -354,9 +359,7 @@ function AuthenticatedLivePageClient() {
     ? `正在播放 ${program.current.title} ${formatTimeToHHMM(program.current.start)}–${formatTimeToHHMM(program.current.end)}${program.next ? ` · 接下来 ${program.next.title}` : ''}`
     : null;
   const sidebar = sources.loading ? (
-    <div className={`flex h-full flex-col ${PLAYER_PANEL_SURFACE_CLASS}`}>
-      <ListLoadingState className='min-h-0 flex-1 px-4 py-6' />
-    </div>
+    <LiveSidebarLoading />
   ) : (
     <LiveChannelSidebar
       activeTab={sources.activeTab}
@@ -423,8 +426,9 @@ function AuthenticatedLivePageClient() {
       shortcutMode='live'
       titleSuffix={selection.currentGroup?.group || null}
       titleActions={
-        selection.currentGroup &&
-        sources.currentChannel && (
+        sources.loading ? (
+          <LiveChannelActionsSkeleton />
+        ) : selection.currentGroup && sources.currentChannel ? (
           <LiveChannelActions
             group={selection.currentGroup}
             currentLine={sources.currentChannel}
@@ -436,18 +440,18 @@ function AuthenticatedLivePageClient() {
                 void favorites.toggleGroupFavorite(selection.currentGroup);
             }}
           />
+        ) : null
+      }
+      titleDescription={
+        sources.loading || sources.isEpgLoading ? (
+          <LiveHeaderDescriptionSkeleton />
+        ) : (
+          programSummary || '暂无节目信息'
         )
       }
-      titleDescription={programSummary}
       tags={
         sources.loading
-          ? [
-              <SkeletonText
-                key='loading'
-                className='px-2.5 py-0.5 text-[11px] font-medium'
-                barClassName='h-2.5 w-24 rounded'
-              />,
-            ]
+          ? [<LiveHeaderTagsSkeleton key='loading' />]
           : headerTags
       }
       playerOverlay={
@@ -538,7 +542,7 @@ function AuthenticatedLivePageClient() {
 
 export default function LivePage() {
   return (
-    <Suspense fallback={<ListLoadingState className='py-12' />}>
+    <Suspense fallback={<LivePageLoading />}>
       <AuthenticatedRoute
         activePath='/live'
         contentMode='player'
