@@ -423,6 +423,13 @@ export interface SourcePlayReportInput {
   success: boolean;
 }
 
+export interface SourcePlayReporterDaily {
+  source: string;
+  bucketDate: string;
+  successReporterDays: number;
+  failureReporterDays: number;
+}
+
 export interface SourcePlayReporterSummary {
   source: string;
   successReporterDays: number;
@@ -1093,6 +1100,9 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   getSourceHealthSearchDaily(
     sinceDate: string,
   ): Promise<SourceHealthSearchDaily[]>;
+  getSourcePlayReporterDaily(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterDaily[]>;
   getSourcePlayReporterSummary(
     sinceDate: string,
   ): Promise<SourcePlayReporterSummary[]>;

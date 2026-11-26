@@ -134,6 +134,42 @@ it('attempts the final outcome even when the route-stat write fails', async () =
   );
 });
 
+it('limits normalized usernames to 120 reports per minute before reading the body or writing', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-04T12:00:00Z'));
+  try {
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'Rate-Limited',
+    });
+    for (let i = 0; i < 120; i++) {
+      expect((await POST(request({ stat, outcome }))).status).toBe(200);
+    }
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: ' rate-limited ',
+    });
+    const json = jest.fn().mockResolvedValue({ stat, outcome });
+    const response = await POST({ json } as unknown as NextRequest);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.json()).toEqual({
+      error: '播放统计上报过于频繁，请稍后重试',
+    });
+    expect(json).not.toHaveBeenCalled();
+    expect(db.recordSourceRouteStat).toHaveBeenCalledTimes(120);
+    expect(recordSourcePlayOutcome).toHaveBeenCalledTimes(120);
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'another-user',
+    });
+    expect((await POST(request({ outcome }))).status).toBe(200);
+    jest.advanceTimersByTime(60_000);
+    (requireActiveUser as jest.Mock).mockResolvedValue({
+      username: 'rate-limited',
+    });
+    expect((await POST(request({ outcome }))).status).toBe(200);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('returns a generic error when recording the final outcome fails', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   (recordSourcePlayOutcome as jest.Mock).mockRejectedValue(

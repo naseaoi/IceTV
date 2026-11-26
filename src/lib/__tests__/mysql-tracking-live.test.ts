@@ -728,10 +728,37 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         lastSuccessDate: null,
       },
     ];
+    const daily = [
+      {
+        source: 'alpha',
+        bucketDate: '2026-01-02',
+        successReporterDays: 1,
+        failureReporterDays: 1,
+      },
+      {
+        source: 'beta',
+        bucketDate: '2026-01-02',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+      },
+      {
+        source: 'alpha',
+        bucketDate: '2026-01-03',
+        successReporterDays: 1,
+        failureReporterDays: 0,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterDaily('2026-01-02')).toEqual(
+      daily,
+    );
+    expect(await storage.getSourcePlayReporterDaily('2026-01-04')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
       summaries,
     );
     await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterDaily('2026-01-01')).toEqual(
+      daily,
+    );
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       summaries,
     );

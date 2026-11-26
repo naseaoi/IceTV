@@ -21,7 +21,12 @@ import Spinner from '@/components/Spinner';
 import { AddSourcesModal } from '@/features/play/components/EpisodeSelector/AddSourcesModal';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
+import {
+  getSourceHealthChip,
+  SourceHealthModal,
+} from '@/features/play/components/EpisodeSelector/SourceHealthModal';
 import { parseLoadSpeedKBps } from '@/features/play/lib/autoSourceSwitchPolicy';
+import { useSourceHealthSummary } from '@/features/play/lib/sourceHealthSummary';
 import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
 import { SOURCE_PROBE_CONCURRENCY } from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
@@ -297,6 +302,19 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     isActiveRef.current = isActive;
   }, [isActive]);
   const [showAddSourcesModal, setShowAddSourcesModal] = useState(false);
+  const healthSummary = useSourceHealthSummary(isActive);
+  const [healthModalSource, setHealthModalSource] = useState<string | null>(
+    null,
+  );
+  const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
+  const healthModalSources = useMemo(
+    () =>
+      displaySources.map((source) => ({
+        key: source.source,
+        name: source.source_name,
+      })),
+    [displaySources],
+  );
   const [searchCandidates, setSearchCandidates] = useState<SearchResult[]>([]);
 
   useEffect(() => {
@@ -623,6 +641,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
             const speedRatio = speed
               ? speedBarRatio(parseLoadSpeedKBps(speed))
               : 0;
+            const healthChip = getSourceHealthChip(
+              healthSummary[source.source],
+            );
 
             return (
               <button
@@ -654,6 +675,28 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   {isCurrentSource && (
                     <span className='shrink-0 rounded bg-brand-500/15 px-1 text-[10px] font-medium leading-4 text-brand-600 dark:bg-brand-400/15 dark:text-brand-300'>
                       播放中
+                    </span>
+                  )}
+                  {healthChip && (
+                    <span
+                      role='button'
+                      tabIndex={0}
+                      title='全站近期参考，点击查看源站近况'
+                      className={`shrink-0 rounded px-1 text-[10px] font-medium leading-4 transition-opacity hover:opacity-80 ${healthChip.className}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHealthModalSource(source.source);
+                        setIsHealthModalOpen(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.currentTarget.click();
+                        }
+                      }}
+                    >
+                      {healthChip.label}
                     </span>
                   )}
                   {(details || resolution) && (
@@ -775,6 +818,14 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           </button>
         )}
       </div>
+
+      <SourceHealthModal
+        isOpen={isHealthModalOpen}
+        onClose={() => setIsHealthModalOpen(false)}
+        sources={healthModalSources}
+        summary={healthSummary}
+        focusSource={healthModalSource}
+      />
 
       <AddSourcesModal
         isOpen={showAddSourcesModal}

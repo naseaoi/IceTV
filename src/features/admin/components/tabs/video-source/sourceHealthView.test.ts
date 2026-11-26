@@ -22,6 +22,7 @@ function item(
     playReporterDays: 6,
     playSuccessRate: 0.8,
     lastOkDate: '2026-11-04',
+    daily: [],
     ...overrides,
   };
 }
@@ -49,7 +50,7 @@ describe('sourceHealthView', () => {
         '近 7 天 · 优质',
         '搜索可用 95% · 40 次',
         '平均耗时 1.3 秒',
-        '播放成功 80% · 6 人次',
+        '播放可用（含测速） 80% · 6 上报者日',
         '最近可用 今天',
       ].join('\n'),
     );
@@ -72,7 +73,7 @@ describe('sourceHealthView', () => {
       [
         '近 7 天 · 样本不足',
         '搜索 无样本',
-        '播放 无样本',
+        '播放可用（含测速） 无样本',
         '最近可用 30 天内无',
       ].join('\n'),
     );

@@ -3193,6 +3193,47 @@ function createFakePool() {
     }
     if (
       normalized ===
+      'SELECT source, bucket_date AS bucketDate, SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays, SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays FROM source_health_play WHERE bucket_date >= ? GROUP BY source, bucket_date ORDER BY bucket_date ASC, source ASC'
+    ) {
+      const daily = new Map<
+        string,
+        {
+          source: string;
+          bucketDate: string;
+          successReporterDays: number;
+          failureReporterDays: number;
+        }
+      >();
+      for (const row of currentState.healthPlay) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const key = JSON.stringify([row.source, row.bucketDate]);
+        const summary = daily.get(key) ?? {
+          source: row.source,
+          bucketDate: row.bucketDate,
+          successReporterDays: 0,
+          failureReporterDays: 0,
+        };
+        if (row.successCount > 0) summary.successReporterDays++;
+        else if (row.failureCount > 0) summary.failureReporterDays++;
+        daily.set(key, summary);
+      }
+      return [
+        [...daily.values()]
+          .sort(
+            (a, b) =>
+              a.bucketDate.localeCompare(b.bucketDate) ||
+              a.source.localeCompare(b.source),
+          )
+          .map((row) => ({
+            ...row,
+            successReporterDays: String(row.successReporterDays),
+            failureReporterDays: String(row.failureReporterDays),
+          })),
+        [],
+      ];
+    }
+    if (
+      normalized ===
       'SELECT source, SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays, SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays, MAX(CASE WHEN success_count > 0 THEN bucket_date ELSE NULL END) AS lastSuccessDate FROM source_health_play WHERE bucket_date >= ? GROUP BY source ORDER BY source ASC'
     ) {
       const summaries = new Map<
@@ -3546,10 +3587,37 @@ describe('mysql storage contract', () => {
         lastSuccessDate: null,
       },
     ];
+    const daily = [
+      {
+        source: 'alpha',
+        bucketDate: '2026-01-02',
+        successReporterDays: 1,
+        failureReporterDays: 1,
+      },
+      {
+        source: 'beta',
+        bucketDate: '2026-01-02',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+      },
+      {
+        source: 'alpha',
+        bucketDate: '2026-01-03',
+        successReporterDays: 1,
+        failureReporterDays: 0,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterDaily('2026-01-02')).toEqual(
+      daily,
+    );
+    expect(await storage.getSourcePlayReporterDaily('2026-01-04')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
       summaries,
     );
     await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterDaily('2026-01-01')).toEqual(
+      daily,
+    );
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       summaries,
     );

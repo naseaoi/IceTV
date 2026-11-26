@@ -124,10 +124,11 @@ const VideoSourceConfig = ({
     refreshConfig,
   });
   const [sources, setSources] = useState<DataSource[]>([]);
-  const { routeStats, health: sourceHealth } = useSourceInsights(
-    config,
-    Boolean(config?.SourceConfig),
-  );
+  const {
+    routeStats,
+    health: sourceHealth,
+    refresh: refreshSourceInsights,
+  } = useSourceInsights(config, Boolean(config?.SourceConfig));
   const sourceUsage = useSourceUsage(Boolean(config?.SourceConfig));
   const sourceRouteStats = useMemo(
     () => buildSourceRouteStats(routeStats),
@@ -423,7 +424,13 @@ const VideoSourceConfig = ({
     error: validationError,
     startValidation,
     getValidationStatus,
-  } = useSourceValidation({ sources, onComplete: refreshAdminAlerts });
+  } = useSourceValidation({
+    sources,
+    onComplete: () => {
+      refreshSourceInsights();
+      refreshAdminAlerts();
+    },
+  });
 
   const handleOpenValidationModal = (sourceKeys?: string[]) => {
     setSearchKeyword('');

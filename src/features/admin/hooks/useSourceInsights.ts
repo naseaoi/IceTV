@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
 import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
@@ -22,8 +22,10 @@ const EMPTY_INSIGHTS: SourceInsights = {
 export function useSourceInsights(
   reloadKey: unknown,
   enabled = true,
-): SourceInsights {
+): SourceInsights & { refresh: () => void } {
   const [insights, setInsights] = useState<SourceInsights>(EMPTY_INSIGHTS);
+  const [revision, setRevision] = useState(0);
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -66,9 +68,9 @@ export function useSourceInsights(
     return () => {
       cancelled = true;
     };
-  }, [reloadKey, enabled]);
+  }, [reloadKey, enabled, revision]);
 
-  return insights;
+  return { ...insights, refresh };
 }
 
 export const SOURCE_USAGE_DAYS = 30;

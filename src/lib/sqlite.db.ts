@@ -202,6 +202,7 @@ import {
   SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
+  SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
   SourceRouteStatInput,
@@ -4720,6 +4721,21 @@ export class LocalSqliteStorage implements IStorage {
     ORDER BY bucket_date ASC, source ASC`,
       )
       .all(sinceDate) as SourceHealthSearchDaily[];
+  }
+
+  async getSourcePlayReporterDaily(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterDaily[]> {
+    return this.db
+      .prepare(
+        `SELECT source, bucket_date AS bucketDate,
+      SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays,
+      SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays
+    FROM source_health_play WHERE bucket_date >= ?
+    GROUP BY source, bucket_date
+    ORDER BY bucket_date ASC, source ASC`,
+      )
+      .all(sinceDate) as SourcePlayReporterDaily[];
   }
 
   async getSourcePlayReporterSummary(

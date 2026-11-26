@@ -1,5 +1,6 @@
 import type {
   SourceHealthSearchDaily,
+  SourcePlayReporterDaily,
   SourcePlayReporterSummary,
 } from '@/lib/types';
 
@@ -11,8 +12,11 @@ export const SOURCE_HEALTH_MIN_PLAY_REPORTER_DAYS = 3;
 export const SOURCE_HEALTH_MIN_OFFLINE_DAYS = 2;
 export const SOURCE_HEALTH_PRIOR_SUCCESS = 1;
 export const SOURCE_HEALTH_PRIOR_TOTAL = 2;
-export const SOURCE_HEALTH_SEARCH_WEIGHT = 0.6;
-export const SOURCE_HEALTH_PLAY_WEIGHT = 0.4;
+export const SOURCE_HEALTH_DAILY_MIN_SEARCH_ATTEMPTS = 5;
+export const SOURCE_HEALTH_DAILY_MIN_PLAY_REPORTER_DAYS = 3;
+export const SOURCE_HEALTH_DAILY_OK_RATE = 0.85;
+export const SOURCE_HEALTH_DAILY_DEGRADED_RATE = 0.5;
+export const SOURCE_HEALTH_PUBLIC_MIN_PLAY_REPORTER_DAYS = 20;
 export const SOURCE_HEALTH_POOR_SCORE = 50;
 export const SOURCE_HEALTH_GOOD_SCORE = 85;
 export const SOURCE_HEALTH_GOOD_LATENCY_MS = 3000;
@@ -24,6 +28,28 @@ export type SourceHealthTier =
   | 'normal'
   | 'insufficient';
 
+export type SourceHealthDailyStatus = 'ok' | 'degraded' | 'down' | 'none';
+
+export interface SourceHealthDailyPoint {
+  date: string;
+  status: SourceHealthDailyStatus;
+}
+
+export type SourceHealthPublicTier = 'good' | 'normal' | 'poor' | 'offline';
+
+export interface SourceHealthPublicItem {
+  tier: SourceHealthPublicTier;
+  playAvailability: number | null;
+  searchAvailability: number | null;
+  lastOkDate: string | null;
+  daily: SourceHealthDailyPoint[];
+}
+
+export interface SourceHealthPublicResponse {
+  days: number;
+  items: Record<string, SourceHealthPublicItem>;
+}
+
 export interface SourceHealthReportItem {
   source: string;
   score: number | null;
@@ -34,6 +60,64 @@ export interface SourceHealthReportItem {
   playReporterDays: number;
   playSuccessRate: number | null;
   lastOkDate: string | null;
+  daily: SourceHealthDailyPoint[];
+}
+
+export function toPublicSourceHealth(
+  item: SourceHealthReportItem,
+): SourceHealthPublicItem | null {
+  const hasPublicPlay =
+    item.playReporterDays >= SOURCE_HEALTH_PUBLIC_MIN_PLAY_REPORTER_DAYS;
+  if (
+    item.tier === 'insufficient' ||
+    (item.tier !== 'offline' && !hasPublicPlay)
+  ) {
+    return null;
+  }
+  return {
+    tier: item.tier,
+    playAvailability: hasPublicPlay ? item.playSuccessRate : null,
+    searchAvailability: item.searchAvailability,
+    lastOkDate: item.lastOkDate,
+    daily: item.daily.map((point) => ({ ...point })),
+  };
+}
+
+export function buildSourceHealthDaily(
+  dates: readonly string[],
+  searchRows: readonly SourceHealthSearchDaily[],
+  playRows: readonly SourcePlayReporterDaily[],
+): SourceHealthDailyPoint[] {
+  const searchByDate = new Map(searchRows.map((row) => [row.bucketDate, row]));
+  const playByDate = new Map(playRows.map((row) => [row.bucketDate, row]));
+  return dates.map((date) => {
+    const search = searchByDate.get(date);
+    const play = playByDate.get(date);
+    const rates: number[] = [];
+    if (search) {
+      const successes = search.okCount + search.emptyCount;
+      const attempts = successes + search.errorCount;
+      if (attempts >= SOURCE_HEALTH_DAILY_MIN_SEARCH_ATTEMPTS) {
+        rates.push(successes / attempts);
+      }
+    }
+    if (play) {
+      const total = play.successReporterDays + play.failureReporterDays;
+      if (total >= SOURCE_HEALTH_DAILY_MIN_PLAY_REPORTER_DAYS) {
+        rates.push(play.successReporterDays / total);
+      }
+    }
+    const rate = Math.min(...rates);
+    const status: SourceHealthDailyStatus =
+      rates.length === 0
+        ? 'none'
+        : rate >= SOURCE_HEALTH_DAILY_OK_RATE
+          ? 'ok'
+          : rate >= SOURCE_HEALTH_DAILY_DEGRADED_RATE
+            ? 'degraded'
+            : 'down';
+    return { date, status };
+  });
 }
 
 function rawRate(success: number, total: number): number | null {
@@ -52,6 +136,7 @@ export function scoreSourceHealth(
   searchRows: readonly SourceHealthSearchDaily[],
   play: SourcePlayReporterSummary | undefined,
   lastOkDate: string | null,
+  daily: SourceHealthDailyPoint[] = [],
 ): SourceHealthReportItem {
   let searchSuccesses = 0;
   let searchAttempts = 0;
@@ -77,10 +162,7 @@ export function scoreSourceHealth(
   const hasPlay = playReporterDays >= SOURCE_HEALTH_MIN_PLAY_REPORTER_DAYS;
   let score: number | null = null;
   if (hasSearch && hasPlay) {
-    score =
-      ((smoothedSearch ?? 0) * SOURCE_HEALTH_SEARCH_WEIGHT +
-        (smoothedPlay ?? 0) * SOURCE_HEALTH_PLAY_WEIGHT) *
-      100;
+    score = Math.min(smoothedSearch ?? 0, smoothedPlay ?? 0) * 100;
   } else if (hasSearch || hasPlay) {
     score = ((hasSearch ? smoothedSearch : smoothedPlay) ?? 0) * 100;
   }
@@ -117,6 +199,7 @@ export function scoreSourceHealth(
     playReporterDays,
     playSuccessRate: rawRate(playSuccesses, playReporterDays),
     lastOkDate,
+    daily,
   };
 }
 

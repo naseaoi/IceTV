@@ -8,6 +8,7 @@ import { db } from '@/lib/db';
 import {
   cleanupSourceHealth,
   flushSourceHealthSearch,
+  getCachedSourceHealthReport,
   getSourceHealthReport,
   getSourceHealthTiers,
   recordSourcePlayOutcome,
@@ -29,6 +30,7 @@ jest.mock('@/lib/db', () => ({
     recordSourcePlayReport: jest.fn(),
     getSourceHealthSearchDaily: jest.fn(),
     getSourcePlayReporterSummary: jest.fn(),
+    getSourcePlayReporterDaily: jest.fn(),
     purgeSourceHealthBefore: jest.fn(),
   },
 }));
@@ -40,6 +42,7 @@ beforeEach(() => {
   jest.resetAllMocks();
   jest.useFakeTimers().setSystemTime(new Date('2026-11-04T12:00:00Z'));
   resetSourceHealthSearchForTests();
+  (db.getSourcePlayReporterDaily as jest.Mock).mockResolvedValue([]);
 });
 afterEach(() => {
   jest.useRealTimers();
@@ -260,22 +263,20 @@ it('scores only configured sources over the window and retains older last succes
       latencySamples: 10,
     },
   ]);
-  (db.getSourcePlayReporterSummary as jest.Mock)
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([
-      {
-        source: 'a',
-        successReporterDays: 1,
-        failureReporterDays: 0,
-        lastSuccessDate: '2026-10-19',
-      },
-      {
-        source: 'b',
-        successReporterDays: 1,
-        failureReporterDays: 0,
-        lastSuccessDate: '2026-10-25',
-      },
-    ]);
+  (db.getSourcePlayReporterSummary as jest.Mock).mockResolvedValueOnce([
+    {
+      source: 'a',
+      successReporterDays: 1,
+      failureReporterDays: 0,
+      lastSuccessDate: '2026-10-19',
+    },
+    {
+      source: 'b',
+      successReporterDays: 1,
+      failureReporterDays: 0,
+      lastSuccessDate: '2026-10-25',
+    },
+  ]);
   const items = await getSourceHealthReport(7);
   expect(items).toEqual([
     expect.objectContaining({
@@ -295,13 +296,21 @@ it('scores only configured sources over the window and retains older last succes
       lastOkDate: null,
     }),
   ]);
+  expect(items[0].daily).toEqual([
+    { date: '2026-10-29', status: 'down' },
+    { date: '2026-10-30', status: 'down' },
+    { date: '2026-10-31', status: 'none' },
+    { date: '2026-11-01', status: 'none' },
+    { date: '2026-11-02', status: 'none' },
+    { date: '2026-11-03', status: 'none' },
+    { date: '2026-11-04', status: 'none' },
+  ]);
+  expect(items[2].daily).toHaveLength(7);
+  expect(items[2].daily.every((point) => point.status === 'none')).toBe(true);
   expect(db.getSourceHealthSearchDaily).toHaveBeenCalledWith('2026-10-05');
+  expect(db.getSourcePlayReporterDaily).toHaveBeenCalledWith('2026-10-29');
   expect(db.getSourcePlayReporterSummary).toHaveBeenNthCalledWith(
     1,
-    '2026-10-29',
-  );
-  expect(db.getSourcePlayReporterSummary).toHaveBeenNthCalledWith(
-    2,
     '2026-10-05',
   );
 });
@@ -338,6 +347,36 @@ describe('getSourceHealthTiers', () => {
     expect(db.getSourceHealthSearchDaily).toHaveBeenCalledTimes(2);
   });
 
+  it('shares full reports with tiers and isolates returned report data', async () => {
+    (db.getSourcePlayReporterDaily as jest.Mock).mockResolvedValue([
+      {
+        source: 'a',
+        bucketDate: '2026-11-04',
+        successReporterDays: 3,
+        failureReporterDays: 0,
+      },
+    ]);
+    const [report, tiers] = await Promise.all([
+      getCachedSourceHealthReport(),
+      getSourceHealthTiers(),
+    ]);
+    expect(report![0]).toMatchObject({
+      tier: 'normal',
+      playReporterDays: 3,
+      playSuccessRate: 1,
+    });
+    expect(report![0].daily[6]).toEqual({ date: '2026-11-04', status: 'ok' });
+    expect(tiers.get('a')).toBe('normal');
+    expect(db.getSourceHealthSearchDaily).toHaveBeenCalledTimes(1);
+    report![0].tier = 'offline';
+    report![0].daily[6].status = 'down';
+    const cached = await getCachedSourceHealthReport();
+    expect(cached![0].tier).toBe('normal');
+    expect(cached![0].daily[6].status).toBe('ok');
+    await getSourceHealthReport(7);
+    expect(db.getSourceHealthSearchDaily).toHaveBeenCalledTimes(2);
+  });
+
   it('falls back to an empty map on read failure and retries after expiry', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     (db.getSourceHealthSearchDaily as jest.Mock).mockRejectedValueOnce(
@@ -348,6 +387,7 @@ describe('getSourceHealthTiers', () => {
       getSourceHealthTiers(),
     ]);
     expect(maps).toEqual([new Map(), new Map()]);
+    expect(await getCachedSourceHealthReport()).toBeNull();
     expect(await getSourceHealthTiers()).toEqual(new Map());
     expect(db.getSourceHealthSearchDaily).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(SOURCE_HEALTH_TIERS_CACHE_TTL_MS);

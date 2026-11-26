@@ -3,13 +3,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { recordSourcePlayOutcome } from '@/lib/source-health.server';
 import type { SourceRouteStatInput } from '@/lib/types';
+import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
 const MAX_SOURCE_LENGTH = 191;
+const limiter = new FixedWindowRateLimiter(120, 60_000);
 type PlayOutcome = Omit<SourceRouteStatInput, 'routeMode'>;
 
 function readOutcome(raw: unknown): PlayOutcome | null {
@@ -44,6 +47,20 @@ export async function POST(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
+
+    const verdict = limiter.check(normalizeUsername(guardResult.username));
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        { error: '播放统计上报过于频繁，请稍后重试' },
+        {
+          status: 429,
+          headers: {
+            ...NO_STORE_HEADERS,
+            'Retry-After': String(verdict.retryAfterSeconds),
+          },
+        },
+      );
+    }
 
     const body: unknown = await request.json().catch(() => null);
     if (!body || typeof body !== 'object' || Array.isArray(body)) {

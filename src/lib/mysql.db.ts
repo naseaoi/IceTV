@@ -203,6 +203,7 @@ import {
   SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
+  SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
   SourceRouteStatInput,
@@ -4335,6 +4336,28 @@ export class MySqlStorage implements IStorage {
       errorCount: Number(row.errorCount),
       latencyMsSum: Number(row.latencyMsSum),
       latencySamples: Number(row.latencySamples),
+    }));
+  }
+
+  async getSourcePlayReporterDaily(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterDaily[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & SourcePlayReporterDaily)[]
+    >(
+      `SELECT source, bucket_date AS bucketDate,
+      SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays,
+      SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays
+    FROM source_health_play WHERE bucket_date >= ?
+    GROUP BY source, bucket_date
+    ORDER BY bucket_date ASC, source ASC`,
+      [sinceDate],
+    );
+    return rows.map((row) => ({
+      ...row,
+      successReporterDays: Number(row.successReporterDays),
+      failureReporterDays: Number(row.failureReporterDays),
     }));
   }
 

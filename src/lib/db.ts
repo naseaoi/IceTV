@@ -17,6 +17,7 @@ import {
   SkipConfig,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
+  SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
   SourceRouteStatInput,
@@ -1275,6 +1276,13 @@ class DbManager {
   ): Promise<SourceHealthSearchDaily[]> {
     const storage = await this.getStorage();
     return storage.getSourceHealthSearchDaily(sinceDate);
+  }
+
+  async getSourcePlayReporterDaily(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterDaily[]> {
+    const storage = await this.getStorage();
+    return storage.getSourcePlayReporterDaily(sinceDate);
   }
 
   async getSourcePlayReporterSummary(
