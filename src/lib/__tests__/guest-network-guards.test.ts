@@ -24,7 +24,7 @@ describe('游客网络请求拦截', () => {
     const { reportSourceRouteStat } =
       require('@/lib/source-route-stats.client') as typeof import('@/lib/source-route-stats.client');
 
-    reportSourceRouteStat('source-a', 'browser', true);
+    reportSourceRouteStat('source-a', 'browser', true, 'primary');
     expect(global.fetch).not.toHaveBeenCalled();
   });
 

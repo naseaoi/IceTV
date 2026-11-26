@@ -32,6 +32,14 @@ export interface ProbeEntry {
 }
 
 const PROBE_TTL_MS = 10 * 60_000;
+// 源可能很快恢复，且失败结果参与自动换源排后，因此失败冷却比成功短。
+const PROBE_FAILURE_TTL_MS = 3 * 60_000;
+
+function getProbeEntryTtl(entry: ProbeEntry): number {
+  return entry.source === 'probe' && entry.info.hasError
+    ? PROBE_FAILURE_TTL_MS
+    : PROBE_TTL_MS;
+}
 
 interface StoreState {
   entries: Map<string, ProbeEntry>;
@@ -73,7 +81,7 @@ export function getFreshProbeInfo(
   if (
     !entry ||
     (entry.source !== 'probe' && entry.source !== 'player') ||
-    now - entry.ts >= PROBE_TTL_MS
+    now - entry.ts >= getProbeEntryTtl(entry)
   )
     return undefined;
   return entry.info;
@@ -181,8 +189,7 @@ export async function getOrProbe(
     if (entry.source === 'player') return;
     if (
       entry.source === 'probe' &&
-      !entry.info.hasError &&
-      now - entry.ts < PROBE_TTL_MS &&
+      now - entry.ts < getProbeEntryTtl(entry) &&
       (!options.probeIdentity || entry.probeIdentity === options.probeIdentity)
     )
       return entry.info;
@@ -298,6 +305,7 @@ async function runProbe(
         source: 'probe',
         probeIdentity: options.probeIdentity,
       });
+    return info;
   };
 
   try {
@@ -346,7 +354,11 @@ async function runProbe(
           }
         }
       } catch (error) {
-        if (error instanceof SourceProbeDeferredError) throw error;
+        if (
+          error instanceof SourceProbeDeferredError ||
+          (error as Error)?.name === 'AbortError'
+        )
+          throw error;
       }
     }
 
@@ -355,17 +367,12 @@ async function runProbe(
     let route = getSourcePlaybackRoute(resolved.source, undefined, proxyModes);
     if (!resolved.episodes || resolved.episodes.length === 0) {
       reportSourcePlayOutcome(resolved.source, false);
-      setEntry(key, {
-        info: {
-          quality: '未知',
-          loadSpeed: '未知',
-          pingTime: 0,
-          hasError: true,
-        },
-        ts: Date.now(),
-        source: 'probe',
+      return writeProbeEntry({
+        quality: '未知',
+        loadSpeed: '未知',
+        pingTime: 0,
+        hasError: true,
       });
-      return;
     }
 
     try {
@@ -402,7 +409,7 @@ async function runProbe(
       throwIfPlaybackCancelled(options.signal);
       if ((error as Error)?.name === 'AbortError') throw error;
       reportSourcePlayOutcome(resolved.source, false);
-      writeProbeEntry({
+      return writeProbeEntry({
         quality: '错误',
         loadSpeed: '未知',
         pingTime: 0,

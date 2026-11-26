@@ -163,6 +163,7 @@ describe('游客受保护接口', () => {
         stat: {
           source: 'hidden',
           routeMode: 'server',
+          phase: 'primary',
           success: true,
           eventAt: Date.now(),
         },

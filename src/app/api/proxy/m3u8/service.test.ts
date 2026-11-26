@@ -8,7 +8,11 @@ import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 
+jest.mock('@/lib/source-proxy-failures.server', () => ({
+  recordSourceProxyFailure: jest.fn(),
+}));
 jest.mock('@/lib/proxy-auth', () => ({
   resolveProxyAuthorization: (...args: unknown[]) => mockAuthorization(...args),
 }));
@@ -543,9 +547,14 @@ describe('warm-only m3u8', () => {
   );
 
   it('does not cache failed warm loads and permits retries', async () => {
+    (recordSourceProxyFailure as jest.Mock).mockClear();
     const url = 'https://cdn.example/warm/retry.m3u8';
     mockFetch.mockRejectedValueOnce(new Error('synthetic failure'));
     expect((await GET(request(url))).status).toBe(500);
+    expect(recordSourceProxyFailure).toHaveBeenCalledTimes(1);
+    expect(recordSourceProxyFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ source: SOURCE, reason: 'upstream-fetch' }),
+    );
     expect(peekM3U8Cache(url, SOURCE)).toBeNull();
     expect((await GET(request(url))).status).toBe(204);
     expect(mockFetch).toHaveBeenCalledTimes(2);

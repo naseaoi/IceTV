@@ -21,6 +21,10 @@ import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
+import {
+  assertSourceProxyFailures,
+  assertSourceRoutePhases,
+} from '@/lib/__tests__/__fixtures__/source-route-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
@@ -509,22 +513,32 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     await assertReviewReplies(storage, 'mysql-reply');
   });
 
+  it('separates route phases', async () => {
+    await assertSourceRoutePhases(storage);
+  });
+
+  it('aggregates and purges source proxy failures', async () => {
+    await assertSourceProxyFailures(storage);
+  });
+
   it('isolates current route semantics while retaining and purging both versions', async () => {
     await storage.recordSourceRouteStat({
       source: 'versioned',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'versioned',
       routeMode: 'server',
+      phase: 'primary',
       success: false,
       eventAt: Date.UTC(2026, 0, 8),
     });
     const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
       .pool;
-    for (const mode of ['browser', 'server']) {
+    for (const mode of ['browser', 'server', 'browser-v2', 'server-v2']) {
       await pool.execute(
         'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
         ['versioned', mode, '2026-01-08', 99, 99, 1],
@@ -535,12 +549,14 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         {
           source: 'versioned',
           routeMode: 'browser',
+          phase: 'primary',
           successCount: 1,
           failureCount: 0,
         },
         {
           source: 'versioned',
           routeMode: 'server',
+          phase: 'primary',
           successCount: 0,
           failureCount: 1,
         },
@@ -551,11 +567,9 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       (await storage.getAllSourceRouteStatBuckets()).map(
         (row) => row.routeMode,
       ),
-    ).toEqual(
-      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
-    );
+    ).toEqual(expect.arrayContaining(['browser-v3', 'server-v3']));
     await storage.purgeSourceRouteStatsBefore('2026-01-08');
-    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
     await storage.purgeSourceRouteStatsBefore('2026-01-09');
     expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
   });

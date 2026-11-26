@@ -206,6 +206,8 @@ import {
   SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
+  SourceProxyFailureDelta,
+  SourceProxyFailureItem,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -620,6 +622,15 @@ export class MySqlStorage implements IStorage {
         PRIMARY KEY (source, route_mode, bucket_date),
         KEY idx_source_route_stats_bucket (bucket_date)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS source_proxy_failures (
+        source VARCHAR(191) NOT NULL,
+        bucket_date CHAR(10) NOT NULL,
+        reason VARCHAR(32) NOT NULL,
+        failure_count BIGINT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (source, bucket_date, reason),
+        KEY idx_source_proxy_failures_bucket (bucket_date)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS source_health_search (
         source VARCHAR(191) NOT NULL,
         bucket_date CHAR(10) NOT NULL,
@@ -4397,11 +4408,56 @@ export class MySqlStorage implements IStorage {
     });
   }
 
+  async recordSourceProxyFailureBatch(
+    rows: SourceProxyFailureDelta[],
+  ): Promise<void> {
+    if (!rows.length) return;
+    await this.withTransaction(async (connection) => {
+      const now = Date.now();
+      for (const row of rows) {
+        await connection.execute(
+          `INSERT INTO source_proxy_failures (source, bucket_date, reason, failure_count, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE failure_count = failure_count + VALUES(failure_count),
+             updated_at = VALUES(updated_at)`,
+          [row.source, row.bucketDate, row.reason, row.failureCount, now],
+        );
+      }
+    });
+  }
+
+  async getSourceProxyFailures(
+    sinceDate: string,
+  ): Promise<SourceProxyFailureItem[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & SourceProxyFailureItem)[]
+    >(
+      `SELECT source, reason, SUM(failure_count) AS failureCount
+       FROM source_proxy_failures WHERE bucket_date >= ?
+       GROUP BY source, reason ORDER BY source ASC, reason ASC`,
+      [sinceDate],
+    );
+    return rows.map((row) => ({
+      ...row,
+      failureCount: Number(row.failureCount),
+    }));
+  }
+
+  async purgeSourceProxyFailuresBefore(beforeDate: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'DELETE FROM source_proxy_failures WHERE bucket_date < ?',
+      [beforeDate],
+    );
+  }
+
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
     await this.ensureInitialized();
     const source = input.source.trim().slice(0, 191);
     if (!source) return;
-    const routeMode = SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode];
+    const routeMode =
+      SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode][input.phase];
     const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
     const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
     const successIncrement = input.success ? 1 : 0;
@@ -4443,17 +4499,15 @@ export class MySqlStorage implements IStorage {
     );
 
     return rows
-      .filter(
-        (row) =>
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
+      .filter((row) =>
+        Object.values(SOURCE_ROUTE_STAT_STORAGE_MODES).some((modes) =>
+          Object.values(modes).some((mode) => mode === row.route_mode),
+        ),
       )
       .map((row) => ({
         source: row.source || '',
-        routeMode:
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server
-            ? 'server'
-            : 'browser',
+        routeMode: row.route_mode?.startsWith('server-') ? 'server' : 'browser',
+        phase: row.route_mode?.includes('-fb-') ? 'fallback' : 'primary',
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
@@ -4476,12 +4530,10 @@ export class MySqlStorage implements IStorage {
     );
 
     return rows
-      .filter(
-        (row) =>
-          row.route_mode === 'browser' ||
-          row.route_mode === 'server' ||
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
+      .filter((row) =>
+        Object.values(SOURCE_ROUTE_STAT_STORAGE_MODES).some((modes) =>
+          Object.values(modes).some((mode) => mode === row.route_mode),
+        ),
       )
       .map((row) => ({
         source: row.source || '',

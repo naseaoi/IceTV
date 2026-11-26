@@ -635,6 +635,7 @@ describe('vodHlsRuntime 运行时释放', () => {
       DETAIL.source,
       'browser',
       true,
+      'primary',
     );
   });
 
@@ -716,6 +717,7 @@ describe('vodHlsRuntime 运行时释放', () => {
         DETAIL.source,
         'server',
         false,
+        'primary',
       );
     });
 
@@ -757,6 +759,7 @@ describe('vodHlsRuntime 运行时释放', () => {
           DETAIL.source,
           'server',
           true,
+          'primary',
         );
       },
     );
@@ -1053,6 +1056,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
           'demo',
           'browser',
           false,
+          expect.anything(),
         );
       });
 
@@ -1081,6 +1085,19 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
         expect(hls.loadSource.mock.calls[1][0]).toContain('forceServer=true');
         expect(hls.nextLoadLevel).toBe(-1);
         expect(hls.autoLevelCapping).toBe(-1);
+        expect(mockReportSourceRouteStat).toHaveBeenCalledWith(
+          DETAIL.source,
+          'browser',
+          false,
+          'primary',
+        );
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(0, 1));
+        expect(mockReportSourceRouteStat).toHaveBeenLastCalledWith(
+          DETAIL.source,
+          'server',
+          true,
+          'fallback',
+        );
       });
 
       it('起播时高画质档两路都失败，代理线路兜底降档且不记代理成功', () => {
@@ -1322,6 +1339,7 @@ describe('vodHlsRuntime 缓冲配额', () => {
       DETAIL.source,
       'browser',
       false,
+      expect.anything(),
     );
   });
 

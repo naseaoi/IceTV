@@ -533,7 +533,13 @@ export async function initializeArtPlayer(
         if (state.failure) return;
         state.failure = true;
       }
-      reportSourceRouteStat(preSourceKey, mode, success);
+      const firstRoute = nativeAttempt?.triedRoutes.values().next().value;
+      reportSourceRouteStat(
+        preSourceKey,
+        mode,
+        success,
+        !firstRoute || firstRoute === mode ? 'primary' : 'fallback',
+      );
     };
 
     if (mediaKind === 'native' && player.video) {

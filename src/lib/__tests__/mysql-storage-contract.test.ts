@@ -22,6 +22,10 @@ import {
 } from '@/lib/__tests__/__fixtures__/play-record-title-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import {
+  assertSourceProxyFailures,
+  assertSourceRoutePhases,
+} from '@/lib/__tests__/__fixtures__/source-route-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { assertWatchLevelContract } from '@/lib/__tests__/__fixtures__/watch-level-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
@@ -30,6 +34,7 @@ import {
   hasUnreadPlayRecordMessage,
   isTrackingEnabled,
 } from '@/lib/play-records';
+import type { SourceProxyFailureDelta } from '@/lib/types';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
@@ -54,7 +59,7 @@ type SearchHistoryRow = {
 
 type SourceRouteStatsRow = {
   source: string;
-  routeMode: 'browser' | 'server' | 'browser-v2' | 'server-v2';
+  routeMode: string;
   bucketDate: string;
   successCount: number;
   failureCount: number;
@@ -81,6 +86,7 @@ type HealthPlayRow = {
 
 type FakeState = ListFakeState & {
   announcements: Map<string, AnnouncementRow>;
+  proxyFailures: SourceProxyFailureDelta[];
   healthSearch: HealthSearchRow[];
   healthPlay: HealthPlayRow[];
   subscription: Record<string, unknown> | null;
@@ -132,6 +138,7 @@ function cloneState(state: FakeState): FakeState {
     announcements: new Map(
       [...state.announcements].map(([id, row]) => [id, { ...row }]),
     ),
+    proxyFailures: state.proxyFailures.map((row) => ({ ...row })),
     healthSearch: state.healthSearch.map((row) => ({ ...row })),
     healthPlay: state.healthPlay.map((row) => ({ ...row })),
     subscription: state.subscription ? { ...state.subscription } : null,
@@ -191,6 +198,7 @@ function createState(): FakeState {
     listItems: [],
     listLikes: [],
     announcements: new Map(),
+    proxyFailures: [],
     healthSearch: [],
     healthPlay: [],
     subscription: null,
@@ -1642,6 +1650,38 @@ function createFakePool() {
           updatedAt,
         });
       }
+      return [[], []];
+    }
+
+    if (normalized.startsWith('INSERT INTO source_proxy_failures (')) {
+      const [source, bucketDate, reason, failureCount] = params as [
+        string,
+        string,
+        SourceProxyFailureDelta['reason'],
+        number,
+      ];
+      const row = currentState.proxyFailures.find(
+        (item) =>
+          item.source === source &&
+          item.bucketDate === bucketDate &&
+          item.reason === reason,
+      );
+      if (row) row.failureCount += failureCount;
+      else
+        currentState.proxyFailures.push({
+          source,
+          bucketDate,
+          reason,
+          failureCount,
+        });
+      return [[], []];
+    }
+    if (
+      normalized === 'DELETE FROM source_proxy_failures WHERE bucket_date < ?'
+    ) {
+      currentState.proxyFailures = currentState.proxyFailures.filter(
+        (row) => row.bucketDate >= (params[0] as string),
+      );
       return [[], []];
     }
 
@@ -3123,6 +3163,39 @@ function createFakePool() {
 
     if (
       normalized ===
+      'SELECT source, reason, SUM(failure_count) AS failureCount FROM source_proxy_failures WHERE bucket_date >= ? GROUP BY source, reason ORDER BY source ASC, reason ASC'
+    ) {
+      const grouped = new Map<
+        string,
+        {
+          source: string;
+          reason: SourceProxyFailureDelta['reason'];
+          failureCount: number;
+        }
+      >();
+      for (const row of currentState.proxyFailures) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const key = JSON.stringify([row.source, row.reason]);
+        const current = grouped.get(key) ?? {
+          source: row.source,
+          reason: row.reason,
+          failureCount: 0,
+        };
+        current.failureCount += row.failureCount;
+        grouped.set(key, current);
+      }
+      return [
+        [...grouped.values()].sort(
+          (a, b) =>
+            a.source.localeCompare(b.source) ||
+            a.reason.localeCompare(b.reason),
+        ),
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
       'SELECT source, route_mode, COALESCE(SUM(success_count), 0) AS success_count, COALESCE(SUM(failure_count), 0) AS failure_count FROM source_route_stats WHERE bucket_date >= ? GROUP BY source, route_mode'
     ) {
       const [sinceDate] = params as [string];
@@ -4396,21 +4469,33 @@ describe('mysql storage contract', () => {
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
   });
 
+  it('separates route phases', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await assertSourceRoutePhases(storage);
+  });
+
+  it('aggregates and purges source proxy failures', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await assertSourceProxyFailures(storage);
+  });
+
   it('isolates current route semantics while retaining and purging both versions', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.recordSourceRouteStat({
       source: 'versioned',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'versioned',
       routeMode: 'server',
+      phase: 'primary',
       success: false,
       eventAt: Date.UTC(2026, 0, 8),
     });
-    for (const mode of ['browser', 'server']) {
+    for (const mode of ['browser', 'server', 'browser-v2', 'server-v2']) {
       await fakePool.execute(
         'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE success_count = success_count + VALUES(success_count)',
         ['versioned', mode, '2026-01-08', 99, 99, 1],
@@ -4421,12 +4506,14 @@ describe('mysql storage contract', () => {
         {
           source: 'versioned',
           routeMode: 'browser',
+          phase: 'primary',
           successCount: 1,
           failureCount: 0,
         },
         {
           source: 'versioned',
           routeMode: 'server',
+          phase: 'primary',
           successCount: 0,
           failureCount: 1,
         },
@@ -4437,11 +4524,9 @@ describe('mysql storage contract', () => {
       (await storage.getAllSourceRouteStatBuckets()).map(
         (row) => row.routeMode,
       ),
-    ).toEqual(
-      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
-    );
+    ).toEqual(expect.arrayContaining(['browser-v3', 'server-v3']));
     await storage.purgeSourceRouteStatsBefore('2026-01-08');
-    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
     await storage.purgeSourceRouteStatsBefore('2026-01-09');
     expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
   });
@@ -4452,30 +4537,35 @@ describe('mysql storage contract', () => {
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
+      phase: 'primary',
       success: false,
       eventAt: Date.UTC(2026, 0, 8),
     });
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'server',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 7),
     });
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2025, 11, 31),
     });
     await storage.recordSourceRouteStat({
       source: 'source-b',
       routeMode: 'browser',
+      phase: 'primary',
       success: true,
       eventAt: Date.UTC(2026, 0, 8),
     });
@@ -4493,18 +4583,21 @@ describe('mysql storage contract', () => {
       {
         source: 'source-a',
         routeMode: 'browser',
+        phase: 'primary',
         successCount: 1,
         failureCount: 1,
       },
       {
         source: 'source-a',
         routeMode: 'server',
+        phase: 'primary',
         successCount: 1,
         failureCount: 0,
       },
       {
         source: 'source-b',
         routeMode: 'browser',
+        phase: 'primary',
         successCount: 1,
         failureCount: 0,
       },

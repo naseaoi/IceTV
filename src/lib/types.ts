@@ -437,17 +437,41 @@ export interface SourcePlayReporterSummary {
   lastSuccessDate: string | null;
 }
 
+export type SourceProxyFailureReason =
+  | 'http-403'
+  | 'http-404'
+  | 'http-4xx'
+  | 'http-5xx'
+  | 'timeout'
+  | 'connection'
+  | 'invalid-response';
+
+export interface SourceProxyFailureDelta {
+  source: string;
+  bucketDate: string;
+  reason: SourceProxyFailureReason;
+  failureCount: number;
+}
+
+export interface SourceProxyFailureItem {
+  source: string;
+  reason: SourceProxyFailureReason;
+  failureCount: number;
+}
+
 export type SourceRouteMode = 'browser' | 'server';
+export type SourceRouteStatPhase = 'primary' | 'fallback';
 
 // 数据库存储键隔离全程线路口径，API 仍使用 browser / server。
 export const SOURCE_ROUTE_STAT_STORAGE_MODES = {
-  browser: 'browser-v2',
-  server: 'server-v2',
+  browser: { primary: 'browser-v3', fallback: 'browser-fb-v3' },
+  server: { primary: 'server-v3', fallback: 'server-fb-v3' },
 } as const;
 
 export interface SourceRouteStatInput {
   source: string;
   routeMode: SourceRouteMode;
+  phase: SourceRouteStatPhase;
   success: boolean;
   eventAt: number;
 }
@@ -455,6 +479,7 @@ export interface SourceRouteStatInput {
 export interface SourceRouteStatsItem {
   source: string;
   routeMode: SourceRouteMode;
+  phase: SourceRouteStatPhase;
   successCount: number;
   failureCount: number;
 }
@@ -462,9 +487,7 @@ export interface SourceRouteStatsItem {
 // 源站路由统计原始行（按天粒度）
 export interface SourceRouteStatsBucket {
   source: string;
-  routeMode:
-    | SourceRouteMode
-    | (typeof SOURCE_ROUTE_STAT_STORAGE_MODES)[SourceRouteMode];
+  routeMode: (typeof SOURCE_ROUTE_STAT_STORAGE_MODES)[SourceRouteMode][SourceRouteStatPhase];
   bucketDate: string;
   successCount: number;
   failureCount: number;
@@ -1108,6 +1131,9 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   ): Promise<SourcePlayReporterSummary[]>;
   purgeSourceHealthBefore(beforeDate: string): Promise<void>;
 
+  recordSourceProxyFailureBatch(rows: SourceProxyFailureDelta[]): Promise<void>;
+  getSourceProxyFailures(sinceDate: string): Promise<SourceProxyFailureItem[]>;
+  purgeSourceProxyFailuresBefore(beforeDate: string): Promise<void>;
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;

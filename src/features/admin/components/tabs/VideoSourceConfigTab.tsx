@@ -32,15 +32,12 @@ import {
 import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
-import {
-  type RouteModeStats,
-  type SourceRouteStatsView,
-  SortableSourceRow,
-} from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import {
   isSourceCleanupCandidate,
   sortByHealth,
 } from '@/features/admin/components/tabs/video-source/sourceHealthView';
+import { buildSourceRouteViews } from '@/features/admin/components/tabs/video-source/sourceRouteView';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
@@ -68,11 +65,9 @@ import {
   type SourceProxyMode,
   DEFAULT_SOURCE_PROXY_MODE,
 } from '@/lib/proxy-modes';
-import type { SourceRouteStatsItem } from '@/lib/types';
 import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
-type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
 type SourceHealthFilter = 'all' | 'alert' | 'cleanup' | 'disabled';
 
 function isSourceHealthFilter(value: string): value is SourceHealthFilter {
@@ -85,27 +80,6 @@ function isSourceHealthFilter(value: string): value is SourceHealthFilter {
 }
 const SOURCE_FOCUS_HIGHLIGHT_MS = 4000;
 type SourceSortMode = 'manual' | 'quality';
-
-function toRouteModeStats(item: SourceRouteStatsItem): RouteModeStats {
-  const totalCount = item.successCount + item.failureCount;
-  return {
-    successCount: item.successCount,
-    failureCount: item.failureCount,
-    totalCount,
-    successRate: totalCount > 0 ? item.successCount / totalCount : null,
-  };
-}
-
-function buildSourceRouteStats(
-  items: SourceRouteStatsItem[],
-): SourceRouteStatsBySource {
-  return items.reduce<SourceRouteStatsBySource>((acc, item) => {
-    const current = acc[item.source] || {};
-    current[item.routeMode] = toRouteModeStats(item);
-    acc[item.source] = current;
-    return acc;
-  }, {});
-}
 
 const VideoSourceConfig = ({
   config,
@@ -126,13 +100,14 @@ const VideoSourceConfig = ({
   const [sources, setSources] = useState<DataSource[]>([]);
   const {
     routeStats,
+    proxyFailures,
     health: sourceHealth,
     refresh: refreshSourceInsights,
   } = useSourceInsights(config, Boolean(config?.SourceConfig));
   const sourceUsage = useSourceUsage(Boolean(config?.SourceConfig));
   const sourceRouteStats = useMemo(
-    () => buildSourceRouteStats(routeStats),
-    [routeStats],
+    () => buildSourceRouteViews(routeStats, proxyFailures),
+    [routeStats, proxyFailures],
   );
   const adminAlerts = useAdminAlerts();
   const refreshAdminAlerts = useRefreshAdminAlerts();

@@ -142,7 +142,12 @@ async function probeMp4(
   try {
     const result = await probeMp4WithMode(rawUrl, useProxy, sourceKey, signal);
     throwIfPlaybackCancelled(signal);
-    reportSourceRouteStat(sourceKey, useProxy ? 'server' : 'browser', true);
+    reportSourceRouteStat(
+      sourceKey,
+      useProxy ? 'server' : 'browser',
+      true,
+      'primary',
+    );
     if (!useProxy && sourceKey) {
       clearSourceProxyOverride(sourceKey, rawUrl);
     }
@@ -150,7 +155,12 @@ async function probeMp4(
   } catch (error) {
     throwIfPlaybackCancelled(signal);
     if (isSourceProbeNetworkError(error))
-      reportSourceRouteStat(sourceKey, useProxy ? 'server' : 'browser', false);
+      reportSourceRouteStat(
+        sourceKey,
+        useProxy ? 'server' : 'browser',
+        false,
+        'primary',
+      );
     if (
       error instanceof SourceProbeDeferredError ||
       !isSourceProbeNetworkError(error) ||
@@ -168,7 +178,12 @@ async function probeMp4(
         signal,
       );
       throwIfPlaybackCancelled(signal);
-      reportSourceRouteStat(sourceKey, useProxy ? 'browser' : 'server', true);
+      reportSourceRouteStat(
+        sourceKey,
+        useProxy ? 'browser' : 'server',
+        true,
+        'fallback',
+      );
       if (useProxy) clearSourceProxyOverride(sourceKey, rawUrl);
       else rememberSourceServerProxy(sourceKey, rawUrl);
       return result;
@@ -179,6 +194,7 @@ async function probeMp4(
           sourceKey,
           useProxy ? 'browser' : 'server',
           false,
+          'fallback',
         );
       throw fallbackError;
     }

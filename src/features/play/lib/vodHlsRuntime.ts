@@ -455,7 +455,13 @@ export function createVodM3u8Loader({
         if (state.failure) return;
         state.failure = true;
       }
-      reportSourceRouteStat(sourceKey, mode, success);
+      const firstRoute = attempt.triedRoutes.values().next().value;
+      reportSourceRouteStat(
+        sourceKey,
+        mode,
+        success,
+        firstRoute === mode ? 'primary' : 'fallback',
+      );
     };
 
     setRealtimeLoadSpeed('测速中...');

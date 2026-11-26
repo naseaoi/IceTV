@@ -770,6 +770,7 @@ export async function getVideoResolutionFromM3u8(
       sourceKey,
       route.useServerProxy ? 'server' : 'browser',
       true,
+      'primary',
     );
     if (!route.useServerProxy && sourceKey) {
       clearSourceProxyOverride(sourceKey, m3u8Url);
@@ -790,6 +791,7 @@ export async function getVideoResolutionFromM3u8(
         sourceKey,
         route.useServerProxy ? 'server' : 'browser',
         false,
+        'primary',
       );
     if (networkFailure && sourceKey && route.allowAutoFallback) {
       try {
@@ -808,6 +810,7 @@ export async function getVideoResolutionFromM3u8(
           sourceKey,
           route.useServerProxy ? 'browser' : 'server',
           true,
+          'fallback',
         );
         if (route.useServerProxy) clearSourceProxyOverride(sourceKey, m3u8Url);
         else rememberSourceServerProxy(sourceKey, m3u8Url);
@@ -823,6 +826,7 @@ export async function getVideoResolutionFromM3u8(
             sourceKey,
             route.useServerProxy ? 'browser' : 'server',
             false,
+            'fallback',
           );
         const normalizedFallbackError = normalizeProbeError(fallbackError);
         const partial = pickBestPartial(

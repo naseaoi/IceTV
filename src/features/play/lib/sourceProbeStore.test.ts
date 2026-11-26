@@ -66,6 +66,142 @@ describe('sourceProbeStore helpers', () => {
     });
   });
 
+  describe('测速失败冷却', () => {
+    const failure = {
+      quality: '错误',
+      loadSpeed: '未知',
+      pingTime: 0,
+      hasError: true,
+    };
+    const success = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
+    const source = createSearchResult({ episodes: ['ep1'] });
+
+    let originalFetch: typeof fetch;
+    beforeEach(() => {
+      jest.useFakeTimers();
+      originalFetch = global.fetch;
+      global.fetch = jest.fn();
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      global.fetch = originalFetch;
+    });
+
+    it('最终失败在三分钟内复用且不续期，到期后重新测速', async () => {
+      const probe = jest.mocked(probeVodEpisodeUrl);
+      probe.mockRejectedValue(new Error('probe failed'));
+      await expect(getOrProbe(source)).resolves.toEqual(failure);
+      const timestamp = getSnapshot().get('source-a-1')!.ts;
+
+      jest.advanceTimersByTime(3 * 60_000 - 1);
+      await expect(getOrProbe(source)).resolves.toEqual(failure);
+      expect(probe).toHaveBeenCalledTimes(1);
+      expect(getSnapshot().get('source-a-1')!.ts).toBe(timestamp);
+      expect(getFreshProbeInfo('source-a-1')).toEqual(failure);
+
+      jest.advanceTimersByTime(1);
+      expect(getFreshProbeInfo('source-a-1')).toBeUndefined();
+      probe.mockResolvedValue(success);
+      await expect(getOrProbe(source)).resolves.toEqual(success);
+      expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    it('force 在失败冷却期内立即重新测速', async () => {
+      const probe = jest.mocked(probeVodEpisodeUrl);
+      probe.mockRejectedValueOnce(new Error('probe failed'));
+      await getOrProbe(source);
+      probe.mockResolvedValue(success);
+      await expect(getOrProbe(source, { force: true })).resolves.toEqual(
+        success,
+      );
+      expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['reject', 'result'])(
+      '自定义测速的 %s 失败遵循 identity 匹配',
+      async (mode) => {
+        const probe = jest.fn();
+        if (mode === 'reject')
+          probe.mockRejectedValue(new Error('parse failed'));
+        else probe.mockResolvedValue(failure);
+        const options = { probe, probeIdentity: 'ep1-browser' };
+        await getOrProbe(source, options);
+        await expect(getOrProbe(source, options)).resolves.toEqual(failure);
+        await expect(getOrProbe(source)).resolves.toEqual(failure);
+        expect(probe).toHaveBeenCalledTimes(1);
+
+        await getOrProbe(source, { ...options, probeIdentity: 'ep1-server' });
+        expect(probe).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it('详情无剧集的最终失败保留 identity 并复用', async () => {
+      const fetchMock = jest
+        .mocked(global.fetch)
+        .mockResolvedValue({ ok: false } as Response);
+      const emptySource = createSearchResult({});
+      const options = { probeIdentity: 'missing-episode' };
+      const info = await getOrProbe(emptySource, options);
+      expect(info?.hasError).toBe(true);
+      await expect(getOrProbe(emptySource, options)).resolves.toEqual(info);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(getSnapshot().get('source-a-1')?.probeIdentity).toBe(
+        'missing-episode',
+      );
+    });
+
+    it.each(['detail', 'vod', 'custom'])(
+      '%s 的 AbortError 不缓存，下一次调用重新测速',
+      async (stage) => {
+        const aborted = new DOMException('播放任务已取消', 'AbortError');
+        const probe = jest.fn().mockRejectedValue(aborted);
+        const fetchMock = jest.mocked(global.fetch).mockRejectedValue(aborted);
+        jest.mocked(probeVodEpisodeUrl).mockRejectedValue(aborted);
+        await expect(
+          getOrProbe(
+            stage === 'detail' ? createSearchResult({}) : source,
+            stage === 'custom' ? { probe } : {},
+          ),
+        ).resolves.toBeUndefined();
+        expect(getSnapshot().has('source-a-1')).toBe(false);
+        expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
+
+        jest.mocked(probeVodEpisodeUrl).mockResolvedValue(success);
+        await expect(getOrProbe(source)).resolves.toEqual(success);
+        expect(probeVodEpisodeUrl).toHaveBeenCalledTimes(
+          stage === 'vod' ? 2 : 1,
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(stage === 'detail' ? 1 : 0);
+      },
+    );
+
+    it('暂缓只遵守 retryAt，结束后立即重测而非进入失败冷却', async () => {
+      const probe = jest.mocked(probeVodEpisodeUrl);
+      probe.mockRejectedValueOnce(new SourceProbeDeferredError(2));
+      await getOrProbe(source);
+      expect(getSnapshot().get('source-a-1')?.source).toBe('deferred');
+      expect(getFreshProbeInfo('source-a-1')).toBeUndefined();
+      await expect(getOrProbe(source)).resolves.toBeUndefined();
+      expect(probe).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(2_000);
+      probe.mockResolvedValue(success);
+      await expect(getOrProbe(source)).resolves.toEqual(success);
+      expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    it('播放器结果保留原有优先级和有效期，force 仍可重测', async () => {
+      writePlayerInfo('source-a-1', failure);
+      const probe = jest.fn().mockResolvedValue(success);
+      jest.advanceTimersByTime(3 * 60_000);
+      expect(getFreshProbeInfo('source-a-1')).toEqual(failure);
+      await expect(getOrProbe(source, { probe })).resolves.toBeUndefined();
+      expect(probe).not.toHaveBeenCalled();
+      await getOrProbe(source, { probe, force: true });
+      expect(probe).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('暂缓期间后台与面板排队，放行后共享两个执行槽', async () => {
     const info = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
     const backgroundProbe = jest.fn().mockResolvedValue(info);
@@ -444,6 +580,13 @@ test('共享探测只在最后消费者离开时中止，取消不记源失败',
   expect(probe).toHaveBeenCalledTimes(1);
   expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
   expect(getSnapshot().has('shared-cancel-1')).toBe(false);
+  const retry = jest.fn().mockResolvedValue({
+    quality: '1080p',
+    loadSpeed: '1 MB/s',
+    pingTime: 20,
+  });
+  await getOrProbe(source, { probe: retry });
+  expect(retry).toHaveBeenCalledTimes(1);
 });
 
 test('排队探测取消后不占执行槽、不发请求', async () => {

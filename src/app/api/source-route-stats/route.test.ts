@@ -24,7 +24,7 @@ installWebPolyfills();
 const { POST } = require('./route') as typeof import('./route');
 const eventAt = Date.parse('2026-01-01T00:00:00Z');
 const outcome = { source: 'a', success: true, eventAt };
-const stat = { ...outcome, routeMode: 'browser' };
+const stat = { ...outcome, routeMode: 'browser', phase: 'primary' };
 const request = (body: unknown) => ({ json: async () => body }) as NextRequest;
 
 beforeEach(() => {
@@ -76,6 +76,8 @@ it.each([
   null,
   [],
   { stat: null },
+  { stat: { ...stat, phase: null }, outcome },
+  { stat: { ...stat, phase: 'invalid' }, outcome },
   { outcome: null },
   { stat, outcome: {} },
   { stat: { ...stat, routeMode: 'auto' } },
@@ -178,4 +180,23 @@ it('returns a generic error when recording the final outcome fails', async () =>
   const response = await POST(request({ outcome }));
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ error: '保存播放统计失败' });
+});
+
+it('ignores phase-less legacy stats and preserves their final outcome', async () => {
+  const legacyStat = { ...outcome, routeMode: 'server' };
+  expect((await POST(request({ stat: legacyStat, outcome }))).status).toBe(200);
+  expect(db.recordSourceRouteStat).not.toHaveBeenCalled();
+  expect(recordSourcePlayOutcome).toHaveBeenCalledWith(
+    'alice',
+    'a',
+    true,
+    eventAt,
+  );
+  expect((await POST(request({ stat: legacyStat }))).status).toBe(200);
+});
+
+it('records fallback attempts separately', async () => {
+  const fallback = { ...stat, routeMode: 'server', phase: 'fallback' };
+  expect((await POST(request({ stat: fallback }))).status).toBe(200);
+  expect(db.recordSourceRouteStat).toHaveBeenCalledWith(fallback);
 });

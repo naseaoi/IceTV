@@ -10,6 +10,9 @@ import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getUpstreamRoutes } from '@/lib/upstream-proxy-pool.server';
 import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
 
+jest.mock('@/lib/source-proxy-failures.server', () => ({
+  recordSourceProxyFailure: jest.fn(),
+}));
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: (...args: unknown[]) => mockRequireActiveUser(...args),
   isGuardFailure: (result: object) => 'response' in result,

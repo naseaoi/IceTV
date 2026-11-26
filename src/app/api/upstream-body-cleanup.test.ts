@@ -3,8 +3,12 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 
 installWebPolyfills();
+jest.mock('@/lib/source-proxy-failures.server', () => ({
+  recordSourceProxyFailure: jest.fn(),
+}));
 const mockFetch = jest.fn();
 const mockAuthorization = jest.fn(async () => ({
   authorized: true,
@@ -184,4 +188,30 @@ it('图片大小预检超限取消正文并返回 413', async () => {
   });
   expect((await imageRoute.GET(request)).status).toBe(413);
   expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+it('records final key failures once for HTTP and transport errors', async () => {
+  (recordSourceProxyFailure as jest.Mock).mockClear();
+  mockFetch.mockResolvedValueOnce({
+    ok: false,
+    status: 404,
+    body: { cancel: jest.fn().mockResolvedValue(undefined) },
+  });
+  expect((await keyRoute.GET(request)).status).toBe(404);
+  expect(recordSourceProxyFailure).toHaveBeenCalledTimes(1);
+  expect(recordSourceProxyFailure).toHaveBeenCalledWith(
+    expect.objectContaining({
+      route: 'key',
+      source: 'live',
+      reason: 'upstream-http',
+      upstreamStatus: 404,
+      isLive: false,
+    }),
+  );
+  mockFetch.mockRejectedValueOnce(new Error('upstream timeout'));
+  expect((await keyRoute.GET(request)).status).toBe(500);
+  expect(recordSourceProxyFailure).toHaveBeenCalledTimes(2);
+  expect(recordSourceProxyFailure).toHaveBeenLastCalledWith(
+    expect.objectContaining({ route: 'key', reason: 'upstream-timeout' }),
+  );
 });

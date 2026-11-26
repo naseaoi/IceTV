@@ -23,6 +23,7 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 import {
   UrlValidationError,
   validateProxyUrlForRequest,
@@ -269,6 +270,7 @@ async function handleGet(request: NextRequest) {
       userInitiated,
     });
     logProxyFailure(diagnostic);
+    recordSourceProxyFailure(diagnostic);
     return NextResponse.json(toProxyFailurePayload(diagnostic), {
       status: diagnostic.status,
     });

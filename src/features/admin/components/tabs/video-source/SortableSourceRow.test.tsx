@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import type { SourceRouteStatsView } from './SortableSourceRow';
 import { SortableSourceRow } from './SortableSourceRow';
+import type { SourceRouteStatsView } from './sourceRouteView';
 
 jest.mock('@dnd-kit/sortable', () => ({
   useSortable: () => ({
@@ -94,9 +94,28 @@ describe('SortableSourceRow', () => {
     expect(onValidate).toHaveBeenCalledWith(source.key);
     expect(onDelete).toHaveBeenCalledWith(source.key);
     expect(onToggleAdminOnly).toHaveBeenCalledWith(source.key);
-    expect(screen.getByTitle('7天成功率 · 直连 — · 代理 —')).toHaveTextContent(
-      '直连 — · 代理 —',
-    );
+    expect(screen.getByText('直连 — · 代理 —')).toBeInTheDocument();
+  });
+
+  it('applies the suggested route from the advice chip', () => {
+    const { onChangeProxyMode } = renderRow({
+      sourceRouteStats: {
+        browser: {
+          successCount: 30,
+          failureCount: 30,
+          totalCount: 60,
+          successRate: 0.5,
+        },
+        serverFallback: {
+          successCount: 1,
+          failureCount: 29,
+          totalCount: 30,
+          successRate: 1 / 30,
+        },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '建议直连' }));
+    expect(onChangeProxyMode).toHaveBeenCalledWith('test-source', 'browser');
   });
 
   it('marks adult content from the row menu', () => {
@@ -139,8 +158,9 @@ describe('SortableSourceRow', () => {
         },
       },
     });
-    expect(
-      screen.getByTitle('7天成功率 · 直连 3/4 · 代理 1/1'),
-    ).toHaveTextContent('直连 75% · 代理 100%');
+    const summary = screen.getByText('直连 75% · 代理 100%');
+    expect(summary.getAttribute('title')).toContain(
+      '首选直连 3/4 · 首选代理 1/1',
+    );
   });
 });

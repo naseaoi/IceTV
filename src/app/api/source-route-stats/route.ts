@@ -13,7 +13,7 @@ export const runtime = 'nodejs';
 
 const MAX_SOURCE_LENGTH = 191;
 const limiter = new FixedWindowRateLimiter(120, 60_000);
-type PlayOutcome = Omit<SourceRouteStatInput, 'routeMode'>;
+type PlayOutcome = Omit<SourceRouteStatInput, 'routeMode' | 'phase'>;
 
 function readOutcome(raw: unknown): PlayOutcome | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -38,9 +38,10 @@ function readOutcome(raw: unknown): PlayOutcome | null {
 function readStat(raw: unknown): SourceRouteStatInput | null {
   const outcome = readOutcome(raw);
   if (!outcome) return null;
-  const { routeMode } = raw as Record<string, unknown>;
+  const { routeMode, phase } = raw as Record<string, unknown>;
   if (routeMode !== 'browser' && routeMode !== 'server') return null;
-  return { ...outcome, routeMode };
+  if (phase !== 'primary' && phase !== 'fallback') return null;
+  return { ...outcome, routeMode, phase };
 }
 
 export async function POST(request: NextRequest) {
@@ -67,11 +68,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '播放统计格式无效' }, { status: 400 });
     }
     const input = body as Record<string, unknown>;
-    const stat = 'stat' in input ? readStat(input.stat) : null;
+    const legacyStat =
+      input.stat !== null &&
+      typeof input.stat === 'object' &&
+      !Array.isArray(input.stat) &&
+      !('phase' in input.stat);
+    const stat = 'stat' in input && !legacyStat ? readStat(input.stat) : null;
     const outcome = 'outcome' in input ? readOutcome(input.outcome) : null;
     if (
-      (!stat && !outcome) ||
-      ('stat' in input && !stat) ||
+      (!stat && !outcome && !legacyStat) ||
+      ('stat' in input && !stat && !legacyStat) ||
       ('outcome' in input && !outcome)
     ) {
       return NextResponse.json({ error: '播放统计格式无效' }, { status: 400 });

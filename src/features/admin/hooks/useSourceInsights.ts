@@ -4,17 +4,19 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
 import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
-import type { SourceRouteStatsItem } from '@/lib/types';
+import type { SourceProxyFailureItem, SourceRouteStatsItem } from '@/lib/types';
 
 export const SOURCE_INSIGHT_DAYS = 7;
 
 export interface SourceInsights {
   routeStats: SourceRouteStatsItem[];
+  proxyFailures: SourceProxyFailureItem[];
   health: Map<string, SourceHealthReportItem>;
 }
 
 const EMPTY_INSIGHTS: SourceInsights = {
   routeStats: [],
+  proxyFailures: [],
   health: new Map(),
 };
 
@@ -36,6 +38,7 @@ export function useSourceInsights(
 
     adminGet<{
       stats: SourceRouteStatsItem[];
+      proxyFailures?: SourceProxyFailureItem[];
     }>(
       `/api/admin/source-route-stats?days=${SOURCE_INSIGHT_DAYS}`,
       '读取路由统计失败',
@@ -43,11 +46,12 @@ export function useSourceInsights(
       .then((payload) =>
         update({
           routeStats: payload.stats || [],
+          proxyFailures: payload.proxyFailures || [],
         }),
       )
       .catch((error) => {
         console.warn('读取路由统计失败:', error);
-        update({ routeStats: [] });
+        update({ routeStats: [], proxyFailures: [] });
       });
     adminGet<{ items: SourceHealthReportItem[] }>(
       `/api/admin/source-health?days=${SOURCE_INSIGHT_DAYS}`,

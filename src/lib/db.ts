@@ -20,6 +20,8 @@ import {
   SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
+  SourceProxyFailureDelta,
+  SourceProxyFailureItem,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -1295,6 +1297,25 @@ class DbManager {
   async purgeSourceHealthBefore(beforeDate: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.purgeSourceHealthBefore(beforeDate);
+  }
+
+  async recordSourceProxyFailureBatch(
+    rows: SourceProxyFailureDelta[],
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.recordSourceProxyFailureBatch(rows);
+  }
+
+  async getSourceProxyFailures(
+    sinceDate: string,
+  ): Promise<SourceProxyFailureItem[]> {
+    const storage = await this.getStorage();
+    return storage.getSourceProxyFailures(sinceDate);
+  }
+
+  async purgeSourceProxyFailuresBefore(beforeDate: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.purgeSourceProxyFailuresBefore(beforeDate);
   }
 
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {

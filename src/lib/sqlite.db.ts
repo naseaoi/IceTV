@@ -205,6 +205,8 @@ import {
   SourcePlayReporterDaily,
   SourcePlayReporterSummary,
   SourcePlayReportInput,
+  SourceProxyFailureDelta,
+  SourceProxyFailureItem,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -1224,6 +1226,17 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE INDEX IF NOT EXISTS idx_source_route_stats_bucket
         ON source_route_stats (bucket_date);
+
+      CREATE TABLE IF NOT EXISTS source_proxy_failures (
+        source TEXT NOT NULL,
+        bucket_date TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (source, bucket_date, reason)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_proxy_failures_bucket
+        ON source_proxy_failures (bucket_date);
 
       CREATE TABLE IF NOT EXISTS source_health_search (
         source TEXT NOT NULL,
@@ -4765,10 +4778,54 @@ export class LocalSqliteStorage implements IStorage {
     })();
   }
 
+  async recordSourceProxyFailureBatch(
+    rows: SourceProxyFailureDelta[],
+  ): Promise<void> {
+    if (!rows.length) return;
+    const statement = this.db.prepare(
+      `INSERT INTO source_proxy_failures (source, bucket_date, reason, failure_count, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(source, bucket_date, reason) DO UPDATE SET
+         failure_count = failure_count + excluded.failure_count,
+         updated_at = excluded.updated_at`,
+    );
+    this.db.transaction(() => {
+      const now = Date.now();
+      for (const row of rows) {
+        statement.run(
+          row.source,
+          row.bucketDate,
+          row.reason,
+          row.failureCount,
+          now,
+        );
+      }
+    })();
+  }
+
+  async getSourceProxyFailures(
+    sinceDate: string,
+  ): Promise<SourceProxyFailureItem[]> {
+    return this.db
+      .prepare(
+        `SELECT source, reason, SUM(failure_count) AS failureCount
+       FROM source_proxy_failures WHERE bucket_date >= ?
+       GROUP BY source, reason ORDER BY source ASC, reason ASC`,
+      )
+      .all(sinceDate) as SourceProxyFailureItem[];
+  }
+
+  async purgeSourceProxyFailuresBefore(beforeDate: string): Promise<void> {
+    this.db
+      .prepare('DELETE FROM source_proxy_failures WHERE bucket_date < ?')
+      .run(beforeDate);
+  }
+
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
     const source = input.source.trim().slice(0, 191);
     if (!source) return;
-    const routeMode = SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode];
+    const routeMode =
+      SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode][input.phase];
     const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
     const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
     const successIncrement = input.success ? 1 : 0;
@@ -4811,17 +4868,15 @@ export class LocalSqliteStorage implements IStorage {
       .all(sinceDate) as SourceRouteStatsRow[];
 
     return rows
-      .filter(
-        (row) =>
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
+      .filter((row) =>
+        Object.values(SOURCE_ROUTE_STAT_STORAGE_MODES).some((modes) =>
+          Object.values(modes).some((mode) => mode === row.route_mode),
+        ),
       )
       .map((row) => ({
         source: row.source,
-        routeMode:
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server
-            ? 'server'
-            : 'browser',
+        routeMode: row.route_mode.startsWith('server-') ? 'server' : 'browser',
+        phase: row.route_mode.includes('-fb-') ? 'fallback' : 'primary',
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
@@ -4843,12 +4898,10 @@ export class LocalSqliteStorage implements IStorage {
       .all() as (SourceRouteStatsRow & { bucket_date: string })[];
 
     return rows
-      .filter(
-        (row) =>
-          row.route_mode === 'browser' ||
-          row.route_mode === 'server' ||
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
-          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
+      .filter((row) =>
+        Object.values(SOURCE_ROUTE_STAT_STORAGE_MODES).some((modes) =>
+          Object.values(modes).some((mode) => mode === row.route_mode),
+        ),
       )
       .map((row) => ({
         source: row.source,

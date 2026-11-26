@@ -11,6 +11,9 @@ import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
 import { upstreamResourcePolicy } from '@/lib/upstream-resource-policy';
 import { createSyntheticUpstream } from '@/performance/synthetic-upstream';
 
+jest.mock('@/lib/source-proxy-failures.server', () => ({
+  recordSourceProxyFailure: jest.fn(),
+}));
 jest.unmock('@/lib/upstream-resource-guard.server');
 jest.mock('@/lib/db', () => ({
   db: Object.fromEntries(

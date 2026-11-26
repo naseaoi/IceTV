@@ -16,6 +16,12 @@ import {
   SOURCE_HEALTH_TIER_LABEL,
 } from '@/features/admin/components/tabs/video-source/sourceHealthView';
 import {
+  type SourceRouteStatsView,
+  formatRouteDetails,
+  formatRouteSummary,
+  getSourceRouteAdvice,
+} from '@/features/admin/components/tabs/video-source/sourceRouteView';
+import {
   type SourceUsageItem,
   SOURCE_USAGE_DAYS,
 } from '@/features/admin/hooks/useSourceInsights';
@@ -35,23 +41,15 @@ export type SourceValidationStatus = {
   message: string;
 };
 
-export type RouteModeStats = {
-  successCount: number;
-  failureCount: number;
-  totalCount: number;
-  successRate: number | null;
-};
-
-export type SourceRouteStatsView = {
-  browser?: RouteModeStats;
-  server?: RouteModeStats;
-};
-
 const PROXY_MODE_OPTIONS = [
   { value: 'auto', label: '自动' },
   { value: 'browser', label: '直连' },
   { value: 'server', label: '代理' },
 ];
+
+const PROXY_MODE_LABEL = Object.fromEntries(
+  PROXY_MODE_OPTIONS.map((option) => [option.value, option.label]),
+) as Record<SourceProxyMode, string>;
 
 function isSourceProxyMode(value: string): value is SourceProxyMode {
   return value === 'auto' || value === 'browser' || value === 'server';
@@ -119,17 +117,9 @@ export function SortableSourceRow({
   } as CSSProperties;
   const proxyMode = source.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
 
-  const routeRate = (stats?: RouteModeStats) =>
-    stats && stats.successRate !== null
-      ? `${Math.round(stats.successRate * 100)}%`
-      : '—';
-  const routeSummary = `直连 ${routeRate(sourceRouteStats?.browser)} · 代理 ${routeRate(sourceRouteStats?.server)}`;
-  const routeDetails = ['browser', 'server']
-    .map((mode) => {
-      const stats = sourceRouteStats?.[mode as keyof SourceRouteStatsView];
-      return `${mode === 'browser' ? '直连' : '代理'} ${stats ? `${stats.successCount}/${stats.totalCount}` : '—'}`;
-    })
-    .join(' · ');
+  const routeSummary = formatRouteSummary(sourceRouteStats);
+  const routeDetails = formatRouteDetails(sourceRouteStats, healthDays);
+  const routeAdvice = getSourceRouteAdvice(proxyMode, sourceRouteStats);
   const usageHours = sourceUsage ? sourceUsage.watchSeconds / 3600 : 0;
   const usageSummary = sourceUsage
     ? `观看 ${usageHours >= 10 ? Math.round(usageHours) : usageHours.toFixed(1)}h · ${sourceUsage.userCount} 人`
@@ -213,6 +203,26 @@ export function SortableSourceRow({
                 ` · ${formatLastOkDate(sourceHealth.lastOkDate)}可用`}
             </span>
           )}
+          {routeAdvice?.kind === 'mode' && (
+            <button
+              type='button'
+              className='rounded bg-yellow-100 px-1.5 text-xs text-yellow-800 transition-colors hover:bg-yellow-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-yellow-900/20 dark:text-yellow-300 dark:hover:bg-yellow-900/40'
+              title={`${routeAdvice.detail}
+点击改为${PROXY_MODE_LABEL[routeAdvice.target]}`}
+              disabled={isProxyModeLoading}
+              onClick={() => onChangeProxyMode(source.key, routeAdvice.target)}
+            >
+              {routeAdvice.label}
+            </button>
+          )}
+          {routeAdvice?.kind === 'dead' && (
+            <span
+              className={`rounded px-1.5 text-xs ${SOURCE_HEALTH_CHIP_CLASS.poor}`}
+              title={routeAdvice.detail}
+            >
+              {routeAdvice.label}
+            </span>
+          )}
           {source.nsfw && (
             <span className='rounded bg-gray-100 px-1.5 text-xs text-gray-600 dark:bg-white/[0.06] dark:text-gray-300'>
               成人内容
@@ -263,7 +273,7 @@ export function SortableSourceRow({
         </span>
         <span
           className='hidden whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400 lg:inline'
-          title={`${healthDays}天成功率 · ${routeDetails}`}
+          title={routeDetails}
         >
           {routeSummary}
         </span>
