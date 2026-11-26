@@ -8,6 +8,7 @@ import {
   saveConfig,
 } from '@/lib/config';
 import { subscriptionFromConfig } from '@/lib/config-state';
+import { decodeConfigSubscriptionContent } from '@/lib/config-subscription';
 import { refreshSubscribedConfig } from '@/lib/cron/config-refresh';
 import { db } from '@/lib/db';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
@@ -175,12 +176,56 @@ describe('subscribed config refresh', () => {
     ).toBe('');
   });
 
-  it('skips disabled subscriptions before reading config', async () => {
-    (db.getConfigSubscription as jest.Mock).mockResolvedValue(
-      subscriptionFromConfig(),
-    );
-    await refreshSubscribedConfig();
-    expect(getConfig).not.toHaveBeenCalled();
-    expect(fetchWithUrlGuard).not.toHaveBeenCalled();
+  it('preserves config and subscription content when the decoded response is empty', async () => {
+    const log = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    (decodeConfigSubscriptionContent as jest.Mock).mockResolvedValueOnce('');
+    try {
+      await refreshSubscribedConfig();
+      expect(getConfig).not.toHaveBeenCalled();
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(db.compareAndSetAdminConfig).toHaveBeenCalledTimes(1);
+      expect(db.compareAndSetAdminConfig).toHaveBeenCalledWith(
+        config(),
+        config(),
+        {
+          subscription: {
+            expected: subscription,
+            next: {
+              ...subscription,
+              ConfigSubscribtion: {
+                ...subscription.ConfigSubscribtion,
+                FailureSince: expect.any(String),
+              },
+            },
+          },
+        },
+      );
+      expect(log).toHaveBeenCalledWith(
+        '刷新配置失败:',
+        expect.any(SyntaxError),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
+
+  it.each([
+    { URL: '', AutoUpdate: false, LastCheck: '' },
+    { URL: '', AutoUpdate: true, LastCheck: '' },
+    { URL: 'https://example.com/sub', AutoUpdate: false, LastCheck: '' },
+  ])(
+    'skips inactive subscriptions before reading config (%j)',
+    async (ConfigSubscribtion) => {
+      (db.getConfigSubscription as jest.Mock).mockResolvedValue(
+        subscriptionFromConfig({ ConfigSubscribtion }),
+      );
+      await refreshSubscribedConfig();
+      expect(getConfig).not.toHaveBeenCalled();
+      expect(fetchWithUrlGuard).not.toHaveBeenCalled();
+      expect(db.compareAndSetAdminConfig).not.toHaveBeenCalled();
+      expect(saveConfig).not.toHaveBeenCalled();
+    },
+  );
 });

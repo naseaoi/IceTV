@@ -273,6 +273,107 @@ describe('config cache persistence', () => {
     expect(second.SiteConfig.SiteName).toBe('IceTV');
   });
 
+  it('initializes a fresh database with defaults without a parse warning', async () => {
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const compareAndSetAdminConfig = jest.fn().mockResolvedValue(true);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      getAdminConfig: jest.fn().mockResolvedValue(null),
+      compareAndSetAdminConfig,
+    });
+
+    const config = await getConfigForRead();
+    expect(config).toMatchObject({
+      SiteConfig: { EnableLiveEntry: false, SiteInterfaceCacheTime: 7200 },
+      SourceConfig: [],
+      CustomCategories: [],
+      LiveConfig: [],
+    });
+    expect(compareAndSetAdminConfig).toHaveBeenCalledTimes(1);
+    expect(compareAndSetAdminConfig).toHaveBeenCalledWith(null, config);
+    expect(await getConfigForRead()).toBe(config);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing sources when the stored config file is empty', async () => {
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SourceConfig = [
+      {
+        key: 'one',
+        name: 'One',
+        api: 'https://example.com/api',
+        from: 'config',
+      },
+    ];
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    expect((await getConfigForRead()).SourceConfig).toEqual(
+      adminConfig.SourceConfig,
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['', ' \n\t '])(
+    'resets an unconfigured site using defaults (%j)',
+    async (ConfigFile) => {
+      const warn = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      const persist = jest.fn();
+      const { resetConfig } = await loadConfigModule(persist);
+      const { db } = require('../db') as typeof import('../db');
+      (db.getConfigSubscription as jest.Mock).mockResolvedValue({ ConfigFile });
+
+      await resetConfig();
+      expect(persist).toHaveBeenCalledWith(
+        expect.objectContaining({ SourceConfig: [], LiveConfig: [] }),
+      );
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rebuilds sources from a nonempty config file when resetting', async () => {
+    const persist = jest.fn();
+    const { resetConfig } = await loadConfigModule(persist);
+    const { db } = require('../db') as typeof import('../db');
+    (db.getConfigSubscription as jest.Mock).mockResolvedValue({
+      ConfigFile: JSON.stringify({
+        api_site: { one: { name: 'One', api: 'https://example.com/api' } },
+      }),
+    });
+
+    await resetConfig();
+    expect(persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SourceConfig: [expect.objectContaining({ key: 'one', from: 'config' })],
+      }),
+    );
+  });
+
+  it('warns with context when resetting from malformed nonempty config', async () => {
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const { resetConfig } = await loadConfigModule(jest.fn());
+    const { db } = require('../db') as typeof import('../db');
+    (db.getConfigSubscription as jest.Mock).mockResolvedValue({
+      ConfigFile: '{',
+    });
+
+    await resetConfig();
+    expect(warn).toHaveBeenCalledWith(
+      '解析初始配置文件失败：配置重置使用的 config_subscription.config_file 不是有效 JSON，沿用默认配置',
+      { contentLength: 1 },
+      expect.any(SyntaxError),
+    );
+  });
+
   it('stops retrying persistence after repeated compare-and-set conflicts', async () => {
     const compareAndSetAdminConfig = jest.fn().mockResolvedValue(false);
     const { getConfig } = await loadConfigModule(jest.fn(), {
