@@ -17,8 +17,13 @@ function resolveIconVersion() {
   const explicitVersion = process.env.NEXT_PUBLIC_APP_VERSION?.trim();
   if (explicitVersion) return explicitVersion;
 
-  // 运行时镜像只带 scripts/ 不带 src/，start.js 每次启动都会执行本脚本，版本只能取镜像 ENV；
-  // 本地构建与开发没有注入版本，按 next.config.js 的同一规则解析
+  // standalone 不带版本解析源码，使用 Next 固化的构建版本，与编译后的 site-icon.ts 保持一致。
+  // 源码环境优先重新解析，避免上一次 .next 产物影响本次构建与开发版本。
+  if (!fs.existsSync(path.join(projectRoot, 'src/lib/build-version.js'))) {
+    return require('../.next/required-server-files.json').config.env
+      .NEXT_PUBLIC_APP_VERSION;
+  }
+
   const { resolveAppVersion } = require('../src/lib/build-version');
   return resolveAppVersion({
     rootDir: projectRoot,

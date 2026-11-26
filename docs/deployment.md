@@ -38,7 +38,9 @@ docker compose up -d
 
 示例中的 `logging` 限制容器日志总量；去掉后 Docker 默认 `json-file` 驱动不轮转，日志随运行时间持续占盘。
 
-访问 `http://localhost:3000`，用配置的站长账号登录。项目不内置播放源，需在后台配置。
+访问 `http://localhost:3000`（或 `http://服务器地址:3000`），用配置的站长账号登录。项目不内置播放源，需在后台配置。
+
+登录 Cookie 的 `Secure` 标记跟随请求协议：直接 HTTP 访问时不带，HTTPS 或代理转发 `X-Forwarded-Proto: https` 时带上。公网部署建议经 HTTPS 反向代理，且代理须如实转发该头；HTTP 访问却收到 `https` 的转发头时，浏览器会拒收登录 Cookie，登录页提示「浏览器未保存登录状态」。
 
 ## Docker + MySQL
 
@@ -317,7 +319,8 @@ docker compose -f compose.yml -f compose.updater.yml up -d
 - 支持 `latest`、`dev` 等浮动标签与单实例镜像部署。固定版本号、digest、无 Compose 标签、挂载缺失或 updater 不可达时，版本面板保留手动更新入口。服务须使用 `image`，升级期间保持 Compose 配置与目标镜像标签稳定，并暂停外部自动更新器及镜像清理任务。
 - updater 同时只执行一个任务，状态保存在内存；任务期间保持 updater 运行。重建使用已拉取的本地镜像（`--pull never`），避免 `pull_policy: always` 再次拉取并覆盖回退镜像；原有数据卷与其他服务保持不变。
 - 新旧容器都以 Docker 健康检查通过为就绪；未配置健康检查时以连续运行 20 秒为准。自动回退只恢复镜像，数据库仍使用原数据卷；**不可逆迁移回退须恢复升级前备份**。SQLite 在线备份位于数据库同目录的 `backups/`，保留最近两份；MySQL 升级前由部署者自行备份，操作见[升级与备份](#升级与备份)。
-- updater 从镜像（而非容器）的 `NEXT_PUBLIC_APP_VERSION` 环境变量读取版本，版本面板据此显示已下载版本并判断是否需要刷新页面，所以 `Dockerfile` 运行阶段必须保留该 `ENV`。`start.js` 每次启动都会重新执行 `scripts/generate-manifest.js`，运行时镜像只带 `scripts/` 而不带 `src/`，该脚本只能用这个 `ENV` 给图标地址加版本号，也不能引用 `src/` 下的模块，否则容器启动即退出，网页升级随之回滚。容器上覆盖的同名变量不参与判断。
+- updater 从镜像（而非容器）的 `NEXT_PUBLIC_APP_VERSION` 环境变量读取版本，版本面板据此显示已下载版本并判断是否需要刷新页面，所以 `Dockerfile` 运行阶段必须保留该 `ENV`。官方发布构建通过同名 build-arg 注入版本；源码裸构建的镜像 ENV 为空，updater 将其识别为版本未知。容器上覆盖的同名变量不参与判断。
+- `start.js` 每次启动都会重新执行 `scripts/generate-manifest.js`。运行时镜像带 `scripts/` 和 standalone 产物，不包含 `src/lib/build-version.js`；脚本优先使用版本 ENV，未注入时读取 `.next/required-server-files.json` 中固化的构建版本，使图标版本与应用一致。该文件须随 standalone 产物保留，运行时不能依赖源码模块。源码环境则重新按 `next.config.js` 的规则解析版本，避免沿用旧 `.next` 产物。
 - updater 自身由部署者手动升级：沿用同一组 Compose 文件执行 `docker compose ... pull icetv-updater` 与 `docker compose ... up -d --no-deps icetv-updater`。应用与 updater 选择一致的发布通道；updater 参数默认值见 [.env.example](../.env.example)。
 
 ## 升级与备份
@@ -348,6 +351,6 @@ docker compose exec -T mysql sh -c 'exec mysqldump --single-transaction --no-tab
 | 弹幕暂时为空         | 在弹幕面板点「重载」查看结果；`200` 空数组不证明原视频无弹幕，需检查采集服务与 DNS |
 | 弹幕 429             | 按 `Retry-After` 等待，缺失时默认 60 秒；不同用户可能共用服务端出口 IP 的上游额度  |
 | MySQL 连接失败       | URL 编码、账号权限、容器健康状态、云数据库 TLS                                     |
-| 反代后登录或限流异常 | 真实代理层数与 `TRUSTED_PROXY_COUNT` 是否一致                                      |
+| 反代后登录或限流异常 | 真实代理层数与 `TRUSTED_PROXY_COUNT` 是否一致；`X-Forwarded-Proto` 与实际协议一致  |
 
 弹幕合法空结果仅短暂缓存，异常搜索响应按上游错误处理且不缓存；临时错误不会覆盖已有非空评论。绑定 ID 失效可重新匹配。手动绑定的标题校验暂时失败时保留绑定，不必反复清除或重绑。

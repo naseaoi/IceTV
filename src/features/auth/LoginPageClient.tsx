@@ -10,6 +10,7 @@ import { useSite } from '@/components/SiteProvider';
 import Spinner from '@/components/Spinner';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { getLinuxDoErrorMessage } from '@/lib/linuxdo-errors';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { validateNickname } from '@/lib/user-profile';
@@ -272,6 +273,13 @@ export function LoginPageClient() {
       });
 
       if (res.ok && mode === 'login') {
+        // 接口成功但 Cookie 被浏览器拒收时，跳转后仍是游客，这里就地提示
+        if (!getAuthInfoFromBrowserCookie()) {
+          setError(
+            '浏览器未保存登录状态。经 HTTPS 反向代理访问时，请确认代理转发的 X-Forwarded-Proto 与实际协议一致，并检查浏览器是否禁用 Cookie',
+          );
+          return;
+        }
         const redirect =
           new URLSearchParams(window.location.search).get('redirect') || '/';
         window.location.href = redirect;

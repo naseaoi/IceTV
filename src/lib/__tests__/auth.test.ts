@@ -1,3 +1,4 @@
+import type { NextRequest } from 'next/server';
 import { TextEncoder } from 'util';
 
 import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
@@ -5,6 +6,7 @@ import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import {
   generateSignature,
   getSessionExpiresAt,
+  isSecureRequest,
   parseAuthCookieValue,
   verifySignature,
 } from '../auth.server';
@@ -13,6 +15,51 @@ if (!global.TextEncoder) {
   global.TextEncoder = TextEncoder as typeof global.TextEncoder;
 }
 installCryptoPolyfill();
+
+function fakeRequest(url: string, headers: Record<string, string> = {}) {
+  return {
+    nextUrl: new URL(url),
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+  } as unknown as NextRequest;
+}
+
+describe('isSecureRequest', () => {
+  it('follows the request protocol even in production', () => {
+    const env = process.env as Record<string, string | undefined>;
+    const originalNodeEnv = env.NODE_ENV;
+    env.NODE_ENV = 'production';
+    try {
+      expect(isSecureRequest(fakeRequest('http://192.168.1.2:3000/'))).toBe(
+        false,
+      );
+      expect(isSecureRequest(fakeRequest('https://tv.example.com/'))).toBe(
+        true,
+      );
+    } finally {
+      env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  it('trusts the first x-forwarded-proto segment from a TLS proxy', () => {
+    expect(
+      isSecureRequest(
+        fakeRequest('http://icetv:3000/', { 'x-forwarded-proto': 'https' }),
+      ),
+    ).toBe(true);
+    expect(
+      isSecureRequest(
+        fakeRequest('http://icetv:3000/', {
+          'x-forwarded-proto': 'https, http',
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isSecureRequest(
+        fakeRequest('http://icetv:3000/', { 'x-forwarded-proto': 'http' }),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe('getSessionExpiresAt', () => {
   const originalTtl = process.env.AUTH_SESSION_TTL_HOURS;
