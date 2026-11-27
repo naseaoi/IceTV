@@ -16,6 +16,11 @@
 | 性能相关改动                                     | [性能验证](docs/performance-baseline.md) |
 | 打 tag、发版                                     | [发布](docs/release.md)                  |
 
+## 框架版本
+
+- Next、React、播放器等依赖的版本以 `package.json` 与 `pnpm-lock.yaml` 为准，API 可能与训练记忆不同。写 Next 相关代码前先查 `node_modules/next/dist/docs/`（随安装版本分发），类型以本地 `.d.ts` 为准；Context7 等外部文档可能返回 canary 版，使用前核对版本。
+- 易误写处：`cookies()` / `headers()` / `params` / `searchParams` 是异步；请求拦截在 `src/proxy.ts`（不是 `middleware`）；开发用 Turbopack、生产构建用 webpack，两边都要能跑。
+
 ## 配置读写
 
 统一入口 `src/lib/config.ts`。三个读取函数不可混用：
@@ -58,6 +63,7 @@
 
 其余界面规范见 [前端界面](docs/frontend.md)。原生 `<select>`、`max-*` 变体、`animate-pulse` / `animate-spin`、`backdrop-blur` 由 ESLint（`eslint.config.mjs`）报错拦截。
 
+- 简繁转换只在显示边界进行，业务状态与自定义组件 props 保持原值；语言切换整页刷新，升级 Next 须重验 JSX 运行时与请求 ALS，见 [简繁显示](docs/frontend.md#简繁显示)。
 - `tailwind.config.ts` 含 raw 断点（`split`），Tailwind 因此**不生成 `max-sm:` / `max-md:` 等 `max-*` 变体**，写了也静默无效。窄屏样式写成基础类加 `sm:` / `md:` 覆盖，窄屏横屏用 `phone-landscape:`。
 - `@tailwindcss/forms` 按控件类型给原生 input / select / textarea 加边框、内边距和背景（select 另有背景箭头）。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则浅色模式出现灰框或文字被裁切。用 `ring-inset` 做描边的控件聚焦时同时写 `focus:ring-inset`，插件的聚焦样式优先级更高，会把内描边改回外描边，在滚动容器边缘被裁掉。下拉统一用 `src/components/Select.tsx`，不写原生 `<select>`。
 - 页面滚动必须由文档承担：`html` / `body` 不设固定高度，`body` 横向裁切用 `overflow-x: clip`（见 `src/app/globals.css`）。让 `body` 成为一屏高的内部滚动容器后，手机浏览器地址栏不再收起，页面底部约一个地址栏高度的内容滚不到，桌面模拟器无法复现。
@@ -73,6 +79,7 @@
 
 ## 错误处理
 
+- 包住 `cookies()` / `headers()` 等 Next 动态 API（含间接调用）的 catch 必须先调用 `unstable_rethrow(error)`（`next/navigation`），再处理业务异常。
 - 客户端严重错误走 `src/lib/client-error-reporting.ts`，根布局已挂 `ClientErrorReporter`。
 - `error.tsx`、`global-error.tsx` 生产只展示通用提示，开发展示类型、信息、编号、堆栈。
 - 业务可恢复错误返回明确文案，不要抛给全局错误边界。

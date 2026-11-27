@@ -1,10 +1,14 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
 
-export const metadata: Metadata = {
-  title: '安全警告 - IceTV',
-  description: '站点安全配置警告',
-};
+import { toDisplayText } from '@/lib/display-text';
+
+export function generateMetadata(): Metadata {
+  return {
+    title: toDisplayText('安全警告 - IceTV'),
+    description: toDisplayText('站点安全配置警告'),
+  };
+}
 
 export default function WarningPage() {
   return (

@@ -96,10 +96,25 @@ export async function getTrackingStrip(
   }
 }
 
-// 登录写计数 cookie 用：不等待上游，日历未缓存时只计有更新的作品
-export async function countTrackingStrip(username: string): Promise<number> {
-  const items = await db.getTrackingCalendarItems(username);
-  return toStripItems(items, peekBangumiCalendarData()).length;
+// 路由骨架用：追更会在播放页、卡片菜单与定时刷新中变化，计数 cookie 跟不上，所以每次实时查库；
+// 不等待上游，日历未缓存时只计有更新的作品
+export async function getTrackingStripSkeletonCount(
+  limit: number,
+): Promise<number> {
+  const authCookie = (await cookies()).get('auth')?.value;
+  if (!authCookie) return 0;
+  const session = await getServerAuthSession(authCookie);
+  if (session.status !== 'authenticated') return 0;
+  try {
+    const items = await db.getTrackingCalendarItems(session.username);
+    return Math.min(
+      toStripItems(items, peekBangumiCalendarData()).length,
+      limit,
+    );
+  } catch (error) {
+    console.warn('追更骨架计数失败', error);
+    return 0;
+  }
 }
 
 const EMPTY_SEED: TrackingStripSeed = {

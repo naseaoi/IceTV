@@ -1316,7 +1316,6 @@ describe('initializeArtPlayer 拉流控制', () => {
       expect(resolveSourcePlaybackRoute).toHaveBeenCalledTimes(1);
       expect(player.switchUrl).not.toHaveBeenCalled();
       expect(hls.stopLoad).not.toHaveBeenCalled();
-      expect(player.title).toContain('Updated title');
       expect(reloadDanmaku).not.toHaveBeenCalled();
       player.emit('video:playing');
       expect(started).toHaveBeenCalledTimes(1);

@@ -1,4 +1,6 @@
 import { SPINNER_MARKUP } from '@/components/Spinner';
+import { getDocumentDisplayLanguage } from '@/lib/display-language';
+import { toDisplayText } from '@/lib/display-text';
 import { resolveHlsBufferDefaults } from '@/lib/hls-buffer-policy';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +57,7 @@ export function formatBytesPerSecond(bytesPerSecond: number): string {
 export function showTimedArtNotice(
   player: {
     constructor?: Function & { NOTICE_TIME?: number };
-    notice?: { show: string };
+    notice?: { get show(): boolean | string; set show(message: string) };
   } | null,
   message: string,
   durationMs = 2000,
@@ -68,7 +70,7 @@ export function showTimedArtNotice(
     constructorRef.NOTICE_TIME = Math.floor(durationMs);
   }
 
-  player.notice.show = message;
+  player.notice.show = toDisplayText(message);
 
   if (constructorRef && typeof previousDuration === 'number') {
     constructorRef.NOTICE_TIME = previousDuration;
@@ -195,6 +197,18 @@ export interface ArtPlayerConfigOverrides {
   moreVideoAttr?: Record<string, unknown>;
 }
 
+function createArtPlayerLanguageConfig() {
+  const language = getDocumentDisplayLanguage();
+  const lang = language.toLowerCase();
+  if (language === 'zh-CN') return { lang };
+  // 5.4 发布包只把简体字典内置在主模块，并导出到 window；创建配置前 getPlayerModules 已加载主模块。
+  const zhCn = window['artplayer-i18n-zh-cn'];
+  const dictionary = Object.fromEntries(
+    Object.entries(zhCn).map(([key, value]) => [key, toDisplayText(value)]),
+  );
+  return { lang, i18n: { [lang]: dictionary } };
+}
+
 /**
  * 创建 Artplayer 基础配置，VOD / Live 场景通过 overrides 差异化。
  * 不包含 container / url，这两个必须在调用端传入。
@@ -223,7 +237,7 @@ export function createArtPlayerConfig(overrides?: ArtPlayerConfigOverrides) {
     airplay: true,
     // brand-400：深色画面上比 brand-500 更易辨认
     theme: '#5fa8d8',
-    lang: 'zh-cn' as const,
+    ...createArtPlayerLanguageConfig(),
     hotkey: false,
     autoOrientation: true,
     lock: true,

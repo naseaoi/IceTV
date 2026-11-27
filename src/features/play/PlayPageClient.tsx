@@ -65,6 +65,7 @@ import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePla
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 import { deduplicatePlayRecords, generateStorageKey } from '@/lib/db.client';
+import { toDisplayText } from '@/lib/display-text';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import {
@@ -1030,7 +1031,7 @@ function AuthenticatedPlayPageClient({
       const unavailableNotice = sourceUnavailableNoticeRef.current;
       sourceUnavailableNoticeRef.current = null;
       if (unavailableNotice && artPlayerRef.current) {
-        artPlayerRef.current.notice.show = unavailableNotice;
+        artPlayerRef.current.notice.show = toDisplayText(unavailableNotice);
       }
     }, [
       ensureEpisodeProgressLoaded,

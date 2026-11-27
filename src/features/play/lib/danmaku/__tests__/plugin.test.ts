@@ -1,9 +1,13 @@
+import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
+
 import {
   applyOffset,
+  createDanmakuPlugin,
   DANMAKU_HEATMAP_SAMPLING_PX,
   resolveDanmakuHeatmapOption,
 } from '@/features/play/lib/danmaku/plugin';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
+import { type DisplayTextGlobals } from '@/lib/display-text';
 
 const build = (times: number[]): DanmakuItem[] =>
   times.map((time, i) => ({
@@ -53,5 +57,74 @@ describe('resolveDanmakuHeatmapOption', () => {
 
   it('关闭时不创建热力图', () => {
     expect(resolveDanmakuHeatmapOption(false)).toBe(false);
+  });
+});
+
+jest.mock('artplayer-plugin-danmuku', () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
+
+describe('弹幕显示边界', () => {
+  const globals = globalThis as DisplayTextGlobals;
+  afterEach(() => {
+    document.documentElement.lang = '';
+    delete globals.__ICETV_DISPLAY_CONVERTER__;
+    jest.clearAllMocks();
+  });
+
+  it('转换队列副本并支持重复显示，加载和发送数据保留原文', async () => {
+    document.documentElement.lang = 'zh-TW';
+    // 非幂等转换可以发现 seek 后误把已显示文本再次转换的问题。
+    globals.__ICETV_DISPLAY_CONVERTER__ = (text) => `${text}繁`;
+    const items = [
+      { text: '视频设置', time: 1, mode: 0 as const, color: '#FFFFFF' },
+    ];
+    const beforeEmit = jest.fn(async () => true);
+    const loadItems = jest.fn(async () => items);
+    await createDanmakuPlugin({
+      loadItems,
+      beforeEmit,
+      opacity: 1,
+      fontSize: 25,
+      visible: true,
+      heatmap: false,
+    });
+    const options = (artplayerPluginDanmuku as jest.Mock).mock.calls[0][0];
+    expect(await options.danmuku()).toBe(items);
+    const queued = { ...items[0] };
+    expect(options.beforeVisible(queued)).toBe(true);
+    expect(queued.text).toBe('视频设置繁');
+    expect(options.beforeVisible(queued)).toBe(true);
+    expect(queued.text).toBe('视频设置繁');
+    expect(items[0].text).toBe('视频设置');
+    const emitted = { text: '发送原文' };
+    await options.beforeEmit(emitted);
+    expect(beforeEmit).toHaveBeenCalledWith({ text: '发送原文' });
+    expect(options.transformText('发送')).toBe('发送繁');
+    expect(options.MARGIN.steps[3]).toEqual({
+      name: '满屏繁',
+      value: [10, 10],
+    });
+    expect(options.SPEED.steps[1]).toEqual({
+      name: '较慢繁',
+      value: 7.5,
+      hide: true,
+    });
+  });
+
+  it('简体队列文本保持不变', async () => {
+    document.documentElement.lang = 'zh-CN';
+    await createDanmakuPlugin({
+      loadItems: async () => [],
+      opacity: 1,
+      fontSize: 25,
+      visible: true,
+      heatmap: false,
+    });
+    const options = (artplayerPluginDanmuku as jest.Mock).mock.calls[0][0];
+    const item = { text: '视频设置' };
+    expect(options.beforeVisible(item)).toBe(true);
+    expect(item.text).toBe('视频设置');
   });
 });

@@ -931,28 +931,31 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     expect(hls.stopLoad).toHaveBeenCalledTimes(1);
   });
 
-  it('失败时取消尚未执行的网络恢复，迟到错误保持失败态', () => {
-    const { runtime, video, hls } = loadEpisode();
-    hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
-    for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
-      hls.emit(FakeHls.Events.ERROR, {
-        type: FakeHls.ErrorTypes.MEDIA_ERROR,
-        details: 'bufferAppendError',
-        fatal: true,
-      });
-    }
+  it.each(['bufferAppendError', 'mediaSourceRequiresReset'])(
+    '%s 耗尽时取消尚未执行的网络恢复，迟到错误保持失败态',
+    (details) => {
+      const { runtime, video, hls } = loadEpisode();
+      hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+      for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
+        hls.emit(FakeHls.Events.ERROR, {
+          type: FakeHls.ErrorTypes.MEDIA_ERROR,
+          details,
+          fatal: true,
+        });
+      }
 
-    expect(getVodRuntimeSourceUrl(video)).toBeNull();
-    expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
-    jest.runOnlyPendingTimers();
-    hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
-    expect(hls.startLoad).not.toHaveBeenCalled();
-    expect(hls.loadSource).toHaveBeenCalledTimes(1);
-    expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
-    expect(hls.recoverMediaError).toHaveBeenCalledTimes(
-      HLS_FATAL_MEDIA_RECOVERY_LIMIT,
-    );
-  });
+      expect(getVodRuntimeSourceUrl(video)).toBeNull();
+      expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
+      jest.runOnlyPendingTimers();
+      hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+      expect(hls.startLoad).not.toHaveBeenCalled();
+      expect(hls.loadSource).toHaveBeenCalledTimes(1);
+      expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+      expect(hls.recoverMediaError).toHaveBeenCalledTimes(
+        HLS_FATAL_MEDIA_RECOVERY_LIMIT,
+      );
+    },
+  );
 
   it('分片加载到失败位置后清零恢复次数，之后的失败重新开始恢复', () => {
     const { runtime, hls } = loadEpisode();
@@ -1391,6 +1394,35 @@ describe('vodHlsRuntime 缓冲配额', () => {
     expect(hls.config.maxMaxBufferLength).toBe(80);
     expect(hls.config.maxBufferLength).toBe(80);
   });
+
+  it.each(['bufferAppendNoProgress', 'mediaSourceRequiresReset'])(
+    '非致命 %s 由 hls.js 自行恢复，不切线路也不消耗恢复预算',
+    (details) => {
+      const { load, setError, onPlaybackRecoveryExhausted } = setupRuntime();
+      const video = createVideo();
+      load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
+        hls.emit(FakeHls.Events.ERROR, {
+          type: FakeHls.ErrorTypes.MEDIA_ERROR,
+          details,
+          fatal: false,
+        });
+      }
+      expect(hls.startLoad).not.toHaveBeenCalled();
+      expect(hls.recoverMediaError).not.toHaveBeenCalled();
+      expect(hls.loadSource).toHaveBeenCalledTimes(1);
+      expect(setError).not.toHaveBeenCalled();
+      expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      hls.emit(FakeHls.Events.ERROR, {
+        type: FakeHls.ErrorTypes.MEDIA_ERROR,
+        details: 'mediaSourceRequiresReset',
+        fatal: true,
+      });
+      expect(hls.recoverMediaError).toHaveBeenCalledTimes(1);
+      expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+    },
+  );
 
   it('bufferFullError 只收紧前向上限，不拉流、不走恢复也不计失败', () => {
     const { load, setError } = setupRuntime();

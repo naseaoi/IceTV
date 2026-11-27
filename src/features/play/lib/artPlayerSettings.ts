@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import { resolveActivePlayTime } from '@/features/play/lib/episodeResumePolicy';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { toDisplayText } from '@/lib/display-text';
 import {
   writeAutoPlayNextEnabled,
   writeBlockAdEnabled,
@@ -66,7 +67,7 @@ export function createArtPlayerSettings({
   return [
     {
       name: '去广告',
-      html: '去广告',
+      html: toDisplayText('去广告'),
       icon: AD_BLOCK_ICON,
       switch: blockAdEnabled,
       onSwitch: function (item: { switch?: boolean }) {
@@ -108,7 +109,7 @@ export function createArtPlayerSettings({
     },
     {
       name: '自动连播',
-      html: '自动连播',
+      html: toDisplayText('自动连播'),
       icon: AUTO_PLAY_NEXT_ICON,
       switch: autoPlayNextEnabled,
       onSwitch: function (item: { switch?: boolean }) {
@@ -124,7 +125,7 @@ export function createArtPlayerSettings({
     },
     {
       name: '跳过片头片尾',
-      html: '跳过片头片尾',
+      html: toDisplayText('跳过片头片尾'),
       switch: skipConfigRef.current.enable,
       onSwitch: function (item: { switch?: boolean }) {
         // handleSkipConfigChange 会同步 setting.update 改写 item.switch，返回值必须先取
@@ -134,7 +135,7 @@ export function createArtPlayerSettings({
       },
     },
     {
-      html: '删除跳过配置',
+      html: toDisplayText('删除跳过配置'),
       onClick: function () {
         handleSkipConfigChange({
           enable: false,
@@ -146,11 +147,11 @@ export function createArtPlayerSettings({
     },
     {
       name: '设置片头',
-      html: '设置片头',
+      html: toDisplayText('设置片头'),
       icon: SKIP_INTRO_ICON,
       tooltip:
         skipConfigRef.current.intro_time === 0
-          ? '设置片头时间'
+          ? toDisplayText('设置片头时间')
           : `${formatTime(skipConfigRef.current.intro_time)}`,
       onClick: function () {
         const currentTime = artPlayerRef.current?.currentTime || 0;
@@ -166,11 +167,11 @@ export function createArtPlayerSettings({
     },
     {
       name: '设置片尾',
-      html: '设置片尾',
+      html: toDisplayText('设置片尾'),
       icon: SKIP_OUTRO_ICON,
       tooltip:
         skipConfigRef.current.outro_time >= 0
-          ? '设置片尾时间'
+          ? toDisplayText('设置片尾时间')
           : `-${formatTime(-skipConfigRef.current.outro_time)}`,
       onClick: function () {
         const outroTime =
@@ -213,7 +214,7 @@ export function createArtPlayerControls({
       position: 'left',
       index: 13,
       html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" fill="currentColor"/></svg></i>',
-      tooltip: '播放下一集',
+      tooltip: toDisplayText('播放下一集'),
       click: function () {
         handleNextEpisode();
       },
@@ -224,7 +225,7 @@ export function createArtPlayerControls({
 export function createArtPlayerContextmenus() {
   return [
     {
-      html: '快捷键配置',
+      html: toDisplayText('快捷键配置'),
       index: 30,
       click(this: Artplayer) {
         this.contextmenu.show = false;

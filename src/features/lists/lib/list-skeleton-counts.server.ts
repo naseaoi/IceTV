@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cookies } from 'next/headers';
+import { unstable_rethrow } from 'next/navigation';
 
 import type { ListHeaderPreview } from '@/features/lists/types';
 import { getServerAuthSession } from '@/lib/auth-session.server';
@@ -25,6 +26,7 @@ export async function getPlazaSkeletonCount(): Promise<number | null> {
     if (viewer === undefined) return null;
     return await db.countPlazaLists(viewer);
   } catch (error) {
+    unstable_rethrow(error);
     console.error('读取片单广场计数失败', error);
     return null;
   }
@@ -47,6 +49,7 @@ export async function getListDetailPreview(
     }
     return await db.getListHeaderPreview(id, viewer);
   } catch (error) {
+    unstable_rethrow(error);
     console.error('读取片单概要失败', error);
     return null;
   }

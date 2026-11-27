@@ -5,15 +5,11 @@ import type {
   TrackingStripSeed,
 } from '@/features/continue-watching/lib/tracking-calendar';
 import { fetchTrackingCalendar } from '@/features/continue-watching/lib/tracking-calendar-client';
-import { writeContinueWatchingTrackingCount } from '@/lib/local-preferences';
 
 import { useTrackingStrip } from './useTrackingStrip';
 
 jest.mock('@/features/continue-watching/lib/tracking-calendar-client', () => ({
   fetchTrackingCalendar: jest.fn(),
-}));
-jest.mock('@/lib/local-preferences', () => ({
-  writeContinueWatchingTrackingCount: jest.fn(),
 }));
 jest.mock('@/lib/db.client', () => ({
   subscribeToDataUpdates: (event: string, callback: () => void) => {
@@ -54,12 +50,11 @@ beforeEach(() => {
   jest.mocked(fetchTrackingCalendar).mockResolvedValue([item('fresh')]);
 });
 
-it('刚完成的完整种子直接复用，不重复请求，并写入计数', () => {
+it('刚完成的完整种子直接复用，不重复请求', () => {
   const value = seed();
   const { result } = renderHook(() => useTrackingStrip(value));
   expect(result.current.map((entry) => entry.key)).toEqual(['a']);
   expect(fetchTrackingCalendar).not.toHaveBeenCalled();
-  expect(writeContinueWatchingTrackingCount).toHaveBeenCalledWith(1);
 });
 
 it.each([

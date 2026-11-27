@@ -253,10 +253,6 @@ export function writeContinueWatchingPageCount(value: number): void {
   writeListCountCookie('cw_page_count', value);
 }
 
-export function writeContinueWatchingTrackingCount(value: number): void {
-  writeListCountCookie('cw_tracking_count', value);
-}
-
 export function resetContinueWatchingPageCount(): void {
   clearListCountCookie('cw_page_count');
 }

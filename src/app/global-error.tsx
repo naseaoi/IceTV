@@ -7,6 +7,8 @@ import {
   buildClientErrorReport,
   reportClientError,
 } from '@/lib/client-error-reporting';
+import { getDisplayLanguage } from '@/lib/display-text';
+import { DISPLAY_CONVERTER_SRC } from '@/lib/display-text/asset.generated';
 
 export default function GlobalError({
   error,
@@ -15,6 +17,7 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const language = getDisplayLanguage();
   const isDevelopment = process.env.NODE_ENV !== 'production';
   const details = isDevelopment
     ? buildClientErrorReport('全局渲染失败', error)
@@ -28,7 +31,14 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <html lang='zh-CN'>
+    <html lang={language}>
+      <head>
+        {language !== 'zh-CN' && (
+          // The root layout may have failed: block hydration until its standalone dictionary is ready.
+          // eslint-disable-next-line @next/next/no-sync-scripts
+          <script src={DISPLAY_CONVERTER_SRC[language]} />
+        )}
+      </head>
       <body>
         <main className='flex min-h-screen items-center justify-center bg-white px-6 text-gray-900 dark:bg-gray-950 dark:text-gray-100'>
           <div className='w-full max-w-md space-y-5 text-center'>

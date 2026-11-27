@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Info,
   KeyRound,
+  Languages,
   Palette,
   Shield,
   SlidersHorizontal,
@@ -12,12 +13,13 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, createElement, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
 import ProfileAvatar from '@/components/ProfileAvatar';
+import Select, { type SelectOption } from '@/components/Select';
 import {
   buildLoginHref,
   ROLE_TEXT,
@@ -33,6 +35,11 @@ import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { UserAvatar } from '@/components/user-menu/UserAvatar';
 import { AdminAlertBadge } from '@/features/admin/components/AdminAlertBadge';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
+import {
+  getDisplayLanguagePreference,
+  parseDisplayLanguagePreference,
+  setDisplayLanguagePreference,
+} from '@/lib/display-language';
 import { CURRENT_VERSION } from '@/lib/version';
 
 type Panel = 'profile' | 'local' | 'password' | 'version' | 'logout' | null;
@@ -99,6 +106,46 @@ function ActionRow({
     <button type='button' onClick={onClick} className={PRESSABLE_ROW_CLASS}>
       {content}
     </button>
+  );
+}
+
+const LANGUAGE_OPTIONS = [
+  { value: 'auto', label: '跟随浏览器' },
+  { value: 'zh-CN', label: '简体中文' },
+  { value: 'zh-TW', label: '繁體中文（台灣）' },
+  { value: 'zh-HK', label: '繁體中文（香港）' },
+];
+
+function renderLanguageLabel(option: SelectOption) {
+  // 语言自称保持原文；createElement 绕过 JSX 显示转换，不扩大全站豁免范围。
+  // 「跟随浏览器」不是语言自称，走默认渲染随当前语言转换。
+  if (option.value === 'auto') return undefined;
+  return createElement(
+    'span',
+    { lang: option.value, translate: 'no' },
+    option.label,
+  );
+}
+
+function LanguageRow() {
+  const hydrated = useClientHydrated();
+  return (
+    <div className={ROW_CLASS}>
+      <RowIcon icon={Languages} />
+      <span className='min-w-0 flex-1'>语言</span>
+      <Select
+        ariaLabel='语言'
+        variant='pill'
+        align='end'
+        value={hydrated ? getDisplayLanguagePreference() : 'auto'}
+        disabled={!hydrated}
+        options={LANGUAGE_OPTIONS}
+        renderOptionLabel={renderLanguageLabel}
+        onChange={(value) =>
+          setDisplayLanguagePreference(parseDisplayLanguagePreference(value))
+        }
+      />
+    </div>
   );
 }
 
@@ -195,6 +242,7 @@ export function SettingsPageClient() {
 
         <div className={GROUP_CLASS}>
           <ThemeRow />
+          <LanguageRow />
           <ActionRow
             icon={SlidersHorizontal}
             label='本地设置'

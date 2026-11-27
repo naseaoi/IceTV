@@ -1,6 +1,7 @@
 import type Artplayer from 'artplayer';
 import { MutableRefObject, useEffect } from 'react';
 
+import { toDisplayText } from '@/lib/display-text';
 import {
   type PlayerShortcutAction,
   type PlayerShortcutMap,
@@ -101,7 +102,7 @@ export function usePlayerKeyboard({
       );
       player.currentTime = next;
       const arrow = seconds > 0 ? '快进' : '快退';
-      player.notice.show = `${arrow} ${Math.abs(seconds)} 秒`;
+      player.notice.show = toDisplayText(`${arrow} ${Math.abs(seconds)} 秒`);
     };
 
     const changeVolume = (delta: number) => {
@@ -109,7 +110,9 @@ export function usePlayerKeyboard({
       if (!player) return;
       const next = Math.round((player.volume + delta) * 10) / 10;
       player.volume = Math.min(1, Math.max(0, next));
-      player.notice.show = `音量: ${Math.round(player.volume * 100)}`;
+      player.notice.show = toDisplayText(
+        `音量: ${Math.round(player.volume * 100)}`,
+      );
     };
 
     const changeRate = (delta: number) => {
@@ -117,14 +120,14 @@ export function usePlayerKeyboard({
       if (!player) return;
       const next = clampRate((player.playbackRate as number) + delta);
       player.playbackRate = next;
-      player.notice.show = `倍速: ${next.toFixed(1)}x`;
+      player.notice.show = toDisplayText(`倍速: ${next.toFixed(1)}x`);
     };
 
     const resetRate = () => {
       const player = artPlayerRef.current;
       if (!player) return;
       player.playbackRate = 1;
-      player.notice.show = '倍速: 1.0x';
+      player.notice.show = toDisplayText('倍速: 1.0x');
     };
 
     const hidePauseStateIcon = (player: Artplayer) => {
@@ -184,9 +187,9 @@ export function usePlayerKeyboard({
       const player = artPlayerRef.current;
       if (!player) return;
       player.muted = !player.muted;
-      player.notice.show = player.muted
-        ? '已静音'
-        : `音量: ${Math.round(player.volume * 100)}`;
+      player.notice.show = toDisplayText(
+        player.muted ? '已静音' : `音量: ${Math.round(player.volume * 100)}`,
+      );
     };
 
     const toggleFullscreen = () => {

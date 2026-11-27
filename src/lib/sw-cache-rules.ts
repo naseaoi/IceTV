@@ -1,3 +1,22 @@
+// @serwist/next defaultCache also stores Pages Router JSON in next-data.
+export const DISPLAY_PAGE_CACHE_NAMES = [
+  'pages',
+  'pages-rsc',
+  'pages-rsc-prefetch',
+  'next-data',
+] as const;
+
+export async function clearDisplayPageCaches(): Promise<void> {
+  try {
+    if (typeof caches === 'undefined') return;
+    await Promise.allSettled(
+      DISPLAY_PAGE_CACHE_NAMES.map((name) => caches.delete(name)),
+    );
+  } catch {
+    // CacheStorage can be unavailable in private contexts; refreshing still applies the cookie.
+  }
+}
+
 type CacheNamedHandler = {
   cacheName?: string;
 };

@@ -1,5 +1,6 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -59,6 +60,13 @@ jest.mock('@/components/SiteProvider', () => ({
   useSite: () => ({ announcement: '本站仅提供信息检索' }),
 }));
 
+// jsdom 的 pointer 事件不带 pointerType，手动补上
+function pointerDown(element: Element, pointerType: 'mouse' | 'touch') {
+  const event = createEvent.pointerDown(element);
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
+  fireEvent(element, event);
+}
+
 const messagePage: UserMessagePage = {
   items: [
     {
@@ -98,6 +106,7 @@ function renderPanel(
     workingIds: new Set(),
     onClose: jest.fn(),
     onRead: jest.fn().mockResolvedValue(undefined),
+    onUntrack: jest.fn().mockResolvedValue(true),
     onReadAll: jest.fn().mockResolvedValue(undefined),
     onLoadMore: jest.fn().mockResolvedValue(undefined),
     onRetry: jest.fn().mockResolvedValue(undefined),
@@ -157,6 +166,73 @@ describe('MessagePanel', () => {
     expect(props.onRead).not.toHaveBeenCalled();
   });
 
+  it('追更消息可在面板内取消追更', () => {
+    const props = renderPanel();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '取消追更《测试剧集》' }),
+    );
+    expect(props.onUntrack).toHaveBeenCalledWith(messagePage.items[1]);
+    expect(props.onRead).not.toHaveBeenCalled();
+  });
+
+  it('触屏首次轻触只展开按钮，再次轻触同一按钮才执行，点到别处收起', () => {
+    const props = renderPanel();
+    const untrack = screen.getByRole('button', {
+      name: '取消追更《测试剧集》',
+    });
+    const watch = screen.getByRole('link', { name: '去观看《测试剧集》' });
+    watch.addEventListener('click', (event) => event.preventDefault());
+    const tap = (element: HTMLElement) => {
+      pointerDown(element, 'touch');
+      fireEvent.click(element, { detail: 1 });
+    };
+
+    tap(untrack);
+    expect(untrack).toHaveAttribute('data-expanded');
+    expect(props.onUntrack).not.toHaveBeenCalled();
+
+    tap(watch);
+    expect(watch).toHaveAttribute('data-expanded');
+    expect(untrack).not.toHaveAttribute('data-expanded');
+    expect(props.onClose).not.toHaveBeenCalled();
+
+    pointerDown(document.body, 'touch');
+    expect(watch).not.toHaveAttribute('data-expanded');
+
+    tap(untrack);
+    tap(untrack);
+    expect(props.onUntrack).toHaveBeenCalledWith(messagePage.items[1]);
+  });
+
+  it('鼠标与键盘点击直接执行', () => {
+    const props = renderPanel();
+    const untrack = screen.getByRole('button', {
+      name: '取消追更《测试剧集》',
+    });
+
+    pointerDown(untrack, 'mouse');
+    fireEvent.click(untrack, { detail: 1 });
+    expect(props.onUntrack).toHaveBeenCalledTimes(1);
+
+    pointerDown(untrack, 'touch');
+    fireEvent.click(untrack, { detail: 0 });
+    expect(props.onUntrack).toHaveBeenCalledTimes(2);
+  });
+
+  it('取消追更处理中禁用该消息的取消追更与已读按钮', () => {
+    renderPanel({
+      workingIds: new Set(['untrack:tracking:source:video:1:2']),
+    });
+
+    expect(
+      screen.getByRole('button', { name: '取消追更《测试剧集》' }),
+    ).toBeDisabled();
+    const readButtons = screen.getAllByRole('button', { name: '标记为已读' });
+    expect(readButtons[0]).toBeEnabled();
+    expect(readButtons[1]).toBeDisabled();
+  });
+
   it('加载失败时提供重试操作', () => {
     const onRetry = jest.fn().mockResolvedValue(undefined);
     renderPanel({
@@ -182,6 +258,7 @@ describe('MessagePanel', () => {
         workingIds={new Set()}
         onClose={onClose}
         onRead={jest.fn().mockResolvedValue(undefined)}
+        onUntrack={jest.fn().mockResolvedValue(true)}
         onReadAll={jest.fn().mockResolvedValue(undefined)}
         onLoadMore={jest.fn().mockResolvedValue(undefined)}
         onRetry={jest.fn().mockResolvedValue(undefined)}

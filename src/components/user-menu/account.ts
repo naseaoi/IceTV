@@ -32,7 +32,8 @@ export async function logout() {
           : getHttpErrorMessage(response.status, '退出失败，请重试'),
       );
     }
-    window.location.href = '/';
+    // 退出后整页重载，清空当前账号的客户端状态。
+    window.location.href = new URL('/', window.location.origin).href;
   } catch (error) {
     if (!isAbortError(error))
       showToast(getErrorMessage(error, '退出失败，请重试'), 'error');

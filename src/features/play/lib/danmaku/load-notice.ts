@@ -3,6 +3,7 @@ import {
   type DanmakuLoadResult,
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
+import { toDisplayText } from '@/lib/display-text';
 import { showTimedArtNotice } from '@/lib/player-utils';
 
 export type { DanmakuLoadResult } from '@/features/play/lib/danmaku/types';
@@ -69,7 +70,7 @@ function flushNotice(player: NoticePlayer, state: DanmakuNoticeState) {
           ? new DanmakuRateLimitError(result.retryAfterSeconds).message
           : '弹幕加载失败，请尝试重新加载';
   state.pending = null;
-  state.displayedMessage = message;
+  state.displayedMessage = toDisplayText(message);
   showTimedArtNotice(player, message, DANMAKU_NOTICE_DURATION_MS);
 }
 

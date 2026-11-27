@@ -445,6 +445,8 @@ export function useLivePlayer({
           const tryFallbackToServer = (data: any) => {
             if (!directRoute || routeFallbackRequested) return false;
             if (data?.type !== Hls.ErrorTypes.NETWORK_ERROR) return false;
+            // 清单成功返回但内容未更新属于直播停滞，不是直连请求失败。
+            if (data.details === 'playlistUnchangedError') return false;
             if (directVerified && !data.fatal) return false;
             const requestUrl = data.frag?.url ?? data.context?.url ?? data.url;
             if (!isDirectLiveRequestUrl(requestUrl)) return false;

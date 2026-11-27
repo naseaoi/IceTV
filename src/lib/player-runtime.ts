@@ -25,7 +25,7 @@ type LoaderCallbacks = {
 
 type HoverControlsArtPlayer = {
   controls?: { show: boolean };
-  setting?: { show: boolean };
+  setting?: { show: boolean; resize?: () => void; render?: () => void };
   template?: {
     $player?: HTMLElement;
     $video?: HTMLVideoElement;
@@ -51,6 +51,7 @@ type MobileControlsArtPlayer = HoverControlsArtPlayer & {
 };
 
 const PLAYER_HOVER_CONTROLS_IDLE_HIDE_MS = 2_000;
+const PLAYER_SETTING_HOVER_CLOSE_MS = 250;
 const PLAYER_MOBILE_TOUCH_MOVE_THRESHOLD_PX = 10;
 const PLAYER_MOBILE_CLICK_SUPPRESS_MS = 700;
 const PLAYER_DEFAULT_FAST_FORWARD_TIME_MS = 1_000;
@@ -275,6 +276,68 @@ export function restorePlayerPlaybackRate(
   art.playbackRate = safePlaybackRate;
 }
 
+// 有悬停能力的指针设备上，设置面板随齿轮悬浮打开、移出后关闭，与弹幕设置面板一致；触屏仍用点击切换。
+function bindPlayerSettingHover(
+  art: HoverControlsArtPlayer,
+  player: HTMLElement,
+): () => void {
+  const setting = art.setting;
+  const gear = player.querySelector<HTMLElement>('.art-control-setting');
+  const panel = player.querySelector<HTMLElement>('.art-settings');
+  if (
+    !setting ||
+    !gear ||
+    !panel ||
+    !window.matchMedia?.('(hover: hover) and (pointer: fine)').matches
+  ) {
+    return () => {};
+  }
+
+  let closeTimer: number | null = null;
+  const cancelClose = () => {
+    if (!closeTimer) return;
+    window.clearTimeout(closeTimer);
+    closeTimer = null;
+  };
+  const open = () => {
+    cancelClose();
+    if (art.isDestroy || setting.show) return;
+    setting.show = true;
+    setting.resize?.();
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer = window.setTimeout(() => {
+      closeTimer = null;
+      if (art.isDestroy || !setting.show) return;
+      setting.show = false;
+      // 与 ArtPlayer 失焦关闭一致，下次打开回到一级菜单
+      setting.render?.();
+    }, PLAYER_SETTING_HOVER_CLOSE_MS);
+  };
+  // 悬浮已打开面板，点击齿轮若沿用内置切换会把面板关掉
+  const keepOpenOnClick = (event: Event) => {
+    event.stopImmediatePropagation();
+    open();
+  };
+
+  const hoverTargets = [gear, panel];
+  for (const target of hoverTargets) {
+    target.addEventListener('mouseenter', open);
+    target.addEventListener('mouseleave', scheduleClose);
+  }
+  gear.addEventListener('click', keepOpenOnClick, true);
+
+  return () => {
+    cancelClose();
+    for (const target of hoverTargets) {
+      target.removeEventListener('mouseenter', open);
+      target.removeEventListener('mouseleave', scheduleClose);
+    }
+    gear.removeEventListener('click', keepOpenOnClick, true);
+  };
+}
+
 export function bindPlayerHoverControls(artPlayer: unknown): () => void {
   const art = artPlayer as HoverControlsArtPlayer;
   const player = art.template?.$player;
@@ -311,7 +374,8 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
     pointerIdle = false;
     idleHideTimer = window.setTimeout(() => {
       idleHideTimer = null;
-      if (!pointerInside) return;
+      // 设置面板打开时停在面板上阅读不算闲置，与 ArtPlayer 自身的隐藏条件一致
+      if (!pointerInside || art.setting?.show) return;
       pointerIdle = true;
       hideControls();
     }, PLAYER_HOVER_CONTROLS_IDLE_HIDE_MS);
@@ -342,10 +406,13 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
     }
   };
 
+  const cleanupSettingHover = bindPlayerSettingHover(art, player);
+
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
     clearIdleHideTimer();
+    cleanupSettingHover();
     player.removeEventListener('mouseenter', markPointerActive);
     player.removeEventListener('mousemove', markPointerActive);
     player.removeEventListener('mouseleave', handlePointerLeave);

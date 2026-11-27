@@ -1,16 +1,16 @@
 {
   "name": "icetv",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
     "pnpm": ">=10.14.0"
   },
   "scripts": {
-    "dev": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:dev-sw && next dev --turbopack -H 0.0.0.0",
-    "dev:webpack": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:dev-sw && next dev --webpack -H 0.0.0.0",
-    "build": "pnpm gen:changelog && pnpm gen:manifest && next build --webpack",
-    "build:turbo": "pnpm gen:changelog && pnpm gen:manifest && next build --turbopack",
+    "dev": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && pnpm gen:dev-sw && next dev --turbopack -H 0.0.0.0",
+    "dev:webpack": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && pnpm gen:dev-sw && next dev --webpack -H 0.0.0.0",
+    "build": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && next build --webpack",
+    "build:turbo": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && next build --turbopack",
     "start": "next start",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix && pnpm format",
@@ -24,6 +24,7 @@
     "format": "prettier -w .",
     "format:check": "prettier -c .",
     "gen:manifest": "node scripts/generate-manifest.js",
+    "gen:display-converter": "node scripts/generate-display-converter.js",
     "gen:dev-sw": "node scripts/generate-dev-sw.js",
     "gen:changelog": "node scripts/convert-changelog.js",
     "validate:changelog": "node scripts/convert-changelog.js --check",
@@ -36,7 +37,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@serwist/next": "^9.5.7",
-    "artplayer": "^5.2.5",
+    "artplayer": "^5.4.0",
     "artplayer-plugin-danmuku": "^5.3.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
@@ -44,17 +45,17 @@
     "boring-avatars": "^2.0.4",
     "bs58": "^6.0.0",
     "he": "^1.2.0",
-    "hls.js": "^1.6.10",
+    "hls.js": "^1.7.4",
     "lucide-react": "^0.438.0",
     "mysql2": "^3.15.3",
-    "next": "^16.2.10",
+    "next": "^16.4.6",
     "next-themes": "^0.4.6",
     "opencc-js": "^1.4.2",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "server-only": "^0.0.1",
     "serwist": "^9.5.7",
-    "sharp": "0.34.5",
+    "sharp": "0.35.5",
     "undici": "^7.30.2"
   },
   "devDependencies": {
@@ -68,13 +69,13 @@
     "@types/he": "^1.2.3",
     "@types/jest": "^27.5.2",
     "@types/node": "24.0.3",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0",
     "@typescript-eslint/eslint-plugin": "^8.55.0",
     "@typescript-eslint/parser": "^8.55.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.39.2",
-    "eslint-config-next": "^16.2.10",
+    "eslint-config-next": "^16.4.6",
     "eslint-plugin-simple-import-sort": "^7.0.0",
     "eslint-plugin-unused-imports": "^4.4.1",
     "husky": "^7.0.4",
@@ -128,8 +129,7 @@
       "unrs-resolver"
     ],
     "patchedDependencies": {
-      "artplayer-plugin-danmuku@5.3.0": "patches/artplayer-plugin-danmuku@5.3.0.patch",
-      "next@16.2.10": "patches/next@16.2.10.patch"
+      "artplayer-plugin-danmuku@5.3.0": "patches/artplayer-plugin-danmuku@5.3.0.patch"
     }
   },
   "packageManager": "pnpm@10.14.0"

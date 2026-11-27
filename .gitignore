@@ -45,6 +45,7 @@ src/lib/runtime.ts
 public/manifest.json
 public/sw.js
 public/sw.js.map
+public/display-text/
 
 # local data
 /data/

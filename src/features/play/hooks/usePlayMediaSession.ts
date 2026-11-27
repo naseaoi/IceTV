@@ -2,6 +2,7 @@ import type Artplayer from 'artplayer';
 import { MutableRefObject, useEffect, useRef } from 'react';
 
 import { useSite } from '@/components/SiteProvider';
+import { toDisplayText } from '@/lib/display-text';
 import { processImageUrl } from '@/lib/utils';
 
 const SEEK_STEP_SECONDS = 10;
@@ -79,16 +80,18 @@ export function usePlayMediaSession({
   const { siteName } = site;
 
   useEffect(() => {
-    document.title = buildPlayDocumentTitle({
-      siteName,
-      videoTitle,
-      episodeLabel,
-    });
+    document.title = toDisplayText(
+      buildPlayDocumentTitle({
+        siteName,
+        videoTitle,
+        episodeLabel,
+      }),
+    );
   }, [site, siteName, videoTitle, episodeLabel]);
 
   useEffect(() => {
     return () => {
-      document.title = siteName;
+      document.title = toDisplayText(siteName);
     };
   }, [siteName]);
 
@@ -104,8 +107,10 @@ export function usePlayMediaSession({
       ? new URL(processImageUrl(videoCover), window.location.href).href
       : '';
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: episodeLabel ? `${videoTitle} ${episodeLabel}` : videoTitle,
-      artist: siteName,
+      title: toDisplayText(
+        episodeLabel ? `${videoTitle} ${episodeLabel}` : videoTitle,
+      ),
+      artist: toDisplayText(siteName),
       artwork: artworkUrl ? [{ src: artworkUrl }] : [],
     });
   }, [siteName, videoTitle, episodeLabel, videoCover]);

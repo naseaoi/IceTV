@@ -21,6 +21,7 @@ import {
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
 import { sendUserDanmaku } from '@/features/play/lib/danmaku/user-client';
+import { toDisplayText } from '@/lib/display-text';
 import {
   readDanmakuFontSize,
   readDanmakuHeatmapEnabled,
@@ -83,7 +84,7 @@ type DanmakuConfigEvent = {
 
 type PlayerWithPlugins = {
   constructor?: Function & { NOTICE_TIME?: number };
-  notice?: { show: string };
+  notice?: { get show(): boolean | string; set show(message: string) };
   template?: { $noticeInner?: HTMLElement; $danmuku?: HTMLElement };
   plugins?: Record<string, unknown>;
   controls?: Record<string, HTMLElement | undefined>;
@@ -129,7 +130,7 @@ function isUserDanmakuFeatureEnabled(): boolean {
 }
 
 function showPlayerNotice(player: PlayerWithPlugins | null, message: string) {
-  if (player?.notice) player.notice.show = message;
+  if (player?.notice) player.notice.show = toDisplayText(message);
 }
 
 function buildUserDanmakuEmitter(

@@ -33,6 +33,7 @@ import {
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
 import { scrollPageTo } from '@/hooks/usePageScroll';
+import { toDisplayText } from '@/lib/display-text';
 import { AdminConfig } from '@/types/admin';
 
 const ADMIN_MOBILE_HEADER = { title: '管理后台' };
@@ -215,7 +216,9 @@ function AdminPageClient() {
       ) {
         return;
       }
-      if (!window.confirm('当前页面有未保存的改动，确定要离开吗？')) {
+      if (
+        !window.confirm(toDisplayText('当前页面有未保存的改动，确定要离开吗？'))
+      ) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }

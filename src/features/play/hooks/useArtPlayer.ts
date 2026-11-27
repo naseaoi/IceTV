@@ -45,9 +45,6 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     const player = latest.artPlayerRef.current;
     setDanmakuLoadNoticeVisibility(player, !latest.isVideoLoading);
     if (!player) return;
-    player.title = latest.loading
-      ? latest.detail?.title || latest.videoTitle
-      : `${latest.detail?.title || latest.videoTitle} - 第${latest.currentEpisodeIndex + 1}集`;
     syncNextEpisodeControl(
       player,
       latest.currentEpisodeIndex < latest.totalEpisodes - 1,

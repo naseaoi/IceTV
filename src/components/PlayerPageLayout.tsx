@@ -140,7 +140,9 @@ export function PlayerPageLayout({
                 ref={artRef}
                 className='h-full w-full overflow-hidden bg-black md:rounded-xl'
               />
-              {playerOverlay}
+              {/* 遮罩的 z-[500+] 只在播放器内比较，否则会盖过骑在播放器右边线上的展开按钮；
+                  不定位的包裹层不影响遮罩的 inset 定位与点击，网页全屏的播放器仍在其上 */}
+              <div className='isolate'>{playerOverlay}</div>
             </div>
           </div>
 

@@ -1,6 +1,7 @@
 import type Artplayer from 'artplayer';
 import type { MutableRefObject } from 'react';
 
+import { toDisplayText } from '@/lib/display-text';
 import type { PreferredQualityPreference } from '@/lib/local-preferences';
 
 export interface HlsLevelLike {
@@ -383,13 +384,13 @@ function registerQualityControl(
 
   const selector: QualitySelectorItem[] = [
     {
-      html: '自动',
+      html: toDisplayText('自动'),
       default: !activeOption,
       levelIndex: -1,
       height: 0,
     },
     ...options.map((option) => ({
-      html: option.label,
+      html: toDisplayText(option.label),
       default: activeOption?.levelIndex === option.levelIndex,
       levelIndex: option.levelIndex,
       height: option.height,
@@ -401,7 +402,7 @@ function registerQualityControl(
     position: 'right',
     index: 10,
     style: { marginRight: '10px' },
-    html: activeOption?.label || '自动',
+    html: toDisplayText(activeOption?.label || '自动'),
     selector,
     onSelect(item: QualitySelectorItem) {
       if (item.levelIndex < 0) {
@@ -415,7 +416,7 @@ function registerQualityControl(
         controlOptions.onPreferenceChange(item.height);
         applyManualQualityLevel(hls, item.levelIndex, { userSelected: true });
       }
-      art.notice.show = `画质: ${item.html}`;
+      art.notice.show = `${toDisplayText('画质')}: ${item.html}`;
       return item.html;
     },
   };

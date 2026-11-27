@@ -1,9 +1,12 @@
+import { Converter } from 'opencc-js/cn2t';
+
 import {
   beginDanmakuLoadNotice,
   clearDanmakuLoadNotice,
   setDanmakuLoadNoticeVisibility,
   waitForDanmakuPlayerSwitch,
 } from '@/features/play/lib/danmaku/load-notice';
+import { type DisplayTextGlobals, toDisplayText } from '@/lib/display-text';
 import { showTimedArtNotice } from '@/lib/player-utils';
 
 jest.mock('@/lib/player-utils', () => ({
@@ -177,5 +180,38 @@ describe('danmaku load notices', () => {
       '已装载819条弹幕',
       4000,
     );
+  });
+});
+
+describe('繁体 notice 的显示文本比较', () => {
+  const globals = globalThis as DisplayTextGlobals;
+  beforeEach(() => {
+    document.documentElement.lang = 'zh-TW';
+    globals.__ICETV_DISPLAY_CONVERTER__ = Converter({ from: 'cn', to: 'twp' });
+    (showTimedArtNotice as jest.Mock).mockImplementation((player, message) => {
+      const displayed = toDisplayText(message);
+      player.notice.show = displayed;
+      player.template.$noticeInner.textContent = displayed;
+    });
+  });
+  afterEach(() => {
+    document.documentElement.lang = '';
+    delete globals.__ICETV_DISPLAY_CONVERTER__;
+    (showTimedArtNotice as jest.Mock).mockReset();
+  });
+
+  it('隐藏自己的已转换提示，保留其他来源覆盖的提示', () => {
+    const player = createPlayer();
+    setDanmakuLoadNoticeVisibility(player, true);
+    beginDanmakuLoadNotice(player)({ status: 'loaded', count: 10 });
+    expect(player.notice.show).toBe('已裝載10條彈幕');
+    clearDanmakuLoadNotice(player);
+    expect(player.notice.show).toBe('');
+
+    beginDanmakuLoadNotice(player)({ status: 'empty' });
+    player.notice.show = '其他提示';
+    player.template.$noticeInner.textContent = '其他提示';
+    clearDanmakuLoadNotice(player);
+    expect(player.notice.show).toBe('其他提示');
   });
 });

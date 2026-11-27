@@ -73,6 +73,7 @@ import {
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import { toDisplayText } from '@/lib/display-text';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { writePlaybackRate } from '@/lib/local-preferences';
 import {
@@ -341,7 +342,6 @@ export async function initializeArtPlayer(
         reusedPlayer,
         reusedPlayer.switchUrl(playbackUrl),
       );
-      reusedPlayer.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
       // switch 内部会注册一次性的归零回调，这里紧随其后注册以立即纠正落点，
       // 避免等重试逻辑生效时出现可见的回跳。
       if (carriedResumeTarget !== null) {
@@ -1469,7 +1469,9 @@ export async function initializeArtPlayer(
       if (introTime > 0 && introSettledUrl !== episodeUrl) {
         if (skipCurrentTime < introTime) {
           player.currentTime = introTime;
-          player.notice.show = `已跳过片头 (${formatTime(introTime)})`;
+          player.notice.show = toDisplayText(
+            `已跳过片头 (${formatTime(introTime)})`,
+          );
           introSettledUrl = episodeUrl;
         } else if (
           loadingSessionRef.current.playbackStartNotified &&
@@ -1489,7 +1491,9 @@ export async function initializeArtPlayer(
       ) {
         outroSettledUrl = episodeUrl;
         handleEpisodeEnd('outro');
-        player.notice.show = `已跳过片尾 (${formatTime(skipConfigRef.current.outro_time)})`;
+        player.notice.show = toDisplayText(
+          `已跳过片尾 (${formatTime(skipConfigRef.current.outro_time)})`,
+        );
       }
     });
 
