@@ -185,6 +185,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
           workingIds={pagination.workingIds}
           onClose={() => setPanelOpen(false)}
           onRead={handleRead}
+          onUntrack={pagination.untrack}
           onReadAll={handleReadAll}
           onLoadMore={pagination.loadMore}
           onRetry={loadFirstPage}

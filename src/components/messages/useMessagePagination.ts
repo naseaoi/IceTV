@@ -2,18 +2,26 @@
 
 import { MutableRefObject, useCallback, useRef, useState } from 'react';
 
+import { setFavoriteTracking, setPlayRecordTracking } from '@/lib/db.client';
 import { triggerGlobalError } from '@/lib/db.client.internal';
-import { UserMessage, UserMessagePage } from '@/lib/message-types';
+import {
+  TrackingUpdateUserMessage,
+  UserMessage,
+  UserMessagePage,
+} from '@/lib/message-types';
 import {
   getMessagePage,
   readAllMessages,
   readMessage,
 } from '@/lib/messages.client';
+import { showToast } from '@/lib/toast';
 
 import {
   getMessagePreviewMode,
   getMessagePreviewPage,
 } from './message-preview';
+
+export const untrackWorkingId = (messageId: string) => `untrack:${messageId}`;
 
 const EMPTY_PAGE: UserMessagePage = {
   items: [],
@@ -36,6 +44,7 @@ export interface MessagePagination {
   loadFirstPage: () => Promise<void>;
   loadMore: () => Promise<void>;
   readOne: (message: UserMessage) => Promise<boolean>;
+  untrack: (message: TrackingUpdateUserMessage) => Promise<boolean>;
   readAll: () => Promise<void>;
   reset: () => void;
 }
@@ -134,6 +143,39 @@ export function useMessagePagination({
     [dropMessage, onAfterMutate, previewModeRef],
   );
 
+  const untrack = useCallback(
+    async (message: TrackingUpdateUserMessage) => {
+      if (previewModeRef.current) {
+        dropMessage(message.id);
+        return false;
+      }
+      const workingId = untrackWorkingId(message.id);
+      setWorkingIds((current) => new Set(current).add(workingId));
+      try {
+        // 收藏更新只在没有同键播放记录时产生，ID 前缀即可区分追更归属
+        if (message.id.startsWith('favorite-tracking:')) {
+          await setFavoriteTracking(message.source, message.videoId, false);
+        } else {
+          await setPlayRecordTracking(message.source, message.videoId, false);
+        }
+        dropMessage(message.id);
+        showToast('已取消追更', 'success');
+        await onAfterMutate();
+        return true;
+      } catch {
+        // 写入失败已由 db.client 统一提示
+        return false;
+      } finally {
+        setWorkingIds((current) => {
+          const next = new Set(current);
+          next.delete(workingId);
+          return next;
+        });
+      }
+    },
+    [dropMessage, onAfterMutate, previewModeRef],
+  );
+
   const readAll = useCallback(async () => {
     if (previewModeRef.current) {
       setPage(EMPTY_PAGE);
@@ -168,6 +210,7 @@ export function useMessagePagination({
     loadFirstPage,
     loadMore,
     readOne,
+    untrack,
     readAll,
     reset,
   };

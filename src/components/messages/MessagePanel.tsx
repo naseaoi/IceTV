@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  BellOff,
   Check,
   CheckCheck,
   ChevronLeft,
@@ -18,7 +19,14 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type MouseEvent,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
@@ -48,9 +56,15 @@ import {
 import type { TimeCapsuleUserMessage } from '@/features/time-capsule/types';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { usePresence } from '@/hooks/usePresence';
-import { UserMessage, UserMessagePage } from '@/lib/message-types';
+import {
+  TrackingUpdateUserMessage,
+  UserMessage,
+  UserMessagePage,
+} from '@/lib/message-types';
 import { formatRelativeTime } from '@/lib/relative-time';
 import { isUserNotice, userNoticeText } from '@/lib/user-notice';
+
+import { untrackWorkingId } from './useMessagePagination';
 
 interface MessagePanelProps {
   open: boolean;
@@ -61,6 +75,7 @@ interface MessagePanelProps {
   workingIds: Set<string>;
   onClose: () => void;
   onRead: (message: UserMessage) => Promise<void>;
+  onUntrack: (message: TrackingUpdateUserMessage) => Promise<unknown>;
   onReadAll: () => Promise<void>;
   onLoadMore: () => Promise<void>;
   onRetry: () => Promise<void>;
@@ -91,15 +106,17 @@ const MESSAGE_LEAD_CLASS = 'h-10 w-10 shrink-0';
 
 function ReadButton({
   working,
+  disabled,
   onClick,
 }: {
   working: boolean;
+  disabled: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type='button'
-      disabled={working}
+      disabled={working || disabled}
       aria-label='标记为已读'
       title='标记为已读'
       className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-brand-100/80 hover:text-brand-700 disabled:opacity-50 dark:hover:bg-brand-900/50 dark:hover:text-brand-300'
@@ -111,6 +128,112 @@ function ReadButton({
         <Check className='h-4 w-4' />
       )}
     </button>
+  );
+}
+
+// 收起时是 h-7 圆钮（7px + 14px 图标 + 7px），悬停、键盘聚焦或触屏首次轻触（data-expanded）时展开文字。
+// 宽度靠 grid 列 0fr → 1fr 过渡，不写死文字宽度；文字展开时晚一拍淡入，收起时先淡出。
+// 悬停展开限定在可悬停设备，触屏轻触后残留的 :hover 不会让按钮收不回去
+const ACTION_PILL_CLASS =
+  'group/action inline-flex h-7 shrink-0 items-center rounded-full px-[7px] text-xs font-medium transition-colors duration-200 disabled:cursor-default disabled:opacity-60';
+const ACTION_ICON_CLASS = 'h-3.5 w-3.5 shrink-0';
+
+function ActionPillLabel({ children }: { children: string }) {
+  return (
+    <span className='grid grid-cols-[0fr] transition-[grid-template-columns] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-focus-visible/action:grid-cols-[1fr] group-data-[expanded]/action:grid-cols-[1fr] motion-reduce:transition-none [@media(hover:hover)]:group-hover/action:grid-cols-[1fr]'>
+      <span className='min-w-0 overflow-hidden'>
+        <span className='block -translate-x-1 whitespace-nowrap pl-1 pr-0.5 opacity-0 transition-[opacity,transform] duration-150 ease-out group-focus-visible/action:translate-x-0 group-focus-visible/action:opacity-100 group-data-[expanded]/action:translate-x-0 group-data-[expanded]/action:opacity-100 group-data-[expanded]/action:delay-75 group-data-[expanded]/action:duration-200 motion-reduce:transition-none [@media(hover:hover)]:group-hover/action:translate-x-0 [@media(hover:hover)]:group-hover/action:opacity-100 [@media(hover:hover)]:group-hover/action:delay-75 [@media(hover:hover)]:group-hover/action:duration-200'>
+          {children}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+type TrackingAction = 'untrack' | 'watch';
+
+function TrackingActions({
+  message,
+  untracking,
+  onUntrack,
+  onNavigate,
+}: {
+  message: TrackingUpdateUserMessage;
+  untracking: boolean;
+  onUntrack: (message: TrackingUpdateUserMessage) => Promise<unknown>;
+  onNavigate: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const touchPointerRef = useRef(false);
+  const [expanded, setExpanded] = useState<TrackingAction | null>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const collapseOnOutside = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node))
+        setExpanded(null);
+    };
+    document.addEventListener('pointerdown', collapseOnOutside);
+    return () => document.removeEventListener('pointerdown', collapseOnOutside);
+  }, [expanded]);
+
+  // 触屏没有悬停预览：首次轻触只展开文字，再次轻触同一按钮才执行；鼠标与键盘直接执行
+  function confirmed(action: TrackingAction, event: MouseEvent) {
+    if (event.detail === 0 || !touchPointerRef.current) return true;
+    if (expanded === action) return true;
+    event.preventDefault();
+    setExpanded(action);
+    return false;
+  }
+
+  // 只为两枚圆钮占位，展开部分向左浮在正文之上，悬停时正文不重排；底色不透明以免透出正文
+  return (
+    <div className='relative h-7 w-[3.875rem] shrink-0'>
+      <div
+        ref={containerRef}
+        className='absolute right-0 top-0 flex w-max items-center gap-1.5'
+        onPointerDown={(event) => {
+          touchPointerRef.current =
+            event.pointerType === 'touch' || event.pointerType === 'pen';
+        }}
+      >
+        <button
+          type='button'
+          disabled={untracking}
+          data-expanded={expanded === 'untrack' || undefined}
+          aria-label={`取消追更《${message.title}》`}
+          className={`${ACTION_PILL_CLASS} bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 focus-visible:bg-red-50 focus-visible:text-red-600 data-[expanded]:bg-red-50 data-[expanded]:text-red-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-red-950 dark:hover:text-red-300 dark:focus-visible:bg-red-950 dark:focus-visible:text-red-300 dark:data-[expanded]:bg-red-950 dark:data-[expanded]:text-red-300`}
+          onClick={(event) => {
+            if (confirmed('untrack', event)) void onUntrack(message);
+          }}
+        >
+          {untracking ? (
+            <Spinner className={ACTION_ICON_CLASS} />
+          ) : (
+            <BellOff className={ACTION_ICON_CLASS} />
+          )}
+          <ActionPillLabel>取消追更</ActionPillLabel>
+        </button>
+        <Link
+          href={buildContinuePlayUrl({
+            source: message.source,
+            id: message.videoId,
+            title: message.title,
+            year: message.year,
+            query: message.searchTitle,
+          })}
+          onClick={(event) => {
+            if (confirmed('watch', event)) onNavigate();
+          }}
+          data-expanded={expanded === 'watch' || undefined}
+          aria-label={`去观看《${message.title}》`}
+          className={`${ACTION_PILL_CLASS} bg-brand-50 text-brand-700 hover:bg-brand-100 focus-visible:bg-brand-100 data-[expanded]:bg-brand-100 dark:bg-brand-950 dark:text-brand-300 dark:hover:bg-brand-900 dark:focus-visible:bg-brand-900 dark:data-[expanded]:bg-brand-900`}
+        >
+          <Play className={`${ACTION_ICON_CLASS} fill-current`} />
+          <ActionPillLabel>去观看</ActionPillLabel>
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -295,14 +418,18 @@ function MessageBody({ message }: { message: UserMessage }) {
 function MessageRow({
   message,
   working,
+  untracking,
   onRead,
+  onUntrack,
   onNavigate,
   onOpenReview,
   onOpenCapsule,
 }: {
   message: UserMessage;
   working: boolean;
+  untracking: boolean;
   onRead: (message: UserMessage) => Promise<void>;
+  onUntrack: (message: TrackingUpdateUserMessage) => Promise<unknown>;
   onNavigate: () => void;
   onOpenReview: (message: ReviewMessage) => void;
   onOpenCapsule: (message: TimeCapsuleUserMessage) => void;
@@ -377,23 +504,18 @@ function MessageRow({
       )}
 
       <div className='flex shrink-0 flex-col items-end justify-between gap-2 self-stretch'>
-        <ReadButton working={working} onClick={() => void onRead(message)} />
+        <ReadButton
+          working={working}
+          disabled={untracking}
+          onClick={() => void onRead(message)}
+        />
         {message.type === 'tracking-update' && (
-          <Link
-            href={buildContinuePlayUrl({
-              source: message.source,
-              id: message.videoId,
-              title: message.title,
-              year: message.year,
-              query: message.searchTitle,
-            })}
-            onClick={onNavigate}
-            aria-label={`去观看《${message.title}》`}
-            className='inline-flex h-7 items-center gap-1 rounded-full bg-brand-50 px-2.5 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100 dark:bg-brand-900/30 dark:text-brand-300 dark:hover:bg-brand-900/50'
-          >
-            <Play className='h-3 w-3 fill-current' />
-            去观看
-          </Link>
+          <TrackingActions
+            message={message}
+            untracking={untracking}
+            onUntrack={onUntrack}
+            onNavigate={onNavigate}
+          />
         )}
       </div>
     </div>
@@ -430,6 +552,7 @@ function MessageList({
   loadingMore,
   workingIds,
   onRead,
+  onUntrack,
   onLoadMore,
   onNavigate,
   onOpenReview,
@@ -440,6 +563,7 @@ function MessageList({
   loadingMore: boolean;
   workingIds: Set<string>;
   onRead: (message: UserMessage) => Promise<void>;
+  onUntrack: (message: TrackingUpdateUserMessage) => Promise<unknown>;
   onLoadMore: () => Promise<void>;
   onNavigate: () => void;
   onOpenReview: (message: ReviewMessage) => void;
@@ -463,7 +587,9 @@ function MessageList({
       key={message.id}
       message={message}
       working={readingAll || workingIds.has(message.id)}
+      untracking={workingIds.has(untrackWorkingId(message.id))}
       onRead={onRead}
+      onUntrack={onUntrack}
       onNavigate={onNavigate}
       onOpenReview={onOpenReview}
       onOpenCapsule={onOpenCapsule}
@@ -528,6 +654,7 @@ export default function MessagePanel({
   workingIds,
   onClose,
   onRead,
+  onUntrack,
   onReadAll,
   onLoadMore,
   onRetry,
@@ -731,6 +858,7 @@ export default function MessagePanel({
               loadingMore={loadingMore}
               workingIds={workingIds}
               onRead={onRead}
+              onUntrack={onUntrack}
               onLoadMore={onLoadMore}
               onNavigate={onClose}
               onOpenReview={openReview}
