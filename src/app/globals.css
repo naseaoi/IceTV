@@ -1318,6 +1318,162 @@ div:has(> [data-player-overlay]) .art-loading {
   font-size: 14px;
 }
 
+/* --- 弹幕设置与样式面板：与设置面板同款外观 ---
+   插件样式运行时追加到 head 末尾，同优先级会被覆盖，规则统一加 .art-video-player 前缀 */
+
+/* 面板贴住图标顶边，透明底部内边距跨过进度条：鼠标从图标移入不断悬停，内容也不压进度条 */
+.art-video-player .artplayer-plugin-danmuku .apd-config .apd-config-panel,
+.art-video-player .artplayer-plugin-danmuku .apd-style .apd-style-panel {
+  bottom: 100%;
+  padding: 10px 10px 38px;
+}
+
+/* 全屏图标更大，与进度条的距离相应拉开 */
+.art-video-player.art-fullscreen .artplayer-plugin-danmuku .apd-config-panel,
+.art-video-player.art-fullscreen .artplayer-plugin-danmuku .apd-style-panel,
+.art-video-player.art-fullscreen-web
+  .artplayer-plugin-danmuku
+  .apd-config-panel,
+.art-video-player.art-fullscreen-web
+  .artplayer-plugin-danmuku
+  .apd-style-panel {
+  padding-bottom: 43px;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-config .apd-config-panel {
+  width: 340px;
+}
+
+.art-video-player
+  .artplayer-plugin-danmuku
+  .apd-config
+  .apd-config-panel
+  .apd-config-panel-inner,
+.art-video-player
+  .artplayer-plugin-danmuku
+  .apd-style
+  .apd-style-panel
+  .apd-style-panel-inner {
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow:
+    0 12px 32px -8px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  padding: 12px 14px;
+  color: #e5e7eb;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* 分组标题（按类型屏蔽、模式、颜色）弱化，选项保持正文色 */
+.art-video-player .artplayer-plugin-danmuku .apd-config-mode,
+.art-video-player .artplayer-plugin-danmuku .apd-style-mode,
+.art-video-player .artplayer-plugin-danmuku .apd-style-color {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-modes {
+  margin-top: 8px;
+  color: #d1d5db;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-modes .apd-mode,
+.art-video-player .artplayer-plugin-danmuku .apd-config-other .apd-other {
+  transition: color 0.15s ease;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-modes .apd-mode:hover,
+.art-video-player .artplayer-plugin-danmuku .apd-config-other .apd-other:hover,
+.art-video-player[data-danmuku-mode='0'] .apd-style-mode [data-mode='0'],
+.art-video-player[data-danmuku-mode='1'] .apd-style-mode [data-mode='1'],
+.art-video-player[data-danmuku-mode='2'] .apd-style-mode [data-mode='2'] {
+  color: #8fc4e6;
+}
+
+.art-video-player[data-danmuku-mode='0'] .apd-style-mode [data-mode='0'] path,
+.art-video-player[data-danmuku-mode='1'] .apd-style-mode [data-mode='1'] path,
+.art-video-player[data-danmuku-mode='2'] .apd-style-mode [data-mode='2'] path,
+.art-video-player .artplayer-plugin-danmuku path[fill='#00AEEC'] {
+  fill: #5fa8d8;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-config-other {
+  color: #d1d5db;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-config-other .apd-other {
+  gap: 4px;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-config-mode,
+.art-video-player .artplayer-plugin-danmuku .apd-config-other,
+.art-video-player .artplayer-plugin-danmuku .apd-style-mode {
+  margin-bottom: 14px;
+}
+
+/* 滑块行：带刻度的行底部留出刻度高度，行距统一，末行不留外边距 */
+.art-video-player .artplayer-plugin-danmuku .apd-config-slider {
+  margin-bottom: 10px;
+}
+
+.art-video-player
+  .artplayer-plugin-danmuku
+  .apd-config-slider:has(.apd-slider-step) {
+  padding-bottom: 16px;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-config-slider:last-child {
+  margin-bottom: 0;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-config-slider .apd-value {
+  width: 40px;
+  color: #8fc4e6;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-slider .apd-slider-line {
+  height: 4px;
+  border-radius: 4px;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-slider .apd-slider-progress {
+  background-color: #5fa8d8;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-slider .apd-slider-dot {
+  box-sizing: border-box;
+  background-color: #fff;
+  border: 2px solid #5fa8d8;
+  box-shadow: 0 0 6px rgba(95, 168, 216, 0.5);
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-slider .apd-slider-steps {
+  bottom: -16px;
+  color: #9ca3af;
+  font-size: 11px;
+}
+
+.art-video-player
+  .artplayer-plugin-danmuku
+  .apd-slider
+  .apd-slider-steps
+  .apd-slider-step {
+  scale: 1;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-colors {
+  margin-top: 8px;
+}
+
+.art-video-player .artplayer-plugin-danmuku .apd-colors .apd-color {
+  border-radius: 4px;
+}
+
 /* 热力图对齐进度条轨道 */
 .art-control-heatmap {
   left: 12px !important;
@@ -1379,6 +1535,20 @@ div:has(> [data-player-overlay]) .art-loading {
   overflow: visible !important;
   height: auto !important;
   max-height: none !important;
+  /* 越过进度条（18px）再留 9px，与弹幕设置面板底边对齐 */
+  bottom: calc(var(--art-control-height) + 27px) !important;
+}
+
+/* 手机竖屏播放器矮于面板，播放器裁切溢出部分；限高后在面板内滚动，顶部留 8px */
+.art-video-player.art-mobile .art-settings {
+  max-height: calc(100% - var(--art-control-height) - 35px) !important;
+  overflow: hidden auto !important;
+}
+
+/* 面板悬浮打开后，齿轮的提示会叠在面板下方 */
+.art-video-player.art-setting-show .art-control-setting::before,
+.art-video-player.art-setting-show .art-control-setting::after {
+  display: none !important;
 }
 
 .art-setting-item {
@@ -1389,6 +1559,8 @@ div:has(> [data-player-overlay]) .art-loading {
   color: #e5e7eb !important;
   font-size: 13px !important;
   border-bottom: none !important;
+  /* 两端对齐没有最小间距，左侧名称与右侧提示较长时会贴在一起 */
+  gap: 16px !important;
 }
 
 .art-setting-item:last-child {

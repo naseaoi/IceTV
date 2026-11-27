@@ -121,12 +121,28 @@ describe('createHlsLoaderClass', () => {
 
 type Listener = (...args: unknown[]) => void;
 
-function createHoverControlsHarness({ mobile = false } = {}) {
+function createHoverControlsHarness({
+  mobile = false,
+  finePointer = false,
+} = {}) {
   const player = document.createElement('div');
   if (mobile) {
     player.classList.add('art-mobile');
   }
+  player.innerHTML =
+    '<div class="art-control-setting"><i class="art-icon"></i></div><div class="art-settings"></div>';
+  const gear = player.querySelector<HTMLElement>('.art-control-setting')!;
+  const gearIcon = gear.querySelector<HTMLElement>('.art-icon')!;
+  const panel = player.querySelector<HTMLElement>('.art-settings')!;
+  // 模拟 ArtPlayer 齿轮的内置点击切换
+  const builtinToggle = jest.fn(() => {
+    art.setting.show = !art.setting.show;
+  });
+  gear.addEventListener('click', builtinToggle);
   document.body.appendChild(player);
+  window.matchMedia = jest.fn((query: string) => ({
+    matches: finePointer && query === '(hover: hover) and (pointer: fine)',
+  })) as unknown as typeof window.matchMedia;
 
   const listeners = new Map<string, Set<Listener>>();
   let controlsVisible = false;
@@ -154,6 +170,8 @@ function createHoverControlsHarness({ mobile = false } = {}) {
         settingVisible = value;
         emit('setting', value);
       },
+      resize: jest.fn(),
+      render: jest.fn(),
     },
     template: { $player: player },
     on: jest.fn((event: string, listener: Listener) => {
@@ -174,6 +192,10 @@ function createHoverControlsHarness({ mobile = false } = {}) {
     art,
     emit,
     player,
+    gear,
+    gearIcon,
+    panel,
+    builtinToggle,
     get controlsVisible() {
       return controlsVisible;
     },
@@ -309,6 +331,8 @@ describe('player runtime hover controls', () => {
     jest.clearAllTimers();
     jest.useRealTimers();
     document.body.innerHTML = '';
+    // jsdom 不提供 matchMedia，harness 临时安装
+    delete (window as Partial<Window>).matchMedia;
   });
 
   it('shows controls when the mouse enters the player', () => {
@@ -401,6 +425,74 @@ describe('player runtime hover controls', () => {
     harness.player.dispatchEvent(new MouseEvent('mouseenter'));
 
     expect(harness.controlsVisible).toBe(false);
+  });
+
+  it('opens settings on gear hover, keeps them open across the panel, and closes back to the root menu after leaving', () => {
+    const harness = createHoverControlsHarness({ finePointer: true });
+    bindPlayerHoverControls(harness.art);
+
+    harness.gear.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(harness.settingVisible).toBe(true);
+    expect(harness.art.setting.resize).toHaveBeenCalled();
+
+    harness.gear.dispatchEvent(new MouseEvent('mouseleave'));
+    jest.advanceTimersByTime(200);
+    harness.panel.dispatchEvent(new MouseEvent('mouseenter'));
+    jest.advanceTimersByTime(1_000);
+    expect(harness.settingVisible).toBe(true);
+
+    harness.panel.dispatchEvent(new MouseEvent('mouseleave'));
+    jest.advanceTimersByTime(249);
+    expect(harness.settingVisible).toBe(true);
+    jest.advanceTimersByTime(1);
+    expect(harness.settingVisible).toBe(false);
+    expect(harness.art.setting.render).toHaveBeenCalled();
+  });
+
+  it('keeps hover-opened settings open when the gear is clicked', () => {
+    const harness = createHoverControlsHarness({ finePointer: true });
+    bindPlayerHoverControls(harness.art);
+
+    harness.gear.dispatchEvent(new MouseEvent('mouseenter'));
+    harness.gearIcon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(harness.builtinToggle).not.toHaveBeenCalled();
+    expect(harness.settingVisible).toBe(true);
+  });
+
+  it('keeps the built-in click toggle without a fine hover pointer', () => {
+    const harness = createHoverControlsHarness();
+    bindPlayerHoverControls(harness.art);
+
+    harness.gear.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(harness.settingVisible).toBe(false);
+
+    harness.gearIcon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(harness.builtinToggle).toHaveBeenCalledTimes(1);
+    expect(harness.settingVisible).toBe(true);
+  });
+
+  it('does not idle-hide controls while settings are open', () => {
+    const harness = createHoverControlsHarness();
+    bindPlayerHoverControls(harness.art);
+
+    harness.player.dispatchEvent(new MouseEvent('mouseenter'));
+    harness.setSettingVisible(true);
+    jest.advanceTimersByTime(2_000);
+
+    expect(harness.controlsVisible).toBe(true);
+    expect(harness.settingVisible).toBe(true);
+  });
+
+  it('removes setting hover listeners during cleanup', () => {
+    const harness = createHoverControlsHarness({ finePointer: true });
+    const cleanup = bindPlayerHoverControls(harness.art);
+
+    cleanup();
+    harness.gear.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(harness.settingVisible).toBe(false);
+    harness.gearIcon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(harness.builtinToggle).toHaveBeenCalledTimes(1);
   });
 });
 
