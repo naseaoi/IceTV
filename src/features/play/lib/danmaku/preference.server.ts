@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cookies } from 'next/headers';
+import { unstable_rethrow } from 'next/navigation';
 
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { db } from '@/lib/db';
@@ -12,6 +13,7 @@ export async function getInitialDanmakuEnabled(): Promise<boolean | null> {
     if (session.status !== 'authenticated') return null;
     return db.getDanmakuEnabledPreference(session.username);
   } catch (error) {
+    unstable_rethrow(error);
     console.error('读取账号弹幕设置失败:', error);
     return null;
   }

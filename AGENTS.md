@@ -73,6 +73,7 @@
 
 ## 错误处理
 
+- 包住 `cookies()` / `headers()` 等 Next 动态 API（含间接调用）的 catch 必须先调用 `unstable_rethrow(error)`（`next/navigation`），再处理业务异常。
 - 客户端严重错误走 `src/lib/client-error-reporting.ts`，根布局已挂 `ClientErrorReporter`。
 - `error.tsx`、`global-error.tsx` 生产只展示通用提示，开发展示类型、信息、编号、堆栈。
 - 业务可恢复错误返回明确文案，不要抛给全局错误边界。

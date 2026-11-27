@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cookies } from 'next/headers';
+import { unstable_rethrow } from 'next/navigation';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { InvalidFavoriteLibraryQuery } from '@/features/favorites/lib/library-storage';
@@ -226,6 +227,7 @@ export async function getInitialProfileView(
     if (!profile) return null;
     return await db.getUserProfileView(profile.username, session.username);
   } catch (error) {
+    unstable_rethrow(error);
     console.error('预取个人主页资料失败:', error);
     return null;
   }
