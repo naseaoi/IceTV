@@ -161,7 +161,7 @@ export function classifyProxyFailure(
     });
   }
 
-  if (isTimeoutMessage(message)) {
+  if (getUpstreamFailureStatus(error) === 504) {
     return createProxyFailureDiagnostic({
       ...defaults,
       stage: defaults.stage === 'proxy' ? 'proxy' : 'upstream',
@@ -215,9 +215,13 @@ export function classifyProxyFailure(
   });
 }
 
-// 回源抛出的超时来自 url-guard 的计时中止或代理连接超时，二者都只能从文案识别
+// fetch 可能只暴露 "fetch failed"，超时类型须同时读取底层 cause.code。
 export function getUpstreamFailureStatus(error: unknown): 502 | 504 {
-  return isTimeoutMessage(getErrorMessage(error)) ? 504 : 502;
+  return isTimeoutMessage(
+    `${getErrorMessage(error)} ${getUpstreamErrorType(error) || ''}`,
+  )
+    ? 504
+    : 502;
 }
 
 export function toProxyFailurePayload(diagnostic: ProxyFailureDiagnostic) {
@@ -380,7 +384,7 @@ function extractStatusFromMessage(message: string): number | undefined {
 }
 
 function isTimeoutMessage(message: string): boolean {
-  return /timeout|timed out|超时/i.test(message);
+  return /timeout|timed[\s_]?out|超时/i.test(message);
 }
 
 export function toSourceProxyFailureReason(

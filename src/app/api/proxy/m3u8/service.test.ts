@@ -599,6 +599,39 @@ describe('relay host failures', () => {
     (recordSourceProxyFailure as jest.Mock).mockClear();
   });
 
+  it.each([
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+  ])(
+    'returns 504 for wrapped %s without cooling the host or leaking error details',
+    async (code) => {
+      const url = `https://timeout-${code.toLowerCase()}.example/a.m3u8`;
+      mockFetch.mockRejectedValueOnce(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: { code, message: 'private upstream context' },
+        }),
+      );
+      const response = await GET(request(url));
+      expect(response.status).toBe(504);
+      expect(response.headers.get('X-IceTV-Relay-Failure')).toBeNull();
+      expect(await response.json()).toEqual({
+        error: 'Upstream request timed out',
+        code: 'UPSTREAM_TIMEOUT',
+        reason: 'upstream-timeout',
+        stage: 'upstream',
+        source: SOURCE,
+      });
+      expect(recordSourceProxyFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ source: SOURCE, reason: 'upstream-timeout' }),
+      );
+      expect(await readRelayHostFailure(url, false)).toBeNull();
+      mockFetch.mockResolvedValueOnce(new Response(mediaPlaylist('ok.ts')));
+      expect((await GET(request(url))).status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it.each([444, 'socket', 'tls', 'empty'])(
     'remembers %s across URL and users, returning explicit host reason without refetching',
     async (failure) => {

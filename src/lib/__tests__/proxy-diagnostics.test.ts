@@ -2,7 +2,10 @@ import {
   type ProxyFailureInput,
   classifyProxyFailure,
   createProxyFailureDiagnostic,
+  getUpstreamFailureStatus,
+  ProxyRouteError,
   sanitizeProxyLogUrl,
+  toProxyFailurePayload,
   toSourceProxyFailureReason,
 } from '@/lib/proxy-diagnostics';
 
@@ -16,6 +19,93 @@ describe('proxy diagnostics', () => {
       'https://example.com/a/b.m3u8?token=%3Credacted%3E&plain=%3Credacted%3E',
     );
   });
+
+  it.each([
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+    'ETIMEDOUT',
+    'ESOCKETTIMEDOUT',
+  ])('recognizes wrapped and direct timeout code %s', (code) => {
+    for (const detail of [{ cause: { code } }, { code }]) {
+      const error = Object.assign(new TypeError('fetch failed'), detail);
+      const diagnostic = classifyProxyFailure(error, {
+        route: 'm3u8',
+        source: 'demo',
+        stage: 'upstream',
+        reason: 'upstream-fetch',
+        status: 502,
+      });
+      expect(diagnostic).toMatchObject({
+        status: 504,
+        reason: 'upstream-timeout',
+        upstreamErrorType: `TypeError:${code}`,
+      });
+      expect(getUpstreamFailureStatus(error)).toBe(504);
+      expect(toSourceProxyFailureReason(diagnostic)).toBe('timeout');
+      expect(toProxyFailurePayload(diagnostic).error).toBe(
+        'Upstream request timed out',
+      );
+    }
+  });
+
+  it('recognizes TimeoutError even without a timeout message', () => {
+    const error = Object.assign(new Error('operation expired'), {
+      name: 'TimeoutError',
+    });
+    expect(getUpstreamFailureStatus(error)).toBe(504);
+    expect(
+      classifyProxyFailure(error, {
+        route: 'm3u8',
+        stage: 'proxy',
+        reason: 'proxy-response',
+      }),
+    ).toMatchObject({ status: 504, reason: 'proxy-timeout', stage: 'proxy' });
+  });
+
+  it.each(['UND_ERR_SOCKET', 'ECONNRESET', 'ENOTFOUND', 'CERT_HAS_EXPIRED'])(
+    'keeps non-timeout network failure %s as 502',
+    (code) => {
+      const error = Object.assign(new TypeError('fetch failed'), {
+        cause: { code },
+      });
+      const diagnostic = classifyProxyFailure(error, {
+        route: 'm3u8',
+        source: 'demo',
+        stage: 'upstream',
+        reason: 'upstream-fetch',
+        status: 502,
+      });
+      expect(diagnostic).toMatchObject({
+        status: 502,
+        reason: 'upstream-fetch',
+      });
+      expect(getUpstreamFailureStatus(error)).toBe(502);
+      expect(toSourceProxyFailureReason(diagnostic)).toBe('connection');
+    },
+  );
+
+  it.each([403, 404, 500, 503])(
+    'preserves explicit upstream HTTP %s',
+    (status) => {
+      const error = new ProxyRouteError({
+        route: 'm3u8',
+        stage: 'upstream',
+        reason: 'upstream-http',
+        upstreamStatus: status,
+        error: Object.assign(new Error('private context'), {
+          code: 'ETIMEDOUT',
+        }),
+      });
+      expect(
+        classifyProxyFailure(error, {
+          route: 'm3u8',
+          stage: 'upstream',
+          reason: 'upstream-fetch',
+        }),
+      ).toMatchObject({ status, reason: 'upstream-http' });
+    },
+  );
 
   it('classifies proxy status failures', () => {
     const diagnostic = classifyProxyFailure(new Error('代理请求失败: 502'), {
