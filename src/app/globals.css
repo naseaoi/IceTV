@@ -1209,8 +1209,9 @@ div[data-media-provider] video {
   height: 32px;
 }
 
-/* 站内状态遮罩（PlayerStateOverlay）与播放器同级，显示期间隐藏内置缓冲指示，避免叠出两个转圈 */
-div:has(> [data-player-overlay]) .art-loading {
+/* 站内状态遮罩（PlayerStateOverlay）显示期间隐藏内置缓冲指示，避免叠出两个转圈；
+   以播放器外壳为锚点，遮罩外包裹层的变化不影响匹配 */
+[data-player-video]:has([data-player-overlay]) .art-loading {
   visibility: hidden !important;
 }
 
