@@ -1,5 +1,6 @@
 import { resolveDanmakuTop } from '@/features/play/lib/danmaku/lane';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
+import { toDisplayText } from '@/lib/display-text';
 import { USER_DANMAKU_MAX_LENGTH } from '@/lib/user-danmaku';
 
 export interface DanmakuPluginOptions {
@@ -80,7 +81,33 @@ export async function createDanmakuPlugin({
 }: DanmakuPluginOptions) {
   const { default: artplayerPluginDanmuku } = await loadDanmakuPluginModule();
 
+  // seek 后会复用同一队列项；保留首次原文，避免二次词组转换。
+  const originalTexts = new WeakMap<object, string>();
   return artplayerPluginDanmuku({
+    transformText: toDisplayText,
+    beforeVisible(danmu) {
+      const original = originalTexts.get(danmu) ?? danmu.text;
+      originalTexts.set(danmu, original);
+      danmu.text = toDisplayText(original);
+      return true;
+    },
+    MARGIN: {
+      steps: [
+        { name: '1/4', value: [10, '75%'] },
+        { name: toDisplayText('半屏'), value: [10, '50%'] },
+        { name: '3/4', value: [10, '25%'] },
+        { name: toDisplayText('满屏'), value: [10, 10] },
+      ],
+    },
+    SPEED: {
+      steps: [
+        { name: toDisplayText('极慢'), value: 10 },
+        { name: toDisplayText('较慢'), value: 7.5, hide: true },
+        { name: toDisplayText('适中'), value: 5 },
+        { name: toDisplayText('较快'), value: 2.5, hide: true },
+        { name: toDisplayText('极快'), value: 1 },
+      ],
+    },
     danmuku: loadItems,
     speed: 7.5,
     margin: [10, '25%'],

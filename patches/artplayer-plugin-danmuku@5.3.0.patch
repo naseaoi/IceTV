@@ -1,5 +1,5 @@
 diff --git a/dist/artplayer-plugin-danmuku.mjs b/dist/artplayer-plugin-danmuku.mjs
-index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c2d574c9b 100644
+index fac426cd821bbde03114f0bbc509d68ea403d7a4..287bbde4672709de9b6f4a6da333aafdbfef917c 100644
 --- a/dist/artplayer-plugin-danmuku.mjs
 +++ b/dist/artplayer-plugin-danmuku.mjs
 @@ -114,6 +114,8 @@ class Danmuku {
@@ -11,15 +11,16 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
      this.$refs = [];
      this.isStop = false;
      this.isHide = false;
-@@ -215,6 +217,7 @@ class Danmuku {
+@@ -215,6 +217,8 @@ class Danmuku {
        filter: "function",
        beforeEmit: "function",
        beforeVisible: "function",
++      transformText: "?function",
 +      getDanmuTop: "?function",
        visible: "boolean",
        emitter: "boolean",
        maxLength: "number",
-@@ -304,11 +307,34 @@ class Danmuku {
+@@ -304,11 +308,34 @@ class Danmuku {
      const { currentTime } = this.art;
      const result = [];
      this.filter("ready", (danmu) => result.push(danmu));
@@ -57,7 +58,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
      return result;
    }
    // 可见的弹幕的数据，用于计算下一个弹幕的top值
-@@ -361,16 +387,25 @@ class Danmuku {
+@@ -361,16 +388,25 @@ class Danmuku {
        if (danmuku === void 0) {
          this.reset();
          this.queue = [];
@@ -83,7 +84,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
        this.art.emit("artplayerPluginDanmuku:error", error);
        throw error;
      }
-@@ -428,8 +463,24 @@ class Danmuku {
+@@ -428,8 +464,24 @@ class Danmuku {
        $lastStartTime: 0
        // 弹幕上次开始时间
      };
@@ -109,7 +110,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
      return this;
    }
    // 动态配置
-@@ -467,6 +518,9 @@ class Danmuku {
+@@ -467,6 +519,9 @@ class Danmuku {
    }
    // 复杂运算交给 Web Worker 处理
    postMessage(message = {}) {
@@ -119,7 +120,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
      return new Promise((resolve) => {
        message.id = Date.now();
        this.worker.postMessage(message);
-@@ -669,7 +723,21 @@ class Danmuku {
+@@ -669,7 +724,21 @@ class Danmuku {
      return this;
    }
    reset() {
@@ -142,7 +143,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
      this.art.emit("artplayerPluginDanmuku:reset");
      return this;
    }
-@@ -741,11 +809,18 @@ function heatmap(art, danmuku, option) {
+@@ -741,11 +810,18 @@ function heatmap(art, danmuku, option) {
      mounted($heatmap) {
        let $start = null;
        let $stop = null;
@@ -162,7 +163,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
            return;
          const svg = {
            w: $heatmap.offsetWidth,
-@@ -771,11 +846,16 @@ function heatmap(art, danmuku, option) {
+@@ -771,11 +847,16 @@ function heatmap(art, danmuku, option) {
            points = [...arg];
          } else {
            const gap = art.duration / svg.w;
@@ -184,7 +185,7 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
            }
          }
          if (points.length === 0)
-@@ -836,20 +916,14 @@ function heatmap(art, danmuku, option) {
+@@ -836,20 +917,14 @@ function heatmap(art, danmuku, option) {
                  `;
          $start = query("#heatmap-start", $heatmap);
          $stop = query("#heatmap-stop", $heatmap);
@@ -209,11 +210,180 @@ index fac426cd821bbde03114f0bbc509d68ea403d7a4..27615eaf59dd69b3d25c9b43ac5b7c3c
        });
        art.on("ready", () => update());
        art.on("resize", () => update());
+@@ -953,6 +1028,9 @@ class Setting {
+   get outside() {
+     return this.template.$mount !== this.template.$controlsCenter;
+   }
++  text(value) {
++    return this.option.transformText ? this.option.transformText(value) : value;
++  }
+   get TEMPLATE() {
+     const { option } = this;
+     return `
+@@ -964,51 +1042,51 @@ class Setting {
+                 <div class="apd-config-panel">
+                     <div class="apd-config-panel-inner">
+                         <div class="apd-config-mode">
+-                            按类型屏蔽
++                            ${this.text("按类型屏蔽")}
+                             <div class="apd-modes">
+                                 <div data-mode="0" class="apd-mode">
+                                     ${$mode_0_off}${$mode_0_on}
+-                                    <div>滚动</div>
++                                    <div>${this.text("滚动")}</div>
+                                 </div>
+                                 <div data-mode="1" class="apd-mode">
+                                     ${$mode_1_off}${$mode_1_on}
+-                                    <div>顶部</div>
++                                    <div>${this.text("顶部")}</div>
+                                 </div>
+                                 <div data-mode="2" class="apd-mode">
+                                     ${$mode_2_off}${$mode_2_on}
+-                                    <div>底部</div>
++                                    <div>${this.text("底部")}</div>
+                                 </div>
+                             </div>
+                         </div>
+                         <div class="apd-config-other">
+                             <div class="apd-other apd-anti-overlap">
+                                 ${$check_on}${$check_off}
+-                                防止弹幕重叠
++                                ${this.text("防止弹幕重叠")}
+                             </div>
+                             <div class="apd-other apd-sync-video">
+                                 ${$check_on}${$check_off}
+-                                同步视频速度
++                                ${this.text("同步视频速度")}
+                             </div>
+                         </div>
+                         <div class="apd-config-slider apd-config-opacity">
+-                            不透明度
++                            ${this.text("不透明度")}
+                             <div class="apd-slider"></div>
+-                            <div class="apd-value">未知</div>
++                            <div class="apd-value">${this.text("未知")}</div>
+                         </div>
+                         <div class="apd-config-slider apd-config-margin">
+-                            显示区域
++                            ${this.text("显示区域")}
+                             <div class="apd-slider"></div>
+-                            <div class="apd-value">未知</div>
++                            <div class="apd-value">${this.text("未知")}</div>
+                         </div>
+                         <div class="apd-config-slider apd-config-fontSize">
+-                            弹幕字号
++                            ${this.text("弹幕字号")}
+                             <div class="apd-slider"></div>
+-                            <div class="apd-value">未知</div>
++                            <div class="apd-value">${this.text("未知")}</div>
+                         </div>
+                         <div class="apd-config-slider apd-config-speed">
+-                            弹幕速度
++                            ${this.text("弹幕速度")}
+                             <div class="apd-slider"></div>
+-                            <div class="apd-value">未知</div>
++                            <div class="apd-value">${this.text("未知")}</div>
+                         </div>
+                     </div>
+                 </div>
+@@ -1019,24 +1097,24 @@ class Setting {
+                     <div class="apd-style-panel">
+                         <div class="apd-style-panel-inner">
+                             <div class="apd-style-mode">
+-                                模式
++                                ${this.text("模式")}
+                                 <div class="apd-modes">
+                                     <div data-mode="0" class="apd-mode">
+                                         ${$mode_0_on}
+-                                        <div>滚动</div>
++                                        <div>${this.text("滚动")}</div>
+                                     </div>
+                                     <div data-mode="1" class="apd-mode">
+                                         ${$mode_1_on}
+-                                        <div>顶部</div>
++                                        <div>${this.text("顶部")}</div>
+                                     </div>
+                                     <div data-mode="2" class="apd-mode">
+                                         ${$mode_2_on}
+-                                        <div>底部</div>
++                                        <div>${this.text("底部")}</div>
+                                     </div>
+                                 </div>
+                             </div>
+                             <div class="apd-style-color">
+-                                颜色
++                                ${this.text("颜色")}
+                                 <div class="apd-colors">
+                                     ${this.COLOR.map((color) => `<div data-color="${color}" class="apd-color" style="background-color: ${color}"></div>`).join("")}
+                                 </div>
+@@ -1044,8 +1122,8 @@ class Setting {
+                         </div>
+                     </div>
+                 </div>
+-                <input class="apd-input" placeholder="发个友善的弹幕见证当下" autocomplete="off" maxLength="${option.maxLength}" />
+-                <div class="apd-send">发送</div>
++                <input class="apd-input" placeholder="${this.text("发个友善的弹幕见证当下")}" autocomplete="off" maxLength="${option.maxLength}" />
++                <div class="apd-send">${this.text("发送")}</div>
+             </div>
+         `;
+   }
+@@ -1187,10 +1265,10 @@ class Setting {
+     this.template.$send = this.query(".apd-send");
+     const { $toggle } = this.template;
+     this.art.on("artplayerPluginDanmuku:show", () => {
+-      tooltip($toggle, "关闭弹幕");
++      tooltip($toggle, this.text("关闭弹幕"));
+     });
+     this.art.on("artplayerPluginDanmuku:hide", () => {
+-      tooltip($toggle, "打开弹幕");
++      tooltip($toggle, this.text("打开弹幕"));
+     });
+   }
+   createEvents() {
+@@ -1467,7 +1545,7 @@ class Setting {
+     const { $send } = this.template;
+     clearTimeout(this.timer);
+     this.isLock = false;
+-    $send.textContent = "发送";
++    $send.textContent = this.text("发送");
+     removeClass($send, "apd-lock");
+   }
+   resize() {
+@@ -1505,7 +1583,7 @@ class Setting {
+     const colors = $colors.children;
+     const $color = Array.from(colors).find((item) => item.dataset.color === this.option.color.toUpperCase());
+     $color && inverseClass($color, "apd-active");
+-    tooltip($toggle, this.option.visible ? "关闭弹幕" : "打开弹幕");
++    tooltip($toggle, this.text(this.option.visible ? "关闭弹幕" : "打开弹幕"));
+     this.resize();
+   }
+   mount(target) {
 diff --git a/types/artplayer-plugin-danmuku.d.ts b/types/artplayer-plugin-danmuku.d.ts
-index 00373f44447474aa2356fd45c92410f1446a43ed..57d4cd4560f8bb30be6e08d8b5f7d452ba38cd1f 100644
+index 00373f44447474aa2356fd45c92410f1446a43ed..883bcbfcdee3f53f8bbfca5de42293f67a2566a9 100644
 --- a/types/artplayer-plugin-danmuku.d.ts
 +++ b/types/artplayer-plugin-danmuku.d.ts
-@@ -148,6 +148,29 @@ export interface Option {
+@@ -12,8 +12,9 @@ export interface Slider {
+   max?: number
+   steps?: {
+     name?: string
+-    value?: number | string
++    value?: number | string | (number | string)[]
+     show?: boolean
++    hide?: boolean
+   }[]
+ }
+ 
+@@ -50,6 +51,9 @@ export interface Danmu {
+ }
+ 
+ export interface Option {
++  /** Transform fixed UI text only; input and emitted data stay unchanged. */
++  transformText?: (text: string) => string
++
+   /**
+    * 弹幕数据: 函数，数组，Promise，URL
+    */
+@@ -148,6 +152,29 @@ export interface Option {
     */
    beforeVisible?: (danmu: Danmu) => boolean | Promise<boolean>
  

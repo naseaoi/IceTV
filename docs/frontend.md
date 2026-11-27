@@ -47,6 +47,22 @@
 - 切换后换成另一批内容、且要从外部数据源加载的列表，豆瓣分类筛选立即显示骨架，新的搜索关键词立即显示搜索动画，均替换旧结果并回到顶部：旧内容与刚选的条件对不上，回源又常需数秒，变暗的旧结果会被当成筛选没生效。只在本地筛选已加载结果的控件（如搜索页的结果筛选）即时生效，不经过加载态。
 - 分类页 `/douban` 的查询、已加载页与加载状态是 `useDoubanFeed` reducer 里的一个整体，请求、续页与重试都走 `fetchFeedPage()`（`src/features/douban/lib/feed-query.ts`）；结果按查询键记在 `feed-store.ts`（标签页内 1 小时、最多 20 条），返回分类时恢复上次查询与已加载页。首页只经 `seedDefaultFeedPreview()` 写入默认查询的预览，不覆盖分类自己加载过的数据，也不改最近的筛选。该存储只在客户端提交后写入，硬加载时服务端与客户端都为空，初始化时读取不会造成水合不一致；不要在服务端或渲染期间写入。
 
+## 简繁显示
+
+- 文案与业务状态保持原始文字，转换只发生在显示边界。`tsconfig.json` 的 `jsxImportSource` 指向 `src/lib/display-text/`，其 JSX / JSX DEV 与根 `createElement` 入口透传 React 的 key、ref、Fragment 等行为（SWC 对 spread 后的 key 使用根入口）；其他自定义组件 props 保持原值，尤其是可能写回服务端的片名、评价与表单值。
+- 宿主元素转换字符串 children（含嵌套数组）与显示属性白名单；Fragment 转字符串 children。`next/link` 与 `next/image` 在 Next 内部创建宿主节点，运行时按默认导出的组件身份特判：Link 只转字符串 children、title、aria-label，Image 只转 alt。组件名相同或封装了 Link / Image 的自定义组件不属于该特判。
+- `value` / `defaultValue`、URL、data 属性、原始 HTML、script / style / textarea 子节点保持原值。第三方组件自行生成的界面、命令式 DOM / canvas / 播放器文案走独立显示边界；同步入口为 `@/lib/display-text` 的 `toDisplayText(text)`。新增命令式显示文字时在最终写入处调用它，避免转换业务状态。
+- ArtPlayer 的 settings `name` 是定位键，保持原文；初建与 `setting.update()` 都只转换 html / tooltip。内置语言从 zh-cn 字典值生成并注册当前变体，不能只切 lang，否则回落英文。
+- 弹幕正文只在插件 `beforeVisible` 的队列副本上转换，并按队列项保留原文以应对 seek 后再次显示；缓存、加载结果与发送参数保持原文。插件面板经 pnpm 补丁提供的 `transformText` 转换固定文案，升级插件时须重验初建、开关与发送冷却结束路径。
+- 语言下拉的选项自称通过 `Select.renderOptionLabel` 返回从 `react` 导入的 `createElement` 创建的原文节点，避免 JSX 运行时改写语言名称。
+- 偏好由 `@/lib/display-language` 统一维护，cookie `display_language` 接受 `auto`、`zh-CN`、`zh-TW`、`zh-HK`，缺失或非法值按 auto。auto 按 Accept-Language 中最高有效权重的语言决定：台湾与 Hant 用台湾用词，香港与澳门用香港字形，其余简体。设置通过 `setDisplayLanguagePreference()` 写 cookie，清理 Serwist 的 pages / pages-rsc / pages-rsc-prefetch / next-data 缓存后整页刷新，清理失败仍刷新。页面存续期间以服务端生成的 `<html lang>` 为准；SiteProvider 在 pageshow（含 BFCache）与页面重新可见时比较加载时的原始 cookie，变化则整页刷新，仅在可见时执行以保留后台播放。
+- 服务端的同步转换钩子由 instrumentation 注册，`src/lib/display-text/server.ts` 单独封装 Next 内部 `workUnitAsyncStorage`；请求 cookie 与语言头逐请求读取，转换结果缓存只按文字和变体复用。无请求上下文与预渲染按简体。根布局 metadata 同样经显示入口转换。
+- **升级 Next 时先跑实际探针，再更新 `server.test.ts` 中的已验证版本**：在 instrumentation 注册的钩子内读取 ALS，分别从服务端组件和客户端组件 SSR 调用，确认两者都取得同一请求的 cookie；在 webpack 生产和 Turbopack 开发下同时验证 JSX 包装器、Link / Image 的 RSC client reference 身份比较以及浏览器水合。仅 mock ALS 的单测无法证明框架内部使用的是同一实例。
+- 简转繁显示在服务端与资产生成脚本读取 opencc-js 词典，等价性测试以它为对照，两端共用紧凑 Map 转换器。`build.ts` 统一从 preset 打包分组，CJS 生成脚本用现有 TypeScript 转译器加载它；服务端首次需要繁体时构建，两个变体共享一份 cn→t Map，各自保留地区转换器和 LRU，源码目录不保存词典 JSON。须保留 preset 的规范化、分词边界、逐组最长匹配、组内词典优先级及未匹配表意描述序列语义；仅串接 Locale.from / to 会绕过 preset configs，产生不同结果。
+- `pnpm gen:display-converter` 生成台湾 / 香港各自的内容指纹资产，成功写入后清理 `public/display-text/` 中其余 `opencc-*.js`；dev / build 已串联生成。`asset.generated.ts` 随源码入库供 CI 直接检查，资产目录忽略并在部署时包含构建产物；生成不包含时间戳，同版本词典与生成逻辑重复执行保持不变。简转繁显示词典不进入客户端应用分块，简体文档不加载它。繁体文档经根布局的 `beforeInteractive` 脚本初始化转换器后再水合；加载失败降级原文，允许 React 回退水合。
+- global-error 用同步 `getDisplayLanguage()` 保持当前请求 / 文档语言，并独立输出普通同步词典 script，根布局失败时也能先加载词典再水合。全局错误页的 html lang 须与本次 JSX 使用的语言一致，否则下一次渲染会切回简体。
+- `__ICETV_GET_DISPLAY_CONVERTER__` / `__ICETV_GET_DISPLAY_LANGUAGE__` 是 instrumentation 注册的服务端钩子，`__ICETV_DISPLAY_CONVERTER__` 是独立浏览器脚本的桥接变量；业务代码使用显示入口。长文本仍转换，LRU 只保留有界短文本。
+
 ## 动效
 
 - 缓动统一用 `globals.css` 的 `--motion-spring`（明显回弹）、`--motion-spring-soft`（轻微回弹）、`--motion-ease-out` 与 `--motion-ease-in`，不在组件里另写贝塞尔曲线。弹簧曲线由 `linear()` 采样，不支持时退回近似的 `cubic-bezier`。

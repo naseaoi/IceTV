@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { LinuxDoIcon } from '@/components/LinuxDoIcon';
 import Spinner from '@/components/Spinner';
+import { toDisplayText } from '@/lib/display-text';
 import { getLinuxDoErrorMessage } from '@/lib/linuxdo-errors';
 import { showToast } from '@/lib/toast';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
@@ -130,7 +131,7 @@ export function LinuxDoBindingTile() {
         ) : (
           <Check
             className='h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400'
-            aria-label='已绑定'
+            aria-label={toDisplayText('已绑定')}
           />
         )}
       </div>

@@ -53,6 +53,7 @@ import {
 } from '@/features/play/lib/vodPlaybackIntent';
 import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { deleteSkipConfig } from '@/lib/db.client';
+import { toDisplayText } from '@/lib/display-text';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { readAutoSwitchSource } from '@/lib/local-preferences';
@@ -299,7 +300,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     const player = artPlayerRef.current;
     if (!notice || !player) return;
     try {
-      player.notice.show = notice;
+      player.notice.show = toDisplayText(notice);
     } catch (err) {
       console.warn('显示换源拒绝提示失败:', err);
     }

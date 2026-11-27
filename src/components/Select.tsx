@@ -2,6 +2,7 @@
 
 import { Check, ChevronDown } from 'lucide-react';
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -27,6 +28,7 @@ interface SelectProps {
   value: string;
   onChange: (value: string) => void;
   options: SelectOption[];
+  renderOptionLabel?: (option: SelectOption) => ReactNode;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -65,6 +67,7 @@ export default function Select({
   value,
   onChange,
   options,
+  renderOptionLabel,
   placeholder = '请选择',
   className = '',
   disabled = false,
@@ -250,7 +253,10 @@ export default function Select({
         <span
           className={selectedOption ? '' : 'text-gray-400 dark:text-gray-500'}
         >
-          {selectedOption?.label || placeholder}
+          {selectedOption
+            ? (renderOptionLabel?.(selectedOption) ??
+              (selectedOption.label || placeholder))
+            : placeholder}
         </span>
         {variant === 'pill' && (
           <ChevronDown
@@ -304,7 +310,9 @@ export default function Select({
                   }`}
                 >
                   <span className='flex min-w-0 items-center gap-2'>
-                    <span className='truncate'>{opt.label}</span>
+                    <span className='truncate'>
+                      {renderOptionLabel?.(opt) ?? opt.label}
+                    </span>
                     {opt.disabledReason && (
                       <span className='shrink-0 text-xs text-rose-500 dark:text-rose-400'>
                         {opt.disabledReason}

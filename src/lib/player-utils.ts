@@ -1,4 +1,8 @@
+import zhCn from 'artplayer/src/i18n/zh-cn';
+
 import { SPINNER_MARKUP } from '@/components/Spinner';
+import { getDocumentDisplayLanguage } from '@/lib/display-language';
+import { toDisplayText } from '@/lib/display-text';
 import { resolveHlsBufferDefaults } from '@/lib/hls-buffer-policy';
 
 // ---------------------------------------------------------------------------
@@ -68,7 +72,7 @@ export function showTimedArtNotice(
     constructorRef.NOTICE_TIME = Math.floor(durationMs);
   }
 
-  player.notice.show = message;
+  player.notice.show = toDisplayText(message);
 
   if (constructorRef && typeof previousDuration === 'number') {
     constructorRef.NOTICE_TIME = previousDuration;
@@ -195,6 +199,17 @@ export interface ArtPlayerConfigOverrides {
   moreVideoAttr?: Record<string, unknown>;
 }
 
+function createArtPlayerLanguageConfig() {
+  const language = getDocumentDisplayLanguage();
+  const lang = language.toLowerCase();
+  if (language === 'zh-CN') return { lang };
+  // ArtPlayer 默认只注册 zh-cn；从它生成完整字典，避免未注册语言回落英文。
+  const dictionary = Object.fromEntries(
+    Object.entries(zhCn).map(([key, value]) => [key, toDisplayText(value)]),
+  );
+  return { lang, i18n: { [lang]: dictionary } };
+}
+
 /**
  * 创建 Artplayer 基础配置，VOD / Live 场景通过 overrides 差异化。
  * 不包含 container / url，这两个必须在调用端传入。
@@ -223,7 +238,7 @@ export function createArtPlayerConfig(overrides?: ArtPlayerConfigOverrides) {
     airplay: true,
     // brand-400：深色画面上比 brand-500 更易辨认
     theme: '#5fa8d8',
-    lang: 'zh-cn' as const,
+    ...createArtPlayerLanguageConfig(),
     hotkey: false,
     autoOrientation: true,
     lock: true,

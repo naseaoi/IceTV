@@ -21,6 +21,7 @@ import {
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
 import { sendUserDanmaku } from '@/features/play/lib/danmaku/user-client';
+import { toDisplayText } from '@/lib/display-text';
 import {
   readDanmakuFontSize,
   readDanmakuHeatmapEnabled,
@@ -129,7 +130,7 @@ function isUserDanmakuFeatureEnabled(): boolean {
 }
 
 function showPlayerNotice(player: PlayerWithPlugins | null, message: string) {
-  if (player?.notice) player.notice.show = message;
+  if (player?.notice) player.notice.show = toDisplayText(message);
 }
 
 function buildUserDanmakuEmitter(

@@ -19,6 +19,7 @@ import {
   saveSkipConfig,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import { toDisplayText } from '@/lib/display-text';
 import { showToast } from '@/lib/toast';
 import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
@@ -97,23 +98,23 @@ export function useSkipConfig({
       if (!setting) return;
       setting.update({
         name: '跳过片头片尾',
-        html: '跳过片头片尾',
+        html: toDisplayText('跳过片头片尾'),
         switch: config.enable,
       });
       setting.update({
         name: '设置片头',
-        html: '设置片头',
+        html: toDisplayText('设置片头'),
         tooltip:
           config.intro_time === 0
-            ? '设置片头时间'
+            ? toDisplayText('设置片头时间')
             : formatTimeSimple(config.intro_time),
       });
       setting.update({
         name: '设置片尾',
-        html: '设置片尾',
+        html: toDisplayText('设置片尾'),
         tooltip:
           config.outro_time >= 0
-            ? '设置片尾时间'
+            ? toDisplayText('设置片尾时间')
             : `-${formatTimeSimple(-config.outro_time)}`,
       });
     },

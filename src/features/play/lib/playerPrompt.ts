@@ -1,5 +1,7 @@
 import type Artplayer from 'artplayer';
 
+import { toDisplayText } from '@/lib/display-text';
+
 export interface PlayerPromptAction {
   label: string;
   primary?: boolean;
@@ -58,7 +60,7 @@ export function createPlayerPrompt(
       card.className = `ice-player-prompt ice-player-prompt-${placement}`;
       const label = document.createElement('span');
       label.className = 'ice-player-prompt-text';
-      label.textContent = text;
+      label.textContent = toDisplayText(text);
       card.appendChild(label);
       for (const action of actions) {
         const button = document.createElement('button');
@@ -66,7 +68,7 @@ export function createPlayerPrompt(
         button.className = action.primary
           ? 'ice-player-prompt-action ice-player-prompt-action-primary'
           : 'ice-player-prompt-action';
-        button.textContent = action.label;
+        button.textContent = toDisplayText(action.label);
         button.addEventListener('click', (event) => {
           event.stopPropagation();
           action.onClick();
@@ -80,8 +82,9 @@ export function createPlayerPrompt(
         hideTimer = window.setTimeout(hide, durationMs);
     },
     setText(text) {
-      if (textNode && textNode.textContent !== text)
-        textNode.textContent = text;
+      const displayed = toDisplayText(text);
+      if (textNode && textNode.textContent !== displayed)
+        textNode.textContent = displayed;
     },
     hide,
   };

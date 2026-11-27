@@ -7,10 +7,10 @@
     "pnpm": ">=10.14.0"
   },
   "scripts": {
-    "dev": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:dev-sw && next dev --turbopack -H 0.0.0.0",
-    "dev:webpack": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:dev-sw && next dev --webpack -H 0.0.0.0",
-    "build": "pnpm gen:changelog && pnpm gen:manifest && next build --webpack",
-    "build:turbo": "pnpm gen:changelog && pnpm gen:manifest && next build --turbopack",
+    "dev": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && pnpm gen:dev-sw && next dev --turbopack -H 0.0.0.0",
+    "dev:webpack": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && pnpm gen:dev-sw && next dev --webpack -H 0.0.0.0",
+    "build": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && next build --webpack",
+    "build:turbo": "pnpm gen:changelog && pnpm gen:manifest && pnpm gen:display-converter && next build --turbopack",
     "start": "next start",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix && pnpm format",
@@ -24,6 +24,7 @@
     "format": "prettier -w .",
     "format:check": "prettier -c .",
     "gen:manifest": "node scripts/generate-manifest.js",
+    "gen:display-converter": "node scripts/generate-display-converter.js",
     "gen:dev-sw": "node scripts/generate-dev-sw.js",
     "gen:changelog": "node scripts/convert-changelog.js",
     "validate:changelog": "node scripts/convert-changelog.js --check",

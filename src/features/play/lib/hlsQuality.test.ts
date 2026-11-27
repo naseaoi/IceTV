@@ -1,3 +1,6 @@
+import type Artplayer from 'artplayer';
+import { Converter } from 'opencc-js/cn2t';
+
 import {
   applyAutoQualityLevel,
   applyDefaultQualityLevel,
@@ -5,8 +8,10 @@ import {
   findHighestLevelIndex,
   findLevelIndexByHeight,
   findNextLowerLevelIndex,
+  registerQualityControlWhenReady,
   seedAutoQualityStartLevel,
 } from '@/features/play/lib/hlsQuality';
+import { type DisplayTextGlobals } from '@/lib/display-text';
 
 describe('hls quality level controls', () => {
   it('locks manual quality across HLS level selectors', () => {
@@ -231,5 +236,50 @@ describe('hls quality level controls', () => {
     expect(hls.nextAutoLevel).toBe(1);
     expect(hls.autoLevelCapping).toBe(1);
     expect(hls.__icetvManualQualityLocked).toBe(false);
+  });
+});
+
+describe('画质显示边界', () => {
+  const globals = globalThis as DisplayTextGlobals;
+  afterEach(() => {
+    document.documentElement.lang = '';
+    delete globals.__ICETV_DISPLAY_CONVERTER__;
+  });
+
+  it('转换自动与默认标签、notice，保留档位索引和写入的画质偏好', () => {
+    document.documentElement.lang = 'zh-TW';
+    globals.__ICETV_DISPLAY_CONVERTER__ = Converter({ from: 'cn', to: 'twp' });
+    const update = jest.fn();
+    const onPreferenceChange = jest.fn();
+    const art = {
+      controls: { update, remove: jest.fn() },
+      notice: { show: '' },
+    } as unknown as Artplayer;
+    const hls = {
+      levels: [{ height: 720 }, {}],
+      currentLevel: 0,
+      startLevel: 0,
+    };
+    registerQualityControlWhenReady({ current: art }, hls, {
+      preference: { mode: 'auto' },
+      defaultLevelIndex: null,
+      autoStartLevelIndex: null,
+      autoInitialMinLevelIndex: null,
+      autoMaxLevelIndex: null,
+      onPreferenceChange,
+    });
+    const control = update.mock.calls[0][0];
+    expect(control.name).toBe('icetv-quality');
+    expect(control.html).toBe('自動');
+    expect(control.selector.map((item: { html: string }) => item.html)).toEqual(
+      ['自動', '720p', '預設'],
+    );
+    expect(control.onSelect(control.selector[1])).toBe('720p');
+    expect(onPreferenceChange).toHaveBeenLastCalledWith(720);
+    expect(hls.currentLevel).toBe(0);
+    expect(art.notice.show).toBe('畫質: 720p');
+    control.onSelect(control.selector[0]);
+    expect(onPreferenceChange).toHaveBeenLastCalledWith(null);
+    expect(art.notice.show).toBe('畫質: 自動');
   });
 });

@@ -3,6 +3,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import { cookies } from 'next/headers';
+import Script from 'next/script';
 
 import { AuthProvider } from '@/components/AuthProvider';
 import { CardInteractionProvider } from '@/components/CardInteractionProvider';
@@ -21,6 +22,9 @@ import { ListPickerProvider } from '@/features/lists/components/ListPickerProvid
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
+import { toDisplayText } from '@/lib/display-text';
+import { DISPLAY_CONVERTER_SRC } from '@/lib/display-text/asset.generated';
+import { getRequestDisplayLanguage } from '@/lib/display-text/server';
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
@@ -55,8 +59,8 @@ const footerText = DEFAULT_SITE_FOOTER_TEXT;
 
 export function generateMetadata(): Metadata {
   return {
-    title: siteName,
-    description: '影视聚合',
+    title: toDisplayText(siteName),
+    description: toDisplayText('影视聚合'),
     manifest: '/manifest.json',
   };
 }
@@ -71,6 +75,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const cookieStore = await cookies();
+  const displayLanguage = getRequestDisplayLanguage();
   const sessionPromise = getServerAuthSession(cookieStore.get('auth')?.value);
   const liveAccessPromise = Promise.all([
     sessionPromise,
@@ -116,8 +121,18 @@ export default async function RootLayout({
   const runtimeConfigReadyForGuest = initialAuthSession.status === 'guest';
 
   return (
-    <html lang='zh-CN' className={DEFAULT_THEME} suppressHydrationWarning>
+    <html
+      lang={displayLanguage}
+      className={DEFAULT_THEME}
+      suppressHydrationWarning
+    >
       <head>
+        {displayLanguage !== 'zh-CN' && (
+          <Script
+            src={DISPLAY_CONVERTER_SRC[displayLanguage]}
+            strategy='beforeInteractive'
+          />
+        )}
         <script
           dangerouslySetInnerHTML={{
             __html: buildThemeInitScript(),

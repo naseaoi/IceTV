@@ -13,6 +13,8 @@ import {
 import { useAuthSession } from '@/components/AuthProvider';
 import { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
 import { useVisibilityPolling } from '@/hooks/useVisibilityPolling';
+import { watchDisplayLanguagePreference } from '@/lib/display-language';
+import { toDisplayText } from '@/lib/display-text';
 import {
   type ServerConfigPayload,
   applyClientServerConfig,
@@ -67,6 +69,7 @@ export function SiteProvider({
   announcement?: string;
   footerText?: string;
 }) {
+  useEffect(() => watchDisplayLanguagePreference(), []);
   const { session } = useAuthSession();
   const account =
     session.status === 'authenticated'
@@ -107,7 +110,7 @@ export function SiteProvider({
         footerText: nextFooterText,
       });
 
-      document.title = nextSiteName;
+      document.title = toDisplayText(nextSiteName);
       updateIconLink("link[rel='icon']", nextSiteIcon || DEFAULT_FAVICON);
       updateIconLink(
         "link[rel='apple-touch-icon']",

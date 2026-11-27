@@ -11,7 +11,7 @@ const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   // 纯 ESM 包，next/jest 只转译此处列出的依赖
-  transpilePackages: ['boring-avatars'],
+  transpilePackages: ['boring-avatars', 'artplayer'],
   compiler: {
     removeConsole:
       process.env.NODE_ENV === 'production'
@@ -30,6 +30,15 @@ const nextConfig = {
 
   async headers() {
     return [
+      {
+        source: '/display-text/:asset',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
       {
         source: '/:path*',
         headers: [
