@@ -8,7 +8,6 @@ import type {
 } from '@/features/continue-watching/lib/tracking-calendar';
 import { fetchTrackingCalendar } from '@/features/continue-watching/lib/tracking-calendar-client';
 import { type CacheUpdateEvent, subscribeToDataUpdates } from '@/lib/db.client';
-import { writeContinueWatchingTrackingCount } from '@/lib/local-preferences';
 import { isAbortError } from '@/lib/user-facing-error';
 
 // 状态 PATCH（标为已读、搁置等）在服务端写入完成后派发；playRecordsUpdated 也随乐观写入提前派发，
@@ -65,10 +64,6 @@ export function useTrackingStrip(
       window.removeEventListener(LIBRARY_WRITTEN_EVENT, load);
     };
   }, [complete, fetchedAt]);
-
-  useEffect(() => {
-    writeContinueWatchingTrackingCount(items.length);
-  }, [items.length]);
 
   return items;
 }

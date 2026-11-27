@@ -1,15 +1,21 @@
 /** @jest-environment node */
 import type Database from 'better-sqlite3';
+import { cookies } from 'next/headers';
 
 import type { BangumiCalendarData } from '@/features/bangumi/lib/bangumi';
-import { getBangumiCalendarData } from '@/features/bangumi/lib/bangumi';
+import {
+  getBangumiCalendarData,
+  peekBangumiCalendarData,
+} from '@/features/bangumi/lib/bangumi';
 import { assertTrackingCalendar } from '@/lib/__tests__/__fixtures__/tracking-calendar-contract';
+import { getServerAuthSession } from '@/lib/auth-session.server';
 import { db } from '@/lib/db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
 import type { TrackingCalendarItem } from './tracking-calendar';
 import {
   getTrackingStrip,
+  getTrackingStripSkeletonCount,
   matchCalendarWeekdays,
 } from './tracking-calendar.server';
 
@@ -125,4 +131,32 @@ it('日历超过等待上限时先返回有更新的作品并标记未完成', a
     items: [updated],
     complete: false,
   });
+});
+
+it('骨架计数实时查库，按追更区口径只读已缓存日历并截断到上限', async () => {
+  const updated = { ...base, key: 'source+2', hasUpdate: true };
+  const unscheduled = { ...base, key: 'source+3', title: '作品 C' };
+  jest.mocked(getBangumiCalendarData).mockClear();
+  jest.mocked(cookies).mockResolvedValue({
+    get: (name: string) => (name === 'auth' ? { value: 'token' } : undefined),
+  } as never);
+  jest
+    .mocked(getServerAuthSession)
+    .mockResolvedValue({ status: 'authenticated', username: 'user' } as never);
+  jest
+    .mocked(db.getTrackingCalendarItems)
+    .mockResolvedValue([base, updated, unscheduled]);
+
+  jest.mocked(peekBangumiCalendarData).mockReturnValue(calendar);
+  expect(await getTrackingStripSkeletonCount(8)).toBe(2);
+  expect(await getTrackingStripSkeletonCount(1)).toBe(1);
+
+  jest.mocked(peekBangumiCalendarData).mockReturnValue(null);
+  expect(await getTrackingStripSkeletonCount(8)).toBe(1);
+  expect(getBangumiCalendarData).not.toHaveBeenCalled();
+
+  jest
+    .mocked(getServerAuthSession)
+    .mockResolvedValue({ status: 'unauthenticated' } as never);
+  expect(await getTrackingStripSkeletonCount(8)).toBe(0);
 });

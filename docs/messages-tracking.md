@@ -86,7 +86,7 @@
 - 刷新以写入完成后的 `userLibraryUpdated` 为准：播放记录与收藏的新增、删除先派发乐观的 `playRecordsUpdated` / `favoritesUpdated` 再写服务端，只听乐观事件会读回写入前的数据；无本地缓存时删除甚至不派发乐观事件。播放记录状态 PATCH 写入后派发 `playRecordsUpdated` 或 `playRecordStatesUpdated`，也一并监听；收藏追更开关 PATCH 写入后同样派发 `userLibraryUpdated`，缓存未命中时也派发。
 - 骨架与真实区块同条件占位：仅「全部」筛选且计数大于 0。首页「有更新」入口直达 `?filter=updated`，路由骨架若不判断筛选会画出追更区再整块消失。
 - 排序不依赖「今天」（有更新在前，其余按周一到周日），服务端与水合结果一致；「今天 / 明天更新」在水合后按浏览器本地时区改写文案，不重排。
-- 条数写入计数 cookie `cw_tracking_count`，路由骨架按它占位；登录时只读本进程已缓存的日历计数，不等待上游。
+- 路由骨架的条数由 `getTrackingStripSkeletonCount()` 每次实时查库，只读本进程已缓存的日历、不等待上游。不用计数 cookie：追更会在播放页、卡片菜单开关与定时刷新发现更新时变化，cookie 只能在访问本页时写入，从无到有时骨架会漏掉整个区块。
 
 ## 管理处理与账号通知
 

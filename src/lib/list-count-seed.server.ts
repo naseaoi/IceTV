@@ -6,7 +6,6 @@ import {
   CONTINUE_WATCHING_LIMIT,
   CONTINUE_WATCHING_PAGE_SIZE,
 } from '@/features/continue-watching/lib/layout';
-import { countTrackingStrip } from '@/features/continue-watching/lib/tracking-calendar.server';
 import { PLAYBACK_HISTORY_PAGE_SIZE } from '@/features/playback-stats/types';
 import { db } from '@/lib/db';
 import {
@@ -22,34 +21,25 @@ async function countHistoryFirstPage(
 }
 
 // 登录时按与各列表接口相同的口径写入计数，新设备首次进入也能按真实条数渲染骨架；
-// 口径与客户端写入处保持一致：有效收藏库总数 libraryTotal、本人评价总数、历史首页条数、片单总数、片单广场可见总数、继续观看上限截断后的条数、追更区条数
+// 口径与客户端写入处保持一致：有效收藏库总数 libraryTotal、本人评价总数、历史首页条数、片单总数、片单广场可见总数、继续观看上限截断后的条数
 async function computeListCounts(
   username: string,
 ): Promise<Record<ListCountCookieName, number>> {
-  const [
-    favorites,
-    reviews,
-    history,
-    playRecords,
-    lists,
-    plaza,
-    savedLists,
-    tracking,
-  ] = await Promise.all([
-    db.getFavoriteLibraryPage(username, {
-      query: '',
-      filter: 'all',
-      sort: 'saved',
-      limit: 1,
-    }),
-    db.getMyVideoReviewCount(username),
-    countHistoryFirstPage(username, PLAYBACK_HISTORY_PAGE_SIZE),
-    db.getPlayRecordPage(username, 1),
-    db.countUserLists(username),
-    db.countPlazaLists(username),
-    db.countSavedLists(username),
-    countTrackingStrip(username),
-  ]);
+  const [favorites, reviews, history, playRecords, lists, plaza, savedLists] =
+    await Promise.all([
+      db.getFavoriteLibraryPage(username, {
+        query: '',
+        filter: 'all',
+        sort: 'saved',
+        limit: 1,
+      }),
+      db.getMyVideoReviewCount(username),
+      countHistoryFirstPage(username, PLAYBACK_HISTORY_PAGE_SIZE),
+      db.getPlayRecordPage(username, 1),
+      db.countUserLists(username),
+      db.countPlazaLists(username),
+      db.countSavedLists(username),
+    ]);
   return {
     fav_count: favorites.libraryTotal,
     review_count: reviews,
@@ -59,7 +49,6 @@ async function computeListCounts(
     plaza_count: plaza,
     cw_count: Math.min(playRecords.total, CONTINUE_WATCHING_LIMIT),
     cw_page_count: Math.min(playRecords.total, CONTINUE_WATCHING_PAGE_SIZE),
-    cw_tracking_count: tracking,
   };
 }
 

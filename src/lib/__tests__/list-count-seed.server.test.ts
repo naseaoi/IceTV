@@ -12,9 +12,6 @@ const mockDb = {
 
 jest.mock('server-only', () => ({}));
 jest.mock('@/lib/db', () => ({ db: mockDb }));
-jest.mock('@/features/continue-watching/lib/tracking-calendar.server', () => ({
-  countTrackingStrip: jest.fn().mockResolvedValue(2),
-}));
 
 const { seedListCountCookies } =
   require('@/lib/list-count-seed.server') as typeof import('@/lib/list-count-seed.server');
@@ -62,7 +59,6 @@ it('按各列表接口口径写入计数', async () => {
     history_count: '3',
     cw_count: '10',
     cw_page_count: '24',
-    cw_tracking_count: '2',
   });
 });
 
