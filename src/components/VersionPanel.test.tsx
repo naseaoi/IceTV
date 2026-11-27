@@ -17,7 +17,7 @@ jest.mock('@/lib/changelog', () => ({
         '界面精简：卡片只保留状态',
         '切换筛选时保留当前列表而不是清空重新加载：更顺滑',
       ],
-      fixed: [],
+      fixed: ['**签名密钥统一**：改用 `AUTH_SECRET`，代码里的 `**` 原样显示'],
       admin: ['当前版本后台改动'],
     },
     {
@@ -152,5 +152,18 @@ describe('VersionPanel 后台条目', () => {
     expect(
       screen.getByText('切换筛选时保留当前列表而不是清空重新加载：更顺滑'),
     ).toBeInTheDocument();
+  });
+
+  it('条目中的加粗与行内代码按 Markdown 渲染', () => {
+    asRole('user');
+    render(<VersionPanel isOpen onClose={jest.fn()} />);
+
+    const strong = screen.getByText('签名密钥统一');
+    expect(strong.tagName).toBe('STRONG');
+    expect(screen.getByText('AUTH_SECRET').tagName).toBe('CODE');
+    expect(screen.getByText('**').tagName).toBe('CODE');
+    expect(strong.closest('li')).toHaveTextContent(
+      '签名密钥统一：改用 AUTH_SECRET，代码里的 ** 原样显示',
+    );
   });
 });

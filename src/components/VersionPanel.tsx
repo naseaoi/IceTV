@@ -84,18 +84,56 @@ const CHANGE_KINDS: Record<
   },
 };
 
-// 「主题：细节」写法的条目把主题加粗便于扫读；过长的前缀多半是正文里的冒号，不拆
-const LEAD_PHRASE_RE = /^([^：:，。,]{2,12})[：:]\s*(.+)$/s;
+const EMPHASIS_CLASS = 'font-medium text-gray-900 dark:text-gray-100';
+
+// CHANGELOG 条目只用到行内代码与加粗两种 Markdown 标记；同一位置先匹配代码，代码里的星号按原样显示
+const INLINE_MARK_RE = /`([^`]+)`|\*\*(.+?)\*\*/g;
+
+function InlineMarkdown({
+  text,
+  allowStrong = true,
+}: {
+  text: string;
+  allowStrong?: boolean;
+}) {
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(INLINE_MARK_RE)) {
+    const [raw, code, strong] = match;
+    if (strong !== undefined && !allowStrong) continue;
+    const index = match.index;
+    if (index > cursor) nodes.push(text.slice(cursor, index));
+    nodes.push(
+      code !== undefined ? (
+        <code
+          key={index}
+          className='break-words rounded bg-gray-100 px-1 py-0.5 font-mono text-[0.85em] text-gray-800 dark:bg-white/[0.08] dark:text-gray-200'
+        >
+          {code}
+        </code>
+      ) : (
+        <strong key={index} className={EMPHASIS_CLASS}>
+          <InlineMarkdown text={strong} allowStrong={false} />
+        </strong>
+      ),
+    );
+    cursor = index + raw.length;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return <>{nodes}</>;
+}
+
+// 「主题：细节」写法的条目把主题加粗便于扫读；过长的前缀多半是正文里的冒号，不拆。
+// 前缀不含 Markdown 标记，避免把成对的加粗或代码从中间拆开
+const LEAD_PHRASE_RE = /^([^：:，。,*`]{2,12})[：:]\s*(.+)$/s;
 
 function ChangeText({ text }: { text: string }) {
   const match = LEAD_PHRASE_RE.exec(text);
-  if (!match) return <>{text}</>;
+  if (!match) return <InlineMarkdown text={text} />;
   return (
     <>
-      <span className='font-medium text-gray-900 dark:text-gray-100'>
-        {match[1]}：
-      </span>
-      {match[2]}
+      <span className={EMPHASIS_CLASS}>{match[1]}：</span>
+      <InlineMarkdown text={match[2]} />
     </>
   );
 }
