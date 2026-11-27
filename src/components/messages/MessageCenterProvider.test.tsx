@@ -248,14 +248,16 @@ describe('MessageCenterProvider', () => {
       .spyOn(document, 'visibilityState', 'get')
       .mockReturnValue('hidden');
     renderProvider();
-    await waitFor(() =>
-      expect(screen.getByTestId('unread')).toHaveTextContent('1'),
-    );
+    expect(mockGetMessageSummary).not.toHaveBeenCalled();
+    expect(screen.getByTestId('unread')).toHaveTextContent('0');
     expect(showToast).not.toHaveBeenCalled();
     writeNotifiedMessageAt('demo', 1000);
     visible.mockReturnValue('visible');
     await act(async () =>
       document.dispatchEvent(new Event('visibilitychange')),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('unread')).toHaveTextContent('1'),
     );
     expect(showToast).not.toHaveBeenCalled();
     visible.mockRestore();

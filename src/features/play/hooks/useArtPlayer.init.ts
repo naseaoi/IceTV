@@ -104,7 +104,7 @@ import {
 import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
 // 暂停、切后台、关页、换集都会立即保存，定时保存只兜底异常退出
-const PERIODIC_PROGRESS_SAVE_INTERVAL_MS = 20_000;
+const PERIODIC_PROGRESS_SAVE_INTERVAL_MS = 60_000;
 const DOUBLE_TAP_SEEK_SECONDS = 10;
 const RESUME_PROMPT_MIN_SECONDS = 10;
 const RESUME_PROMPT_DURATION_MS = 6_000;
@@ -1569,8 +1569,9 @@ export async function initializeArtPlayer(
     player.on('video:error', handlePlayerError);
 
     player.on('video:timeupdate', () => {
+      if (isStalePlayerSession()) return;
       const now = Date.now();
-      if (now - lastSaveTimeRef.current > PERIODIC_PROGRESS_SAVE_INTERVAL_MS) {
+      if (now - lastSaveTimeRef.current >= PERIODIC_PROGRESS_SAVE_INTERVAL_MS) {
         saveCurrentPlayProgress();
       }
     });
@@ -1578,7 +1579,9 @@ export async function initializeArtPlayer(
     // 媒体键、画中画等直接暂停元素时不一定经过 Artplayer 的 pause 事件
     for (const event of ['pause', 'waiting', 'stalled'] as const) {
       player.on(`video:${event}`, () => {
-        if (!isStalePlayerSession()) handlePlaybackStatsEvent?.(event);
+        if (isStalePlayerSession()) return;
+        if (event === 'pause') saveCurrentPlayProgress();
+        handlePlaybackStatsEvent?.(event);
       });
     }
 
@@ -1613,6 +1616,15 @@ export async function initializeArtPlayer(
         );
       } else {
         updateStableCurrentTime(player.currentTime || 0);
+      }
+      if (
+        completed &&
+        !programmatic &&
+        loadingSessionRef.current.playbackStartNotified &&
+        loadingSessionRef.current.pendingInitialResumeTarget === null &&
+        !clearTargetEpisodeProgressRef.current
+      ) {
+        saveCurrentPlayProgress();
       }
     };
     player.on('video:seeking', () => {

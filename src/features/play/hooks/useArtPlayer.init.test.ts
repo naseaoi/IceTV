@@ -501,6 +501,42 @@ describe('initializeArtPlayer 拉流控制', () => {
     expect(params.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
   });
 
+  it('播放进度周期为一分钟，暂停与用户拖动完成立即保存', async () => {
+    const { player, params } = await setupPlayer();
+    player.duration = 1500;
+    player.currentTime = 120;
+    player.emit('video:playing');
+    params.lastSaveTimeRef.current = Date.now();
+    jest.mocked(params.saveCurrentPlayProgress).mockClear();
+    jest.advanceTimersByTime(59_999);
+    player.emit('video:timeupdate');
+    expect(params.saveCurrentPlayProgress).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    player.emit('video:timeupdate');
+    expect(params.saveCurrentPlayProgress).toHaveBeenCalledTimes(1);
+    params.lastSaveTimeRef.current = Date.now();
+    for (const event of ['pause', 'video:pause', 'video:seeked']) {
+      player.currentTime += 10;
+      player.emit(event);
+    }
+    expect(params.saveCurrentPlayProgress).toHaveBeenCalledTimes(4);
+    player.currentTime = 1500;
+    player.emit('video:ended');
+    expect(params.saveCurrentPlayProgress).toHaveBeenCalledTimes(5);
+  });
+
+  it('换集起播前的 seeked 和已释放运行时事件保持静默', async () => {
+    const { player, params, video } = await setupPlayer();
+    player.currentTime = 120;
+    params.clearTargetEpisodeProgressRef.current = true;
+    player.emit('video:seeked');
+    expect(params.saveCurrentPlayProgress).not.toHaveBeenCalled();
+    runManagedVideoCleanup(video);
+    for (const event of ['video:pause', 'video:seeked', 'video:timeupdate'])
+      player.emit(event);
+    expect(params.saveCurrentPlayProgress).not.toHaveBeenCalled();
+  });
+
   it.each(['video:timeupdate', 'video:ended'])(
     '释放旧集后 %s 不触发下一集或片尾操作',
     async (event) => {

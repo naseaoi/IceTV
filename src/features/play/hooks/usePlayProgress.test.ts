@@ -669,6 +669,36 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     return { ...view, refs, setCurrentEpisodeIndex, onRestoreEpisodeChange };
   }
 
+  it.each(['hidden', 'pagehide', 'beforeunload', 'unmount'])(
+    '%s 立即保存最新进度，后续退出事件保持去重',
+    async (trigger) => {
+      const { refs, unmount } = renderHistoryRestore(
+        createHistoryRestoreGate(),
+      );
+      await flushMicrotasks();
+      refs.artPlayerRef.current = { currentTime: 123, duration: 1500 } as any;
+      refs.stableCurrentTimeRef.current = 123;
+      await act(async () => {
+        if (trigger === 'unmount') unmount();
+        else if (trigger === 'hidden') {
+          jest
+            .spyOn(document, 'visibilityState', 'get')
+            .mockReturnValue('hidden');
+          document.dispatchEvent(new Event('visibilitychange'));
+        } else window.dispatchEvent(new Event(trigger));
+      });
+      expect(savePlayRecord).toHaveBeenCalledTimes(1);
+      expect(savePlayRecord).toHaveBeenCalledWith(
+        detail.source,
+        detail.id,
+        expect.objectContaining({ play_time: 123 }),
+      );
+      await act(async () => window.dispatchEvent(new Event('pagehide')));
+      expect(savePlayRecord).toHaveBeenCalledTimes(1);
+      jest.restoreAllMocks();
+    },
+  );
+
   // 只冲刷微任务不推进计时器，放行只可能来自历史恢复的信号
   async function flushMicrotasks() {
     await act(async () => {
@@ -1231,6 +1261,73 @@ describe('播放记录持久化边界', () => {
     await ctx.run();
     expect(ctx.onSaved).toHaveBeenCalledWith('b', 'b');
     log.mockRestore();
+  });
+
+  it('进度未变时普通、暂停与退出保存共用去重，失败允许重试', async () => {
+    const ctx = setup();
+    await ctx.run();
+    await ctx.run();
+    await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(1);
+    ctx.player.current.currentTime = 121;
+    await ctx.run();
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    '新进度在途时拖回已保存的位置仍提交新序号（立即=%s）',
+    async (immediate) => {
+      const ctx = setup();
+      await ctx.run();
+      let finish!: () => void;
+      save.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      ctx.player.current.currentTime = 180;
+      const pending = ctx.run();
+      ctx.player.current.currentTime = 120;
+      await ctx.run(immediate);
+      finish();
+      await pending;
+      expect(
+        save.mock.calls.map(([, , record]) => [
+          record.play_time,
+          record.progress_sequence,
+        ]),
+      ).toEqual([
+        [120, 1],
+        [180, 2],
+        [120, 3],
+      ]);
+      await ctx.run(true);
+      expect(save).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('同位置旧请求在途时，往前拖动再拖回保留最新选择', async () => {
+    const ctx = setup();
+    let finish!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = ctx.run();
+    ctx.player.current.currentTime = 180;
+    await ctx.run(true);
+    ctx.player.current.currentTime = 120;
+    await ctx.run(true);
+    finish();
+    await pending;
+    expect(save.mock.calls.map(([, , record]) => record.play_time)).toEqual([
+      120, 180, 120,
+    ]);
+    await ctx.run(true);
+    expect(save).toHaveBeenCalledTimes(3);
   });
 
   it('换集换源延续同一会话序号，新页面独立生成会话', async () => {

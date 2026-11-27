@@ -204,12 +204,16 @@ describe('usePlaybackStatsReporter', () => {
     expect(reports()[0].buckets[0].watch_ms).toBe(1000);
   });
 
-  it('每 30 秒发送变化的桶，强制重复上报不增加累计值', async () => {
+  it('每 60 秒发送变化的桶，强制重复上报不增加累计值', async () => {
     const h = setup();
     h.event('playing');
     h.tick();
     await act(async () => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(59_999);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(1);
     });
     expect(reports()[0].buckets[0].watch_ms).toBe(1000);
     await h.flush();
@@ -218,6 +222,32 @@ describe('usePlaybackStatsReporter', () => {
     h.tick();
     await h.flush();
     expect(reports()[1].buckets[0].watch_ms).toBe(2000);
+  });
+
+  it.each(['pause', 'ended', 'stop'] as const)(
+    '%s 立即补发，静止期间周期与退出事件保持去重',
+    async (trigger) => {
+      const h = setup();
+      h.event('playing');
+      h.tick();
+      await act(async () => h.event(trigger));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(reports()[0].buckets[0].watch_ms).toBe(1000);
+      await act(async () => {
+        jest.advanceTimersByTime(180_000);
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('一分钟内持续播放按实际时长累计，报告频率与计时独立', async () => {
+    const h = setup();
+    h.event('playing');
+    for (let second = 0; second < 60; second++) h.tick();
+    await h.flush();
+    expect(reports()[0].buckets).toEqual([{ start: START, watch_ms: 60_000 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('失败保留原累计值，下次上报重试', async () => {

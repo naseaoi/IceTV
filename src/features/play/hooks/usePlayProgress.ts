@@ -89,8 +89,8 @@ export interface PlayProgressSaveState {
   inFlight: boolean;
   pending: Map<string, PendingPlayProgressSave>;
   lastSavedFingerprint: string | null;
-  activeFingerprints?: Set<string>;
-  latestSaveToken?: object;
+  activeSequences?: Set<number>;
+  lastSnapshotFingerprint?: string;
   onSaved?: (source: string, id: string) => void | Promise<void>;
   // 每个新快照同步通知，切集时本地每集进度表不必等保存请求返回
   onEpisodeProgress?: (entry: EpisodeProgressEntry) => void;
@@ -111,27 +111,20 @@ async function persistPlayProgressSave(
   lastSaveTimeRef: MutableRefObject<number>,
   payload: PendingPlayProgressSave,
 ): Promise<void> {
-  const active = (state.activeFingerprints ??= new Set());
-  if (
-    active.has(payload.fingerprint) ||
-    payload.fingerprint === state.lastSavedFingerprint
-  ) {
-    return;
-  }
-  active.add(payload.fingerprint);
+  const active = (state.activeSequences ??= new Set());
+  const sequence = payload.record.progress_sequence!;
+  active.add(sequence);
   lastSaveTimeRef.current = Date.now();
-  const token = {};
-  state.latestSaveToken = token;
   try {
     await savePlayRecord(payload.source, payload.id, payload.record);
-    if (state.latestSaveToken === token) {
+    if (state.sequence === sequence) {
       state.lastSavedFingerprint = payload.fingerprint;
     }
     await state.onSaved?.(payload.source, payload.id);
   } catch (err) {
     console.error('保存播放进度失败:', err);
   } finally {
-    active.delete(payload.fingerprint);
+    active.delete(sequence);
   }
 }
 
@@ -253,10 +246,18 @@ export async function saveCurrentPlayProgress(
   );
 
   const key = `${generateStorageKey(currentSourceRef.current, currentIdRef.current)}|${record.index}`;
-  if (fingerprint === state.lastSavedFingerprint && !state.pending.has(key)) {
+  // 只和最新采样去重：用户拖回之前保存过的位置仍是一次新选择。
+  if (
+    fingerprint === state.lastSnapshotFingerprint &&
+    (state.pending.get(key)?.fingerprint === fingerprint ||
+      state.activeSequences?.has(state.sequence!) ||
+      fingerprint === state.lastSavedFingerprint)
+  ) {
     if (immediate) await flushPendingPlayProgress(state, lastSaveTimeRef, true);
     return;
   }
+  state.lastSnapshotFingerprint = fingerprint;
+  state.lastSavedFingerprint = null;
 
   // 并发补写同一集时按采样时间取最新，避免同一毫秒内的两个快照平局。
   record.save_time = state.lastSnapshotTime = Math.max(

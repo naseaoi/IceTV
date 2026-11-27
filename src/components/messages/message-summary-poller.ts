@@ -2,8 +2,8 @@ import type { UserMessageSummary } from '@/lib/message-types';
 
 import type { RefreshMode } from './message-toast-text';
 
-export const MESSAGE_POLL_INTERVAL_MS = 60_000;
-const MIN_REFRESH_GAP_MS = 1_000;
+export const MESSAGE_POLL_INTERVAL_MS = 180_000;
+const MIN_REFRESH_GAP_MS = 60_000;
 
 type Snapshot = { summary: UserMessageSummary; requestedAt: number };
 
@@ -51,7 +51,8 @@ export function createMessageSummaryPoller({
       // 显式写入后的刷新不受可见性和补拉节流限制。
       if (
         (mode === 'mount' || mode === 'poll') &&
-        Date.now() - lastRequestAt < MIN_REFRESH_GAP_MS
+        (document.visibilityState !== 'visible' ||
+          Date.now() - lastRequestAt < MIN_REFRESH_GAP_MS)
       )
         return;
       const requestSequence = ++sequence;

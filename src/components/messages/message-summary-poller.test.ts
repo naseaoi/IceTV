@@ -100,20 +100,23 @@ afterEach(async () => {
   jest.useRealTimers();
 });
 
-it('两个可见标签页只有一个每分钟轮询并同步摘要，关主标签后接任', async () => {
+it('两个可见标签页只有一个每三分钟轮询并同步摘要，关主标签后接任', async () => {
   const first = start();
   const second = start();
   await flush();
   expect(first.load).toHaveBeenCalledTimes(1);
   expect(second.load).not.toHaveBeenCalled();
   expect(second.onSummary).toHaveBeenCalledWith(summary('first'), 'external');
-  jest.advanceTimersByTime(60_000);
+  jest.advanceTimersByTime(179_999);
+  await flush();
+  expect(first.load).toHaveBeenCalledTimes(1);
+  jest.advanceTimersByTime(1);
   await flush();
   expect(first.load).toHaveBeenCalledTimes(2);
   expect(second.load).not.toHaveBeenCalled();
   first.stop();
   await flush();
-  jest.advanceTimersByTime(60_000);
+  jest.advanceTimersByTime(180_000);
   await flush();
   expect(second.load).toHaveBeenCalledTimes(1);
 });
@@ -129,7 +132,7 @@ it('从标签已读立即查新摘要并广播，查询期间的写操作刷新�
         resolve = done;
       }),
   );
-  jest.advanceTimersByTime(60_000);
+  jest.advanceTimersByTime(180_000);
   await flush();
   second.load.mockResolvedValue(summary('read'));
   const mutation = second.refresh('local');
@@ -188,8 +191,57 @@ it('不支持跨标签能力时各自轮询并保留隐藏页暂停', async () =
   const first = start();
   const second = start();
   await flush();
-  jest.advanceTimersByTime(60_000);
+  jest.advanceTimersByTime(180_000);
   await flush();
   expect(first.load).toHaveBeenCalledTimes(2);
   expect(second.load).toHaveBeenCalledTimes(2);
+  jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  document.dispatchEvent(new Event('visibilitychange'));
+  jest.advanceTimersByTime(360_000);
+  await flush();
+  expect(first.load).toHaveBeenCalledTimes(2);
+  expect(second.load).toHaveBeenCalledTimes(2);
+});
+
+it.each([true, false])(
+  '可见或聚焦补拉只在摘要满一分钟后进行（跨标签=%s）',
+  async (coordinated) => {
+    if (!coordinated)
+      Object.defineProperty(navigator, 'locks', {
+        configurable: true,
+        value: undefined,
+      });
+    const visible = jest.spyOn(document, 'visibilityState', 'get');
+    const first = start();
+    await flush();
+    visible.mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    jest.advanceTimersByTime(59_999);
+    visible.mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+    await flush();
+    expect(first.load).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(1);
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    await flush();
+    expect(first.load).toHaveBeenCalledTimes(2);
+    await first.refresh('local');
+    expect(first.load).toHaveBeenCalledTimes(3);
+  },
+);
+
+it('隐藏挂载不查询，操作后刷新仍即时执行', async () => {
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: undefined,
+  });
+  jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  const first = start();
+  jest.advanceTimersByTime(360_000);
+  await flush();
+  expect(first.load).not.toHaveBeenCalled();
+  await first.refresh('external');
+  expect(first.load).toHaveBeenCalledTimes(1);
 });

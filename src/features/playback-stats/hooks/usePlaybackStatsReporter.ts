@@ -58,7 +58,7 @@ type UsePlaybackStatsReporterParams = {
   stableCurrentTimeRef: MutableRefObject<number>;
 };
 
-const REPORT_INTERVAL_MS = 30_000;
+const REPORT_INTERVAL_MS = 60_000;
 const MAX_TICK_MS = 5_000;
 
 function createSessionId(): string {
