@@ -118,10 +118,17 @@ async function loadThirdPartyDanmaku(
     );
 
     let candidateIndex = 0;
-    while (candidateIndex < candidates.length) {
+    let attempts = 0;
+    let refreshedMapping = false;
+    const missingEpisodeIds = new Set<number>();
+    while (
+      candidateIndex < candidates.length &&
+      attempts < MAX_CANDIDATE_ATTEMPTS + 1
+    ) {
       if (superseded()) return NO_THIRD_PARTY;
       const candidate = candidates[candidateIndex];
       candidateIndex += 1;
+      attempts += 1;
       let items: DanmakuItem[];
       let missingEpisode = false;
       try {
@@ -138,21 +145,27 @@ async function loadThirdPartyDanmaku(
           };
         }
         missingEpisode = true;
+        missingEpisodeIds.add(candidate.episodeId);
         items = [];
       }
 
       if (items.length === 0) {
-        if (!candidate.persistOnSuccess && missingEpisode) {
-          // 旧映射已失效，清掉后重新搜索并尝试新的候选。
-          await clearPersistedEpisodeId(
-            context.source,
-            context.videoId,
-            context.episodeIndex,
-          );
+        if (missingEpisode && !refreshedMapping) {
+          // 搜索缓存里的候选也会过期；整次加载只重搜一次，共用评论尝试预算。
+          refreshedMapping = true;
+          if (superseded()) return NO_THIRD_PARTY;
+          if (!candidate.persistOnSuccess) {
+            await clearPersistedEpisodeId(
+              context.source,
+              context.videoId,
+              context.episodeIndex,
+            );
+          }
+          if (superseded()) return NO_THIRD_PARTY;
           const keyword = candidate.keyword || context.searchTitle;
           if (!keyword) return NO_THIRD_PARTY;
           const searched = await searchDanmakuCandidates(keyword, undefined, {
-            force: missingEpisode,
+            force: true,
           });
           candidates = rankCandidatesByEpisode(
             searched,
@@ -160,7 +173,7 @@ async function loadThirdPartyDanmaku(
             keyword,
             context.searchYear,
           )
-            .filter((item) => item.episodeId !== candidate.episodeId)
+            .filter((item) => !missingEpisodeIds.has(item.episodeId))
             .slice(0, MAX_CANDIDATE_ATTEMPTS)
             .map((item) => ({
               episodeId: item.episodeId,

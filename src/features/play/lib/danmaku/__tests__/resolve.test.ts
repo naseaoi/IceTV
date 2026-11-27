@@ -10,7 +10,10 @@ import {
 import { loadDanmakuForEpisode } from '@/features/play/lib/danmaku/resolve';
 import { DanmakuEpisodeNotFoundError } from '@/features/play/lib/danmaku/types';
 import { fetchUserDanmaku } from '@/features/play/lib/danmaku/user-client';
-import { writeDanmakuEpisodeSearchTitle } from '@/lib/local-preferences';
+import {
+  readDanmakuEpisodeId,
+  writeDanmakuEpisodeSearchTitle,
+} from '@/lib/local-preferences';
 
 jest.mock('@/features/play/lib/danmaku/client', () => ({
   fetchDanmakuComments: jest.fn(),
@@ -171,6 +174,108 @@ describe('loadDanmakuForEpisode outcomes', () => {
       keyword: context.searchTitle,
     });
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('repairs an expired search candidate even without a persisted mapping', async () => {
+    const stale = {
+      episodeId: 123,
+      animeTitle: '测试影片',
+      episodeTitle: '第1集',
+    };
+    const fresh = { ...stale, episodeId: 456 };
+    const items = [{ text: 'test', time: 1, mode: 0, color: '#ffffff' }];
+    (getPersistedEpisodeId as jest.Mock).mockResolvedValue(null);
+    (searchDanmakuCandidates as jest.Mock)
+      .mockResolvedValueOnce([stale])
+      .mockResolvedValueOnce([fresh]);
+    (rankCandidatesByEpisode as jest.Mock).mockImplementation((items) => items);
+    (fetchDanmakuComments as jest.Mock)
+      .mockRejectedValueOnce(new DanmakuEpisodeNotFoundError())
+      .mockResolvedValueOnce(items);
+
+    await expect(loadDanmakuForEpisode(context, () => true)).resolves.toEqual(
+      items,
+    );
+
+    expect(searchDanmakuCandidates).toHaveBeenCalledTimes(2);
+    expect(searchDanmakuCandidates).toHaveBeenLastCalledWith(
+      context.searchTitle,
+      undefined,
+      { force: true },
+    );
+    expect(fetchDanmakuComments).toHaveBeenCalledTimes(2);
+    expect(clearPersistedEpisodeId).not.toHaveBeenCalled();
+    expect(readDanmakuEpisodeId('source-a:video-a:0')).toBe(456);
+  });
+
+  it('refreshes only once and skips the failed ID returned by the refresh', async () => {
+    const stale = {
+      episodeId: 123,
+      animeTitle: '测试影片',
+      episodeTitle: '第1集',
+    };
+    (getPersistedEpisodeId as jest.Mock).mockResolvedValue(null);
+    (searchDanmakuCandidates as jest.Mock)
+      .mockResolvedValueOnce([stale])
+      .mockResolvedValueOnce([stale, { ...stale, episodeId: 456 }]);
+    (rankCandidatesByEpisode as jest.Mock).mockImplementation((items) => items);
+    (fetchDanmakuComments as jest.Mock).mockRejectedValue(
+      new DanmakuEpisodeNotFoundError(),
+    );
+
+    await expect(loadDanmakuForEpisode(context, () => true)).resolves.toEqual(
+      [],
+    );
+
+    expect(searchDanmakuCandidates).toHaveBeenCalledTimes(2);
+    expect(fetchDanmakuComments).toHaveBeenCalledTimes(2);
+    expect(fetchDanmakuComments).toHaveBeenLastCalledWith(456, undefined, {
+      force: undefined,
+      keyword: context.searchTitle,
+    });
+  });
+
+  it('shares the comment attempt budget across the initial and refreshed candidates', async () => {
+    const candidates = Array.from({ length: 6 }, (_, index) => ({
+      episodeId: index + 1,
+      animeTitle: '测试影片',
+      episodeTitle: '第1集',
+    }));
+    (getPersistedEpisodeId as jest.Mock).mockResolvedValue(null);
+    (searchDanmakuCandidates as jest.Mock)
+      .mockResolvedValueOnce(candidates)
+      .mockResolvedValueOnce(
+        candidates.map((item) => ({ ...item, episodeId: item.episodeId + 10 })),
+      );
+    (rankCandidatesByEpisode as jest.Mock).mockImplementation((items) => items);
+    (fetchDanmakuComments as jest.Mock)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new DanmakuEpisodeNotFoundError())
+      .mockResolvedValue([]);
+
+    await loadDanmakuForEpisode(context, () => true);
+
+    expect(searchDanmakuCandidates).toHaveBeenCalledTimes(2);
+    expect(fetchDanmakuComments).toHaveBeenCalledTimes(7);
+  });
+
+  it('does not restart the search after an invalid candidate if the episode changed', async () => {
+    let current = true;
+    (fetchDanmakuComments as jest.Mock).mockImplementation(async () => {
+      current = false;
+      throw new DanmakuEpisodeNotFoundError();
+    });
+
+    await loadDanmakuForEpisode(context, () => true, {
+      isCurrent: () => current,
+    });
+
+    expect(searchDanmakuCandidates).not.toHaveBeenCalled();
+    expect(clearPersistedEpisodeId).not.toHaveBeenCalled();
   });
 
   it('validates manually bound titles using the saved search keyword', async () => {
