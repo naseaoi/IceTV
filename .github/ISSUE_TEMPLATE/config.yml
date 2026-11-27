@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 部署文档
+    url: https://github.com/naseaoi/IceTV/blob/main/docs/deployment.md
+    about: 部署方式、环境变量与常见配置
