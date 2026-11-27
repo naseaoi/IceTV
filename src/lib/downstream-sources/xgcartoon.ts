@@ -1,10 +1,10 @@
 import type { ApiSite } from '@/lib/config';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { getUpstreamErrorType } from '@/lib/proxy-diagnostics';
 import {
   readTextLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
-import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
@@ -34,7 +34,12 @@ const XGCARTOON_FALLBACK_ORIGINS = [
 ];
 
 export function isXgcartoonSource(apiSite: ApiSite): boolean {
-  return /xgcartoon\.com/i.test(apiSite.api);
+  try {
+    const hostname = new URL(apiSite.api).hostname;
+    return hostname === 'xgcartoon.com' || hostname.endsWith('.xgcartoon.com');
+  } catch {
+    return false;
+  }
 }
 
 function getXgcartoonOrigins(apiSite: ApiSite): string[] {
@@ -45,6 +50,7 @@ async function fetchXgcartoonHtml(
   url: string,
   signal?: AbortSignal,
   referer?: string,
+  onFailure?: (reason: string) => void,
 ): Promise<{ html: string; finalUrl: string } | null> {
   const abortState = createTimedAbortController(signal, 10000);
 
@@ -59,6 +65,7 @@ async function fetchXgcartoonHtml(
     });
     if (!res.ok) {
       await res.body?.cancel();
+      onFailure?.(`西瓜卡通搜索失败 (${res.status})`);
       return null;
     }
     return {
@@ -67,6 +74,11 @@ async function fetchXgcartoonHtml(
     };
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
+    onFailure?.(
+      abortState.isTimeout()
+        ? '西瓜卡通搜索超时'
+        : `西瓜卡通搜索请求失败 (${getUpstreamErrorType(error) || 'unknown'})`,
+    );
     return null;
   } finally {
     abortState.cleanup();
@@ -78,14 +90,17 @@ async function fetchXgcartoonHtmlFromOrigins(
   path: string,
   signal?: AbortSignal,
   referer?: string,
+  failures?: string[],
 ): Promise<{ origin: string; html: string; finalUrl: string } | null> {
-  for (const origin of origins) {
+  for (const [index, origin] of origins.entries()) {
     if (signal?.aborted) {
       return null;
     }
 
     const url = toAbsoluteUrl(path, origin);
-    const result = await fetchXgcartoonHtml(url, signal, referer);
+    const result = await fetchXgcartoonHtml(url, signal, referer, (reason) => {
+      failures?.push(`入口${index + 1}: ${reason}`);
+    });
     if (!result) {
       continue;
     }
@@ -116,16 +131,19 @@ export async function searchFromXgcartoon(
 
   const origins = getXgcartoonOrigins(apiSite);
   const searchPath = `/search?q=${encodeURIComponent(query)}`;
+  const failures: string[] = [];
 
   try {
     const result = await fetchXgcartoonHtmlFromOrigins(
       origins,
       searchPath,
       signal,
+      undefined,
+      failures,
     );
+    if (signal?.aborted) return [];
     if (!result) {
-      if (signal?.aborted) return [];
-      throw new SearchSourceUnavailableError(apiSite.name);
+      throw new Error(failures.join('; '));
     }
 
     const parsedResults = extractXgcartoonSearchResults(result.html);
@@ -133,7 +151,12 @@ export async function searchFromXgcartoon(
       !parsedResults.length &&
       !/共\s*0\s*[条條]\s*搜索[结結]果/.test(result.html)
     ) {
-      throw new SearchSourceUnavailableError(apiSite.name);
+      throw new Error(
+        [
+          ...failures,
+          `入口${failures.length + 1}: 西瓜卡通搜索页无法解析`,
+        ].join('; '),
+      );
     }
     const results = parsedResults.filter((item) =>
       isTitleMatchedSearchQuery(item.title, query),
@@ -154,9 +177,9 @@ export async function searchFromXgcartoon(
       douban_id: 0,
     }));
   } catch (error) {
-    if (signal?.aborted) return [];
     if (error instanceof ResourceLimitError) throw error;
-    throw new SearchSourceUnavailableError(apiSite.name);
+    if (signal?.aborted) return [];
+    throw error;
   }
 }
 

@@ -6,10 +6,8 @@ import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getCachedDetail } from '@/lib/detail-cache';
 import { searchFirstPageFromApi } from '@/lib/downstream';
-import { isGirigiriSource } from '@/lib/downstream-sources/giri';
+import { getSpecialSourceAdapter } from '@/lib/downstream-sources/registry.server';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { isXgcartoonSource } from '@/lib/downstream-sources/xgcartoon';
-import { isXifanSource } from '@/lib/downstream-sources/xifan';
 import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
@@ -315,9 +313,7 @@ async function searchQuickSite({
 
 function canStartFromSearch(site: ApiSite, source: SearchResult): boolean {
   if (
-    isGirigiriSource(site) ||
-    isXgcartoonSource(site) ||
-    isXifanSource(site) ||
+    getSpecialSourceAdapter(site)?.canStartFromSearch === false ||
     !source.id ||
     source.source !== site.key ||
     !source.title?.trim() ||

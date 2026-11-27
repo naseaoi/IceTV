@@ -44,7 +44,66 @@ beforeEach(() => {
 });
 afterEach(() => {
   global.fetch = originalFetch;
+  jest.useRealTimers();
   jest.clearAllMocks();
+});
+
+it('非 2xx 响应取消正文并保留 HTTP 状态码', async () => {
+  const cancel = jest.fn().mockResolvedValue(undefined);
+  (global.fetch as jest.Mock).mockResolvedValue({
+    ok: false,
+    status: 503,
+    body: { cancel },
+  });
+  await expect(searchFromXifan(site, '葬送')).rejects.toThrow(
+    '稀饭请求失败 (503)',
+  );
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+it('请求超时给出明确原因', async () => {
+  jest.useFakeTimers();
+  (global.fetch as jest.Mock).mockImplementation(
+    (_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () =>
+          reject(init.signal?.reason),
+        );
+      }),
+  );
+  const assertion = expect(searchFromXifan(site, '葬送')).rejects.toThrow(
+    '稀饭请求超时',
+  );
+  jest.advanceTimersByTime(10000);
+  await assertion;
+});
+
+it('网络异常保留原有类型与 cause', async () => {
+  const error = Object.assign(new TypeError('fetch failed'), {
+    cause: { code: 'ECONNRESET' },
+  });
+  (global.fetch as jest.Mock).mockRejectedValue(error);
+  await expect(searchFromXifan(site, '葬送')).rejects.toBe(error);
+});
+
+it('父级先取消后清理超过超时时间，仍保留取消错误', async () => {
+  jest.useFakeTimers();
+  const controller = new AbortController();
+  const reason = new DOMException('parent cancelled', 'AbortError');
+  (global.fetch as jest.Mock).mockImplementation(
+    (_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          setTimeout(() => reject(reason), 11000);
+        });
+      }),
+  );
+  const assertion = expect(
+    searchFromXifan(site, '葬送', controller.signal),
+  ).rejects.toBe(reason);
+  controller.abort(reason);
+  jest.advanceTimersByTime(11000);
+  await assertion;
 });
 
 it('通过统一搜索入口读取游客 API 并区分空结果与错误响应', async () => {

@@ -157,6 +157,29 @@ it.each([
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
+it.each([0, '0'])(
+  'maccms 无结果的 list: null 且 total 为 %j 按空结果处理',
+  async (total) => {
+    (global.fetch as jest.Mock).mockImplementation(async () =>
+      response({ code: 1, msg: '数据列表', pagecount: 0, total, list: null }),
+    );
+    await expect(
+      searchFromApi(site, '龙珠', { reportFailure: true }),
+    ).resolves.toEqual([]);
+    expect(recordSourceSearchOutcome).toHaveBeenCalledWith(
+      'cms',
+      'empty',
+      expect.any(Number),
+    );
+    expect(
+      getCachedSearchPage(getSourceCacheKey(site), '龙珠', 1)?.status,
+    ).toBe('ok');
+    await expect(
+      validateSourceSearch(site, '龙珠', new AbortController().signal),
+    ).resolves.toBe('no_results');
+  },
+);
+
 it('混合有效和脏条目时只保留有效条目，检测与搜索均成功', async () => {
   (global.fetch as jest.Mock).mockImplementation(async () =>
     response({

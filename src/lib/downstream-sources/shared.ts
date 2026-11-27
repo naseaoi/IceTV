@@ -14,8 +14,11 @@ export function createTimedAbortController(
 ) {
   const controller = new AbortController();
   let timeoutFired = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
+  // isTimeout() 只反映首个中止原因：父级先取消后，底层异步清理期间计时器到期也不算超时
   const abortFromParent = () => {
+    clearTimeout(timeoutId);
     controller.abort(parentSignal?.reason);
   };
 
@@ -23,12 +26,12 @@ export function createTimedAbortController(
     abortFromParent();
   } else {
     parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+    timeoutId = setTimeout(() => {
+      if (controller.signal.aborted) return;
+      timeoutFired = true;
+      controller.abort(new Error('timeout'));
+    }, timeoutMs);
   }
-
-  const timeoutId = setTimeout(() => {
-    timeoutFired = true;
-    controller.abort(new Error('timeout'));
-  }, timeoutMs);
 
   return {
     signal: controller.signal,

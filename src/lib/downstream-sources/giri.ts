@@ -6,12 +6,12 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { getUpstreamErrorType } from '@/lib/proxy-diagnostics';
 import {
   readJsonLimited,
   readTextLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
-import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -39,7 +39,12 @@ interface GirigiriPlayExtractResult {
 }
 
 export function isGirigiriSource(apiSite: ApiSite): boolean {
-  return /girigirilove\./i.test(apiSite.api);
+  // 站点更换过多个顶级域，按主机名中的 girigirilove 段识别
+  try {
+    return /(?:^|\.)girigirilove\./i.test(new URL(apiSite.api).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function isCfChallenge(html: string): boolean {
@@ -62,6 +67,8 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
       if (res.ok) {
         const html = await readTextLimited(res, UPSTREAM_METADATA_MAX_BYTES);
         if (!isCfChallenge(html)) return html;
+      } else {
+        await res.body?.cancel();
       }
     } catch (error) {
       if (error instanceof ResourceLimitError) throw error;
@@ -206,7 +213,7 @@ async function fetchGirigiriSuggestList(
   origin: string,
   query: string,
   signal?: AbortSignal,
-): Promise<GirigiriSuggestItem[] | null> {
+): Promise<{ list: GirigiriSuggestItem[] } | { failure: string }> {
   const searchUrl = `${origin}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(query)}`;
 
   const abortState = createTimedAbortController(signal, 8000);
@@ -219,18 +226,24 @@ async function fetchGirigiriSuggestList(
 
     if (!response.ok) {
       await response.body?.cancel();
-      return null;
+      return { failure: `girigiri 搜索失败 (${response.status})` };
     }
     const data = await readJsonLimited<any>(
       response,
       UPSTREAM_METADATA_MAX_BYTES,
     );
     return Array.isArray(data?.list)
-      ? (data.list as GirigiriSuggestItem[])
-      : null;
+      ? { list: data.list as GirigiriSuggestItem[] }
+      : { failure: 'girigiri 搜索响应无效' };
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
-    return null;
+    return {
+      failure: abortState.isTimeout()
+        ? 'girigiri 搜索超时'
+        : error instanceof SyntaxError
+          ? 'girigiri 搜索响应不是有效 JSON'
+          : `girigiri 搜索请求失败 (${getUpstreamErrorType(error) || 'unknown'})`,
+    };
   } finally {
     abortState.cleanup();
   }
@@ -242,18 +255,21 @@ export async function searchFromGirigiri(
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const origins = getGirigiriOrigins(apiSite);
+  const failures: string[] = [];
 
   for (const origin of origins) {
     if (signal?.aborted) {
       return [];
     }
 
-    const list = await fetchGirigiriSuggestList(origin, query, signal);
-    if (!list) {
+    const result = await fetchGirigiriSuggestList(origin, query, signal);
+    if (signal?.aborted) return [];
+    if ('failure' in result) {
+      failures.push(`入口${failures.length + 1}: ${result.failure}`);
       continue;
     }
 
-    return list
+    return result.list
       .map((item) => {
         const id = String(item.id || '').trim();
         const title = normalizeInlineText(item.name || '');
@@ -278,7 +294,7 @@ export async function searchFromGirigiri(
   }
 
   if (signal?.aborted) return [];
-  throw new SearchSourceUnavailableError(apiSite.name);
+  throw new Error(failures.join('; '));
 }
 
 async function resolveGirigiriEpisodeVariants(

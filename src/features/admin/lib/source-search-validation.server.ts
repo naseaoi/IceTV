@@ -3,15 +3,7 @@ import {
   parseCmsSearchPayload,
 } from '@/lib/cms-search.server';
 import { type ApiSite, API_CONFIG } from '@/lib/config';
-import {
-  isGirigiriSource,
-  searchFromGirigiri,
-} from '@/lib/downstream-sources/giri';
-import {
-  isXgcartoonSource,
-  searchFromXgcartoon,
-} from '@/lib/downstream-sources/xgcartoon';
-import { isXifanSource, searchFromXifan } from '@/lib/downstream-sources/xifan';
+import { getSpecialSourceAdapter } from '@/lib/downstream-sources/registry.server';
 import {
   readJsonLimited,
   UPSTREAM_METADATA_MAX_BYTES,
@@ -25,13 +17,7 @@ async function validateSourceSearchQuery(
   query: string,
   signal: AbortSignal,
 ): Promise<'valid' | 'no_results'> {
-  const search = isGirigiriSource(site)
-    ? searchFromGirigiri
-    : isXgcartoonSource(site)
-      ? searchFromXgcartoon
-      : isXifanSource(site)
-        ? searchFromXifan
-        : null;
+  const search = getSpecialSourceAdapter(site)?.search;
   if (search) {
     const results = await search(site, query, signal);
     // 特殊源在消费者取消时可能返回 []；检测超时仍属于失败。

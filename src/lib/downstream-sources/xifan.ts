@@ -4,6 +4,7 @@ import {
   readJsonLimited,
   UPSTREAM_METADATA_MAX_BYTES,
 } from '@/lib/proxy-response-limits';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import {
   getSignedUrlFreshMs,
   hasSignedUrlParams,
@@ -75,11 +76,18 @@ async function requestXifan(
       body: JSON.stringify(body),
       signal: abortState.signal,
     });
-    if (!response.ok) throw new Error(`稀饭请求失败 (${response.status})`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`稀饭请求失败 (${response.status})`);
+    }
     return await readJsonLimited<unknown>(
       response,
       UPSTREAM_METADATA_MAX_BYTES,
     );
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
+    if (abortState.isTimeout()) throw new Error('稀饭请求超时');
+    throw error;
   } finally {
     abortState.cleanup();
   }

@@ -349,7 +349,7 @@ function getErrorName(error: unknown): string {
   return error instanceof Error ? error.name : '';
 }
 
-function getUpstreamErrorType(error: unknown): string | undefined {
+export function getUpstreamErrorType(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const record = error as Record<string, unknown>;
   const cause = record.cause as Record<string, unknown> | undefined;

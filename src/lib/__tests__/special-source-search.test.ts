@@ -47,7 +47,32 @@ const sources = [
     empty: '<html><body>共 0 条搜索结果</body></html>',
     full: '<a href="/detail/anime" class="topic-list-item"><div class="h3 mb12">Anime</div></a>',
   },
+  {
+    key: 'tyyszy',
+    name: '天涯资源',
+    api: 'https://tyyszy.com/api.php/provide/vod',
+    empty: '<div class="movie-grid" id="movieGrid"></div>',
+    full: '<div class="movie-grid" id="movieGrid"><a href="/index.php/vod/detail/id/1.html" class="movie-card">Anime</a></div>',
+    detailPayload: JSON.stringify({
+      list: [
+        {
+          vod_id: 1,
+          vod_name: 'Anime',
+          vod_pic: '',
+          vod_play_url: '第1集$https://cdn.example/1.m3u8',
+        },
+      ],
+    }),
+  },
 ];
+
+function fullResponse(site: (typeof sources)[number], url: string) {
+  return new Response(
+    site.detailPayload && url.startsWith(site.api)
+      ? site.detailPayload
+      : site.full,
+  );
+}
 
 describe.each(sources)('$key search failures', (site) => {
   const options = {
@@ -90,7 +115,14 @@ describe.each(sources)('$key search failures', (site) => {
           );
           break;
         case 'parse':
-          fetchMock.mockImplementation(async () => new Response('{'));
+          fetchMock.mockImplementation(
+            async (url: string) =>
+              new Response(
+                site.key === 'tyyszy' && !url.startsWith(site.api)
+                  ? site.full
+                  : '{',
+              ),
+          );
           if (site.key === 'xgcartoon') {
             (extractXgcartoonSearchResults as jest.Mock).mockImplementation(
               () => {
@@ -117,7 +149,9 @@ describe.each(sources)('$key search failures', (site) => {
       await expect(searchFirstPageFromApi(site, 'Anime')).resolves.toEqual([]);
 
       resetXgcartoonParser();
-      fetchMock.mockImplementation(async () => new Response(site.full));
+      fetchMock.mockImplementation(async (url: string) =>
+        fullResponse(site, url),
+      );
       const recovered = await collectSearchAggregation({
         ...options,
         retryFailed: true,
@@ -141,11 +175,13 @@ describe.each(sources)('$key search failures', (site) => {
       results: [],
       failedSources: [],
     });
-    fetchMock.mockImplementation(async () => new Response(site.full));
+    fetchMock.mockImplementation(async (url: string) =>
+      fullResponse(site, url),
+    );
     const recovered = await collectSearchAggregation(options);
     expect(recovered.failedSources).toEqual([]);
     expect(recovered.results).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(site.key === 'tyyszy' ? 3 : 2);
   });
 
   it('does not report consumer cancellation as a source failure', async () => {

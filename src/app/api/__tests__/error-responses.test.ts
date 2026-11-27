@@ -69,6 +69,8 @@ jest.mock('@/lib/cron/runner', () => ({ startCronTask: jest.fn() }));
 jest.mock('@/lib/detail-cache', () => ({ getCachedDetail: jest.fn() }));
 jest.mock('@/lib/downstream-sources/giri', () => ({
   isGirigiriSource: () => true,
+  searchFromGirigiri: jest.fn(),
+  getDetailFromGirigiri: jest.fn(),
   resolveGirigiriEpisodePlayUrlByPath: jest.fn(),
 }));
 jest.mock('@/lib/server-proxy-guard', () => ({
@@ -76,6 +78,8 @@ jest.mock('@/lib/server-proxy-guard', () => ({
 }));
 jest.mock('@/lib/downstream-sources/xgcartoon', () => ({
   isXgcartoonSource: () => false,
+  searchFromXgcartoon: jest.fn(),
+  getDetailFromXgcartoon: jest.fn(),
   resolveXgcartoonEpisodeUrlByPath: jest.fn(),
 }));
 

@@ -8,15 +8,19 @@ import {
   searchFromApi,
 } from '@/lib/downstream';
 import { searchFromGirigiri } from '@/lib/downstream-sources/giri';
-import { searchFromXgcartoon } from '@/lib/downstream-sources/xgcartoon';
+import { specialSourceAdapters } from '@/lib/downstream-sources/registry.server';
 import {
   dedupeSearchLoad,
   getCachedSearchPage,
   loadSpecialSourceSearch,
   peekCachedSearchPage,
+  setCachedSearchPage,
 } from '@/lib/search-cache';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
-import { ResourceLimitError } from '@/lib/server-resource-errors';
+import {
+  ResourceLimitError,
+  UpstreamCooldownError,
+} from '@/lib/server-resource-errors';
 import { recordSourceSearchOutcome } from '@/lib/source-health.server';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -33,9 +37,17 @@ jest.mock('@/lib/downstream-sources/giri', () => ({
   ...jest.requireActual('@/lib/downstream-sources/giri'),
   searchFromGirigiri: jest.fn(),
 }));
+jest.mock('@/lib/downstream-sources/tyyszy', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/tyyszy'),
+  searchFromTyyszy: jest.fn(),
+}));
 jest.mock('@/lib/downstream-sources/xgcartoon', () => ({
   ...jest.requireActual('@/lib/downstream-sources/xgcartoon'),
   searchFromXgcartoon: jest.fn(),
+}));
+jest.mock('@/lib/downstream-sources/xifan', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/xifan'),
+  searchFromXifan: jest.fn(),
 }));
 jest.mock('@/lib/search-cache', () => ({
   acquireUpstreamSearchSlot: jest.fn(async () => () => {}),
@@ -64,6 +76,20 @@ jest.mock('@/lib/upstream-fetch.server', () => ({
 }));
 
 installStreamPolyfills();
+
+const specialSourceApis: Record<keyof typeof specialSourceAdapters, string> = {
+  giri: 'https://www.girigirilove.com',
+  xgcartoon: 'https://www.xgcartoon.com',
+  xifan: 'https://next.xifanacg.com',
+  tyyszy: 'https://tyyszy.com/api.php/provide/vod',
+};
+const specialSources = Object.entries(specialSourceAdapters).map(
+  ([name, adapter]) => ({
+    name,
+    api: specialSourceApis[name as keyof typeof specialSourceApis],
+    search: adapter.search,
+  }),
+);
 
 const site: ApiSite = { key: 'a', name: 'A', api: 'https://example.com/api' };
 const fetchMock = fetchUpstream as jest.Mock;
@@ -278,12 +304,9 @@ describe('special source samples', () => {
     expect(recordSourceSearchOutcome).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['giri', 'https://www.girigirilove.com', searchFromGirigiri],
-    ['xgcartoon', 'https://www.xgcartoon.com', searchFromXgcartoon],
-  ])(
-    'probes %s without the shared search cache',
-    async (_name, api, search) => {
+  it.each(specialSources)(
+    'probes $name without the shared search cache',
+    async ({ api, search }) => {
       (search as jest.Mock).mockResolvedValue([]);
       await expect(
         probeSourceSearch({ ...site, api }, 'movie'),
@@ -429,12 +452,9 @@ it('preserves distinct source identities and the original unique array', async (
   expect(await searchFirstPageFromApi(site, 'movie')).toBe(cached);
 });
 
-it.each([
-  ['giri', 'https://www.girigirilove.com', searchFromGirigiri],
-  ['xgcartoon', 'https://www.xgcartoon.com', searchFromXgcartoon],
-])(
-  'deduplicates %s results at both search entry points',
-  async (_name, api, search) => {
+it.each(specialSources)(
+  'deduplicates $name results at both search entry points',
+  async ({ api, search }) => {
     const first = searchResult('1');
     const second = searchResult('2');
     const cached = [first, { ...first, title: 'duplicate' }, second];
@@ -548,5 +568,178 @@ describe('first-page failure reporting', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(dedupeSearchLoad).not.toHaveBeenCalled();
     expect(results.map((result) => result.title)).toEqual(['Movie']);
+  });
+});
+
+describe('search failure log', () => {
+  let warn: jest.SpyInstance;
+  beforeEach(() => {
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  const failureLogs = () =>
+    warn.mock.calls
+      .filter(([tag]) => tag === '[search.failure]')
+      .map(([, data]) => data);
+
+  it('records the HTTP status without the query', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      body: { cancel: jest.fn().mockResolvedValue(undefined) },
+    });
+    await searchFromApi(site, 'secret query');
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({
+        source: 'a',
+        page: 1,
+        reason: 'http',
+        status: 403,
+      }),
+    ]);
+    expect(JSON.stringify(failureLogs())).not.toContain('secret');
+  });
+
+  it('records invalid payloads and the network error code', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ list: 'invalid' })),
+    );
+    await searchFromApi(site, 'movie');
+    fetchMock.mockRejectedValueOnce(
+      new TypeError('fetch failed', {
+        cause: Object.assign(new Error('reset'), { code: 'ECONNRESET' }),
+      }),
+    );
+    await searchFromApi(site, 'other');
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({ reason: 'invalid-payload', status: null }),
+      expect.objectContaining({
+        reason: 'request',
+        errorType: 'TypeError:ECONNRESET',
+      }),
+    ]);
+  });
+
+  it('records and caches its own timeout', async () => {
+    jest.useFakeTimers();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          markStarted();
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason),
+          );
+        }),
+    );
+    const result = searchFromApi(site, 'movie');
+    await started;
+    jest.advanceTimersByTime(8000);
+    await result;
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({ reason: 'timeout' }),
+    ]);
+    expect(setCachedSearchPage).toHaveBeenCalledWith(
+      expect.any(String),
+      'movie',
+      1,
+      'timeout',
+      [],
+    );
+  });
+
+  it('records received upstream rate limits but not cooldown hits or local limits', async () => {
+    fetchMock.mockRejectedValueOnce(new UpstreamCooldownError(30, true));
+    await expect(searchFromApi(site, 'movie')).rejects.toBeInstanceOf(
+      UpstreamCooldownError,
+    );
+    fetchMock.mockRejectedValueOnce(new UpstreamCooldownError(30, false));
+    await expect(searchFromApi(site, 'movie')).rejects.toBeInstanceOf(
+      UpstreamCooldownError,
+    );
+    fetchMock.mockRejectedValueOnce(new ResourceLimitError());
+    await expect(searchFromApi(site, 'movie')).rejects.toBeInstanceOf(
+      ResourceLimitError,
+    );
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({ reason: 'upstream-cooldown' }),
+    ]);
+  });
+
+  it('skips parent cancellation', async () => {
+    const parent = new AbortController();
+    fetchMock.mockImplementation(async () => {
+      parent.abort();
+      throw new Error('cancelled');
+    });
+    await probeSourceSearch(site, 'movie', parent.signal);
+    expect(failureLogs()).toEqual([]);
+    expect(setCachedSearchPage).not.toHaveBeenCalled();
+  });
+
+  it('keeps parent cancellation when the timeout elapses during upstream cleanup', async () => {
+    jest.useFakeTimers();
+    const parent = new AbortController();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          markStarted();
+          init.signal?.addEventListener('abort', () => {
+            setTimeout(() => reject(init.signal?.reason), 10000);
+          });
+        }),
+    );
+    const probe = probeSourceSearch(site, 'movie', parent.signal);
+    await started;
+    parent.abort();
+    jest.advanceTimersByTime(20000);
+    await probe;
+    expect(failureLogs()).toEqual([]);
+    expect(setCachedSearchPage).not.toHaveBeenCalled();
+    expect(recordSourceSearchOutcome).not.toHaveBeenCalled();
+  });
+
+  it('replaces JSON parse messages that may echo response text', async () => {
+    (searchFromGirigiri as jest.Mock).mockRejectedValue(
+      new SyntaxError('Unexpected token, "secret query" is not valid JSON'),
+    );
+    await probeSourceSearch(
+      { key: 'giri', name: 'Giri', api: 'https://anime.girigirilove.icu' },
+      'movie',
+    );
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({
+        reason: 'adapter',
+        message: '响应不是有效 JSON',
+      }),
+    ]);
+    expect(JSON.stringify(failureLogs())).not.toContain('secret');
+  });
+
+  it('records special source adapter errors with their message', async () => {
+    (searchFromGirigiri as jest.Mock).mockRejectedValue(
+      new Error('girigiri failed (503)'),
+    );
+    await probeSourceSearch(
+      { key: 'giri', name: 'Giri', api: 'https://anime.girigirilove.icu' },
+      'movie',
+    );
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({
+        source: 'giri',
+        reason: 'adapter',
+        message: 'girigiri failed (503)',
+      }),
+    ]);
   });
 });

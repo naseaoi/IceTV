@@ -1,7 +1,12 @@
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
-import { resolveXgcartoonEpisodeUrlByPath } from '@/lib/downstream-sources/xgcartoon';
+import {
+  getDetailFromXgcartoon,
+  resolveXgcartoonEpisodeUrlByPath,
+  searchFromXgcartoon,
+} from '@/lib/downstream-sources/xgcartoon';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 
 installStreamPolyfills();
 
@@ -18,6 +23,149 @@ function createXgcartoonSite(api = 'https://www.xgcartoon.com'): ApiSite {
     api,
   };
 }
+
+describe('西瓜卡通搜索失败诊断', () => {
+  const site = createXgcartoonSite();
+  const query = '私密搜索词';
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  it('全部入口 HTTP 失败保留各入口状态码并取消正文', async () => {
+    const cancels = [jest.fn(), jest.fn(), jest.fn()];
+    const fetchMock = global.fetch as jest.Mock;
+    [503, 403, 502].forEach((status, index) => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status,
+        body: { cancel: cancels[index] },
+      });
+    });
+    const pending = searchFromXgcartoon(site, query);
+    await expect(pending).rejects.toThrow('入口1: 西瓜卡通搜索失败 (503)');
+    await expect(pending).rejects.toThrow('入口2: 西瓜卡通搜索失败 (403)');
+    await expect(pending).rejects.toThrow('入口3: 西瓜卡通搜索失败 (502)');
+    await expect(pending).rejects.not.toThrow(query);
+    await expect(pending).rejects.not.toThrow('https://');
+    expect(fetchMock.mock.calls.map(([url]) => new URL(url).origin)).toEqual([
+      'https://www.xgcartoon.com',
+      'https://cn1.xgcartoon.com',
+      'https://cn.xgcartoon.com',
+    ]);
+    cancels.forEach((cancel) => expect(cancel).toHaveBeenCalledTimes(1));
+  });
+
+  it('汇总 HTTP、超时与网络异常，排除上游错误里的关键词和地址', async () => {
+    jest.useFakeTimers();
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock
+      .mockImplementationOnce(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(init.signal?.reason),
+            );
+          }),
+      )
+      .mockResolvedValueOnce({ ok: false, status: 403, body: null })
+      .mockRejectedValueOnce(
+        Object.assign(new TypeError(`https://example.test/?q=${query}`), {
+          cause: { code: 'ECONNRESET' },
+        }),
+      );
+    const pending = searchFromXgcartoon(site, query);
+    const assertion = expect(pending).rejects.toThrow(
+      '入口1: 西瓜卡通搜索超时; 入口2: 西瓜卡通搜索失败 (403); 入口3: 西瓜卡通搜索请求失败 (TypeError:ECONNRESET)',
+    );
+    jest.advanceTimersByTime(10000);
+    await assertion;
+    await expect(pending).rejects.not.toThrow(query);
+    await expect(pending).rejects.not.toThrow('https://');
+  });
+
+  it('首入口失败后继续下一入口，明确零结果标记才返回空数组', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(createTextResponse('共 0 条 搜索结果'));
+    await expect(searchFromXgcartoon(site, query)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('不可解析页面带具体原因，保持首个成功 HTTP 响应终止回退', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue(
+      createTextResponse(`<html>blocked ${query}</html>`),
+    );
+    const pending = searchFromXgcartoon(site, query);
+    await expect(pending).rejects.toThrow('西瓜卡通搜索页无法解析');
+    await expect(pending).rejects.not.toThrow(query);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('回退后页面无法解析时，保留之前入口的失败原因', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ ok: false, status: 503, body: null })
+      .mockResolvedValueOnce(createTextResponse('<html>blocked</html>'));
+    await expect(searchFromXgcartoon(site, query)).rejects.toThrow(
+      '入口1: 西瓜卡通搜索失败 (503); 入口2: 西瓜卡通搜索页无法解析',
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    '父级取消返回空数组，预先取消=%s',
+    async (alreadyAborted) => {
+      const controller = new AbortController();
+      (global.fetch as jest.Mock).mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(init.signal?.reason),
+            );
+          }),
+      );
+      if (alreadyAborted) controller.abort();
+      const pending = searchFromXgcartoon(site, query, controller.signal);
+      controller.abort();
+      await expect(pending).resolves.toEqual([]);
+      expect(global.fetch).toHaveBeenCalledTimes(alreadyAborted ? 0 : 1);
+    },
+  );
+
+  it('ResourceLimitError 原样抛出并停止入口回退', async () => {
+    const error = new ResourceLimitError();
+    (global.fetch as jest.Mock).mockRejectedValue(error);
+    await expect(searchFromXgcartoon(site, query)).rejects.toBe(error);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('非搜索播放页继续回退入口，全部失败仍返回 null', async () => {
+    (global.fetch as jest.Mock).mockRejectedValue(
+      new TypeError('fetch failed'),
+    );
+    await expect(
+      resolveXgcartoonEpisodeUrlByPath(site, '/video/test/c1.html'),
+    ).resolves.toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('非搜索详情全部入口失败仍抛原有详情错误', async () => {
+    (global.fetch as jest.Mock).mockRejectedValue(
+      new TypeError('fetch failed'),
+    );
+    await expect(getDetailFromXgcartoon(site, 'test')).rejects.toThrow(
+      '详情页请求失败',
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+});
 
 describe('downstream xgcartoon source', () => {
   beforeEach(() => {

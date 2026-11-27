@@ -52,6 +52,8 @@ jest.mock('@/lib/detail-cache', () => ({
 }));
 jest.mock('@/lib/downstream-sources/giri', () => ({
   isGirigiriSource: () => true,
+  searchFromGirigiri: jest.fn(),
+  getDetailFromGirigiri: jest.fn(),
   resolveGirigiriEpisodePlayUrlByPath: jest.fn(
     async () => 'https://media.example/video.m3u8',
   ),

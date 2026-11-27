@@ -6,50 +6,14 @@ import {
 } from '@/app/api/episode-url/cache';
 import { withAuthenticatedSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import type { ActiveUserInfo } from '@/lib/api-auth';
-import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
-import {
-  isGirigiriSource,
-  resolveGirigiriEpisodePlayUrlByPath,
-} from '@/lib/downstream-sources/giri';
-import {
-  isXgcartoonSource,
-  resolveXgcartoonEpisodeUrlByPath,
-} from '@/lib/downstream-sources/xgcartoon';
-import {
-  isXifanSource,
-  resolveXifanEpisodeUrlByPath,
-} from '@/lib/downstream-sources/xifan';
+import { specialSourceAdapters } from '@/lib/downstream-sources/registry.server';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-
-function matchesLazyKind(kind: string, apiSite: ApiSite): boolean {
-  if (kind === 'giri') return isGirigiriSource(apiSite);
-  if (kind === 'xgcartoon') return isXgcartoonSource(apiSite);
-  if (kind === 'xifan') return isXifanSource(apiSite);
-  return false;
-}
-
-async function resolveEpisodeUrl(
-  kind: string,
-  apiSite: ApiSite,
-  path: string,
-): Promise<string> {
-  const resolved =
-    kind === 'giri'
-      ? await resolveGirigiriEpisodePlayUrlByPath(apiSite, path)
-      : kind === 'xifan'
-        ? await resolveXifanEpisodeUrlByPath(apiSite, path)
-        : await resolveXgcartoonEpisodeUrlByPath(apiSite, path);
-  if (!resolved) {
-    throw new Error('播放地址解析失败');
-  }
-  return resolved;
-}
 
 export async function GET(request: NextRequest) {
   return withAuthenticatedSourceProbeBudget(request, handleGet);
@@ -78,7 +42,8 @@ async function handleGet(request: NextRequest, guardResult: ActiveUserInfo) {
     );
     const apiSite = apiSites.find((site) => site.key === sourceCode);
 
-    if (!apiSite || !matchesLazyKind(target.kind, apiSite)) {
+    const adapter = specialSourceAdapters[target.kind];
+    if (!apiSite || !adapter || !adapter.matches(apiSite)) {
       return NextResponse.json({ error: '无效的API来源' }, { status: 400 });
     }
 
@@ -93,7 +58,11 @@ async function handleGet(request: NextRequest, guardResult: ActiveUserInfo) {
     }
 
     const cacheKey = getEpisodeUrlCacheKey(apiSite, lazyUrl);
-    const loader = () => resolveEpisodeUrl(target.kind, apiSite, target.path);
+    const loader = async () => {
+      const resolved = await adapter.episode.resolve(apiSite, target.path);
+      if (!resolved) throw new Error('播放地址解析失败');
+      return resolved;
+    };
     const url = forceRefresh
       ? await episodeUrlCache.refresh(cacheKey, loader, request.signal)
       : IS_DEVELOPMENT

@@ -1,5 +1,10 @@
 import 'server-only';
 
+import type { ApiSite } from '@/lib/config';
+import { parseSeriesStatus } from '@/lib/series-status';
+import type { SearchResult } from '@/lib/types';
+import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
+
 export interface CmsSearchItem {
   vod_id: string | number;
   vod_name: string;
@@ -42,16 +47,21 @@ export function parseCmsSearchPayload(
 ): { list: CmsSearchItem[]; pageCount: number } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const data = value as Record<string, unknown>;
+  // maccms 无结果时返回 list: null 且 total 为 0，属于正常空结果，不能记成源失败
+  const rawList =
+    data.list === null && [0, '0'].includes(data.total as number | string)
+      ? []
+      : data.list;
   if (
     (data.code !== undefined &&
       ((typeof data.code !== 'number' && typeof data.code !== 'string') ||
         ![1, 200].includes(Number(data.code)))) ||
     data.success === false ||
-    !Array.isArray(data.list)
+    !Array.isArray(rawList)
   ) {
     return null;
   }
-  const list = data.list.filter((item): item is CmsSearchItem => {
+  const list = rawList.filter((item): item is CmsSearchItem => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
     return (
       typeof item.vod_name === 'string' &&
@@ -59,7 +69,7 @@ export function parseCmsSearchPayload(
         (typeof item.vod_id === 'number' && Number.isFinite(item.vod_id)))
     );
   });
-  if (data.list.length > 0 && list.length === 0) return null;
+  if (rawList.length > 0 && list.length === 0) return null;
   const pageCount =
     typeof data.pagecount === 'number' || typeof data.pagecount === 'string'
       ? Number(data.pagecount)
@@ -67,5 +77,70 @@ export function parseCmsSearchPayload(
   return {
     list,
     pageCount: Number.isSafeInteger(pageCount) && pageCount > 0 ? pageCount : 1,
+  };
+}
+
+function isSupportedVodPlaybackUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return pathname.endsWith('.m3u8') || pathname.endsWith('.mp4');
+  } catch {
+    return /\.(?:m3u8|mp4)(?:$|[?#])/i.test(url);
+  }
+}
+
+export function parseVodPlayUrl(vodPlayUrl: string): {
+  episodes: string[];
+  titles: string[];
+} {
+  let episodes: string[] = [];
+  let titles: string[] = [];
+
+  const sources = vodPlayUrl.split('$$$');
+  for (const source of sources) {
+    const matchEpisodes: string[] = [];
+    const matchTitles: string[] = [];
+    const pairs = source.split('#');
+    for (const pair of pairs) {
+      const parts = pair.split('$');
+      if (parts.length === 2 && isSupportedVodPlaybackUrl(parts[1])) {
+        matchTitles.push(normalizeInlineText(parts[0]));
+        matchEpisodes.push(parts[1]);
+      }
+    }
+    if (matchEpisodes.length > episodes.length) {
+      episodes = matchEpisodes;
+      titles = matchTitles;
+    }
+  }
+
+  return { episodes, titles };
+}
+
+export function mapCmsSearchItem(
+  apiSite: ApiSite,
+  item: CmsSearchItem,
+): SearchResult {
+  const { episodes, titles } = item.vod_play_url
+    ? parseVodPlayUrl(item.vod_play_url)
+    : { episodes: [], titles: [] };
+
+  return {
+    id: item.vod_id.toString(),
+    title: normalizeInlineText(item.vod_name),
+    poster: item.vod_pic,
+    episodes,
+    episodes_titles: titles,
+    source: apiSite.key,
+    source_name: apiSite.name,
+    class: item.vod_class,
+    year: item.vod_year ? item.vod_year.match(/\d{4}/)?.[0] || '' : 'unknown',
+    desc: cleanHtmlTags(item.vod_content || ''),
+    type_name: item.type_name,
+    series_status: parseSeriesStatus({
+      ...item,
+      episodeCount: episodes.length,
+    }),
+    douban_id: item.vod_douban_id,
   };
 }

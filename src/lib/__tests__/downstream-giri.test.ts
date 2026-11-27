@@ -1,7 +1,11 @@
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
-import { resolveGirigiriEpisodePlayUrlByPath } from '@/lib/downstream-sources/giri';
+import {
+  resolveGirigiriEpisodePlayUrlByPath,
+  searchFromGirigiri,
+} from '@/lib/downstream-sources/giri';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 
 jest.mock('@/lib/config', () => ({
   API_CONFIG: {
@@ -43,6 +47,104 @@ function createGenericSite(): ApiSite {
     api: 'https://api.example',
   };
 }
+
+describe('giri 搜索失败诊断', () => {
+  const site = createGiriSite('https://anime.girigirilove.icu');
+  const query = '私密搜索词';
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  it('HTTP 失败带入口与状态码，并取消正文', async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 503,
+      body: { cancel },
+    });
+
+    await expect(searchFromGirigiri(site, query)).rejects.toThrow(
+      '入口1: girigiri 搜索失败 (503)',
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('网络错误保留底层类型，消息排除关键词与完整地址', async () => {
+    const error = Object.assign(
+      new TypeError(`fetch failed https://example.test/?q=${query}`),
+      { cause: { code: 'ECONNRESET' } },
+    );
+    (global.fetch as jest.Mock).mockRejectedValue(error);
+
+    const pending = searchFromGirigiri(site, query);
+    await expect(pending).rejects.toThrow('TypeError:ECONNRESET');
+    await expect(pending).rejects.not.toThrow(query);
+    await expect(pending).rejects.not.toThrow('https://');
+  });
+
+  it.each([
+    ['invalid', '搜索响应不是有效 JSON'],
+    [JSON.stringify({ error: 'unavailable' }), '搜索响应无效'],
+  ])('异常响应给出安全的解析原因：%s', async (payload, message) => {
+    (global.fetch as jest.Mock).mockResolvedValue(
+      createTextResponse(payload === 'invalid' ? `invalid ${query}` : payload),
+    );
+    const pending = searchFromGirigiri(site, query);
+    await expect(pending).rejects.toThrow(message);
+    await expect(pending).rejects.not.toThrow(query);
+  });
+
+  it('内部超时与网络错误分开报告', async () => {
+    jest.useFakeTimers();
+    (global.fetch as jest.Mock).mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason),
+          );
+        }),
+    );
+    const assertion = expect(searchFromGirigiri(site, query)).rejects.toThrow(
+      'girigiri 搜索超时',
+    );
+    jest.advanceTimersByTime(8000);
+    await assertion;
+  });
+
+  it.each([false, true])(
+    '父级取消返回空数组，预先取消=%s',
+    async (alreadyAborted) => {
+      const controller = new AbortController();
+      (global.fetch as jest.Mock).mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(init.signal?.reason),
+            );
+          }),
+      );
+      if (alreadyAborted) controller.abort();
+      const pending = searchFromGirigiri(site, query, controller.signal);
+      controller.abort();
+      await expect(pending).resolves.toEqual([]);
+      expect(global.fetch).toHaveBeenCalledTimes(alreadyAborted ? 0 : 1);
+    },
+  );
+
+  it('ResourceLimitError 保持同一错误对象', async () => {
+    const error = new ResourceLimitError();
+    (global.fetch as jest.Mock).mockRejectedValue(error);
+    await expect(searchFromGirigiri(site, query)).rejects.toBe(error);
+  });
+});
 
 describe('downstream giri source', () => {
   beforeEach(() => {

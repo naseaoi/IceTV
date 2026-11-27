@@ -1,29 +1,20 @@
 import {
   buildCmsSearchUrl,
+  mapCmsSearchItem,
   parseCmsSearchPayload,
+  parseVodPlayUrl,
 } from '@/lib/cms-search.server';
 import { waitForSharedLoad } from '@/lib/concurrency';
 import { API_CONFIG, ApiSite, getConfigForRead } from '@/lib/config';
 import {
-  getDetailFromGirigiri,
-  isGirigiriSource,
-  searchFromGirigiri,
-} from '@/lib/downstream-sources/giri';
+  type SpecialSourceAdapter,
+  getSpecialSourceAdapter,
+} from '@/lib/downstream-sources/registry.server';
 import {
   createTimedAbortController,
-  isAbortError,
   runWithConcurrency,
 } from '@/lib/downstream-sources/shared';
-import {
-  getDetailFromXgcartoon,
-  isXgcartoonSource,
-  searchFromXgcartoon,
-} from '@/lib/downstream-sources/xgcartoon';
-import {
-  getDetailFromXifan,
-  isXifanSource,
-  searchFromXifan,
-} from '@/lib/downstream-sources/xifan';
+import { getUpstreamErrorType } from '@/lib/proxy-diagnostics';
 import {
   readJsonLimited,
   readTextLimited,
@@ -46,7 +37,10 @@ import { searchWithScriptFallback } from '@/lib/search-script-fallback';
 import { SearchSourceUnavailableError } from '@/lib/search-source-error';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { parseSeriesStatus } from '@/lib/series-status';
-import { ResourceLimitError } from '@/lib/server-resource-errors';
+import {
+  ResourceLimitError,
+  UpstreamCooldownError,
+} from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
 import {
   type SourceSearchOutcome,
@@ -75,43 +69,6 @@ async function readSearchRuntimeParams() {
   } catch {
     return DEFAULT_RUNTIME_PARAMS;
   }
-}
-
-function isSupportedVodPlaybackUrl(url: string): boolean {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    return pathname.endsWith('.m3u8') || pathname.endsWith('.mp4');
-  } catch {
-    return /\.(?:m3u8|mp4)(?:$|[?#])/i.test(url);
-  }
-}
-
-function parseVodPlayUrl(vodPlayUrl: string): {
-  episodes: string[];
-  titles: string[];
-} {
-  let episodes: string[] = [];
-  let titles: string[] = [];
-
-  const sources = vodPlayUrl.split('$$$');
-  for (const source of sources) {
-    const matchEpisodes: string[] = [];
-    const matchTitles: string[] = [];
-    const pairs = source.split('#');
-    for (const pair of pairs) {
-      const parts = pair.split('$');
-      if (parts.length === 2 && isSupportedVodPlaybackUrl(parts[1])) {
-        matchTitles.push(normalizeInlineText(parts[0]));
-        matchEpisodes.push(parts[1]);
-      }
-    }
-    if (matchEpisodes.length > episodes.length) {
-      episodes = matchEpisodes;
-      titles = matchTitles;
-    }
-  }
-
-  return { episodes, titles };
 }
 
 async function searchWithCache(
@@ -156,6 +113,42 @@ async function searchWithCache(
   );
 }
 
+type SearchFailureReason =
+  | 'http'
+  | 'invalid-payload'
+  | 'timeout'
+  | 'upstream-cooldown'
+  | 'request'
+  | 'adapter';
+
+// 仅在真实回源失败时记录；健康样本只分 ok/empty/error，失败原因靠这条日志区分。
+// 不记录搜索关键词与地址，避免把用户输入写进日志。
+function logSearchFailure(
+  apiSite: ApiSite,
+  page: number,
+  reason: SearchFailureReason,
+  startedAt: number,
+  detail: { status?: number; error?: unknown } = {},
+): void {
+  console.warn('[search.failure]', {
+    source: apiSite.key,
+    page,
+    reason,
+    status: detail.status ?? null,
+    errorType: detail.error
+      ? (getUpstreamErrorType(detail.error) ?? null)
+      : null,
+    // JSON.parse 的报错会带上正文片段，可能回显关键词，只记录固定说明
+    message:
+      reason === 'adapter' && detail.error instanceof Error
+        ? detail.error instanceof SyntaxError
+          ? '响应不是有效 JSON'
+          : detail.error.message
+        : null,
+    elapsedMs: Date.now() - startedAt,
+  });
+}
+
 async function fetchAndCacheSearchPage(
   apiSite: ApiSite,
   query: string,
@@ -183,6 +176,9 @@ async function fetchAndCacheSearchPage(
 
     if (!response.ok) {
       await response.body?.cancel();
+      logSearchFailure(apiSite, page, 'http', startedAt, {
+        status: response.status,
+      });
       if (response.status === 403) {
         setCachedSearchPage(
           getSourceCacheKey(apiSite),
@@ -200,6 +196,7 @@ async function fetchAndCacheSearchPage(
     );
     latencyMs = Date.now() - startedAt;
     if (!data) {
+      logSearchFailure(apiSite, page, 'invalid-payload', startedAt);
       setCachedSearchPage(
         getSourceCacheKey(apiSite),
         query,
@@ -223,36 +220,9 @@ async function fetchAndCacheSearchPage(
       return { results: [], pageCount };
     }
 
-    const allResults = data.list.map((item) => {
-      const { episodes, titles } = item.vod_play_url
-        ? parseVodPlayUrl(item.vod_play_url)
-        : { episodes: [], titles: [] };
-
-      return {
-        id: item.vod_id.toString(),
-        title: normalizeInlineText(item.vod_name),
-        poster: item.vod_pic,
-        episodes,
-        episodes_titles: titles,
-        source: apiSite.key,
-        source_name: apiSite.name,
-        class: item.vod_class,
-        year: item.vod_year
-          ? item.vod_year.match(/\d{4}/)?.[0] || ''
-          : 'unknown',
-        desc: cleanHtmlTags(item.vod_content || ''),
-        type_name: item.type_name,
-        series_status: parseSeriesStatus({
-          ...item,
-          episodeCount: episodes.length,
-        }),
-        douban_id: item.vod_douban_id,
-      };
-    });
-
-    const results = allResults.filter(
-      (result: SearchResult) => result.episodes.length > 0,
-    );
+    const results = data.list
+      .map((item) => mapCmsSearchItem(apiSite, item))
+      .filter((result) => result.episodes.length > 0);
 
     const pageCount = page === 1 ? data.pageCount : undefined;
     setCachedSearchPage(
@@ -267,11 +237,26 @@ async function fetchAndCacheSearchPage(
   } catch (error: any) {
     if (error instanceof ResourceLimitError) {
       resourceLimited = true;
+      // 冷却命中与本站限额不是上游的真实失败；只有本次收到 429 / 503 时记录
+      if (error instanceof UpstreamCooldownError && error.responseReceived) {
+        logSearchFailure(apiSite, page, 'upstream-cooldown', startedAt);
+      }
       throw error;
     }
     abortState.cleanup();
-    const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
-    if (isAbortError(error) && !abortedByParent) {
+    const timedOut = abortState.isTimeout();
+    const abortedByParent = Boolean(signal?.aborted && !timedOut);
+    if (!abortedByParent) {
+      logSearchFailure(
+        apiSite,
+        page,
+        timedOut ? 'timeout' : 'request',
+        startedAt,
+        { error },
+      );
+    }
+    // 超时以 Error('timeout') 中止，fetch 原样抛出该 reason，不能用 isAbortError 识别
+    if (timedOut) {
       setCachedSearchPage(
         getSourceCacheKey(apiSite),
         query,
@@ -298,7 +283,7 @@ export async function probeSourceSearch(
 ): Promise<void> {
   if (signal?.aborted) return;
 
-  const specialSearch = getSpecialSourceSearch(apiSite);
+  const specialSearch = getSpecialSourceAdapter(apiSite)?.search;
   if (specialSearch) {
     try {
       // 跳过特殊源共享搜索缓存，直接回源采样
@@ -330,18 +315,7 @@ export async function probeSourceSearch(
   }
 }
 
-type SpecialSourceSearch = (
-  apiSite: ApiSite,
-  query: string,
-  signal?: AbortSignal,
-) => Promise<SearchResult[]>;
-
-function getSpecialSourceSearch(apiSite: ApiSite): SpecialSourceSearch | null {
-  if (isGirigiriSource(apiSite)) return searchFromGirigiri;
-  if (isXgcartoonSource(apiSite)) return searchFromXgcartoon;
-  if (isXifanSource(apiSite)) return searchFromXifan;
-  return null;
-}
+type SpecialSourceSearch = SpecialSourceAdapter['search'];
 
 // 适配器失败时抛错、真正无结果时返回空数组，据此记 error / empty / ok
 async function searchSpecialSourceWithSample(
@@ -360,6 +334,16 @@ async function searchSpecialSourceWithSample(
     return results;
   } catch (error) {
     resourceLimited = error instanceof ResourceLimitError;
+    if (!signal?.aborted) {
+      if (!resourceLimited) {
+        logSearchFailure(apiSite, 1, 'adapter', startedAt, { error });
+      } else if (
+        error instanceof UpstreamCooldownError &&
+        error.responseReceived
+      ) {
+        logSearchFailure(apiSite, 1, 'upstream-cooldown', startedAt);
+      }
+    }
     throw error;
   } finally {
     releaseSearchSlot();
@@ -414,7 +398,7 @@ async function searchFromApiQuery(
     return [];
   }
 
-  const specialSearch = getSpecialSourceSearch(apiSite);
+  const specialSearch = getSpecialSourceAdapter(apiSite)?.search;
   if (specialSearch) {
     return uniqueSearchResults(
       await searchSpecialSource(apiSite, query, specialSearch, options),
@@ -553,17 +537,8 @@ export async function getDetailFromApi(
   apiSite: ApiSite,
   id: string,
 ): Promise<SearchResult> {
-  if (isGirigiriSource(apiSite)) {
-    return getDetailFromGirigiri(apiSite, id);
-  }
-
-  if (isXgcartoonSource(apiSite)) {
-    return getDetailFromXgcartoon(apiSite, id);
-  }
-
-  if (isXifanSource(apiSite)) {
-    return getDetailFromXifan(apiSite, id);
-  }
+  const detail = getSpecialSourceAdapter(apiSite)?.detail;
+  if (detail) return detail(apiSite, id);
 
   if (apiSite.detail) {
     return getDetailWithPageFallback(apiSite, id);
