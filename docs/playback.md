@@ -166,4 +166,4 @@
 - `rycj` 按固定片数插 DISCONTINUITY，块时长随镜头浮动（同一集 10–38 秒），周期布局只按片数判定；加入块时长集中度门槛会让布局失效，连续化重建静默跳过。
 - 新增源规则在注册表组合现有 signal 与时间轴策略，无法表达时才扩展检测器；补源站 fixture，验证广告删除、正片保留和时间轴边界。源专用规则与通用规则二选一，避免二次重建。
 - 播放器加载器可跨源复用，过滤时从 `detailRef.current` 读取当前源；下一集预载按当前会话源选择同一规则。主机异常检测经 `resolveSegmentAssetUri()` 还原代理地址，并以响应最终清单 URL 解析相对地址，保持直连与代理的判定一致。
-- 客户端过滤只在 hls.js 加载清单时生效。iPadOS / Safari 17+ 下 hls.js 用 ManagedMediaSource，以 blob: 的 `<source>` 挂载；`ensureVideoSource()` 必须让它留在最前，播放地址只作为末尾的 AirPlay 备选，否则 Safari 选中 m3u8 原生播放，广告原样播出。
+- 客户端过滤只在 hls.js 加载清单时生效。hls.js 1.7 默认 `preferManagedMediaSource: false`，同时支持两者时用标准 MediaSource；只有 ManagedMediaSource 的环境（iOS 17.1+ 的 iPhone 等）仍用它，以 blob: 的 `<source>` 挂载；`ensureVideoSource()` 必须让它留在最前，播放地址只作为末尾的 AirPlay 备选，否则 Safari 选中 m3u8 原生播放，广告原样播出。

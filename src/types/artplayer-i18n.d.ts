@@ -1,4 +1,7 @@
-declare module 'artplayer/src/i18n/zh-cn' {
-  const dictionary: Record<string, string>;
-  export default dictionary;
+export {};
+
+declare global {
+  interface Window {
+    'artplayer-i18n-zh-cn': Record<string, string>;
+  }
 }

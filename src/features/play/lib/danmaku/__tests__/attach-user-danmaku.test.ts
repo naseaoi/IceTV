@@ -56,7 +56,7 @@ async function createPlayer() {
     notice: { show: '' },
     plugins: { artplayerPluginDanmuku: api },
     on: jest.fn(),
-  } as unknown as Artplayer & { notice: { show: string } };
+  } as unknown as Artplayer;
   let beforeEmit: ((danmu: DanmakuEmitPayload) => Promise<boolean>) | undefined;
   let initialTask: Promise<void> | undefined;
   (createDanmakuPlugin as jest.Mock).mockImplementation(async (options) => {

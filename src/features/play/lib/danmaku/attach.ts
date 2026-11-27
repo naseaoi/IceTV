@@ -84,7 +84,7 @@ type DanmakuConfigEvent = {
 
 type PlayerWithPlugins = {
   constructor?: Function & { NOTICE_TIME?: number };
-  notice?: { show: string };
+  notice?: { get show(): boolean | string; set show(message: string) };
   template?: { $noticeInner?: HTMLElement; $danmuku?: HTMLElement };
   plugins?: Record<string, unknown>;
   controls?: Record<string, HTMLElement | undefined>;

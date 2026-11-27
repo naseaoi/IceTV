@@ -16,6 +16,11 @@
 | 性能相关改动                                     | [性能验证](docs/performance-baseline.md) |
 | 打 tag、发版                                     | [发布](docs/release.md)                  |
 
+## 框架版本
+
+- Next、React、播放器等依赖的版本以 `package.json` 与 `pnpm-lock.yaml` 为准，API 可能与训练记忆不同。写 Next 相关代码前先查 `node_modules/next/dist/docs/`（随安装版本分发），类型以本地 `.d.ts` 为准；Context7 等外部文档可能返回 canary 版，使用前核对版本。
+- 易误写处：`cookies()` / `headers()` / `params` / `searchParams` 是异步；请求拦截在 `src/proxy.ts`（不是 `middleware`）；开发用 Turbopack、生产构建用 webpack，两边都要能跑。
+
 ## 配置读写
 
 统一入口 `src/lib/config.ts`。三个读取函数不可混用：

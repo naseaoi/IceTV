@@ -342,7 +342,6 @@ export async function initializeArtPlayer(
         reusedPlayer,
         reusedPlayer.switchUrl(playbackUrl),
       );
-      reusedPlayer.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
       // switch 内部会注册一次性的归零回调，这里紧随其后注册以立即纠正落点，
       // 避免等重试逻辑生效时出现可见的回跳。
       if (carriedResumeTarget !== null) {

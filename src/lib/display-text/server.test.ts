@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 it('requires the webpack and turbopack ALS probes to be rerun on a Next upgrade', () => {
-  expect(version).toBe('16.2.10');
+  expect(version).toBe('16.4.6');
 });
 
 it('registers the actual hook from instrumentation and keeps concurrent requests isolated', async () => {

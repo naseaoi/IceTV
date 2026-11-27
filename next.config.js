@@ -10,6 +10,8 @@ const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  // next dev 检测到 AI 代理时会往 AGENTS.md 追加英文规则块；等效规则已写入 AGENTS.md
+  agentRules: false,
   // 纯 ESM 包，next/jest 只转译此处列出的依赖
   transpilePackages: ['boring-avatars', 'artplayer'],
   compiler: {

@@ -658,6 +658,51 @@ describe('useLivePlayer automatic route', () => {
     expect((player as unknown as { switch?: string }).switch).toBeUndefined();
   });
 
+  it.each([
+    ['networkError', 'playlistUnchangedError'],
+    ['mediaError', 'bufferAppendNoProgress'],
+    ['mediaError', 'mediaSourceRequiresReset'],
+  ])(
+    'keeps %s/%s recovery inside hls.js while nonfatal',
+    async (type, details) => {
+      const { freshChannel, result, onPlaybackFailed } = renderFreshChannel();
+      const { player, hls } = await waitForPlayer(1);
+
+      act(() => {
+        hls.emit(MockHls.Events.ERROR, {
+          type,
+          details,
+          fatal: false,
+          url: freshChannel.url,
+        });
+      });
+
+      expect((player as unknown as { switch?: string }).switch).toBeUndefined();
+      expect(hls.startLoad).not.toHaveBeenCalled();
+      expect(hls.recoverMediaError).not.toHaveBeenCalled();
+      expect(result.current.playbackFailed).toBe(false);
+      expect(onPlaybackFailed).not.toHaveBeenCalled();
+    },
+  );
+
+  it('bounds fatal media-source reset recovery without switching routes', async () => {
+    const { result, onPlaybackFailed } = renderFreshChannel();
+    const { player, hls } = await waitForPlayer(1);
+    for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
+      emitFatalError(
+        hls,
+        MockHls.ErrorTypes.MEDIA_ERROR,
+        'mediaSourceRequiresReset',
+      );
+    }
+    expect(hls.recoverMediaError).toHaveBeenCalledTimes(
+      HLS_FATAL_MEDIA_RECOVERY_LIMIT,
+    );
+    expect((player as unknown as { switch?: string }).switch).toBeUndefined();
+    expect(result.current.playbackFailed).toBe(true);
+    expect(onPlaybackFailed).toHaveBeenCalledTimes(1);
+  });
+
   it('stops with a relay-paused failure instead of retrying', async () => {
     const { result, onPlaybackFailed } = renderFreshChannel();
     const { hls } = await waitForPlayer(1);

@@ -74,10 +74,14 @@ export function LinuxDoBindingTile() {
 
   function bind() {
     setBusy(true);
+    // OAuth 经 API 跳出本站，使用浏览器整页导航。
     window.location.assign(
-      `/api/auth/linuxdo?mode=bind&redirect=${encodeURIComponent(
-        window.location.pathname + window.location.search,
-      )}`,
+      new URL(
+        `/api/auth/linuxdo?mode=bind&redirect=${encodeURIComponent(
+          window.location.pathname + window.location.search,
+        )}`,
+        window.location.origin,
+      ),
     );
   }
 

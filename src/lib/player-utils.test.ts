@@ -1,4 +1,4 @@
-import zhCn from 'artplayer/src/i18n/zh-cn';
+import Artplayer from 'artplayer';
 import { Converter } from 'opencc-js/cn2t';
 
 import { type DisplayTextGlobals } from '@/lib/display-text';
@@ -48,7 +48,14 @@ describe('createHlsConfig', () => {
 
 describe('播放器显示语言', () => {
   const globals = globalThis as DisplayTextGlobals;
+  beforeEach(() => {
+    // Artplayer 销毁时调用 video.load()，jsdom 未实现
+    jest
+      .spyOn(HTMLMediaElement.prototype, 'load')
+      .mockImplementation(() => undefined);
+  });
   afterEach(() => {
+    jest.restoreAllMocks();
     document.documentElement.lang = '';
     delete globals.__ICETV_DISPLAY_CONVERTER__;
   });
@@ -64,17 +71,26 @@ describe('播放器显示语言', () => {
         from: 'cn',
         to: variant,
       });
-      for (const isLive of [false, true]) {
-        const config = createArtPlayerConfig({ isLive });
-        const dictionary = config.i18n?.[config.lang];
-        expect(config.lang).toBe(language.toLowerCase());
-        expect(Object.keys(dictionary ?? {})).toEqual(Object.keys(zhCn));
-        expect(dictionary?.['Show Setting']).toBe(showSetting);
-        expect(dictionary?.['Video Load Failed']).toBe(
-          language === 'zh-TW' ? '載入失敗' : '加載失敗',
-        );
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const player = new Artplayer({ container, url: '', lang: 'zh-cn' });
+      const zhCn = player.i18n.languages['zh-cn']!;
+      try {
+        for (const isLive of [false, true]) {
+          const config = createArtPlayerConfig({ isLive });
+          const dictionary = config.i18n?.[config.lang];
+          expect(config.lang).toBe(language.toLowerCase());
+          expect(Object.keys(dictionary ?? {})).toEqual(Object.keys(zhCn));
+          expect(dictionary?.['Show Setting']).toBe(showSetting);
+          expect(dictionary?.['Video Load Failed']).toBe(
+            language === 'zh-TW' ? '載入失敗' : '加載失敗',
+          );
+        }
+        expect(zhCn['Show Setting']).toBe('显示设置');
+      } finally {
+        player.destroy();
+        container.remove();
       }
-      expect(zhCn['Show Setting']).toBe('显示设置');
     },
   );
 

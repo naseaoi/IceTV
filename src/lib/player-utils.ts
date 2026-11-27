@@ -1,5 +1,3 @@
-import zhCn from 'artplayer/src/i18n/zh-cn';
-
 import { SPINNER_MARKUP } from '@/components/Spinner';
 import { getDocumentDisplayLanguage } from '@/lib/display-language';
 import { toDisplayText } from '@/lib/display-text';
@@ -59,7 +57,7 @@ export function formatBytesPerSecond(bytesPerSecond: number): string {
 export function showTimedArtNotice(
   player: {
     constructor?: Function & { NOTICE_TIME?: number };
-    notice?: { show: string };
+    notice?: { get show(): boolean | string; set show(message: string) };
   } | null,
   message: string,
   durationMs = 2000,
@@ -203,7 +201,8 @@ function createArtPlayerLanguageConfig() {
   const language = getDocumentDisplayLanguage();
   const lang = language.toLowerCase();
   if (language === 'zh-CN') return { lang };
-  // ArtPlayer 默认只注册 zh-cn；从它生成完整字典，避免未注册语言回落英文。
+  // 5.4 发布包只把简体字典内置在主模块，并导出到 window；创建配置前 getPlayerModules 已加载主模块。
+  const zhCn = window['artplayer-i18n-zh-cn'];
   const dictionary = Object.fromEntries(
     Object.entries(zhCn).map(([key, value]) => [key, toDisplayText(value)]),
   );
