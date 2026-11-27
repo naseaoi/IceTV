@@ -28,7 +28,11 @@ import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
 import { isNearPlaybackCompletion } from '@/features/play/lib/episodeProgress';
 import { resolveActivePlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { prewarmLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
-import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
+import {
+  getForwardBufferSeconds,
+  scheduleNextEpisodePreload,
+} from '@/features/play/lib/nextEpisodePreload';
+import { createPlaybackSmoothnessReporter } from '@/features/play/lib/playbackSmoothnessReporter';
 import { getNextPlaybackEpisode } from '@/features/play/lib/playbackStartPolicy';
 import { clearPlaybackStartState } from '@/features/play/lib/playbackStartState';
 import {
@@ -62,6 +66,7 @@ import {
   isVodRuntimeWaitingForResource,
   pauseIfVodRuntimeReleased,
   registerVodNativeRuntime,
+  VOD_ROUTE_CHANGING_EVENT,
 } from '@/features/play/lib/vodHlsRuntime';
 import {
   createVodPlaybackIntent,
@@ -554,6 +559,55 @@ export async function initializeArtPlayer(
       );
     }
 
+    const smoothnessReporter = createPlaybackSmoothnessReporter(() => {
+      const video = player.video as HTMLVideoElement | undefined;
+      if (artPlayerRef.current !== player || !video) return null;
+      const runtimeUrl = getVodRuntimeSourceUrl(video);
+      const detail = detailRef.current;
+      if (!runtimeUrl || !detail?.source) return null;
+      const routeMode = getManagedVideo(video).__icetvUsingServerProxy
+        ? 'server'
+        : 'browser';
+      return {
+        sessionKey: JSON.stringify([
+          detail.source,
+          detail.id,
+          currentEpisodeIndexRef.current,
+        ]),
+        key: JSON.stringify([
+          detail.source,
+          detail.id,
+          currentEpisodeIndexRef.current,
+          runtimeUrl,
+          routeMode,
+        ]),
+        source: detail.source,
+        routeMode,
+        mediaType: mediaKind === 'hls' ? 'hls' : 'mp4',
+        snapshot: {
+          currentTime: video.currentTime,
+          forwardBuffer: getForwardBufferSeconds(video),
+          paused: video.paused,
+          visible: document.visibilityState === 'visible',
+          online: navigator.onLine,
+          seeking: video.seeking,
+          resourceWaiting: isVodRuntimeWaitingForResource(video),
+        },
+      };
+    });
+    const smoothnessVideo = player.video as HTMLVideoElement;
+    smoothnessVideo.addEventListener(
+      VOD_ROUTE_CHANGING_EVENT,
+      smoothnessReporter.endSegment,
+    );
+    player.on('destroy', () => {
+      smoothnessVideo.removeEventListener(
+        VOD_ROUTE_CHANGING_EVENT,
+        smoothnessReporter.endSegment,
+      );
+      smoothnessReporter.dispose();
+    });
+
     const switchNativeToServerProxy = (reason: string) => {
       if (
         mediaKind !== 'native' ||
@@ -593,6 +647,7 @@ export async function initializeArtPlayer(
         resumeModeRef.current = 'forced';
       }
       loadingSessionRef.current.pendingInitialResumeTarget = resumeTarget;
+      smoothnessReporter.endSegment();
       nativeUseServerProxy = nextServer;
       nativeAttempt.routeSwitched = true;
       nativeAttempt.triedRoutes.add(nextServer ? 'server' : 'browser');
@@ -1321,7 +1376,10 @@ export async function initializeArtPlayer(
       if (resolvePendingStart()) return;
       ensureInitialPlaybackPosition();
       finishInitialLoading(true);
-      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('playing');
+      if (!isStalePlayerSession()) {
+        smoothnessReporter.handle('playing');
+        handlePlaybackStatsEvent?.('playing');
+      }
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         retryPendingResumePosition();
       }
@@ -1336,6 +1394,7 @@ export async function initializeArtPlayer(
     });
 
     player.on('video:ended', () => {
+      smoothnessReporter.finish();
       if (isStalePlayerSession()) return;
       if (resolvePendingStart()) return;
       void releaseWakeLock();
@@ -1410,6 +1469,7 @@ export async function initializeArtPlayer(
         completionPrompt.hide();
         return;
       }
+      smoothnessReporter.handle('timeupdate');
       handlePlaybackStatsEvent?.('timeupdate');
       updateStableCurrentTime(player.currentTime || 0);
 
@@ -1555,6 +1615,7 @@ export async function initializeArtPlayer(
     if (mediaKind === 'native')
       window.addEventListener('online', onNativeOnline);
     const onRuntimeReleased = () => {
+      smoothnessReporter.finish();
       hideEndPrompts();
       resumePrompt.hide();
       autoAdvanceArmedRef.current = false;
@@ -1580,6 +1641,7 @@ export async function initializeArtPlayer(
     for (const event of ['pause', 'waiting', 'stalled'] as const) {
       player.on(`video:${event}`, () => {
         if (isStalePlayerSession()) return;
+        smoothnessReporter.handle(event);
         if (event === 'pause') saveCurrentPlayProgress();
         handlePlaybackStatsEvent?.(event);
       });
@@ -1629,12 +1691,18 @@ export async function initializeArtPlayer(
     };
     player.on('video:seeking', () => {
       completionPrompt.hide();
-      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeking');
+      if (!isStalePlayerSession()) {
+        smoothnessReporter.handle('seeking');
+        handlePlaybackStatsEvent?.('seeking');
+      }
       updateSeekProgress(false);
     });
 
     player.on('video:seeked', () => {
-      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeked');
+      if (!isStalePlayerSession()) {
+        smoothnessReporter.handle('seeked');
+        handlePlaybackStatsEvent?.('seeked');
+      }
       updateSeekProgress(true);
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         completePendingResumeIfReady();

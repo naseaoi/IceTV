@@ -5,8 +5,14 @@ import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
-import { recordSourcePlayOutcome } from '@/lib/source-health.server';
-import type { SourceRouteStatInput } from '@/lib/types';
+import {
+  recordSourcePlayOutcome,
+  recordSourceSmoothness,
+} from '@/lib/source-health.server';
+import type {
+  SourceRouteStatInput,
+  SourceSmoothnessPayload,
+} from '@/lib/types';
 import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
@@ -15,14 +21,15 @@ const MAX_SOURCE_LENGTH = 191;
 const limiter = new FixedWindowRateLimiter(120, 60_000);
 type PlayOutcome = Omit<SourceRouteStatInput, 'routeMode' | 'phase'>;
 
-function readOutcome(raw: unknown): PlayOutcome | null {
-  if (!raw || typeof raw !== 'object') return null;
+function readEvent(
+  raw: unknown,
+): Pick<PlayOutcome, 'source' | 'eventAt'> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
   const source = typeof record.source === 'string' ? record.source.trim() : '';
   if (
     !source ||
     source.length > MAX_SOURCE_LENGTH ||
-    typeof record.success !== 'boolean' ||
     typeof record.eventAt !== 'number' ||
     !Number.isFinite(record.eventAt) ||
     record.eventAt <= 0
@@ -30,8 +37,51 @@ function readOutcome(raw: unknown): PlayOutcome | null {
     return null;
   return {
     source,
-    success: record.success,
     eventAt: Math.min(Math.floor(record.eventAt), Date.now() + 60_000),
+  };
+}
+
+function readOutcome(raw: unknown): PlayOutcome | null {
+  const event = readEvent(raw);
+  if (!event) return null;
+  const { success } = raw as Record<string, unknown>;
+  return typeof success === 'boolean' ? { ...event, success } : null;
+}
+
+function readSmooth(raw: unknown): SourceSmoothnessPayload | null {
+  const event = readEvent(raw);
+  if (!event) return null;
+  const { routeMode, mediaType, watchMs, stallMs, stallCount, unknownMs } =
+    raw as Record<string, unknown>;
+  if (
+    (routeMode !== 'browser' && routeMode !== 'server') ||
+    (mediaType !== 'hls' && mediaType !== 'mp4') ||
+    typeof watchMs !== 'number' ||
+    !Number.isFinite(watchMs) ||
+    watchMs < 0 ||
+    watchMs > 600_000 ||
+    typeof stallMs !== 'number' ||
+    !Number.isFinite(stallMs) ||
+    stallMs < 0 ||
+    stallMs > watchMs + 30_000 ||
+    typeof unknownMs !== 'number' ||
+    !Number.isFinite(unknownMs) ||
+    unknownMs < 0 ||
+    unknownMs > watchMs + 30_000 ||
+    typeof stallCount !== 'number' ||
+    !Number.isFinite(stallCount) ||
+    stallCount < 0 ||
+    stallCount > 120
+  )
+    return null;
+  return {
+    ...event,
+    routeMode,
+    mediaType,
+    watchMs: Math.floor(watchMs),
+    stallMs: Math.floor(stallMs),
+    stallCount: Math.floor(stallCount),
+    unknownMs: Math.floor(unknownMs),
   };
 }
 
@@ -75,8 +125,10 @@ export async function POST(request: NextRequest) {
       !('phase' in input.stat);
     const stat = 'stat' in input && !legacyStat ? readStat(input.stat) : null;
     const outcome = 'outcome' in input ? readOutcome(input.outcome) : null;
+    const smooth = 'smooth' in input ? readSmooth(input.smooth) : null;
     if (
-      (!stat && !outcome && !legacyStat) ||
+      (!stat && !outcome && !smooth && !legacyStat) ||
+      ('smooth' in input && !smooth) ||
       ('stat' in input && !stat && !legacyStat) ||
       ('outcome' in input && !outcome)
     ) {
@@ -94,6 +146,7 @@ export async function POST(request: NextRequest) {
       ).map((source) => source.key),
     );
     if (
+      (smooth && !availableSources.has(smooth.source)) ||
       (stat && !availableSources.has(stat.source)) ||
       (outcome && !availableSources.has(outcome.source))
     ) {
@@ -101,6 +154,13 @@ export async function POST(request: NextRequest) {
     }
 
     await Promise.all([
+      smooth &&
+      (smooth.watchMs ||
+        smooth.stallMs ||
+        smooth.stallCount ||
+        smooth.unknownMs)
+        ? recordSourceSmoothness(guardResult.username, smooth)
+        : undefined,
       stat ? db.recordSourceRouteStat(stat) : undefined,
       outcome
         ? recordSourcePlayOutcome(

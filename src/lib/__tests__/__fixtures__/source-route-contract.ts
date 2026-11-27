@@ -42,6 +42,122 @@ export async function assertSourceRoutePhases(storage: IStorage) {
   ).toEqual(['browser-fb-v3', 'browser-v3', 'server-fb-v3', 'server-v3']);
 }
 
+export async function assertSourceSmoothness(storage: IStorage) {
+  const delta = {
+    source: 'smooth-a',
+    bucketDate: '2026-01-02',
+    reporter: 'r1',
+    routeMode: 'browser' as const,
+    mediaType: 'hls' as const,
+    watchMs: 300_000,
+    stallMs: 2000,
+    stallCount: 1,
+    unknownMs: 500,
+  };
+  await storage.recordSourceSmoothReport(delta);
+  await storage.recordSourceSmoothReport(delta);
+  await storage.recordSourceSmoothReport({ ...delta, routeMode: 'server' });
+  await storage.recordSourceSmoothReport({ ...delta, mediaType: 'mp4' });
+  await storage.recordSourceSmoothReport({ ...delta, reporter: 'r2' });
+  await storage.recordSourceSmoothReport({
+    ...delta,
+    bucketDate: '2026-01-03',
+  });
+  await storage.recordSourceSmoothReport({ ...delta, source: 'smooth-b' });
+  await storage.recordSourceSmoothReport({
+    ...delta,
+    bucketDate: '2026-01-01',
+  });
+  const daily = await storage.getSourceSmoothReporterDaily('2026-01-02');
+  expect(daily).toEqual([
+    {
+      source: 'smooth-a',
+      bucketDate: '2026-01-02',
+      reporter: 'r1',
+      watchMs: 1_200_000,
+      stallMs: 8000,
+      stallCount: 4,
+    },
+    {
+      source: 'smooth-a',
+      bucketDate: '2026-01-02',
+      reporter: 'r2',
+      watchMs: 300_000,
+      stallMs: 2000,
+      stallCount: 1,
+    },
+    {
+      source: 'smooth-b',
+      bucketDate: '2026-01-02',
+      reporter: 'r1',
+      watchMs: 300_000,
+      stallMs: 2000,
+      stallCount: 1,
+    },
+    {
+      source: 'smooth-a',
+      bucketDate: '2026-01-03',
+      reporter: 'r1',
+      watchMs: 300_000,
+      stallMs: 2000,
+      stallCount: 1,
+    },
+  ]);
+  const breakdown = await storage.getSourceSmoothBreakdown('2026-01-02');
+  expect(breakdown).toEqual([
+    {
+      source: 'smooth-a',
+      routeMode: 'browser',
+      mediaType: 'hls',
+      watchMs: 1_200_000,
+      stallMs: 8000,
+      stallCount: 4,
+      unknownMs: 2000,
+      reporterDays: 3,
+    },
+    {
+      source: 'smooth-a',
+      routeMode: 'browser',
+      mediaType: 'mp4',
+      watchMs: 300_000,
+      stallMs: 2000,
+      stallCount: 1,
+      unknownMs: 500,
+      reporterDays: 1,
+    },
+    {
+      source: 'smooth-a',
+      routeMode: 'server',
+      mediaType: 'hls',
+      watchMs: 300_000,
+      stallMs: 2000,
+      stallCount: 1,
+      unknownMs: 500,
+      reporterDays: 1,
+    },
+    {
+      source: 'smooth-b',
+      routeMode: 'browser',
+      mediaType: 'hls',
+      watchMs: 300_000,
+      stallMs: 2000,
+      stallCount: 1,
+      unknownMs: 500,
+      reporterDays: 1,
+    },
+  ]);
+  await storage.purgeSourceHealthBefore('2026-01-02');
+  expect(await storage.getSourceSmoothReporterDaily('2020-01-01')).toEqual(
+    daily,
+  );
+  expect(await storage.getSourceSmoothBreakdown('2020-01-01')).toEqual(
+    breakdown,
+  );
+  await storage.purgeSourceHealthBefore('2026-01-04');
+  expect(await storage.getSourceSmoothReporterDaily('2020-01-01')).toEqual([]);
+  expect(await storage.getSourceSmoothBreakdown('2020-01-01')).toEqual([]);
+}
+
 export async function assertSourceProxyFailures(storage: IStorage) {
   await storage.recordSourceProxyFailureBatch([]);
   await storage.recordSourceProxyFailureBatch([

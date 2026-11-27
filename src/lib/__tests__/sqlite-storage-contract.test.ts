@@ -28,6 +28,7 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 import {
   assertSourceProxyFailures,
   assertSourceRoutePhases,
+  assertSourceSmoothness,
 } from '@/lib/__tests__/__fixtures__/source-route-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
@@ -1150,6 +1151,17 @@ describe('sqlite storage contract', () => {
       .run('{not-valid-json');
 
     await expect(storage.getAdminConfig()).rejects.toThrow();
+  });
+
+  it('accumulates, groups and purges smoothness increments', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    try {
+      await assertSourceSmoothness(storage);
+    } finally {
+      (
+        storage as unknown as { db: import('better-sqlite3').Database }
+      ).db.close();
+    }
   });
 
   it('separates route phases', async () => {

@@ -1,4 +1,8 @@
 import { readStorage, writeStorage } from '@/lib/browser-storage';
+import {
+  type SourceSmoothSample,
+  isSmoothSampleStuttering,
+} from '@/lib/source-quality-policy';
 
 export const SOURCE_PLAYBACK_STATS_STORAGE_KEY = 'sourcePlaybackStats';
 
@@ -24,6 +28,7 @@ export type SourcePlaybackStat = {
   failures: number;
   manualSelections: number;
   lastUsedAt: number;
+  stutteringSessions?: number[];
 };
 
 type StoredSourcePlaybackStats = {
@@ -66,6 +71,13 @@ function parseStat(value: unknown): SourcePlaybackStat | null {
     failures: stat.failures,
     manualSelections: stat.manualSelections,
     lastUsedAt: stat.lastUsedAt,
+    ...(Array.isArray(stat.stutteringSessions)
+      ? {
+          stutteringSessions: stat.stutteringSessions
+            .filter(isNonNegativeNumber)
+            .slice(-5),
+        }
+      : {}),
   };
 }
 
@@ -174,6 +186,37 @@ export function recordSourcePlaybackSuccess(
 export function recordSourcePlaybackFailure(sourceKey: string) {
   updateSourcePlaybackStat(sourceKey, (stat) =>
     capAttempts({ ...stat, failures: stat.failures + 1 }),
+  );
+}
+
+export function recordSourcePlaybackSmoothness(
+  sourceKey: string,
+  sample: SourceSmoothSample,
+) {
+  const stuttering = isSmoothSampleStuttering(sample);
+  if (stuttering === null) return;
+  const now = Date.now();
+  updateSourcePlaybackStat(sourceKey, (stat) => ({
+    ...stat,
+    stutteringSessions: stuttering
+      ? [
+          ...(stat.stutteringSessions ?? []).filter(
+            (at) => at <= now && now - at <= DAY_MS,
+          ),
+          now,
+        ].slice(-5)
+      : [],
+  }));
+}
+
+export function isSourceLocallyStuttering(
+  stat: SourcePlaybackStat | undefined,
+  now = Date.now(),
+): boolean {
+  return (
+    (stat?.stutteringSessions ?? []).filter(
+      (at) => at <= now && now - at <= DAY_MS,
+    ).length >= 2
   );
 }
 

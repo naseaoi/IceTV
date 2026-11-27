@@ -11,6 +11,7 @@ import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch
 import {
   describeSourceHealth,
   formatLastOkDate,
+  isSourceStuttering,
   SOURCE_HEALTH_CHIP_CLASS,
   SOURCE_HEALTH_SCORE_CLASS,
   SOURCE_HEALTH_TIER_LABEL,
@@ -201,6 +202,14 @@ export function SortableSourceRow({
               {sourceHealth.tier === 'offline' &&
                 sourceHealth.lastOkDate &&
                 ` · ${formatLastOkDate(sourceHealth.lastOkDate)}可用`}
+            </span>
+          )}
+          {isSourceStuttering(sourceHealth) && (
+            <span
+              className={`rounded px-1.5 text-xs ${SOURCE_HEALTH_CHIP_CLASS.poor}`}
+              title={healthTitle}
+            >
+              卡顿多
             </span>
           )}
           {routeAdvice?.kind === 'mode' && (

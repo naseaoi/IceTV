@@ -29,6 +29,7 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 import {
   assertSourceProxyFailures,
   assertSourceRoutePhases,
+  assertSourceSmoothness,
 } from '@/lib/__tests__/__fixtures__/source-route-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { assertWatchLevelContract } from '@/lib/__tests__/__fixtures__/watch-level-contract';
@@ -38,7 +39,12 @@ import {
   hasUnreadPlayRecordMessage,
   isTrackingEnabled,
 } from '@/lib/play-records';
-import type { SourceProxyFailureDelta } from '@/lib/types';
+import type {
+  SourceProxyFailureDelta,
+  SourceSmoothBreakdownItem,
+  SourceSmoothReporterDaily,
+  SourceSmoothReportInput,
+} from '@/lib/types';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
@@ -93,6 +99,7 @@ type FakeState = ListFakeState & {
   proxyFailures: SourceProxyFailureDelta[];
   healthSearch: HealthSearchRow[];
   healthPlay: HealthPlayRow[];
+  healthSmooth: SourceSmoothReportInput[];
   subscription: Record<string, unknown> | null;
   liveCounts: Map<string, Record<string, unknown>>;
   social: Record<string, Record<string, any>[]>;
@@ -141,6 +148,7 @@ function cloneState(state: FakeState): FakeState {
     proxyFailures: state.proxyFailures.map((row) => ({ ...row })),
     healthSearch: state.healthSearch.map((row) => ({ ...row })),
     healthPlay: state.healthPlay.map((row) => ({ ...row })),
+    healthSmooth: state.healthSmooth.map((row) => ({ ...row })),
     subscription: state.subscription ? { ...state.subscription } : null,
     liveCounts: new Map(
       [...state.liveCounts].map(([key, row]) => [key, { ...row }]),
@@ -197,6 +205,7 @@ function createState(): FakeState {
     proxyFailures: [],
     healthSearch: [],
     healthPlay: [],
+    healthSmooth: [],
     subscription: null,
     liveCounts: new Map(),
     social: {
@@ -1714,6 +1723,64 @@ function createFakePool() {
       }
       return [[], []];
     }
+    if (normalized.startsWith('INSERT INTO source_health_smooth (')) {
+      const [
+        source,
+        bucketDate,
+        reporter,
+        routeMode,
+        mediaType,
+        watchMs,
+        stallMs,
+        stallCount,
+        unknownMs,
+      ] = params as [
+        string,
+        string,
+        string,
+        SourceSmoothReportInput['routeMode'],
+        SourceSmoothReportInput['mediaType'],
+        number,
+        number,
+        number,
+        number,
+      ];
+      const existing = currentState.healthSmooth.find(
+        (row) =>
+          row.source === source &&
+          row.bucketDate === bucketDate &&
+          row.reporter === reporter &&
+          row.routeMode === routeMode &&
+          row.mediaType === mediaType,
+      );
+      if (existing) {
+        existing.watchMs += watchMs;
+        existing.stallMs += stallMs;
+        existing.stallCount += stallCount;
+        existing.unknownMs += unknownMs;
+      } else {
+        currentState.healthSmooth.push({
+          source,
+          bucketDate,
+          reporter,
+          routeMode,
+          mediaType,
+          watchMs,
+          stallMs,
+          stallCount,
+          unknownMs,
+        });
+      }
+      return [[], []];
+    }
+    if (
+      normalized === 'DELETE FROM source_health_smooth WHERE bucket_date < ?'
+    ) {
+      currentState.healthSmooth = currentState.healthSmooth.filter(
+        (row) => row.bucketDate >= (params[0] as string),
+      );
+      return [[], []];
+    }
     if (normalized.startsWith('INSERT INTO source_health_play (')) {
       const [source, bucketDate, reporter, successCount, failureCount] =
         params as [string, string, string, number, number];
@@ -1844,6 +1911,12 @@ function createFakePool() {
         [],
       ];
     }
+    if (
+      normalized.startsWith(
+        'SELECT COLUMN_NAME FROM information_schema.COLUMNS',
+      )
+    )
+      return [[], []];
     if (normalized === "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'")
       return [[{ Field: 'value_bytes' }], []];
     if (
@@ -3287,6 +3360,88 @@ function createFakePool() {
 
     if (
       normalized ===
+      'SELECT source, bucket_date AS bucketDate, reporter, SUM(watch_ms) AS watchMs, SUM(stall_ms) AS stallMs, SUM(stall_count) AS stallCount FROM source_health_smooth WHERE bucket_date >= ? GROUP BY source, bucket_date, reporter ORDER BY bucket_date ASC, source ASC, reporter ASC'
+    ) {
+      const groups = new Map<string, SourceSmoothReporterDaily>();
+      for (const row of currentState.healthSmooth) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const key = JSON.stringify([row.source, row.bucketDate, row.reporter]);
+        const group = groups.get(key) ?? {
+          source: row.source,
+          bucketDate: row.bucketDate,
+          reporter: row.reporter,
+          watchMs: 0,
+          stallMs: 0,
+          stallCount: 0,
+        };
+        group.watchMs += row.watchMs;
+        group.stallMs += row.stallMs;
+        group.stallCount += row.stallCount;
+        groups.set(key, group);
+      }
+      return [
+        [...groups.values()]
+          .sort(
+            (a, b) =>
+              a.bucketDate.localeCompare(b.bucketDate) ||
+              a.source.localeCompare(b.source) ||
+              a.reporter.localeCompare(b.reporter),
+          )
+          .map((row) => ({
+            ...row,
+            watchMs: String(row.watchMs),
+            stallMs: String(row.stallMs),
+            stallCount: String(row.stallCount),
+          })),
+        [],
+      ];
+    }
+    if (
+      normalized ===
+      'SELECT source, route_mode AS routeMode, media_type AS mediaType, SUM(watch_ms) AS watchMs, SUM(stall_ms) AS stallMs, SUM(stall_count) AS stallCount, SUM(unknown_ms) AS unknownMs, COUNT(*) AS reporterDays FROM source_health_smooth WHERE bucket_date >= ? GROUP BY source, route_mode, media_type ORDER BY source ASC, route_mode ASC, media_type ASC'
+    ) {
+      const groups = new Map<string, SourceSmoothBreakdownItem>();
+      for (const row of currentState.healthSmooth) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const key = JSON.stringify([row.source, row.routeMode, row.mediaType]);
+        const group = groups.get(key) ?? {
+          source: row.source,
+          routeMode: row.routeMode,
+          mediaType: row.mediaType,
+          watchMs: 0,
+          stallMs: 0,
+          stallCount: 0,
+          unknownMs: 0,
+          reporterDays: 0,
+        };
+        group.watchMs += row.watchMs;
+        group.stallMs += row.stallMs;
+        group.stallCount += row.stallCount;
+        group.unknownMs += row.unknownMs;
+        group.reporterDays += 1;
+        groups.set(key, group);
+      }
+      return [
+        [...groups.values()]
+          .sort(
+            (a, b) =>
+              a.source.localeCompare(b.source) ||
+              a.routeMode.localeCompare(b.routeMode) ||
+              a.mediaType.localeCompare(b.mediaType),
+          )
+          .map((row) => ({
+            ...row,
+            watchMs: String(row.watchMs),
+            stallMs: String(row.stallMs),
+            stallCount: String(row.stallCount),
+            unknownMs: String(row.unknownMs),
+            reporterDays: String(row.reporterDays),
+          })),
+        [],
+      ];
+    }
+    if (
+      normalized ===
       'SELECT source, bucket_date AS bucketDate, ok_count AS okCount, empty_count AS emptyCount, error_count AS errorCount, latency_ms_sum AS latencyMsSum, latency_samples AS latencySamples FROM source_health_search WHERE bucket_date >= ? ORDER BY bucket_date ASC, source ASC'
     ) {
       return [
@@ -3520,6 +3675,86 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it.each([
+    ['source_route_stats', ['source', 'route_mode', 'bucket_date']],
+    ['source_proxy_failures', ['source', 'bucket_date', 'reason']],
+    ['source_health_search', ['source', 'bucket_date']],
+    ['source_health_play', ['source', 'bucket_date', 'reporter']],
+    [
+      'source_health_smooth',
+      ['source', 'bucket_date', 'reporter', 'route_mode', 'media_type'],
+    ],
+  ] as const)(
+    'creates and idempotently repairs binary identity columns in %s',
+    async (table, columns) => {
+      const storage = new MySqlStorage(
+        'mysql://demo:demo@localhost:3306/icetv',
+      );
+      const originalQuery = fakePool.query.bind(fakePool);
+      const originalExecute = fakePool.execute.bind(fakePool);
+      const execute = jest.spyOn(fakePool, 'execute');
+      const query = jest.spyOn(fakePool, 'query');
+      try {
+        await storage.getAdminConfig();
+        const ddl = execute.mock.calls.find(([sql]) =>
+          sql.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`),
+        )?.[0];
+        expect(ddl).toContain('CHARACTER SET utf8mb4 COLLATE utf8mb4_bin');
+        expect(
+          execute.mock.calls.some(([sql]) =>
+            sql.startsWith(`ALTER TABLE ${table} `),
+          ),
+        ).toBe(false);
+
+        // 逐列模拟旧库或部分迁移完成的库，其余身份列已是 bin。
+        for (const column of columns) {
+          let pending = true;
+          query.mockImplementation(async (sql, params) => {
+            if (
+              sql.includes('FROM information_schema.COLUMNS') &&
+              params?.[0] === table
+            ) {
+              expect(sql).toContain('TABLE_SCHEMA = DATABASE()');
+              expect(sql).toContain("COLLATION_NAME <> 'utf8mb4_bin'");
+              return [pending ? [{ COLUMN_NAME: column }] : [], []];
+            }
+            return originalQuery(sql, params);
+          });
+          execute.mockImplementation(async (sql, params) => {
+            if (sql.startsWith(`ALTER TABLE ${table} `)) {
+              pending = false;
+              return [[], []];
+            }
+            return originalExecute(sql, params);
+          });
+          execute.mockClear();
+          const impl = storage as unknown as {
+            initializeSchema(): Promise<void>;
+          };
+          await impl.initializeSchema();
+          await impl.initializeSchema();
+          const alters = execute.mock.calls.filter(([sql]) =>
+            sql.startsWith(`ALTER TABLE ${table} `),
+          );
+          const type =
+            column === 'bucket_date'
+              ? 'CHAR(10)'
+              : column === 'source' || column === 'reporter'
+                ? 'VARCHAR(191)'
+                : column === 'reason'
+                  ? 'VARCHAR(32)'
+                  : 'VARCHAR(16)';
+          expect(alters.map(([sql]) => sql)).toEqual([
+            `ALTER TABLE ${table} MODIFY COLUMN ${column} ${type} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL`,
+          ]);
+        }
+      } finally {
+        query.mockRestore();
+        execute.mockRestore();
+      }
+    },
+  );
+
   it.each(['record', 'favorite'] as const)(
     'metadata %s lookup retains index equality and rejects case variants',
     async (kind) => {
@@ -4627,6 +4862,11 @@ describe('mysql storage contract', () => {
       true,
     );
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
+  });
+
+  it('accumulates, groups and purges smoothness increments', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await assertSourceSmoothness(storage);
   });
 
   it('separates route phases', async () => {

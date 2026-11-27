@@ -1,7 +1,11 @@
 'use client';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import type { SourceRouteMode, SourceRouteStatPhase } from '@/lib/types';
+import type {
+  SourceRouteMode,
+  SourceRouteStatPhase,
+  SourceSmoothnessPayload,
+} from '@/lib/types';
 
 type SourceOutcomePayload = {
   source: string;
@@ -16,6 +20,7 @@ type PendingReport = {
   username: string;
   stat?: SourceRouteStatPayload;
   outcome?: SourceOutcomePayload;
+  smooth?: SourceSmoothnessPayload;
 };
 
 let pending: PendingReport[] = [];
@@ -25,7 +30,7 @@ let listening = false;
 const ROUTE_STAT_DEDUPE_MS = 10 * 60 * 1000;
 const recentRouteStats = new Map<string, number>();
 
-function flushReports(): void {
+export function flushSourceRouteReports(): void {
   if (flushTimer !== undefined) clearTimeout(flushTimer);
   flushTimer = undefined;
   const reports = pending;
@@ -45,8 +50,11 @@ function flushReports(): void {
 }
 
 function enqueueReport(
-  kind: 'stat' | 'outcome',
-  payload: SourceRouteStatPayload | SourceOutcomePayload,
+  kind: 'stat' | 'outcome' | 'smooth',
+  payload:
+    | SourceRouteStatPayload
+    | SourceOutcomePayload
+    | SourceSmoothnessPayload,
   dedupeKey?: string,
 ): void {
   const username = getAuthInfoFromBrowserCookie()?.username;
@@ -66,20 +74,24 @@ function enqueueReport(
     (report) =>
       report.username === username &&
       !report[kind] &&
-      (report.stat ?? report.outcome)?.source === payload.source,
+      (report.stat ?? report.outcome ?? report.smooth)?.source ===
+        payload.source,
   );
   const report = match ?? { username };
   if (kind === 'stat') report.stat = payload as SourceRouteStatPayload;
-  else report.outcome = payload;
+  else if (kind === 'smooth')
+    report.smooth = payload as SourceSmoothnessPayload;
+  else report.outcome = payload as SourceOutcomePayload;
   if (!match) pending.push(report);
   if (!listening && typeof window !== 'undefined') {
-    window.addEventListener('pagehide', flushReports);
+    window.addEventListener('pagehide', flushSourceRouteReports);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') flushReports();
+      if (document.visibilityState === 'hidden') flushSourceRouteReports();
     });
     listening = true;
   }
-  if (flushTimer === undefined) flushTimer = setTimeout(flushReports, 0);
+  if (flushTimer === undefined)
+    flushTimer = setTimeout(flushSourceRouteReports, 0);
 }
 
 export function reportSourcePlayOutcome(
@@ -109,6 +121,45 @@ export function reportSourceRouteStat(
     { source: trimmed, routeMode, phase, success, eventAt: Date.now() },
     `${trimmed}|${routeMode}|${phase}|${success ? 1 : 0}`,
   );
+}
+
+export function reportSourceSmoothness(payload: SourceSmoothnessPayload): void {
+  if (
+    !payload.watchMs &&
+    !payload.stallMs &&
+    !payload.stallCount &&
+    !payload.unknownMs
+  )
+    return;
+  // 增量逐条保留；长时间暂停调度后仍满足单请求观看时长上限。
+  const remaining = {
+    watchMs: payload.watchMs,
+    stallMs: payload.stallMs,
+    stallCount: payload.stallCount,
+    unknownMs: payload.unknownMs,
+  };
+  do {
+    const part = {
+      watchMs: Math.min(remaining.watchMs, 600_000),
+      stallMs: Math.min(remaining.stallMs, 30_000),
+      stallCount: Math.min(remaining.stallCount, 120),
+      unknownMs: Math.min(remaining.unknownMs, 30_000),
+    };
+    enqueueReport('smooth', {
+      ...payload,
+      source: payload.source.trim(),
+      ...part,
+    });
+    for (const key of Object.keys(part) as Array<keyof typeof part>) {
+      remaining[key] -= part[key];
+    }
+  } while (Object.values(remaining).some((value) => value > 0));
+  if (
+    typeof document !== 'undefined' &&
+    document.visibilityState === 'hidden'
+  ) {
+    flushSourceRouteReports();
+  }
 }
 
 export function resetSourceRouteStatDedupeForTests(): void {

@@ -140,6 +140,10 @@
 
 ## 源站线路统计
 
+- `source_health_search`、`source_health_play`、`source_health_smooth`、`source_route_stats`、`source_proxy_failures` 的全部文本主键列（源、日期、上报者、线路、媒体类型、原因）在 MySQL 使用 `utf8mb4_bin`，与 SQLite 一样区分大小写；初始化按 `information_schema` 自检，仅修改排序规则不符的列，保留已有计数。旧库已合并的大小写变体计数保持原值，无法自动拆分。
+
+- `source_health_smooth` 按「源 × UTC 日 × HMAC 上报者 × 线路 × 媒体类型」保存观看、卡顿、未知等待的增量；主键冲突时累加，属于增量协议，客户端重发会重复计数。评分读取跨线路与媒体类型的上报者日合计，诊断读取各分层的合计与去重上报者日数；同一分层每个主键恰好对应一个上报者日。与 `source_health_search`、`source_health_play` 共用 `SOURCE_HEALTH_RETENTION_DAYS`（30 天），由 `purgeSourceHealthBefore()` 同事务按 UTC 日期清理；HMAC 身份沿用播放可用率口径，不参与删号清理。
+
 - `source_route_stats.route_mode` 按「线路 × 阶段」保存四个 v3 键：首选 `browser-v3` / `server-v3`，回落 `browser-fb-v3` / `server-fb-v3`；接口收发 `routeMode` 与 `phase`。管理端聚合只读 v3，v2 及更早的行不混入、由保留期清理淘汰。自动模式下代理多为直连失败后的回落，首选与回落混算会把「代理也救不回」误读为代理不可用。
 - 存储键受 MySQL `VARCHAR(16)` 约束，新增键须不超过 16 个字符，两后端均保持原表结构。定时清理按日期作用于整表。
 - `source_proxy_failures` 由服务端在代理路由最终返回失败时按「源 × UTC 日 × 原因」累计（进程内合并后批量写入），原因为上游 403 / 404 / 其他 4xx / 5xx、超时、连接中断、响应异常；直播、客户端取消、鉴权与校验失败、资源额度与月流量暂停不计。浏览器直连失败多被 CORS 遮蔽、拿不到原因，因此原因只描述服务器出口，与线路统计同一保留期清理。

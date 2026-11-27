@@ -58,12 +58,14 @@ function readItem(value: unknown): SourceHealthPublicItem | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   const playAvailability = readRate(record.playAvailability);
+  const smoothRate = readRate(record.smoothRate);
   const searchAvailability = readRate(record.searchAvailability);
   const daily = readDaily(record.daily);
   if (
     typeof record.tier !== 'string' ||
     !PUBLIC_TIERS.has(record.tier) ||
     playAvailability === undefined ||
+    smoothRate === undefined ||
     searchAvailability === undefined ||
     !daily ||
     (record.lastOkDate !== null && typeof record.lastOkDate !== 'string')
@@ -72,6 +74,7 @@ function readItem(value: unknown): SourceHealthPublicItem | null {
   return {
     tier: record.tier as SourceHealthPublicTier,
     playAvailability,
+    smoothRate,
     searchAvailability,
     lastOkDate: record.lastOkDate,
     daily,

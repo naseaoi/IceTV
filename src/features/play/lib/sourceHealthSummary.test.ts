@@ -29,6 +29,7 @@ describe('sourceHealthSummary', () => {
           good: {
             tier: 'good',
             playAvailability: 0.96,
+            smoothRate: 0.9,
             searchAvailability: 0.99,
             lastOkDate: '2026-11-26',
             daily,
@@ -37,6 +38,15 @@ describe('sourceHealthSummary', () => {
           badRate: {
             tier: 'poor',
             playAvailability: 2,
+            smoothRate: null,
+            searchAvailability: null,
+            lastOkDate: null,
+            daily,
+          },
+          badSmoothRate: {
+            tier: 'poor',
+            playAvailability: null,
+            smoothRate: 1.5,
             searchAvailability: null,
             lastOkDate: null,
             daily,
@@ -44,6 +54,7 @@ describe('sourceHealthSummary', () => {
           badDaily: {
             tier: 'poor',
             playAvailability: null,
+            smoothRate: null,
             searchAvailability: null,
             lastOkDate: null,
             daily: [{ date: '2026-11-26', status: 'unknown' }],
@@ -55,7 +66,11 @@ describe('sourceHealthSummary', () => {
     const summary = await loadSourceHealthSummary();
 
     expect(Object.keys(summary)).toEqual(['good']);
-    expect(summary.good).toMatchObject({ tier: 'good', daily });
+    expect(summary.good).toMatchObject({
+      tier: 'good',
+      smoothRate: 0.9,
+      daily,
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/source-health',
       expect.objectContaining({ signal: expect.anything() }),
@@ -73,6 +88,7 @@ describe('sourceHealthSummary', () => {
           a: {
             tier: 'offline',
             playAvailability: null,
+            smoothRate: null,
             searchAvailability: 0,
             lastOkDate: null,
             daily,

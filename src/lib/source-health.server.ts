@@ -6,9 +6,11 @@ import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 import {
+  type EffectiveSmoothDaily,
   type SourceHealthReportItem,
   type SourceHealthTier,
   buildSourceHealthDaily,
+  getEffectiveSmoothDaily,
   normalizeSourceHealthDays,
   scoreSourceHealth,
   SOURCE_HEALTH_DEFAULT_DAYS,
@@ -21,6 +23,8 @@ import type {
   SourceHealthSearchDelta,
   SourcePlayReporterDaily,
   SourcePlayReporterSummary,
+  SourceSmoothBreakdownItem,
+  SourceSmoothnessPayload,
 } from '@/lib/types';
 import { normalizeUsername } from '@/lib/username';
 
@@ -125,16 +129,32 @@ export function resetSourceHealthSearchForTests(): void {
   reportInFlight = null;
 }
 
+function getSourceHealthReporter(username: string): string {
+  return createHmac('sha256', getAuthSigningSecret())
+    .update(`source-health-play:${normalizeUsername(username)}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+export async function recordSourceSmoothness(
+  username: string,
+  payload: SourceSmoothnessPayload,
+): Promise<void> {
+  const { eventAt, ...delta } = payload;
+  await db.recordSourceSmoothReport({
+    ...delta,
+    reporter: getSourceHealthReporter(username),
+    bucketDate: new Date(eventAt).toISOString().slice(0, 10),
+  });
+}
+
 export async function recordSourcePlayOutcome(
   username: string,
   source: string,
   success: boolean,
   eventAt: number,
 ): Promise<void> {
-  const reporter = createHmac('sha256', getAuthSigningSecret())
-    .update(`source-health-play:${normalizeUsername(username)}`)
-    .digest('hex')
-    .slice(0, 16);
+  const reporter = getSourceHealthReporter(username);
   await db.recordSourcePlayReport({
     source,
     bucketDate: new Date(eventAt).toISOString().slice(0, 10),
@@ -160,12 +180,33 @@ export async function getSourceHealthReport(
   );
   const sinceDate = dates[0];
   const retentionDate = utcDateDaysAgo(SOURCE_HEALTH_RETENTION_DAYS, now);
-  const [config, searchRows, playWindow, playRetention] = await Promise.all([
+  const [
+    config,
+    searchRows,
+    playWindow,
+    playRetention,
+    smoothWindow,
+    smoothBreakdown,
+  ] = await Promise.all([
     getConfigForRead(),
     db.getSourceHealthSearchDaily(retentionDate),
     db.getSourcePlayReporterDaily(sinceDate),
     db.getSourcePlayReporterSummary(retentionDate),
+    db.getSourceSmoothReporterDaily(sinceDate),
+    db.getSourceSmoothBreakdown(sinceDate),
   ]);
+  const smoothBySource = new Map<string, EffectiveSmoothDaily[]>();
+  for (const row of getEffectiveSmoothDaily(smoothWindow)) {
+    const rows = smoothBySource.get(row.source) ?? [];
+    rows.push(row);
+    smoothBySource.set(row.source, rows);
+  }
+  const breakdownBySource = new Map<string, SourceSmoothBreakdownItem[]>();
+  for (const row of smoothBreakdown) {
+    const rows = breakdownBySource.get(row.source) ?? [];
+    rows.push(row);
+    breakdownBySource.set(row.source, rows);
+  }
   const searchBySource = new Map<string, SourceHealthSearchDaily[]>();
   const lastOkBySource = new Map<string, string>();
   const setLastOk = (source: string, date: string | null) => {
@@ -212,7 +253,10 @@ export async function getSourceHealthReport(
         dates,
         searchBySource.get(source.key) ?? [],
         playDailyBySource.get(source.key) ?? [],
+        smoothBySource.get(source.key) ?? [],
       ),
+      smoothBySource.get(source.key) ?? [],
+      breakdownBySource.get(source.key) ?? [],
     ),
   );
 }
@@ -255,6 +299,7 @@ function cloneReport(report: SourceHealthReportItem[] | null) {
     report?.map((item) => ({
       ...item,
       daily: item.daily.map((point) => ({ ...point })),
+      smoothBreakdown: item.smoothBreakdown.map((row) => ({ ...row })),
     })) ?? null
   );
 }

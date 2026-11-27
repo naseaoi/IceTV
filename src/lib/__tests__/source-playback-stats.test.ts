@@ -1,10 +1,12 @@
 import {
   type SourcePlaybackStat,
   compareSourcePlaybackPreference,
+  isSourceLocallyStuttering,
   isTrustedSourcePlaybackStat,
   readSourcePlaybackStats,
   recordSourceManualSelection,
   recordSourcePlaybackFailure,
+  recordSourcePlaybackSmoothness,
   recordSourcePlaybackSuccess,
   sortSourcesByPlaybackStats,
   SOURCE_PLAYBACK_STATS_STORAGE_KEY,
@@ -35,6 +37,64 @@ describe('source playback stats storage', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('兼容旧版和损坏的可选卡顿字段，保留有效时间戳最多五个', () => {
+    window.localStorage.setItem(
+      SOURCE_PLAYBACK_STATS_STORAGE_KEY,
+      JSON.stringify({
+        v: 1,
+        entries: [
+          ['old', stat({ successes: 3 })],
+          ['bad', { ...stat({ successes: 2 }), stutteringSessions: 'invalid' }],
+          [
+            'mixed',
+            {
+              ...stat({}),
+              stutteringSessions: [null, -1, 'oops', 1, 2, 3, 4, 5, 6],
+            },
+          ],
+        ],
+      }),
+    );
+    const entries = readSourcePlaybackStats();
+    expect(entries.get('old')?.successes).toBe(3);
+    expect(isSourceLocallyStuttering(entries.get('old'), now)).toBe(false);
+    expect(entries.get('bad')?.successes).toBe(2);
+    expect(entries.get('mixed')?.stutteringSessions).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('卡顿会话最多五次，近24小时至少两次才排后；流畅清空，短会话不变', () => {
+    const stuttering = { watchMs: 300_000, stallMs: 10_000, stallCount: 2 };
+    recordSourcePlaybackSmoothness('demo', stuttering);
+    expect(
+      isSourceLocallyStuttering(readSourcePlaybackStats().get('demo'), now),
+    ).toBe(false);
+    recordSourcePlaybackSmoothness('demo', stuttering);
+    expect(
+      isSourceLocallyStuttering(readSourcePlaybackStats().get('demo'), now),
+    ).toBe(true);
+    recordSourcePlaybackSmoothness('demo', { ...stuttering, watchMs: 299_999 });
+    expect(
+      readSourcePlaybackStats().get('demo')?.stutteringSessions,
+    ).toHaveLength(2);
+    for (let index = 0; index < 5; index++)
+      recordSourcePlaybackSmoothness('demo', stuttering);
+    expect(
+      readSourcePlaybackStats().get('demo')?.stutteringSessions,
+    ).toHaveLength(5);
+    now += DAY_MS + 1;
+    expect(
+      isSourceLocallyStuttering(readSourcePlaybackStats().get('demo'), now),
+    ).toBe(false);
+    recordSourcePlaybackSmoothness('demo', {
+      watchMs: 300_000,
+      stallMs: 0,
+      stallCount: 0,
+    });
+    expect(readSourcePlaybackStats().get('demo')?.stutteringSessions).toEqual(
+      [],
+    );
   });
 
   it('records startup time as an exponentially weighted average', () => {

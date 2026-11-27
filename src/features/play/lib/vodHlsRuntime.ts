@@ -143,6 +143,8 @@ const HLS_LOAD_IN_PROGRESS_STATES: ReadonlySet<string | undefined> = new Set([
 // 运行时释放时同步移除；页面层据此确认挂在 video 上的运行时仍属于当前播放地址
 const CACHED_FRAGMENT_MAX_LOAD_MS = 50;
 
+export const VOD_ROUTE_CHANGING_EVENT = 'icetv:vod-route-changing';
+
 const vodRuntimeSourceUrls = new WeakMap<HTMLVideoElement, string>();
 
 export function getVodRuntimeSourceUrl(video: HTMLVideoElement): string | null {
@@ -581,6 +583,7 @@ export function createVodM3u8Loader({
       attempt.routeSwitched = true;
       attempt.triedRoutes.add(routeKey(nextServer));
       reportRouteStat(false);
+      video.dispatchEvent(new Event(VOD_ROUTE_CHANGING_EVENT));
       currentUseServerProxy = nextServer;
       fallbackAwaitingProgress = true;
       targetUrl = buildTargetUrl(url, nextServer);

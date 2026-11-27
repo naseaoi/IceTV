@@ -213,6 +213,9 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
+  SourceSmoothBreakdownItem,
+  SourceSmoothReporterDaily,
+  SourceSmoothReportInput,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
@@ -659,7 +662,7 @@ export class MySqlStorage implements IStorage {
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (source, route_mode, bucket_date),
         KEY idx_source_route_stats_bucket (bucket_date)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS source_proxy_failures (
         source VARCHAR(191) NOT NULL,
         bucket_date CHAR(10) NOT NULL,
@@ -680,7 +683,7 @@ export class MySqlStorage implements IStorage {
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (source, bucket_date),
         KEY idx_source_health_search_bucket (bucket_date)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS source_health_play (
         source VARCHAR(191) NOT NULL,
         bucket_date CHAR(10) NOT NULL,
@@ -690,7 +693,21 @@ export class MySqlStorage implements IStorage {
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (source, bucket_date, reporter),
         KEY idx_source_health_play_bucket (bucket_date)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS source_health_smooth (
+        source VARCHAR(191) NOT NULL,
+        bucket_date CHAR(10) NOT NULL,
+        reporter VARCHAR(191) NOT NULL,
+        route_mode VARCHAR(16) NOT NULL,
+        media_type VARCHAR(16) NOT NULL,
+        watch_ms BIGINT NOT NULL DEFAULT 0,
+        stall_ms BIGINT NOT NULL DEFAULT 0,
+        stall_count BIGINT NOT NULL DEFAULT 0,
+        unknown_ms BIGINT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (source, bucket_date, reporter, route_mode, media_type),
+        KEY idx_source_health_smooth_bucket (bucket_date)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
         username VARCHAR(191) NOT NULL,
         scope_key VARCHAR(255) NOT NULL,
@@ -731,6 +748,53 @@ export class MySqlStorage implements IStorage {
 
     for (const statement of statements) {
       await this.pool.execute(statement);
+    }
+    // ci 改为 bin 只细分原有键的等价类，不会产生新的主键冲突。
+    for (const [table, columns] of Object.entries({
+      source_route_stats: {
+        source: 'VARCHAR(191)',
+        route_mode: 'VARCHAR(16)',
+        bucket_date: 'CHAR(10)',
+      },
+      source_proxy_failures: {
+        source: 'VARCHAR(191)',
+        bucket_date: 'CHAR(10)',
+        reason: 'VARCHAR(32)',
+      },
+      source_health_search: {
+        source: 'VARCHAR(191)',
+        bucket_date: 'CHAR(10)',
+      },
+      source_health_play: {
+        source: 'VARCHAR(191)',
+        bucket_date: 'CHAR(10)',
+        reporter: 'VARCHAR(191)',
+      },
+      source_health_smooth: {
+        source: 'VARCHAR(191)',
+        bucket_date: 'CHAR(10)',
+        reporter: 'VARCHAR(191)',
+        route_mode: 'VARCHAR(16)',
+        media_type: 'VARCHAR(16)',
+      },
+    })) {
+      const [columnsToMigrate] = await this.pool.query<RowDataPacket[]>(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+           AND COLLATION_NAME <> 'utf8mb4_bin'`,
+        [table],
+      );
+      const changes = Object.entries(columns)
+        .filter(([column]) =>
+          columnsToMigrate.some((row) => row.COLUMN_NAME === column),
+        )
+        .map(
+          ([column, type]) =>
+            `MODIFY COLUMN ${column} ${type} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL`,
+        );
+      if (changes.length) {
+        await this.pool.execute(`ALTER TABLE ${table} ${changes.join(', ')}`);
+      }
     }
     const [cacheColumns] = await this.pool.query<RowDataPacket[]>(
       "SHOW COLUMNS FROM shared_cache LIKE 'value_bytes'",
@@ -4024,6 +4088,83 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async recordSourceSmoothReport(
+    input: SourceSmoothReportInput,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      `INSERT INTO source_health_smooth (
+      source, bucket_date, reporter, route_mode, media_type,
+      watch_ms, stall_ms, stall_count, unknown_ms, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      watch_ms = watch_ms + VALUES(watch_ms),
+      stall_ms = stall_ms + VALUES(stall_ms),
+      stall_count = stall_count + VALUES(stall_count),
+      unknown_ms = unknown_ms + VALUES(unknown_ms),
+      updated_at = VALUES(updated_at)`,
+      [
+        input.source,
+        input.bucketDate,
+        input.reporter,
+        input.routeMode,
+        input.mediaType,
+        input.watchMs,
+        input.stallMs,
+        input.stallCount,
+        input.unknownMs,
+        Date.now(),
+      ],
+    );
+  }
+
+  async getSourceSmoothReporterDaily(
+    sinceDate: string,
+  ): Promise<SourceSmoothReporterDaily[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & SourceSmoothReporterDaily)[]
+    >(
+      `SELECT source, bucket_date AS bucketDate, reporter,
+      SUM(watch_ms) AS watchMs, SUM(stall_ms) AS stallMs, SUM(stall_count) AS stallCount
+      FROM source_health_smooth WHERE bucket_date >= ?
+      GROUP BY source, bucket_date, reporter
+      ORDER BY bucket_date ASC, source ASC, reporter ASC`,
+      [sinceDate],
+    );
+    return rows.map((row) => ({
+      ...row,
+      watchMs: Number(row.watchMs),
+      stallMs: Number(row.stallMs),
+      stallCount: Number(row.stallCount),
+    }));
+  }
+
+  async getSourceSmoothBreakdown(
+    sinceDate: string,
+  ): Promise<SourceSmoothBreakdownItem[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & SourceSmoothBreakdownItem)[]
+    >(
+      `SELECT source, route_mode AS routeMode, media_type AS mediaType,
+      SUM(watch_ms) AS watchMs, SUM(stall_ms) AS stallMs, SUM(stall_count) AS stallCount,
+      SUM(unknown_ms) AS unknownMs, COUNT(*) AS reporterDays
+      FROM source_health_smooth WHERE bucket_date >= ?
+      GROUP BY source, route_mode, media_type
+      ORDER BY source ASC, route_mode ASC, media_type ASC`,
+      [sinceDate],
+    );
+    return rows.map((row) => ({
+      ...row,
+      watchMs: Number(row.watchMs),
+      stallMs: Number(row.stallMs),
+      stallCount: Number(row.stallCount),
+      unknownMs: Number(row.unknownMs),
+      reporterDays: Number(row.reporterDays),
+    }));
+  }
+
   async getSourceHealthSearchDaily(
     sinceDate: string,
   ): Promise<SourceHealthSearchDaily[]> {
@@ -4101,6 +4242,10 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM source_health_play WHERE bucket_date < ?',
+        [beforeDate],
+      );
+      await connection.execute(
+        'DELETE FROM source_health_smooth WHERE bucket_date < ?',
         [beforeDate],
       );
     });

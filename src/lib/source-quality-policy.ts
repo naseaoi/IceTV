@@ -2,6 +2,8 @@ import type {
   SourceHealthSearchDaily,
   SourcePlayReporterDaily,
   SourcePlayReporterSummary,
+  SourceSmoothBreakdownItem,
+  SourceSmoothReporterDaily,
 } from '@/lib/types';
 
 export const SOURCE_HEALTH_DEFAULT_DAYS = 7;
@@ -22,6 +24,73 @@ export const SOURCE_HEALTH_POOR_SCORE = 50;
 export const SOURCE_HEALTH_GOOD_SCORE = 85;
 export const SOURCE_HEALTH_GOOD_LATENCY_MS = 3000;
 
+// 播放流畅度：客户端本机偏好与服务端评分共用同一卡顿判定
+export const SOURCE_SMOOTH_MIN_WATCH_MS = 5 * 60 * 1000;
+export const SOURCE_SMOOTH_MAX_STALL_RATIO = 0.015;
+export const SOURCE_SMOOTH_MAX_STALLS_PER_10_MIN = 2;
+export const SOURCE_SMOOTH_MIN_REPORTER_DAYS = 20;
+export const SOURCE_SMOOTH_MIN_ACCOUNTS = 5;
+// 同一上报者同日在至少这么多个源上卡顿且无流畅源时，视为其自身网络受限
+export const SOURCE_SMOOTH_NETWORK_LIMITED_SOURCES = 3;
+export const SOURCE_SMOOTH_DAILY_MIN_ACCOUNTS = 3;
+export const SOURCE_SMOOTH_DAILY_MIN_WATCH_MS = 30 * 60 * 1000;
+
+export interface SourceSmoothSample {
+  watchMs: number;
+  stallMs: number;
+  stallCount: number;
+}
+
+/** 观察时长不足返回 null；否则卡顿率或每 10 分钟卡顿次数任一超限即为卡顿。 */
+export function isSmoothSampleStuttering(
+  sample: SourceSmoothSample,
+): boolean | null {
+  if (sample.watchMs < SOURCE_SMOOTH_MIN_WATCH_MS) return null;
+  const totalMs = sample.watchMs + sample.stallMs;
+  return (
+    sample.stallMs / totalMs > SOURCE_SMOOTH_MAX_STALL_RATIO ||
+    (sample.stallCount * 600_000) / totalMs >=
+      SOURCE_SMOOTH_MAX_STALLS_PER_10_MIN
+  );
+}
+
+export interface EffectiveSmoothDaily extends SourceSmoothReporterDaily {
+  stuttering: boolean;
+}
+
+/** 先跨源识别网络受限的上报者日，再保留可评分的源上报者日。 */
+export function getEffectiveSmoothDaily(
+  rows: readonly SourceSmoothReporterDaily[],
+): EffectiveSmoothDaily[] {
+  const classified: EffectiveSmoothDaily[] = [];
+  const reporterDays = new Map<
+    string,
+    { stutteringSources: Set<string>; hasSmooth: boolean }
+  >();
+  for (const row of rows) {
+    const stuttering = isSmoothSampleStuttering(row);
+    if (stuttering === null) continue;
+    classified.push({ ...row, stuttering });
+    const key = JSON.stringify([row.bucketDate, row.reporter]);
+    const day = reporterDays.get(key) ?? {
+      stutteringSources: new Set<string>(),
+      hasSmooth: false,
+    };
+    if (stuttering) day.stutteringSources.add(row.source);
+    else day.hasSmooth = true;
+    reporterDays.set(key, day);
+  }
+  return classified.filter((row) => {
+    const day = reporterDays.get(
+      JSON.stringify([row.bucketDate, row.reporter]),
+    )!;
+    return (
+      day.hasSmooth ||
+      day.stutteringSources.size < SOURCE_SMOOTH_NETWORK_LIMITED_SOURCES
+    );
+  });
+}
+
 export type SourceHealthTier =
   | 'offline'
   | 'poor'
@@ -41,6 +110,7 @@ export type SourceHealthPublicTier = 'good' | 'normal' | 'poor' | 'offline';
 export interface SourceHealthPublicItem {
   tier: SourceHealthPublicTier;
   playAvailability: number | null;
+  smoothRate: number | null;
   searchAvailability: number | null;
   lastOkDate: string | null;
   daily: SourceHealthDailyPoint[];
@@ -60,8 +130,25 @@ export interface SourceHealthReportItem {
   avgSearchLatencyMs: number | null;
   playReporterDays: number;
   playSuccessRate: number | null;
+  smoothReporterDays: number;
+  smoothAccounts: number;
+  smoothRate: number | null;
+  stallRatio: number | null;
+  stallsPer10Min: number | null;
+  smoothWatchMs: number;
+  smoothBreakdown: SourceSmoothBreakdownItem[];
   lastOkDate: string | null;
   daily: SourceHealthDailyPoint[];
+}
+
+export function hasSourceSmoothDimension(item: {
+  smoothReporterDays: number;
+  smoothAccounts: number;
+}): boolean {
+  return (
+    item.smoothReporterDays >= SOURCE_SMOOTH_MIN_REPORTER_DAYS &&
+    item.smoothAccounts >= SOURCE_SMOOTH_MIN_ACCOUNTS
+  );
 }
 
 export function toPublicSourceHealth(
@@ -78,6 +165,7 @@ export function toPublicSourceHealth(
   return {
     tier: item.tier,
     playAvailability: hasPublicPlay ? item.playSuccessRate : null,
+    smoothRate: hasSourceSmoothDimension(item) ? item.smoothRate : null,
     searchAvailability: item.searchAvailability,
     lastOkDate: item.lastOkDate,
     daily: item.daily.map((point) => ({ ...point })),
@@ -88,7 +176,14 @@ export function buildSourceHealthDaily(
   dates: readonly string[],
   searchRows: readonly SourceHealthSearchDaily[],
   playRows: readonly SourcePlayReporterDaily[],
+  smoothRows: readonly EffectiveSmoothDaily[] = [],
 ): SourceHealthDailyPoint[] {
+  const smoothByDate = new Map<string, EffectiveSmoothDaily[]>();
+  for (const row of smoothRows) {
+    const rows = smoothByDate.get(row.bucketDate) ?? [];
+    rows.push(row);
+    smoothByDate.set(row.bucketDate, rows);
+  }
   const searchByDate = new Map(searchRows.map((row) => [row.bucketDate, row]));
   const playByDate = new Map(playRows.map((row) => [row.bucketDate, row]));
   return dates.map((date) => {
@@ -117,7 +212,16 @@ export function buildSourceHealthDaily(
           : rate >= SOURCE_HEALTH_DAILY_DEGRADED_RATE
             ? 'degraded'
             : 'down';
-    return { date, status };
+    const smooth = smoothByDate.get(date) ?? [];
+    const degradedBySmooth =
+      status === 'ok' &&
+      new Set(smooth.map((row) => row.reporter)).size >=
+        SOURCE_SMOOTH_DAILY_MIN_ACCOUNTS &&
+      smooth.reduce((sum, row) => sum + row.watchMs, 0) >=
+        SOURCE_SMOOTH_DAILY_MIN_WATCH_MS &&
+      smooth.filter((row) => !row.stuttering).length / smooth.length <
+        SOURCE_HEALTH_DAILY_OK_RATE;
+    return { date, status: degradedBySmooth ? 'degraded' : status };
   });
 }
 
@@ -138,6 +242,8 @@ export function scoreSourceHealth(
   play: SourcePlayReporterSummary | undefined,
   lastOkDate: string | null,
   daily: SourceHealthDailyPoint[] = [],
+  smoothRows: readonly EffectiveSmoothDaily[] = [],
+  smoothBreakdown: SourceSmoothBreakdownItem[] = [],
 ): SourceHealthReportItem {
   let searchSuccesses = 0;
   let searchAttempts = 0;
@@ -161,13 +267,22 @@ export function scoreSourceHealth(
     latencySamples > 0 ? latencyMsSum / latencySamples : null;
   const hasSearch = searchAttempts >= SOURCE_HEALTH_MIN_SEARCH_ATTEMPTS;
   const hasPlay = playReporterDays >= SOURCE_HEALTH_MIN_PLAY_REPORTER_DAYS;
-  let score: number | null = null;
-  if (hasSearch && hasPlay) {
-    score = Math.min(smoothedSearch ?? 0, smoothedPlay ?? 0) * 100;
-  } else if (hasSearch || hasPlay) {
-    score = ((hasSearch ? smoothedSearch : smoothedPlay) ?? 0) * 100;
-  }
-  if (score !== null) score = Math.round(score);
+  const smoothReporterDays = smoothRows.length;
+  const smoothAccounts = new Set(smoothRows.map((row) => row.reporter)).size;
+  const smoothSuccesses = smoothRows.filter((row) => !row.stuttering).length;
+  const smoothWatchMs = smoothRows.reduce((sum, row) => sum + row.watchMs, 0);
+  const stallMs = smoothRows.reduce((sum, row) => sum + row.stallMs, 0);
+  const stallCount = smoothRows.reduce((sum, row) => sum + row.stallCount, 0);
+  const hasSmooth = hasSourceSmoothDimension({
+    smoothReporterDays,
+    smoothAccounts,
+  });
+  const rates: number[] = [];
+  if (hasSearch) rates.push(smoothedSearch ?? 0);
+  if (hasPlay) rates.push(smoothedPlay ?? 0);
+  if (hasSmooth)
+    rates.push(smoothedRate(smoothSuccesses, smoothReporterDays) ?? 0);
+  const score = rates.length ? Math.round(Math.min(...rates) * 100) : null;
 
   let tier: SourceHealthTier = 'insufficient';
   if (score !== null) {
@@ -199,6 +314,13 @@ export function scoreSourceHealth(
     avgSearchLatencyMs,
     playReporterDays,
     playSuccessRate: rawRate(playSuccesses, playReporterDays),
+    smoothReporterDays,
+    smoothAccounts,
+    smoothRate: rawRate(smoothSuccesses, smoothReporterDays),
+    stallRatio: rawRate(stallMs, smoothWatchMs + stallMs),
+    stallsPer10Min: rawRate(stallCount * 600_000, smoothWatchMs + stallMs),
+    smoothWatchMs,
+    smoothBreakdown,
     lastOkDate,
     daily,
   };

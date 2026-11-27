@@ -35,6 +35,13 @@ const item: SourceHealthReportItem = {
   avgSearchLatencyMs: 1000,
   playReporterDays: 20,
   playSuccessRate: 0.9,
+  smoothReporterDays: 20,
+  smoothAccounts: 5,
+  smoothRate: 0.8,
+  stallRatio: 0.02,
+  stallsPer10Min: 2,
+  smoothWatchMs: 12_000_000,
+  smoothBreakdown: [],
   lastOkDate: '2026-11-07',
   daily,
 };
@@ -61,6 +68,7 @@ beforeEach(() => {
       source: 'offline',
       tier: 'offline',
       playReporterDays: 0,
+      smoothReporterDays: 0,
       playSuccessRate: null,
     },
     { ...item, source: 'low-sample', playReporterDays: 19 },
@@ -87,6 +95,7 @@ it('projects only available, sufficiently sampled sources with the exact public 
       visible: {
         tier: 'good',
         playAvailability: 0.9,
+        smoothRate: 0.8,
         searchAvailability: 0.95,
         lastOkDate: '2026-11-07',
         daily,
@@ -94,6 +103,7 @@ it('projects only available, sufficiently sampled sources with the exact public 
       offline: {
         tier: 'offline',
         playAvailability: null,
+        smoothRate: null,
         searchAvailability: 0.95,
         lastOkDate: '2026-11-07',
         daily,

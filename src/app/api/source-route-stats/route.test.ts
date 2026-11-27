@@ -6,7 +6,10 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites } from '@/lib/config';
 import { db } from '@/lib/db';
-import { recordSourcePlayOutcome } from '@/lib/source-health.server';
+import {
+  recordSourcePlayOutcome,
+  recordSourceSmoothness,
+} from '@/lib/source-health.server';
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest.fn(),
@@ -19,6 +22,7 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/db', () => ({ db: { recordSourceRouteStat: jest.fn() } }));
 jest.mock('@/lib/source-health.server', () => ({
   recordSourcePlayOutcome: jest.fn(),
+  recordSourceSmoothness: jest.fn(),
 }));
 installWebPolyfills();
 const { POST } = require('./route') as typeof import('./route');
@@ -32,6 +36,7 @@ beforeEach(() => {
   (requireActiveUser as jest.Mock).mockResolvedValue({ username: 'alice' });
   (getAvailableApiSites as jest.Mock).mockResolvedValue([{ key: 'a' }]);
   (recordSourcePlayOutcome as jest.Mock).mockResolvedValue(undefined);
+  (recordSourceSmoothness as jest.Mock).mockResolvedValue(undefined);
   (db.recordSourceRouteStat as jest.Mock).mockResolvedValue(undefined);
 });
 afterEach(() => jest.restoreAllMocks());
@@ -193,6 +198,174 @@ it('ignores phase-less legacy stats and preserves their final outcome', async ()
     eventAt,
   );
   expect((await POST(request({ stat: legacyStat }))).status).toBe(200);
+});
+
+const smooth = {
+  source: 'a',
+  routeMode: 'browser',
+  mediaType: 'hls',
+  watchMs: 300_000,
+  stallMs: 2000,
+  stallCount: 1,
+  unknownMs: 500,
+  eventAt,
+};
+
+it.each([false, true])(
+  'records smoothness alone or with other stats: combined=%s',
+  async (combined) => {
+    const response = await POST(
+      request({ ...(combined ? { stat, outcome } : {}), smooth }),
+    );
+    expect(response.status).toBe(200);
+    expect(recordSourceSmoothness).toHaveBeenCalledWith('alice', smooth);
+    expect(db.recordSourceRouteStat).toHaveBeenCalledTimes(combined ? 1 : 0);
+    expect(recordSourcePlayOutcome).toHaveBeenCalledTimes(combined ? 1 : 0);
+  },
+);
+
+it('normalizes source, integer increments and future timestamps like outcomes', async () => {
+  const now = Date.now();
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+  expect(
+    (
+      await POST(
+        request({
+          smooth: {
+            ...smooth,
+            source: ' a ',
+            routeMode: 'server',
+            mediaType: 'mp4',
+            watchMs: 100.9,
+            stallMs: 10.9,
+            stallCount: 2.9,
+            unknownMs: 5.9,
+            eventAt: now + 100_000,
+          },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(recordSourceSmoothness).toHaveBeenCalledWith('alice', {
+    ...smooth,
+    routeMode: 'server',
+    mediaType: 'mp4',
+    watchMs: 100,
+    stallMs: 10,
+    stallCount: 2,
+    unknownMs: 5,
+    eventAt: now + 60_000,
+  });
+});
+
+it('ignores all-zero smooth increments while retaining outcomes', async () => {
+  const zero = {
+    ...smooth,
+    watchMs: 0,
+    stallMs: 0,
+    stallCount: 0,
+    unknownMs: 0,
+  };
+  expect((await POST(request({ smooth: zero }))).status).toBe(200);
+  expect((await POST(request({ smooth: zero, outcome }))).status).toBe(200);
+  expect(recordSourceSmoothness).not.toHaveBeenCalled();
+  expect(recordSourcePlayOutcome).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  null,
+  {},
+  [],
+  { ...smooth, source: '' },
+  { ...smooth, source: 'x'.repeat(192) },
+  { ...smooth, routeMode: 'auto' },
+  { ...smooth, mediaType: 'dash' },
+  { ...smooth, watchMs: -1 },
+  { ...smooth, watchMs: 600_001 },
+  { ...smooth, watchMs: Infinity },
+  { ...smooth, watchMs: '1' },
+  { ...smooth, stallMs: -1 },
+  { ...smooth, stallMs: 330_001 },
+  { ...smooth, stallMs: NaN },
+  { ...smooth, stallMs: '1' },
+  { ...smooth, unknownMs: -1 },
+  { ...smooth, unknownMs: 330_001 },
+  { ...smooth, unknownMs: Infinity },
+  { ...smooth, unknownMs: null },
+  { ...smooth, stallCount: -1 },
+  { ...smooth, stallCount: 121 },
+  { ...smooth, stallCount: NaN },
+  { ...smooth, stallCount: undefined },
+  { ...smooth, eventAt: 0 },
+  { ...smooth, eventAt: Infinity },
+  { ...smooth, eventAt: '1' },
+])('rejects malformed smoothness before any write: %j', async (invalid) => {
+  const response = await POST(request({ smooth: invalid, stat, outcome }));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: '播放统计格式无效' });
+  expect(recordSourceSmoothness).not.toHaveBeenCalled();
+  expect(recordSourcePlayOutcome).not.toHaveBeenCalled();
+  expect(db.recordSourceRouteStat).not.toHaveBeenCalled();
+});
+
+it('accepts exact smoothness limits and unknown-only diagnostics', async () => {
+  expect(
+    (
+      await POST(
+        request({
+          smooth: {
+            ...smooth,
+            watchMs: 600_000,
+            stallMs: 630_000,
+            unknownMs: 630_000,
+            stallCount: 120,
+          },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await POST(
+        request({
+          smooth: { ...smooth, watchMs: 0, stallMs: 0, stallCount: 0 },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(recordSourceSmoothness).toHaveBeenCalledTimes(2);
+});
+
+it('checks smoothness source access even for zero increments', async () => {
+  expect(
+    (
+      await POST(
+        request({
+          smooth: {
+            ...smooth,
+            source: 'hidden',
+            watchMs: 0,
+            stallMs: 0,
+            stallCount: 0,
+            unknownMs: 0,
+          },
+          outcome,
+        }),
+      )
+    ).status,
+  ).toBe(400);
+  expect(recordSourceSmoothness).not.toHaveBeenCalled();
+  expect(recordSourcePlayOutcome).not.toHaveBeenCalled();
+});
+
+it('returns a generic error on smoothness storage failure', async () => {
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  (recordSourceSmoothness as jest.Mock).mockRejectedValue(
+    new Error('sensitive database details'),
+  );
+  const response = await POST(request({ smooth }));
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: '保存播放统计失败' });
 });
 
 it('records fallback attempts separately', async () => {

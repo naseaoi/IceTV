@@ -27,6 +27,56 @@ const context: SourceSelectionContext = {
 const stats = new Map<string, SourcePlaybackStat>();
 
 describe('client route preference', () => {
+  it('本机卡顿在可靠性之后、全局等级之前比较，缺远端上下文仍有效', () => {
+    const local: SourcePlaybackStat = {
+      startupMs: null,
+      successes: 0,
+      failures: 0,
+      manualSelections: 0,
+      lastUsedAt: now,
+      stutteringSessions: [now - 1_000, now],
+    };
+    const history = new Map([['browser', local]]);
+    expect(
+      compareSourceRoutePreference(
+        source('browser'),
+        source('poor'),
+        context,
+        history,
+        now,
+      ),
+    ).toBeGreaterThan(0);
+    expect(
+      compareSourceRoutePreference(
+        source('browser'),
+        source('poor'),
+        { proxyModes: {}, healthTiers: {} },
+        history,
+        now,
+      ),
+    ).toBeGreaterThan(0);
+    history.set('browser', { ...local, successes: 3 });
+    expect(
+      compareSourceRoutePreference(
+        source('browser'),
+        source('poor'),
+        context,
+        history,
+        now,
+      ),
+    ).toBeLessThan(0);
+    history.set('poor', { ...local, successes: 3, stutteringSessions: [] });
+    expect(
+      compareSourceRoutePreference(
+        source('browser'),
+        source('poor'),
+        context,
+        history,
+        now,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
   it('demotes the failed pair ahead of reliability while preserving the other ordering', () => {
     const failed = source('auto');
     const anotherWork = { ...failed, id: 'another-work' };

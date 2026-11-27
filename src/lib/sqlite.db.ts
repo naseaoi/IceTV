@@ -212,6 +212,9 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
+  SourceSmoothBreakdownItem,
+  SourceSmoothReporterDaily,
+  SourceSmoothReportInput,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
@@ -937,6 +940,22 @@ export class LocalSqliteStorage implements IStorage {
       );
       CREATE INDEX IF NOT EXISTS idx_source_health_play_bucket
         ON source_health_play (bucket_date);
+
+      CREATE TABLE IF NOT EXISTS source_health_smooth (
+        source TEXT NOT NULL,
+        bucket_date TEXT NOT NULL,
+        reporter TEXT NOT NULL,
+        route_mode TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        watch_ms INTEGER NOT NULL DEFAULT 0,
+        stall_ms INTEGER NOT NULL DEFAULT 0,
+        stall_count INTEGER NOT NULL DEFAULT 0,
+        unknown_ms INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (source, bucket_date, reporter, route_mode, media_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_health_smooth_bucket
+        ON source_health_smooth (bucket_date);
 
       CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
         username TEXT NOT NULL,
@@ -3924,6 +3943,65 @@ export class LocalSqliteStorage implements IStorage {
       );
   }
 
+  async recordSourceSmoothReport(
+    input: SourceSmoothReportInput,
+  ): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO source_health_smooth (
+      source, bucket_date, reporter, route_mode, media_type,
+      watch_ms, stall_ms, stall_count, unknown_ms, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source, bucket_date, reporter, route_mode, media_type) DO UPDATE SET
+      watch_ms = watch_ms + excluded.watch_ms,
+      stall_ms = stall_ms + excluded.stall_ms,
+      stall_count = stall_count + excluded.stall_count,
+      unknown_ms = unknown_ms + excluded.unknown_ms,
+      updated_at = excluded.updated_at`,
+      )
+      .run(
+        input.source,
+        input.bucketDate,
+        input.reporter,
+        input.routeMode,
+        input.mediaType,
+        input.watchMs,
+        input.stallMs,
+        input.stallCount,
+        input.unknownMs,
+        Date.now(),
+      );
+  }
+
+  async getSourceSmoothReporterDaily(
+    sinceDate: string,
+  ): Promise<SourceSmoothReporterDaily[]> {
+    return this.db
+      .prepare(
+        `SELECT source, bucket_date AS bucketDate, reporter,
+      SUM(watch_ms) AS watchMs, SUM(stall_ms) AS stallMs, SUM(stall_count) AS stallCount
+      FROM source_health_smooth WHERE bucket_date >= ?
+      GROUP BY source, bucket_date, reporter
+      ORDER BY bucket_date ASC, source ASC, reporter ASC`,
+      )
+      .all(sinceDate) as SourceSmoothReporterDaily[];
+  }
+
+  async getSourceSmoothBreakdown(
+    sinceDate: string,
+  ): Promise<SourceSmoothBreakdownItem[]> {
+    return this.db
+      .prepare(
+        `SELECT source, route_mode AS routeMode, media_type AS mediaType,
+      SUM(watch_ms) AS watchMs, SUM(stall_ms) AS stallMs, SUM(stall_count) AS stallCount,
+      SUM(unknown_ms) AS unknownMs, COUNT(*) AS reporterDays
+      FROM source_health_smooth WHERE bucket_date >= ?
+      GROUP BY source, route_mode, media_type
+      ORDER BY source ASC, route_mode ASC, media_type ASC`,
+      )
+      .all(sinceDate) as SourceSmoothBreakdownItem[];
+  }
+
   async getSourceHealthSearchDaily(
     sinceDate: string,
   ): Promise<SourceHealthSearchDaily[]> {
@@ -3976,6 +4054,9 @@ export class LocalSqliteStorage implements IStorage {
         .run(beforeDate);
       this.db
         .prepare('DELETE FROM source_health_play WHERE bucket_date < ?')
+        .run(beforeDate);
+      this.db
+        .prepare('DELETE FROM source_health_smooth WHERE bucket_date < ?')
         .run(beforeDate);
     })();
   }

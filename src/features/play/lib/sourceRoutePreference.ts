@@ -1,6 +1,7 @@
 import {
   type SourcePlaybackStat,
   getSourcePlaybackPreferenceTier,
+  isSourceLocallyStuttering,
 } from '@/lib/source-playback-stats';
 import {
   type SourceHealthTier,
@@ -42,6 +43,11 @@ export function compareSourceRoutePreference(
     now,
   );
   if (aTier !== bTier) return aTier - bTier;
+
+  const smoothnessDifference =
+    Number(isSourceLocallyStuttering(playbackStats.get(a.source), now)) -
+    Number(isSourceLocallyStuttering(playbackStats.get(b.source), now));
+  if (smoothnessDifference) return smoothnessDifference;
 
   if (aTier === 1) {
     // 没有本地证据且远端上下文不完整时，保留调用方原有顺序。

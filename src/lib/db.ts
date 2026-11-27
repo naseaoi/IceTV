@@ -25,6 +25,9 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
+  SourceSmoothBreakdownItem,
+  SourceSmoothReporterDaily,
+  SourceSmoothReportInput,
   UserMessageState,
   VideoReview,
   WorkReviewSummary,
@@ -1268,6 +1271,24 @@ class DbManager {
   async recordSourcePlayReport(input: SourcePlayReportInput): Promise<void> {
     const storage = await this.getStorage();
     await storage.recordSourcePlayReport(input);
+  }
+
+  async recordSourceSmoothReport(
+    input: SourceSmoothReportInput,
+  ): Promise<void> {
+    await (await this.getStorage()).recordSourceSmoothReport(input);
+  }
+
+  async getSourceSmoothReporterDaily(
+    sinceDate: string,
+  ): Promise<SourceSmoothReporterDaily[]> {
+    return (await this.getStorage()).getSourceSmoothReporterDaily(sinceDate);
+  }
+
+  async getSourceSmoothBreakdown(
+    sinceDate: string,
+  ): Promise<SourceSmoothBreakdownItem[]> {
+    return (await this.getStorage()).getSourceSmoothBreakdown(sinceDate);
   }
 
   async getSourceHealthSearchDaily(

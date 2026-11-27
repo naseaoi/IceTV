@@ -1,6 +1,9 @@
 import {
   type SourceHealthTier,
   buildSourceHealthDaily,
+  getEffectiveSmoothDaily,
+  hasSourceSmoothDimension,
+  isSmoothSampleStuttering,
   rankSourcesByHealth,
   scoreSourceHealth,
   SOURCE_HEALTH_PUBLIC_MIN_PLAY_REPORTER_DAYS,
@@ -183,6 +186,7 @@ describe('public source health', () => {
     expect(result).toEqual({
       tier: 'normal',
       playAvailability: 0.72,
+      smoothRate: null,
       searchAvailability: 0.9,
       lastOkDate: '2026-11-04',
       daily: [{ date: '2026-11-04', status: 'degraded' }],
@@ -199,6 +203,189 @@ describe('public source health', () => {
       );
     },
   );
+});
+
+describe('smoothness policy', () => {
+  const sample = {
+    source: 'a',
+    bucketDate: '2026-11-04',
+    reporter: 'r',
+    watchMs: 600_000,
+    stallMs: 0,
+    stallCount: 0,
+  };
+  const rows = (count: number, accounts = 5, stuttering = true) =>
+    getEffectiveSmoothDaily(
+      Array.from({ length: count }, (_, index) => ({
+        ...sample,
+        reporter: `r${index % accounts}`,
+        bucketDate: `2026-11-${String(Math.floor(index / accounts) + 1).padStart(2, '0')}`,
+        stallMs: stuttering ? 60_000 : 0,
+        stallCount: stuttering ? 3 : 0,
+      })),
+    );
+  const scored = (count: number, accounts = 5, stuttering = true) =>
+    scoreSourceHealth(
+      'a',
+      search(100),
+      play(100),
+      null,
+      [],
+      rows(count, accounts, stuttering),
+    );
+
+  it.each<[number, number, boolean]>([
+    [19, 5, false],
+    [20, 4, false],
+    [20, 5, true],
+  ])(
+    'enables smooth dimension for %i reporter-days and %i accounts: %s',
+    (smoothReporterDays, smoothAccounts, expected) => {
+      expect(
+        hasSourceSmoothDimension({ smoothReporterDays, smoothAccounts }),
+      ).toBe(expected);
+    },
+  );
+
+  it('classifies only sufficiently observed samples and uses both stall metrics', () => {
+    expect(
+      isSmoothSampleStuttering({
+        ...sample,
+        watchMs: 299_999,
+        stallMs: 60_000,
+      }),
+    ).toBeNull();
+    expect(isSmoothSampleStuttering({ ...sample, watchMs: 300_000 })).toBe(
+      false,
+    );
+    expect(isSmoothSampleStuttering({ ...sample, stallMs: 10_000 })).toBe(true);
+    expect(isSmoothSampleStuttering({ ...sample, stallCount: 2 })).toBe(true);
+    expect(isSmoothSampleStuttering({ ...sample, stallCount: 1 })).toBe(false);
+  });
+
+  it('preserves old score below either threshold and takes the smoothed weakest signal above both', () => {
+    expect(scored(19)).toMatchObject({
+      score: 99,
+      tier: 'good',
+      smoothReporterDays: 19,
+      smoothRate: 0,
+    });
+    expect(scored(20, 4)).toMatchObject({
+      score: 99,
+      tier: 'good',
+      smoothAccounts: 4,
+    });
+    const result = scored(20);
+    expect(result).toMatchObject({
+      score: 5,
+      tier: 'poor',
+      smoothReporterDays: 20,
+      smoothAccounts: 5,
+      smoothRate: 0,
+      smoothWatchMs: 12_000_000,
+    });
+    expect(result.stallRatio).toBeCloseTo(1 / 11);
+    expect(result.stallsPer10Min).toBeCloseTo(30 / 11);
+    expect(scored(20, 5, false)).toMatchObject({ score: 95, smoothRate: 1 });
+    expect(
+      scoreSourceHealth('a', [], undefined, null, [], rows(20, 5, false)),
+    ).toMatchObject({ score: 95, tier: 'good', lastOkDate: null });
+    expect(
+      scoreSourceHealth(
+        'a',
+        [
+          ...search(0, 0, 5),
+          { ...search(0, 0, 5)[0], bucketDate: '2026-11-03' },
+        ],
+        undefined,
+        null,
+        [],
+        rows(20, 5, false),
+      ).tier,
+    ).toBe('offline');
+    expect(
+      scoreSourceHealth(
+        'a',
+        search(0, 0, 100),
+        undefined,
+        null,
+        [],
+        rows(20, 5, false),
+      ).score,
+    ).toBe(1);
+  });
+
+  it('excludes a reporter-day only with three distinct stuttering sources and no smooth source', () => {
+    const bad = ['a', 'b', 'c'].map((source) => ({
+      ...sample,
+      source,
+      stallMs: 60_000,
+    }));
+    expect(getEffectiveSmoothDaily(bad)).toEqual([]);
+    expect(getEffectiveSmoothDaily(bad.slice(0, 2))).toHaveLength(2);
+    expect(
+      getEffectiveSmoothDaily([
+        ...bad,
+        { ...sample, source: 'd', watchMs: 100 },
+      ]),
+    ).toEqual([]);
+    expect(
+      getEffectiveSmoothDaily([...bad, { ...sample, source: 'd' }]),
+    ).toHaveLength(4);
+    expect(
+      getEffectiveSmoothDaily([
+        ...bad,
+        { ...sample, reporter: 'other' },
+        { ...sample, bucketDate: '2026-11-03' },
+      ]),
+    ).toHaveLength(2);
+    expect(getEffectiveSmoothDaily([bad[0], bad[0], bad[0]])).toHaveLength(3);
+  });
+
+  it('only downgrades ok days after account and watch thresholds', () => {
+    const smooth = getEffectiveSmoothDaily(
+      [0, 1, 2].map((index) => ({
+        ...sample,
+        reporter: `r${index}`,
+        stallMs: 60_000,
+      })),
+    );
+    const daily = (ok: number, errors = 0, data = smooth) =>
+      buildSourceHealthDaily(
+        [sample.bucketDate],
+        search(ok, 0, errors),
+        [],
+        data,
+      )[0].status;
+    expect(daily(5)).toBe('degraded');
+    expect(daily(0)).toBe('none');
+    expect(daily(0, 5)).toBe('down');
+    expect(daily(5, 0, smooth.slice(0, 2))).toBe('ok');
+    expect(
+      daily(
+        5,
+        0,
+        smooth.map((row) => ({ ...row, watchMs: 599_999 })),
+      ),
+    ).toBe('ok');
+    expect(
+      daily(
+        5,
+        0,
+        smooth.map((row) => ({ ...row, stuttering: false })),
+      ),
+    ).toBe('ok');
+  });
+
+  it('exposes only the qualified raw smooth rate', () => {
+    expect(toPublicSourceHealth(scored(19))?.smoothRate).toBeNull();
+    expect(toPublicSourceHealth(scored(20, 4))?.smoothRate).toBeNull();
+    const result = toPublicSourceHealth(scored(20, 5, false));
+    expect(result?.smoothRate).toBe(1);
+    expect(result).not.toHaveProperty('smoothAccounts');
+    expect(result).not.toHaveProperty('smoothBreakdown');
+    expect(result).not.toHaveProperty('smoothReporterDays');
+  });
 });
 
 describe('rankSourcesByHealth', () => {

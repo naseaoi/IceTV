@@ -7,7 +7,10 @@ import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
 import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
-import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
+import {
+  reportSourceRouteStat,
+  reportSourceSmoothness,
+} from '@/lib/source-route-stats.client';
 import type { SearchResult } from '@/lib/types';
 
 type Listener = (...args: unknown[]) => void;
@@ -192,6 +195,8 @@ jest.mock('@/lib/proxy-modes', () => ({
 
 jest.mock('@/lib/source-route-stats.client', () => ({
   reportSourceRouteStat: jest.fn(),
+  reportSourceSmoothness: jest.fn(),
+  flushSourceRouteReports: jest.fn(),
 }));
 
 const EPISODE_1 = 'https://cdn.example/ep1/index.m3u8';
@@ -334,8 +339,34 @@ describe('initializeArtPlayer 拉流控制', () => {
 
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    MockArtplayer.instances.forEach((player) => player.emit('destroy'));
     jest.restoreAllMocks();
     jest.useRealTimers();
+  });
+
+  it('媒体事件采集流畅度，释放运行时结算当前源与媒体类型', async () => {
+    const { player, video } = await setupPlayer();
+    jest.mocked(reportSourceSmoothness).mockClear();
+    makeFirstFrameReady(video);
+    Object.defineProperty(video, 'paused', {
+      configurable: true,
+      get: () => false,
+    });
+    player.emit('video:playing');
+    video.currentTime = 0.1;
+    player.currentTime = 0.1;
+    player.emit('video:timeupdate');
+    jest.advanceTimersByTime(2_000);
+    runManagedVideoCleanup(video);
+    expect(reportSourceSmoothness).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: 'demo',
+        routeMode: 'browser',
+        mediaType: 'hls',
+        watchMs: 2_000,
+        stallCount: 0,
+      }),
+    );
   });
 
   it('HLS 与 MP4 切换时重建播放器并同步截图与 crossorigin', async () => {

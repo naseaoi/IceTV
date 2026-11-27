@@ -13,6 +13,7 @@ import {
   getSourceHealthTiers,
   recordSourcePlayOutcome,
   recordSourceSearchOutcome,
+  recordSourceSmoothness,
   resetSourceHealthSearchForTests,
 } from '@/lib/source-health.server';
 import {
@@ -28,6 +29,9 @@ jest.mock('@/lib/db', () => ({
   db: {
     recordSourceHealthSearchBatch: jest.fn(),
     recordSourcePlayReport: jest.fn(),
+    recordSourceSmoothReport: jest.fn(),
+    getSourceSmoothReporterDaily: jest.fn(),
+    getSourceSmoothBreakdown: jest.fn(),
     getSourceHealthSearchDaily: jest.fn(),
     getSourcePlayReporterSummary: jest.fn(),
     getSourcePlayReporterDaily: jest.fn(),
@@ -43,6 +47,8 @@ beforeEach(() => {
   jest.useFakeTimers().setSystemTime(new Date('2026-11-04T12:00:00Z'));
   resetSourceHealthSearchForTests();
   (db.getSourcePlayReporterDaily as jest.Mock).mockResolvedValue([]);
+  (db.getSourceSmoothReporterDaily as jest.Mock).mockResolvedValue([]);
+  (db.getSourceSmoothBreakdown as jest.Mock).mockResolvedValue([]);
 });
 afterEach(() => {
   jest.useRealTimers();
@@ -313,6 +319,100 @@ it('scores only configured sources over the window and retains older last succes
     1,
     '2026-10-05',
   );
+});
+
+it('records smooth increments with the same reporter hash and UTC date as outcomes', async () => {
+  const payload = {
+    source: 'a',
+    routeMode: 'server' as const,
+    mediaType: 'mp4' as const,
+    watchMs: 300_000,
+    stallMs: 4000,
+    stallCount: 2,
+    unknownMs: 1000,
+    eventAt: Date.parse('2026-11-04T00:30:00+02:00'),
+  };
+  await recordSourcePlayOutcome('alice', 'a', true, payload.eventAt);
+  await recordSourceSmoothness(' Alice ', payload);
+  const { eventAt: _eventAt, ...delta } = payload;
+  expect(db.recordSourceSmoothReport).toHaveBeenCalledWith({
+    ...delta,
+    bucketDate: '2026-11-03',
+    reporter: (db.recordSourcePlayReport as jest.Mock).mock.calls[0][0]
+      .reporter,
+  });
+});
+
+it('filters network-limited days for scoring and daily status while retaining diagnostic breakdown', async () => {
+  (getConfigForRead as jest.Mock).mockResolvedValue({
+    SourceConfig: [{ key: 'a' }],
+  });
+  (db.getSourceHealthSearchDaily as jest.Mock).mockResolvedValue([]);
+  (db.getSourcePlayReporterSummary as jest.Mock).mockResolvedValue([]);
+  (db.getSourcePlayReporterDaily as jest.Mock).mockResolvedValue([
+    {
+      source: 'a',
+      bucketDate: '2026-11-04',
+      successReporterDays: 20,
+      failureReporterDays: 0,
+    },
+  ]);
+  const good = Array.from({ length: 20 }, (_, index) => ({
+    source: 'a',
+    bucketDate: `2026-11-0${Math.floor(index / 5) + 1}`,
+    reporter: `r${index % 5}`,
+    watchMs: 600_000,
+    stallMs: 0,
+    stallCount: 0,
+  }));
+  const limited = [0, 1, 2].flatMap((account) =>
+    ['a', 'b', 'c'].map((source) => ({
+      source,
+      bucketDate: '2026-11-04',
+      reporter: `limited-${account}`,
+      watchMs: 600_000,
+      stallMs: 60_000,
+      stallCount: 3,
+    })),
+  );
+  (db.getSourceSmoothReporterDaily as jest.Mock).mockResolvedValue([
+    ...good,
+    ...limited,
+  ]);
+  const breakdown = {
+    source: 'a',
+    routeMode: 'browser',
+    mediaType: 'hls',
+    watchMs: 13_800_000,
+    stallMs: 180_000,
+    stallCount: 9,
+    unknownMs: 50_000,
+    reporterDays: 23,
+  };
+  (db.getSourceSmoothBreakdown as jest.Mock).mockResolvedValue([breakdown]);
+  const [report] = (await getCachedSourceHealthReport())!;
+  expect(report).toMatchObject({
+    score: 95,
+    smoothReporterDays: 20,
+    smoothAccounts: 5,
+    smoothRate: 1,
+    stallRatio: 0,
+    smoothWatchMs: 12_000_000,
+    lastOkDate: null,
+    smoothBreakdown: [breakdown],
+  });
+  expect(report.daily[6]).toEqual({ date: '2026-11-04', status: 'ok' });
+  expect(db.getSourceSmoothReporterDaily).toHaveBeenCalledWith('2026-10-29');
+  expect(db.getSourceSmoothBreakdown).toHaveBeenCalledWith('2026-10-29');
+  report.smoothBreakdown[0].watchMs = 0;
+  expect(
+    (await getCachedSourceHealthReport())![0].smoothBreakdown[0].watchMs,
+  ).toBe(13_800_000);
+  (db.getSourceSmoothReporterDaily as jest.Mock).mockResolvedValue([
+    ...good,
+    ...limited.filter((row) => row.source === 'a'),
+  ]);
+  expect((await getSourceHealthReport(7))[0].daily[6].status).toBe('degraded');
 });
 
 it('purges before the UTC date thirty days ago', async () => {

@@ -21,6 +21,7 @@ const mockSummary = {
   stable: {
     tier: 'good',
     playAvailability: 0.96,
+    smoothRate: 0.9,
     searchAvailability: 0.99,
     lastOkDate: '2026-11-26',
     daily,
@@ -28,6 +29,7 @@ const mockSummary = {
   plain: {
     tier: 'normal',
     playAvailability: 0.7,
+    smoothRate: null,
     searchAvailability: 0.98,
     lastOkDate: '2026-11-26',
     daily,
@@ -81,7 +83,7 @@ describe('SourcesTab source health', () => {
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(/全站近 7 天参考/)).toBeInTheDocument();
     expect(
-      within(dialog).getByText('播放可用 96% · 搜索可用 99%'),
+      within(dialog).getByText('播放可用 96% · 流畅 90% · 搜索可用 99%'),
     ).toBeInTheDocument();
     expect(within(dialog).getByText('样本不足')).toBeInTheDocument();
     expect(scrollIntoView.mock.instances).toEqual([

@@ -30,6 +30,7 @@ import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-n
 import {
   assertSourceProxyFailures,
   assertSourceRoutePhases,
+  assertSourceSmoothness,
 } from '@/lib/__tests__/__fixtures__/source-route-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
@@ -144,6 +145,125 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       await storage.getWatchHistoryPage('startup-alice', { limit: 10 }),
     ).toEqual([]);
   });
+
+  it.each(['fresh', 'migrated'] as const)(
+    '%s source statistics keep case-sensitive identities and counters',
+    async (schema) => {
+      const impl = storage as unknown as {
+        pool: import('mysql2/promise').Pool;
+        initializeSchema(): Promise<void>;
+      };
+      const tables = [
+        'source_route_stats',
+        'source_proxy_failures',
+        'source_health_search',
+        'source_health_play',
+        'source_health_smooth',
+      ];
+      const readCollations = async () => {
+        const [rows] = await impl.pool.query<
+          import('mysql2/promise').RowDataPacket[]
+        >(
+          `SELECT TABLE_NAME, COLUMN_NAME, COLLATION_NAME
+           FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?, ?)
+             AND COLLATION_NAME IS NOT NULL`,
+          tables,
+        );
+        expect(rows).toHaveLength(16);
+        return rows;
+      };
+      const report = {
+        source: 'ABC',
+        bucketDate: '2026-01-02',
+        reporter: 'Reporter',
+        success: true,
+      };
+      await storage.recordSourcePlayReport(report);
+      if (schema === 'migrated') {
+        for (const table of tables) {
+          await impl.pool.execute(
+            `ALTER TABLE ${table} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+          );
+        }
+        expect(
+          (await readCollations()).every(
+            (row) => row.COLLATION_NAME === 'utf8mb4_unicode_ci',
+          ),
+        ).toBe(true);
+        await impl.initializeSchema();
+      }
+      expect(
+        (await readCollations()).every(
+          (row) => row.COLLATION_NAME === 'utf8mb4_bin',
+        ),
+      ).toBe(true);
+      const execute = jest.spyOn(impl.pool, 'execute');
+      try {
+        await impl.initializeSchema();
+        expect(
+          execute.mock.calls.some(([sql]) =>
+            String(sql).startsWith('ALTER TABLE source_'),
+          ),
+        ).toBe(false);
+      } finally {
+        execute.mockRestore();
+      }
+      await storage.recordSourcePlayReport(report);
+      await storage.recordSourcePlayReport({
+        ...report,
+        source: 'abc',
+        success: false,
+      });
+      await storage.recordSourcePlayReport({
+        ...report,
+        reporter: 'reporter',
+        success: false,
+      });
+      const [rows] = await impl.pool.query<
+        import('mysql2/promise').RowDataPacket[]
+      >(
+        'SELECT source, reporter, success_count, failure_count FROM source_health_play ORDER BY source, reporter',
+      );
+      expect(rows).toEqual([
+        {
+          source: 'ABC',
+          reporter: 'Reporter',
+          success_count: 2,
+          failure_count: 0,
+        },
+        {
+          source: 'ABC',
+          reporter: 'reporter',
+          success_count: 0,
+          failure_count: 1,
+        },
+        {
+          source: 'abc',
+          reporter: 'Reporter',
+          success_count: 0,
+          failure_count: 1,
+        },
+      ]);
+      expect(
+        await storage.getSourcePlayReporterDaily(report.bucketDate),
+      ).toEqual([
+        {
+          source: 'ABC',
+          bucketDate: report.bucketDate,
+          successReporterDays: 1,
+          failureReporterDays: 1,
+        },
+        {
+          source: 'abc',
+          bucketDate: report.bucketDate,
+          successReporterDays: 0,
+          failureReporterDays: 1,
+        },
+      ]);
+    },
+    30000,
+  );
 
   it('全局元数据分页跨用户并按作品读取全部关联快照', async () => {
     await assertMetadataRefreshPages(storage);
@@ -396,6 +516,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
   it('回复双后端契约', async () => {
     await assertReviewReplies(storage, 'mysql-reply');
+  });
+
+  it('accumulates, groups and purges smoothness increments', async () => {
+    await assertSourceSmoothness(storage);
   });
 
   it('separates route phases', async () => {

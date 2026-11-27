@@ -449,6 +449,51 @@ export interface SourcePlayReporterSummary {
   lastSuccessDate: string | null;
 }
 
+export type SourceSmoothMediaType = 'hls' | 'mp4';
+
+// 客户端上报的播放流畅度增量（距上次上报），按「源 × UTC 日 × 上报者 × 线路 × 媒体类型」累加。
+export interface SourceSmoothnessPayload {
+  source: string;
+  routeMode: SourceRouteMode;
+  mediaType: SourceSmoothMediaType;
+  watchMs: number;
+  stallMs: number;
+  stallCount: number;
+  // 缓冲充足却停顿等无法归因于供给的等待，只供诊断，不计入评分
+  unknownMs: number;
+  eventAt: number;
+}
+
+export interface SourceSmoothReportInput extends Omit<
+  SourceSmoothnessPayload,
+  'eventAt'
+> {
+  bucketDate: string;
+  reporter: string;
+}
+
+// 「源 × 日 × 上报者」汇总行（跨线路与媒体类型求和），评分在此粒度判定卡顿日
+export interface SourceSmoothReporterDaily {
+  source: string;
+  bucketDate: string;
+  reporter: string;
+  watchMs: number;
+  stallMs: number;
+  stallCount: number;
+}
+
+// 后台诊断用的分层汇总（窗口内求和）
+export interface SourceSmoothBreakdownItem {
+  source: string;
+  routeMode: SourceRouteMode;
+  mediaType: SourceSmoothMediaType;
+  watchMs: number;
+  stallMs: number;
+  stallCount: number;
+  unknownMs: number;
+  reporterDays: number;
+}
+
 export type SourceProxyFailureReason =
   | 'http-403'
   | 'http-404'
@@ -1142,6 +1187,13 @@ export interface IStorage extends ListStore, ViewingHappinessStore {
   ): Promise<PlaybackAnnualData>;
   recordSourceHealthSearchBatch(rows: SourceHealthSearchDelta[]): Promise<void>;
   recordSourcePlayReport(input: SourcePlayReportInput): Promise<void>;
+  recordSourceSmoothReport(input: SourceSmoothReportInput): Promise<void>;
+  getSourceSmoothReporterDaily(
+    sinceDate: string,
+  ): Promise<SourceSmoothReporterDaily[]>;
+  getSourceSmoothBreakdown(
+    sinceDate: string,
+  ): Promise<SourceSmoothBreakdownItem[]>;
   getSourceHealthSearchDaily(
     sinceDate: string,
   ): Promise<SourceHealthSearchDaily[]>;

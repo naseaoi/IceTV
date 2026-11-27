@@ -181,6 +181,9 @@ export function SourceHealthModal({
                   item.playAvailability !== null
                     ? `播放可用 ${formatPercent(item.playAvailability)}`
                     : '',
+                  item.smoothRate !== null
+                    ? `流畅 ${formatPercent(item.smoothRate)}`
+                    : '',
                   item.searchAvailability !== null
                     ? `搜索可用 ${formatPercent(item.searchAvailability)}`
                     : '',

@@ -34,6 +34,7 @@ import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import {
+  getProxyStutterNotice,
   isSourceCleanupCandidate,
   sortByHealth,
 } from '@/features/admin/components/tabs/video-source/sourceHealthView';
@@ -105,6 +106,10 @@ const VideoSourceConfig = ({
     refresh: refreshSourceInsights,
   } = useSourceInsights(config, Boolean(config?.SourceConfig));
   const sourceUsage = useSourceUsage(Boolean(config?.SourceConfig));
+  const proxyStutterNotice = useMemo(
+    () => getProxyStutterNotice(sourceHealth.values()),
+    [sourceHealth],
+  );
   const sourceRouteStats = useMemo(
     () => buildSourceRouteViews(routeStats, proxyFailures),
     [routeStats, proxyFailures],
@@ -505,6 +510,11 @@ const VideoSourceConfig = ({
       {actionError && (
         <p role='alert' className='text-sm text-red-600'>
           {actionError}
+        </p>
+      )}
+      {proxyStutterNotice && (
+        <p role='status' className='text-sm text-amber-700 dark:text-amber-300'>
+          {proxyStutterNotice}
         </p>
       )}
       <AdminListToolbar
