@@ -146,7 +146,22 @@ describe('sourceHealthView', () => {
         item({ smoothReporterDays: 19, smoothAccounts: 5, smoothRate: 0.2 }),
       ),
     ).toBe(false);
+    expect(isSourceStuttering(item({ ...scored, smoothRate: 0.8499 }))).toBe(
+      true,
+    );
+    expect(isSourceStuttering(item({ ...scored, smoothRate: 0.85 }))).toBe(
+      false,
+    );
+    expect(isSourceStuttering(item({ ...scored, smoothRate: null }))).toBe(
+      false,
+    );
+    expect(
+      isSourceStuttering(
+        item({ smoothReporterDays: 20, smoothAccounts: 4, smoothRate: 0.2 }),
+      ),
+    ).toBe(false);
     expect(isSourceStuttering(null)).toBe(false);
+    expect(isSourceStuttering(undefined)).toBe(false);
   });
 
   it('notices proxy-wide stutter only when proxy is clearly worse', () => {

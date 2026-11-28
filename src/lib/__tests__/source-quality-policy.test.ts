@@ -3,6 +3,7 @@ import {
   buildSourceHealthDaily,
   getEffectiveSmoothDaily,
   hasSourceSmoothDimension,
+  isSmoothRateStuttering,
   isSmoothSampleStuttering,
   rankSourcesByHealth,
   scoreSourceHealth,
@@ -44,6 +45,16 @@ const score = (rows = search(0), reports?: SourcePlayReporterSummary) =>
   scoreSourceHealth('a', rows, reports, null);
 
 describe('source quality policy', () => {
+  it.each([
+    [null, false],
+    [0, true],
+    [0.8499, true],
+    [0.85, false],
+    [1, false],
+  ] as const)('流畅率 %s 的卡顿判定为 %s', (rate, expected) => {
+    expect(isSmoothRateStuttering(rate)).toBe(expected);
+  });
+
   it('requires either ten searches or three reporter-days', () => {
     expect(score()).toMatchObject({
       tier: 'insufficient',

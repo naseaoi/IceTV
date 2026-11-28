@@ -151,6 +151,11 @@ export function hasSourceSmoothDimension(item: {
   );
 }
 
+/** 调用方先按流畅维度样本门槛筛选，未达门槛传 null。 */
+export function isSmoothRateStuttering(smoothRate: number | null): boolean {
+  return smoothRate !== null && smoothRate < SOURCE_HEALTH_DAILY_OK_RATE;
+}
+
 export function toPublicSourceHealth(
   item: SourceHealthReportItem,
 ): SourceHealthPublicItem | null {

@@ -2,7 +2,7 @@ import {
   type SourceHealthReportItem,
   type SourceHealthTier,
   hasSourceSmoothDimension,
-  SOURCE_HEALTH_DAILY_OK_RATE,
+  isSmoothRateStuttering,
   SOURCE_HEALTH_TIER_PRIORITY,
   SOURCE_SMOOTH_MAX_STALL_RATIO,
 } from '@/lib/source-quality-policy';
@@ -117,8 +117,7 @@ export function isSourceStuttering(
   return (
     !!item &&
     hasSourceSmoothDimension(item) &&
-    item.smoothRate !== null &&
-    item.smoothRate < SOURCE_HEALTH_DAILY_OK_RATE
+    isSmoothRateStuttering(item.smoothRate)
   );
 }
 

@@ -9,6 +9,7 @@ import {
   type SourceHealthDailyStatus,
   type SourceHealthPublicItem,
   type SourceHealthPublicTier,
+  isSmoothRateStuttering,
   SOURCE_HEALTH_TIER_PRIORITY,
 } from '@/lib/source-quality-policy';
 
@@ -26,7 +27,7 @@ const TIER_TEXT_CLASS: Record<SourceHealthPublicTier, string> = {
   offline: 'text-red-600 dark:text-red-400',
 };
 
-const CHIP_CLASS: Partial<Record<SourceHealthPublicTier, string>> = {
+const CHIP_CLASS: Record<Exclude<SourceHealthPublicTier, 'normal'>, string> = {
   good: 'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300',
   poor: 'bg-amber-500/15 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
   offline: 'bg-red-500/10 text-red-700 dark:bg-red-400/15 dark:text-red-300',
@@ -46,12 +47,20 @@ const DAILY_LABEL: Record<SourceHealthDailyStatus, string> = {
   none: '无数据',
 };
 
-// 列表只标出值得注意的等级，普通等级不占行内空间
+// 行内只显示一个徽标，优先提示失联、不稳与卡顿。
 export function getSourceHealthChip(
   item: SourceHealthPublicItem | undefined,
 ): { label: string; className: string } | null {
-  const className = item && CHIP_CLASS[item.tier];
-  return item && className ? { label: TIER_LABEL[item.tier], className } : null;
+  if (!item) return null;
+  if (item.tier === 'offline' || item.tier === 'poor') {
+    return { label: TIER_LABEL[item.tier], className: CHIP_CLASS[item.tier] };
+  }
+  if (isSmoothRateStuttering(item.smoothRate)) {
+    return { label: '卡顿多', className: CHIP_CLASS.poor };
+  }
+  return item.tier === 'good'
+    ? { label: TIER_LABEL.good, className: CHIP_CLASS.good }
+    : null;
 }
 
 function formatPercent(value: number): string {
@@ -214,6 +223,11 @@ export function SourceHealthModal({
                       }`}
                     >
                       {item ? TIER_LABEL[item.tier] : '样本不足'}
+                      {item && isSmoothRateStuttering(item.smoothRate) && (
+                        <span className={TIER_TEXT_CLASS.poor}>
+                          {' · 卡顿多'}
+                        </span>
+                      )}
                     </span>
                   </div>
                   {item && (
