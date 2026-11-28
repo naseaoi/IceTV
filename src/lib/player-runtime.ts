@@ -50,6 +50,22 @@ type MobileControlsArtPlayer = HoverControlsArtPlayer & {
   __icetvFastForwardActive?: boolean;
 };
 
+export interface PlayerFastForwardHandle {
+  previousPlaybackRate: number;
+  fastForwardRate: number;
+}
+
+export interface PlayerFastForwardEnterOptions {
+  silent?: boolean;
+}
+
+export interface PlayerFastForwardExitOptions {
+  silent?: boolean;
+  restoreRate?: boolean;
+}
+
+const fastForwardResetListeners = new WeakMap<object, Set<() => void>>();
+
 const PLAYER_HOVER_CONTROLS_IDLE_HIDE_MS = 2_000;
 const PLAYER_SETTING_HOVER_CLOSE_MS = 250;
 const PLAYER_MOBILE_TOUCH_MOVE_THRESHOLD_PX = 10;
@@ -243,6 +259,68 @@ function hidePlayerControls(art: MobileControlsArtPlayer): void {
   }
 }
 
+function notifyPlayerFastForwardReset(art: MobileControlsArtPlayer): void {
+  const listeners = fastForwardResetListeners.get(art);
+  if (!listeners || listeners.size === 0) return;
+  for (const listener of Array.from(listeners)) {
+    listener();
+  }
+}
+
+export function subscribePlayerFastForwardReset(
+  artPlayer: unknown,
+  listener: () => void,
+): () => void {
+  if (!artPlayer || typeof artPlayer !== 'object') {
+    return () => {};
+  }
+  const key = artPlayer as object;
+  let listeners = fastForwardResetListeners.get(key);
+  if (!listeners) {
+    listeners = new Set();
+    fastForwardResetListeners.set(key, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = fastForwardResetListeners.get(key);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) {
+      fastForwardResetListeners.delete(key);
+    }
+  };
+}
+
+function setPlayerPlaybackRate(
+  art: MobileControlsArtPlayer,
+  playbackRate: number,
+  silent: boolean,
+): void {
+  if (art.isDestroy) return;
+
+  if (silent) {
+    const video = art.template?.$video;
+    if (
+      !video ||
+      (typeof video.playbackRate === 'number' &&
+        Math.abs(video.playbackRate - playbackRate) <= 0.01)
+    ) {
+      return;
+    }
+    video.playbackRate = playbackRate;
+    return;
+  }
+
+  if (
+    typeof art.playbackRate === 'number' &&
+    Math.abs(art.playbackRate - playbackRate) <= 0.01
+  ) {
+    return;
+  }
+
+  art.playbackRate = playbackRate;
+}
+
 export function getPlayerFastForwardTime(artPlayer: unknown): number {
   const art = artPlayer as MobileControlsArtPlayer | null | undefined;
   return (
@@ -259,31 +337,41 @@ export function getPlayerFastForwardRate(artPlayer: unknown): number {
 
 export function isPlayerFastForwarding(artPlayer: unknown): boolean {
   const art = artPlayer as MobileControlsArtPlayer;
-  if (art.__icetvFastForwardActive) return true;
-
   const fastForwardValue = getPlayerFastForwardRate(art);
   const playbackRate = Number(art.playbackRate);
   if (Math.abs(playbackRate - fastForwardValue) > 0.01) return false;
 
+  if (art.__icetvFastForwardActive) return true;
   return !!art.template?.$player?.classList.contains('art-fast-forward');
 }
 
-export function enterPlayerFastForward(artPlayer: unknown): {
-  previousPlaybackRate: number;
-  fastForwardRate: number;
-} {
+export function enterPlayerFastForward(
+  artPlayer: unknown,
+  options?: PlayerFastForwardEnterOptions,
+): PlayerFastForwardHandle | null {
   const art = artPlayer as MobileControlsArtPlayer;
+  if (!art || typeof art !== 'object' || art.isDestroy) {
+    return null;
+  }
+  if (isPlayerFastForwarding(art)) {
+    return null;
+  }
+
+  const fastForwardRate = getPlayerFastForwardRate(art);
   const previousPlaybackRate =
     typeof art.playbackRate === 'number' &&
     Number.isFinite(art.playbackRate) &&
     art.playbackRate > 0
       ? art.playbackRate
       : 1;
-  const fastForwardRate = getPlayerFastForwardRate(art);
+
+  if (previousPlaybackRate >= fastForwardRate - 0.01) {
+    return null;
+  }
 
   art.__icetvFastForwardActive = true;
   art.template?.$player?.classList.add('art-fast-forward');
-  art.playbackRate = fastForwardRate;
+  setPlayerPlaybackRate(art, fastForwardRate, Boolean(options?.silent));
 
   return { previousPlaybackRate, fastForwardRate };
 }
@@ -291,8 +379,24 @@ export function enterPlayerFastForward(artPlayer: unknown): {
 export function exitPlayerFastForward(
   artPlayer: unknown,
   previousPlaybackRate: number,
+  options?: PlayerFastForwardExitOptions,
 ): void {
-  restorePlayerPlaybackRate(artPlayer, previousPlaybackRate);
+  const art = artPlayer as MobileControlsArtPlayer;
+  if (!art || typeof art !== 'object') return;
+
+  art.__icetvFastForwardActive = false;
+  art.template?.$player?.classList.remove('art-fast-forward');
+
+  if (options?.restoreRate === false) {
+    notifyPlayerFastForwardReset(art);
+    return;
+  }
+
+  const safePlaybackRate =
+    Number.isFinite(previousPlaybackRate) && previousPlaybackRate > 0
+      ? previousPlaybackRate
+      : 1;
+  setPlayerPlaybackRate(art, safePlaybackRate, Boolean(options?.silent));
 }
 
 export function restorePlayerPlaybackRate(
@@ -300,20 +404,15 @@ export function restorePlayerPlaybackRate(
   playbackRate: number,
 ): void {
   const art = artPlayer as MobileControlsArtPlayer;
+  if (!art || typeof art !== 'object') return;
+
   const safePlaybackRate =
     Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
 
   art.__icetvFastForwardActive = false;
   art.template?.$player?.classList.remove('art-fast-forward');
-
-  if (
-    typeof art.playbackRate === 'number' &&
-    Math.abs(art.playbackRate - safePlaybackRate) <= 0.01
-  ) {
-    return;
-  }
-
-  art.playbackRate = safePlaybackRate;
+  setPlayerPlaybackRate(art, safePlaybackRate, false);
+  notifyPlayerFastForwardReset(art);
 }
 
 // 有悬停能力的指针设备上，设置面板随齿轮悬浮打开、移出后关闭，与弹幕设置面板一致；触屏仍用点击切换。
@@ -503,6 +602,12 @@ export function bindPlayerMobileControls(
     pressTimer = null;
   };
 
+  const resetFastForwardState = () => {
+    clearPressTimer();
+    fastForwardActive = false;
+    startTouch = null;
+  };
+
   const finishFastForward = () => {
     clearPressTimer();
     if (!fastForwardActive) {
@@ -534,8 +639,10 @@ export function bindPlayerMobileControls(
     pressTimer = window.setTimeout(() => {
       if (disposed || !startTouch || !art.playing) return;
 
+      const handle = enterPlayerFastForward(art);
+      if (!handle) return;
       fastForwardActive = true;
-      ({ previousPlaybackRate } = enterPlayerFastForward(art));
+      previousPlaybackRate = handle.previousPlaybackRate;
       suppressClickUntil = Date.now() + PLAYER_MOBILE_CLICK_SUPPRESS_MS;
       hidePlayerControls(art);
     }, getPlayerFastForwardTime(art));
@@ -653,6 +760,11 @@ export function bindPlayerMobileControls(
     );
   }
 
+  const unsubscribeFastForwardReset = subscribePlayerFastForwardReset(
+    art,
+    resetFastForwardState,
+  );
+
   art.on?.('dblclick', handleDblClick);
 
   const cleanup = () => {
@@ -660,10 +772,11 @@ export function bindPlayerMobileControls(
     disposed = true;
     clearPressTimer();
     removeSeekFeedback();
+    unsubscribeFastForwardReset();
     if (fastForwardActive) {
       fastForwardActive = false;
       exitPlayerFastForward(art, previousPlaybackRate);
-    } else {
+    } else if (!isPlayerFastForwarding(art)) {
       art.__icetvFastForwardActive = false;
       player.classList.remove('art-fast-forward');
     }

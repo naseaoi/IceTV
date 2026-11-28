@@ -9,6 +9,7 @@ import {
   isPlayerFastForwarding,
   prefetchM3U8,
   restorePlayerPlaybackRate,
+  subscribePlayerFastForwardReset,
 } from '@/lib/player-runtime';
 
 describe('播放器模块加载重试', () => {
@@ -693,9 +694,116 @@ describe('player runtime mobile controls', () => {
     expect(isPlayerFastForwarding(harness.art)).toBe(true);
     expect(harness.player.classList.contains('art-fast-forward')).toBe(true);
 
-    exitPlayerFastForward(harness.art, state.previousPlaybackRate);
+    exitPlayerFastForward(harness.art, state!.previousPlaybackRate);
     expect(harness.playbackRate).toBe(1.25);
     expect(isPlayerFastForwarding(harness.art)).toBe(false);
     expect(harness.player.classList.contains('art-fast-forward')).toBe(false);
+  });
+
+  it('refuses to slow down when playbackRate is already at or above fast-forward rate', () => {
+    const harness = createMobileControlsHarness();
+    harness.art.playbackRate = 3.5;
+
+    expect(enterPlayerFastForward(harness.art)).toBeNull();
+    expect(harness.playbackRate).toBe(3.5);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+
+    bindPlayerMobileControls(harness.art);
+    harness.video.dispatchEvent(createTouchEvent('touchstart', 10, 10));
+    jest.advanceTimersByTime(1_000);
+
+    expect(harness.playbackRate).toBe(3.5);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+  });
+
+  it('ignores a second fast-forward entry while already fast-forwarding', () => {
+    const harness = createMobileControlsHarness();
+    harness.art.playbackRate = 1.25;
+    const cleanupMobile = bindPlayerMobileControls(harness.art);
+
+    // 触控长按先进入 3x，期间键盘长按不得重复进入并把 3x 当作原倍速
+    harness.video.dispatchEvent(createTouchEvent('touchstart', 10, 10));
+    jest.advanceTimersByTime(1_000);
+    expect(harness.playbackRate).toBe(3);
+    expect(enterPlayerFastForward(harness.art)).toBeNull();
+
+    document.dispatchEvent(createTouchEvent('touchend'));
+    expect(harness.playbackRate).toBe(1.25);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+
+    // 键盘先进入 3x，期间触控长按与移动端清理都不应破坏键盘倍速
+    const keyboardHandle = enterPlayerFastForward(harness.art);
+    expect(keyboardHandle).toEqual({
+      previousPlaybackRate: 1.25,
+      fastForwardRate: 3,
+    });
+    harness.video.dispatchEvent(createTouchEvent('touchstart', 10, 10));
+    jest.advanceTimersByTime(1_000);
+    document.dispatchEvent(createTouchEvent('touchend'));
+    expect(harness.playbackRate).toBe(3);
+    expect(isPlayerFastForwarding(harness.art)).toBe(true);
+
+    cleanupMobile();
+    expect(isPlayerFastForwarding(harness.art)).toBe(true);
+
+    exitPlayerFastForward(harness.art, keyboardHandle!.previousPlaybackRate);
+    expect(harness.playbackRate).toBe(1.25);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+  });
+
+  it('notifies reset subscribers and returns false from isPlayerFastForwarding on external rate change', () => {
+    const harness = createMobileControlsHarness();
+    harness.art.playbackRate = 1.5;
+    const onReset = jest.fn();
+    const unsubscribe = subscribePlayerFastForwardReset(harness.art, onReset);
+
+    const handle = enterPlayerFastForward(harness.art);
+    expect(handle).not.toBeNull();
+    expect(isPlayerFastForwarding(harness.art)).toBe(true);
+
+    // 外部修改倍速偏离 3x 后，isPlayerFastForwarding 立即返回 false
+    harness.art.playbackRate = 2;
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+
+    restorePlayerPlaybackRate(harness.art, 1.5);
+    expect(onReset).toHaveBeenCalledTimes(1);
+    expect(harness.playbackRate).toBe(1.5);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+
+    unsubscribe();
+    restorePlayerPlaybackRate(harness.art, 1);
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates $video playbackRate silently without triggering notice and skips destroyed players', () => {
+    const playerElement = document.createElement('div');
+    const video = document.createElement('video');
+    const art = {
+      constructor: { FAST_FORWARD_VALUE: 3 },
+      isDestroy: false,
+      template: { $player: playerElement, $video: video },
+      notice: {
+        show: '',
+      },
+      get playbackRate() {
+        return video.playbackRate;
+      },
+      set playbackRate(value: number) {
+        video.playbackRate = value;
+        this.notice.show = `速度: ${value}x`;
+      },
+    };
+    video.playbackRate = 1.25;
+
+    const handle = enterPlayerFastForward(art, { silent: true });
+    expect(handle).not.toBeNull();
+    expect(video.playbackRate).toBe(3);
+    expect(art.notice.show).toBe('');
+
+    art.isDestroy = true;
+    exitPlayerFastForward(art, handle!.previousPlaybackRate, { silent: true });
+    expect(video.playbackRate).toBe(3);
+    expect(art.notice.show).toBe('');
+    expect(isPlayerFastForwarding(art)).toBe(false);
   });
 });

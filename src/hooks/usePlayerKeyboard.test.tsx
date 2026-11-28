@@ -3,7 +3,10 @@ import type Artplayer from 'artplayer';
 import type { MutableRefObject } from 'react';
 
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
-import { isPlayerFastForwarding } from '@/lib/player-runtime';
+import {
+  isPlayerFastForwarding,
+  restorePlayerPlaybackRate,
+} from '@/lib/player-runtime';
 import { setPlayerShortcutsSuspended } from '@/lib/player-shortcuts';
 
 function createPlayerHarness(
@@ -17,6 +20,7 @@ function createPlayerHarness(
   const playerElement = document.createElement('div');
   playerElement.className = 'art-video-player';
   const stateElement = document.createElement('div');
+  const videoElement = document.createElement('video');
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   let loadingVisible = false;
   let playbackRate = options.playbackRate ?? 1;
@@ -27,6 +31,18 @@ function createPlayerHarness(
       listener(...args);
     }
   };
+
+  Object.defineProperty(videoElement, 'playbackRate', {
+    configurable: true,
+    get() {
+      return playbackRate;
+    },
+    set(value: number) {
+      if (value === playbackRate) return;
+      playbackRate = value;
+      emit('video:ratechange');
+    },
+  });
 
   const notice = {
     get show() {
@@ -52,19 +68,22 @@ function createPlayerHarness(
     volume: 0.5,
     muted: false,
     get playbackRate() {
-      return playbackRate;
+      return videoElement.playbackRate;
     },
     set playbackRate(value: number) {
-      if (value === playbackRate) return;
-      playbackRate = value;
+      if (value === videoElement.playbackRate) return;
+      videoElement.playbackRate = value;
       notice.show = `倍速: ${value === 1 ? '正常' : `${value}x`}`;
-      emit('video:ratechange');
     },
     fullscreen: false,
     playing: options.playing ?? true,
     isDestroy: false,
     notice,
-    template: { $player: playerElement, $state: stateElement },
+    template: {
+      $player: playerElement,
+      $state: stateElement,
+      $video: videoElement,
+    },
     loading: {
       get show() {
         return loadingVisible;
@@ -98,7 +117,7 @@ function dispatchShortcut(
   key: string,
   modifiers: Pick<
     KeyboardEventInit,
-    'altKey' | 'ctrlKey' | 'shiftKey' | 'repeat'
+    'altKey' | 'ctrlKey' | 'shiftKey' | 'repeat' | 'code'
   > = {},
 ) {
   const event = new KeyboardEvent('keydown', {
@@ -113,7 +132,10 @@ function dispatchShortcut(
 
 function dispatchKeyUp(
   key: string,
-  modifiers: Pick<KeyboardEventInit, 'altKey' | 'ctrlKey' | 'shiftKey'> = {},
+  modifiers: Pick<
+    KeyboardEventInit,
+    'altKey' | 'ctrlKey' | 'shiftKey' | 'code'
+  > = {},
 ) {
   const event = new KeyboardEvent('keyup', {
     key,
@@ -516,9 +538,21 @@ describe('usePlayerKeyboard', () => {
       const { unmount: unmountDestroy } = renderHook(() =>
         usePlayerKeyboard({ artPlayerRef: destroyHarness.artPlayerRef }),
       );
-      runCase(() => {
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(destroyHarness.player.playbackRate).toBe(3);
+      act(() => {
+        (destroyHarness.player as unknown as { isDestroy: boolean }).isDestroy =
+          true;
         destroyHarness.emit('destroy');
-      }, destroyHarness);
+      });
+      expect(isPlayerFastForwarding(destroyHarness.player)).toBe(false);
+      expect(
+        destroyHarness.playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+      expect(destroyHarness.player.notice.show).toBe('');
       unmountDestroy();
 
       const suspendHarness = createPlayerHarness({ playbackRate: 1.25 });
@@ -661,6 +695,265 @@ describe('usePlayerKeyboard', () => {
       expect(firstNext).not.toHaveBeenCalled();
       expect(latestPrev).toHaveBeenCalledTimes(1);
       expect(latestNext).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears fast-forward notice and pending hold on external restore, ended, and episode switch', () => {
+      const { artPlayerRef, player, playerElement, emit } = createPlayerHarness(
+        { playbackRate: 1.25 },
+      );
+      const handleNextEpisode = jest.fn();
+      renderHook(() =>
+        usePlayerKeyboard({
+          artPlayerRef,
+          episodeHandlers: {
+            detailRef: { current: { episodes: ['ep1', 'ep2'] } },
+            currentEpisodeIndexRef: { current: 0 },
+            handlePreviousEpisode: jest.fn(),
+            handleNextEpisode,
+          },
+        }),
+      );
+
+      // 场景 1：复用播放器切集 / 自动连播调用 restorePlayerPlaybackRate
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).not.toBeNull();
+
+      act(() => {
+        restorePlayerPlaybackRate(player, 1.25);
+      });
+      expect(player.playbackRate).toBe(1.25);
+      expect(isPlayerFastForwarding(player)).toBe(false);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+
+      // 场景 2：短按等待期内被外部复位后，松键不应对新集补快进
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(300);
+        restorePlayerPlaybackRate(player, 1.25);
+      });
+      dispatchKeyUp('ArrowRight');
+      expect(player.currentTime).toBe(50);
+
+      // 场景 3：播放结束（video:ended）自动退出倍速并移除常驻提示
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+      act(() => {
+        emit('video:ended');
+      });
+      expect(player.playbackRate).toBe(1.25);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+
+      // 场景 4：按住期间快捷键切集，立即退出倍速
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      dispatchShortcut('ArrowRight', { altKey: true });
+      expect(handleNextEpisode).toHaveBeenCalledTimes(1);
+      expect(player.playbackRate).toBe(1.25);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+    });
+
+    it('releases custom non-letter key by physical code even when Shift changes event.key', () => {
+      window.localStorage.setItem(
+        'playerShortcuts',
+        JSON.stringify({ seekForward: { key: '.' } }),
+      );
+      const { artPlayerRef, player, playerElement } = createPlayerHarness();
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      dispatchShortcut('.', { code: 'Period' });
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).not.toBeNull();
+
+      // 长按期间按下 Shift 后松开 '.'，浏览器上报 key='>' 但 code 仍为 Period
+      dispatchKeyUp('>', { shiftKey: true, code: 'Period' });
+      expect(player.playbackRate).toBe(1);
+      expect(isPlayerFastForwarding(player)).toBe(false);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+    });
+
+    it('cancels active fast-forward on Meta keyup and contextmenu', () => {
+      const { artPlayerRef, player, playerElement } = createPlayerHarness({
+        playbackRate: 1.5,
+      });
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      dispatchShortcut('ArrowRight', { code: 'ArrowRight' });
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+
+      dispatchKeyUp('Meta', { code: 'MetaLeft' });
+      expect(player.playbackRate).toBe(1.5);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+
+      dispatchShortcut('ArrowRight', { code: 'ArrowRight' });
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+
+      act(() => {
+        window.dispatchEvent(new MouseEvent('contextmenu'));
+      });
+      expect(player.playbackRate).toBe(1.5);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+    });
+
+    it('exits fast-forward immediately when playback pauses', () => {
+      const { artPlayerRef, player, playerElement, emit } = createPlayerHarness(
+        { playbackRate: 1.5 },
+      );
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+
+      act(() => {
+        emit('video:pause');
+      });
+      expect(player.playbackRate).toBe(1.5);
+      expect(isPlayerFastForwarding(player)).toBe(false);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+
+      // 暂停取消后松开快进键不再补快进
+      dispatchKeyUp('ArrowRight');
+      expect(player.currentTime).toBe(50);
+    });
+
+    it('exits fast-forward and preserves user rate changes from keyboard or external UI', () => {
+      const { artPlayerRef, player, playerElement } = createPlayerHarness({
+        playbackRate: 1.5,
+      });
+      const persistedRates: number[] = [];
+      player.on('video:ratechange', () => {
+        if (isPlayerFastForwarding(player)) return;
+        persistedRates.push(player.playbackRate as number);
+      });
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      // 场景 1：长按 3x 期间按 x（降速），基于原 1.5x 降为 1.4x 且松键不回写
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+
+      dispatchShortcut('x');
+      expect(player.playbackRate).toBe(1.4);
+      expect(isPlayerFastForwarding(player)).toBe(false);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+      expect(persistedRates[persistedRates.length - 1]).toBe(1.4);
+
+      dispatchKeyUp('ArrowRight');
+      expect(player.playbackRate).toBe(1.4);
+
+      // 场景 2：长按 3x 期间外部面板切速为 2.0x，退出常驻提示、持久化且松键不覆盖
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+
+      act(() => {
+        player.playbackRate = 2;
+      });
+      expect(player.playbackRate).toBe(2);
+      expect(isPlayerFastForwarding(player)).toBe(false);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+      expect(persistedRates[persistedRates.length - 1]).toBe(2);
+
+      dispatchKeyUp('ArrowRight');
+      expect(player.playbackRate).toBe(2);
+    });
+
+    it('does not slow down playback when current rate is already above 3x', () => {
+      const { artPlayerRef, player, playerElement } = createPlayerHarness({
+        playbackRate: 3.5,
+      });
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_500);
+      });
+      expect(player.playbackRate).toBe(3.5);
+      expect(isPlayerFastForwarding(player)).toBe(false);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
+
+      dispatchKeyUp('ArrowRight');
+      expect(player.playbackRate).toBe(3.5);
+      expect(player.currentTime).toBe(55);
+    });
+
+    it('preserves unrelated notices when entering and exiting fast-forward', () => {
+      const { artPlayerRef, player, playerElement } = createPlayerHarness({
+        playbackRate: 1.25,
+      });
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      // 进入前已有其他提示时不被清空
+      act(() => {
+        player.notice.show = '已装载10条弹幕';
+      });
+      dispatchShortcut('ArrowRight');
+      act(() => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(player.playbackRate).toBe(3);
+      expect(player.notice.show).toBe('已装载10条弹幕');
+      expect(playerElement.classList.contains('art-notice-show')).toBe(true);
+
+      // 倍速期间调音量后立即松键，音量提示保持可见不被清空
+      dispatchShortcut('ArrowUp');
+      expect(player.notice.show).toBe('音量: 60');
+
+      dispatchKeyUp('ArrowRight');
+      expect(player.playbackRate).toBe(1.25);
+      expect(player.notice.show).toBe('音量: 60');
+      expect(playerElement.classList.contains('art-notice-show')).toBe(true);
+      expect(
+        playerElement.querySelector('.ice-fast-forward-notice'),
+      ).toBeNull();
     });
   });
 });

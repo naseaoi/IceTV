@@ -6,6 +6,7 @@ import {
   enterPlayerFastForward,
   exitPlayerFastForward,
   getPlayerFastForwardTime,
+  subscribePlayerFastForwardReset,
 } from '@/lib/player-runtime';
 import {
   type PlayerShortcutAction,
@@ -53,7 +54,11 @@ const ACTIVATABLE_CONTROL_SELECTOR =
 function isBindingReleased(
   event: KeyboardEvent,
   binding: ShortcutBinding,
+  code: string,
 ): boolean {
+  if (code && event.code === code) {
+    return true;
+  }
   if (normalizeShortcutKey(event.key) === normalizeShortcutKey(binding.key)) {
     return true;
   }
@@ -117,11 +122,13 @@ export function usePlayerKeyboard({
     interface SeekForwardHoldState {
       player: Artplayer;
       binding: ShortcutBinding;
+      code: string;
       timer: number | null;
       active: boolean;
+      fastForwardRate: number;
       previousPlaybackRate: number;
       noticeElement: HTMLDivElement | null;
-      handleDestroy: () => void;
+      cleanupListeners: () => void;
     }
 
     let shortcuts: PlayerShortcutMap = readPlayerShortcuts();
@@ -147,7 +154,9 @@ export function usePlayerKeyboard({
       ).off('loading', handler);
     };
 
-    const cancelSeekForwardHold = () => {
+    const cancelSeekForwardHold = (
+      options: { restoreRate?: boolean; skipExit?: boolean } = {},
+    ) => {
       const hold = seekForwardHold;
       if (!hold) return;
       seekForwardHold = null;
@@ -156,20 +165,20 @@ export function usePlayerKeyboard({
         window.clearTimeout(hold.timer);
         hold.timer = null;
       }
-      (
-        hold.player as unknown as {
-          off?: (name: string, fn: () => void) => void;
-        }
-      ).off?.('destroy', hold.handleDestroy);
+      hold.cleanupListeners();
       hold.noticeElement?.remove();
       hold.noticeElement = null;
 
-      if (hold.active) {
-        exitPlayerFastForward(hold.player, hold.previousPlaybackRate);
-        if (hold.player.notice) {
-          hold.player.notice.show = '';
-        }
+      if (hold.active && !options.skipExit) {
+        exitPlayerFastForward(hold.player, hold.previousPlaybackRate, {
+          silent: true,
+          restoreRate: options.restoreRate,
+        });
       }
+    };
+
+    const handleCancelHoldEvent = () => {
+      cancelSeekForwardHold();
     };
 
     const syncShortcuts = () => {
@@ -192,7 +201,8 @@ export function usePlayerKeyboard({
       PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT,
       handleShortcutsSuspended,
     );
-    window.addEventListener('blur', cancelSeekForwardHold);
+    window.addEventListener('blur', handleCancelHoldEvent);
+    window.addEventListener('contextmenu', handleCancelHoldEvent);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const seekBy = (seconds: number) => {
@@ -308,12 +318,14 @@ export function usePlayerKeyboard({
       const index = currentEpisodeHandlers.currentEpisodeIndexRef.current;
       if (direction < 0) {
         if (detail && index > 0) {
+          cancelSeekForwardHold();
           currentEpisodeHandlers.handlePreviousEpisode();
           return true;
         }
         return false;
       }
       if (detail && index < detail.episodes.length - 1) {
+        cancelSeekForwardHold();
         currentEpisodeHandlers.handleNextEpisode();
         return true;
       }
@@ -344,7 +356,7 @@ export function usePlayerKeyboard({
     const isEpisodeAction = (action: PlayerShortcutAction) =>
       action === 'prevEpisode' || action === 'nextEpisode';
 
-    const startSeekForwardHold = (player: Artplayer) => {
+    const startSeekForwardHold = (player: Artplayer, code: string) => {
       if (seekForwardHold) {
         if (seekForwardHold.player === player) {
           return;
@@ -353,27 +365,63 @@ export function usePlayerKeyboard({
       }
 
       const binding: ShortcutBinding = { ...shortcuts.seekForward };
-      const handleDestroy = () => {
+      const playerEvents = player as unknown as {
+        on?: (name: string, fn: () => void) => void;
+        off?: (name: string, fn: () => void) => void;
+      };
+      const handlePlayerStop = () => {
         if (seekForwardHold === hold) {
           cancelSeekForwardHold();
         }
       };
+      const handleExternalReset = () => {
+        if (seekForwardHold === hold) {
+          cancelSeekForwardHold({ skipExit: true });
+        }
+      };
+      const handlePause = () => {
+        if (seekForwardHold === hold && hold.active) {
+          cancelSeekForwardHold();
+        }
+      };
+      const handleRateChange = () => {
+        if (seekForwardHold !== hold || !hold.active) return;
+        const currentRate = Number(hold.player.playbackRate);
+        if (
+          Number.isFinite(currentRate) &&
+          Math.abs(currentRate - hold.fastForwardRate) > 0.01
+        ) {
+          cancelSeekForwardHold({ restoreRate: false });
+        }
+      };
+
+      const unsubscribeReset = subscribePlayerFastForwardReset(
+        player,
+        handleExternalReset,
+      );
+      playerEvents.on?.('destroy', handlePlayerStop);
+      playerEvents.on?.('video:ended', handlePlayerStop);
+      playerEvents.on?.('video:pause', handlePause);
+      playerEvents.on?.('video:ratechange', handleRateChange);
+
       const hold: SeekForwardHoldState = {
         player,
         binding,
+        code,
         timer: null,
         active: false,
+        fastForwardRate: 3,
         previousPlaybackRate: 1,
         noticeElement: null,
-        handleDestroy,
+        cleanupListeners: () => {
+          unsubscribeReset();
+          playerEvents.off?.('destroy', handlePlayerStop);
+          playerEvents.off?.('video:ended', handlePlayerStop);
+          playerEvents.off?.('video:pause', handlePause);
+          playerEvents.off?.('video:ratechange', handleRateChange);
+        },
       };
       seekForwardHold = hold;
-
-      (
-        player as unknown as {
-          on?: (name: string, fn: () => void) => void;
-        }
-      ).on?.('destroy', handleDestroy);
 
       hold.timer = window.setTimeout(() => {
         if (seekForwardHold !== hold) return;
@@ -393,16 +441,16 @@ export function usePlayerKeyboard({
           return;
         }
 
-        const { previousPlaybackRate, fastForwardRate } =
-          enterPlayerFastForward(hold.player);
-        hold.active = true;
-        hold.previousPlaybackRate = previousPlaybackRate;
-        if (hold.player.notice) {
-          hold.player.notice.show = '';
+        const handle = enterPlayerFastForward(hold.player, { silent: true });
+        if (!handle) {
+          return;
         }
+        hold.active = true;
+        hold.previousPlaybackRate = handle.previousPlaybackRate;
+        hold.fastForwardRate = handle.fastForwardRate;
         hold.noticeElement = mountFastForwardNotice(
           hold.player,
-          fastForwardRate,
+          handle.fastForwardRate,
         );
       }, getPlayerFastForwardTime(player));
     };
@@ -446,8 +494,17 @@ export function usePlayerKeyboard({
 
       if (action === 'seekForward') {
         if (e.repeat) return;
-        startSeekForwardHold(artPlayerRef.current!);
+        startSeekForwardHold(artPlayerRef.current!, e.code || '');
         return;
+      }
+
+      if (
+        seekForwardHold?.active &&
+        (action === 'resetRate' ||
+          action === 'decreaseRate' ||
+          action === 'increaseRate')
+      ) {
+        cancelSeekForwardHold();
       }
 
       actionHandlers[action]();
@@ -456,7 +513,11 @@ export function usePlayerKeyboard({
     const handleKeyUp = (e: KeyboardEvent) => {
       const hold = seekForwardHold;
       if (!hold) return;
-      if (!isBindingReleased(e, hold.binding)) return;
+      if (e.key === 'Meta') {
+        cancelSeekForwardHold();
+        return;
+      }
+      if (!isBindingReleased(e, hold.binding, hold.code)) return;
 
       const wasActive = hold.active;
       const samePlayer =
@@ -479,7 +540,8 @@ export function usePlayerKeyboard({
         PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT,
         handleShortcutsSuspended,
       );
-      window.removeEventListener('blur', cancelSeekForwardHold);
+      window.removeEventListener('blur', handleCancelHoldEvent);
+      window.removeEventListener('contextmenu', handleCancelHoldEvent);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       cancelSeekForwardHold();
       releaseLoadingSpinnerGuard();
