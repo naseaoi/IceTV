@@ -48,6 +48,7 @@ import {
 } from '@/lib/source-health.server';
 import { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
+import { UrlValidationError } from '@/lib/url-guard';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 interface SearchFromApiOptions {
@@ -121,6 +122,26 @@ type SearchFailureReason =
   | 'request'
   | 'adapter';
 
+function getSearchFailureMessage(error: unknown, reason: SearchFailureReason) {
+  if (error instanceof UrlValidationError) {
+    // URL guard 当前只产生固定原因；白名单保证后续新增原因也不会泄露地址。
+    switch (error.reason) {
+      case 'Invalid URL':
+      case 'Only http/https allowed':
+      case 'Blocked destination':
+      case 'DNS lookup failed':
+      case 'Redirect not allowed':
+      case 'Too many redirects':
+        return error.reason;
+      default:
+        return 'URL validation failed';
+    }
+  }
+  // JSON.parse 的报错会带上正文片段，可能回显关键词，只记录固定说明。
+  if (error instanceof SyntaxError) return '响应不是有效 JSON';
+  return reason === 'adapter' && error instanceof Error ? error.message : null;
+}
+
 // 仅在真实回源失败时记录；健康样本只分 ok/empty/error，失败原因靠这条日志区分。
 // 不记录搜索关键词与地址，避免把用户输入写进日志。
 function logSearchFailure(
@@ -138,13 +159,7 @@ function logSearchFailure(
     errorType: detail.error
       ? (getUpstreamErrorType(detail.error) ?? null)
       : null,
-    // JSON.parse 的报错会带上正文片段，可能回显关键词，只记录固定说明
-    message:
-      reason === 'adapter' && detail.error instanceof Error
-        ? detail.error instanceof SyntaxError
-          ? '响应不是有效 JSON'
-          : detail.error.message
-        : null,
+    message: getSearchFailureMessage(detail.error, reason),
     elapsedMs: Date.now() - startedAt,
   });
 }

@@ -24,6 +24,7 @@ import {
 import { recordSourceSearchOutcome } from '@/lib/source-health.server';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
+import { UrlValidationError } from '@/lib/url-guard';
 
 jest.mock('@/lib/config', () => ({
   API_CONFIG: {
@@ -621,6 +622,64 @@ describe('search failure log', () => {
         errorType: 'TypeError:ECONNRESET',
       }),
     ]);
+  });
+
+  it.each([
+    'Invalid URL',
+    'Only http/https allowed',
+    'Blocked destination',
+    'DNS lookup failed',
+    'Redirect not allowed',
+    'Too many redirects',
+  ])('records the fixed URL validation reason: %s', async (message) => {
+    fetchMock.mockRejectedValueOnce(new UrlValidationError(message));
+    await searchFromApi(site, 'secret query');
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({
+        reason: 'request',
+        errorType: 'UrlValidationError',
+        message,
+      }),
+    ]);
+    expect(JSON.stringify(failureLogs())).not.toContain('secret');
+    expect(JSON.stringify(failureLogs())).not.toContain(site.api);
+  });
+
+  it('redacts unknown validation reasons for ordinary and special sources', async () => {
+    const error = new UrlValidationError(`${site.api}?wd=secret query`);
+    fetchMock.mockRejectedValueOnce(error);
+    await searchFromApi(site, 'secret query');
+    (searchFromGirigiri as jest.Mock).mockRejectedValueOnce(error);
+    await probeSourceSearch(
+      { key: 'giri', name: 'Giri', api: 'https://anime.girigirilove.icu' },
+      'secret query',
+    );
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({
+        reason: 'request',
+        message: 'URL validation failed',
+      }),
+      expect.objectContaining({
+        reason: 'adapter',
+        message: 'URL validation failed',
+      }),
+    ]);
+    expect(JSON.stringify(failureLogs())).not.toContain('secret');
+    expect(JSON.stringify(failureLogs())).not.toContain(site.api);
+  });
+
+  it('redacts ordinary source JSON parse errors', async () => {
+    fetchMock.mockRejectedValueOnce(
+      new SyntaxError('Unexpected token, "secret query" is not valid JSON'),
+    );
+    await searchFromApi(site, 'secret query');
+    expect(failureLogs()).toEqual([
+      expect.objectContaining({
+        reason: 'request',
+        message: '响应不是有效 JSON',
+      }),
+    ]);
+    expect(JSON.stringify(failureLogs())).not.toContain('secret');
   });
 
   it('records and caches its own timeout', async () => {

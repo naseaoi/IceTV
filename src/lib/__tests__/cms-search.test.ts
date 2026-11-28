@@ -26,6 +26,7 @@ jest.mock('@/lib/source-health.server', () => ({
   recordSourceSearchOutcome: jest.fn(),
 }));
 jest.mock('@/lib/url-guard', () => ({
+  UrlValidationError: jest.requireActual('@/lib/url-guard').UrlValidationError,
   fetchWithUrlGuard: (url: string, init: RequestInit) => fetch(url, init),
   validateProxyUrlForRequest: async (url: string) => ({ ok: true, url }),
 }));
