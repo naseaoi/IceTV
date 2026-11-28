@@ -55,6 +55,16 @@ export function isAbortError(error: unknown): boolean {
   );
 }
 
+// 只看 API 主机名：普通 CMS 地址的路径或查询参数里出现特殊源域名时不能误判。
+export function matchesSiteHost(apiSite: ApiSite, domain: string): boolean {
+  try {
+    const hostname = new URL(apiSite.api).hostname.toLowerCase();
+    return hostname === domain || hostname.endsWith(`.${domain}`);
+  } catch {
+    return false;
+  }
+}
+
 export function getSiteOrigin(apiSite: ApiSite): string {
   const fallback = apiSite.api.replace(/\/+$/, '');
   try {

@@ -139,7 +139,7 @@ it('关键词使用 encodeURIComponent，批量详情保留源参数并清理搜
   ).toEqual({ token: 'demo', ac: 'detail', ids: '170' });
   const signal = fetchMock.mock.calls[0][1].signal;
   expect(signal).toBeInstanceOf(AbortSignal);
-  expect(fetchMock.mock.calls[1][1].signal).toBe(signal);
+  expect(fetchMock.mock.calls[1][1].signal).toBeInstanceOf(AbortSignal);
 });
 
 it('网页没有卡片时返回空数组且不请求详情', async () => {
@@ -208,7 +208,9 @@ it.each(['网页', '详情'])('%s 网络异常时抛错', async (stage) => {
   if (stage === '详情')
     fetchMock.mockResolvedValueOnce(new Response(grid(card(170))));
   fetchMock.mockRejectedValueOnce(new TypeError('network error'));
-  await expect(searchFromTyyszy(site, '斗罗')).rejects.toThrow('network error');
+  await expect(searchFromTyyszy(site, '斗罗')).rejects.toThrow(
+    '请求失败 (TypeError)',
+  );
 });
 
 it('详情不是 JSON 时抛错', async () => {
@@ -298,6 +300,58 @@ it.each(['父级取消', '超时'])('网页与详情请求响应%s', async (reas
   if (reason === '父级取消') parent.abort();
   else jest.advanceTimersByTime(10000);
   await assertion;
+});
+
+it('网页耗时占用批量详情的同一十秒预算', async () => {
+  jest.useFakeTimers();
+  let detailSignal: AbortSignal | undefined;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  (global.fetch as jest.Mock)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                new Response(
+                  new ReadableStream({
+                    start(controller) {
+                      controller.enqueue(
+                        new TextEncoder().encode(grid(card(170))),
+                      );
+                      controller.close();
+                    },
+                  }),
+                ),
+              ),
+            6000,
+          );
+        }),
+    )
+    .mockImplementationOnce(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          detailSignal = init.signal as AbortSignal;
+          detailSignal.addEventListener('abort', () =>
+            reject(detailSignal?.reason),
+          );
+          started();
+        }),
+    );
+  const pending = searchFromTyyszy(site, '斗罗');
+  const assertion = expect(pending).rejects.toThrow('timeout');
+  jest.advanceTimersByTime(6000);
+  await ready;
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  expect(detailSignal?.aborted).toBe(false);
+  jest.advanceTimersByTime(3999);
+  expect(detailSignal?.aborted).toBe(false);
+  jest.advanceTimersByTime(1);
+  await assertion;
+  expect(detailSignal?.aborted).toBe(true);
 });
 
 it('统一搜索入口只取第一页，后台手动检测同样调用网页与批量详情', async () => {

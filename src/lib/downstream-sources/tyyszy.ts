@@ -3,23 +3,17 @@ import {
   parseCmsSearchPayload,
 } from '@/lib/cms-search.server';
 import { type ApiSite, API_CONFIG } from '@/lib/config';
-import {
-  readJsonLimited,
-  readTextLimited,
-  UPSTREAM_METADATA_MAX_BYTES,
-} from '@/lib/proxy-response-limits';
 import type { SearchResult } from '@/lib/types';
-import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
-import { BROWSER_HTML_HEADERS, createTimedAbortController } from './shared';
+import { requestSourceJson, requestSourceText } from './request.server';
+import {
+  BROWSER_HTML_HEADERS,
+  createTimedAbortController,
+  matchesSiteHost,
+} from './shared';
 
 export function isTyyszySource(apiSite: ApiSite): boolean {
-  try {
-    const hostname = new URL(apiSite.api).hostname;
-    return hostname === 'tyyszy.com' || hostname.endsWith('.tyyszy.com');
-  } catch {
-    return false;
-  }
+  return matchesSiteHost(apiSite, 'tyyszy.com');
 }
 
 // 单条卡片地址异常时跳过；结果容器缺失（拦截页、维护页、模板改版）或有卡片却一条都识别不出，
@@ -55,17 +49,12 @@ export async function searchFromTyyszy(
   const abortState = createTimedAbortController(signal, 10000);
   try {
     const origin = new URL(apiSite.api).origin;
-    const response = await fetchUpstream(
+    const { text: html } = await requestSourceText(
+      '天涯网页搜索',
       `${origin}/index.php/vod/search.html?wd=${encodeURIComponent(query)}`,
       { headers: BROWSER_HTML_HEADERS, signal: abortState.signal },
     );
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(`天涯网页搜索失败 (${response.status})`);
-    }
-    const ids = parseSearchIds(
-      await readTextLimited(response, UPSTREAM_METADATA_MAX_BYTES),
-    );
+    const ids = parseSearchIds(html);
     if (ids.length === 0) return [];
 
     const detailUrl = new URL(apiSite.api);
@@ -73,19 +62,11 @@ export async function searchFromTyyszy(
     detailUrl.searchParams.delete('pg');
     detailUrl.searchParams.set('ac', 'detail');
     detailUrl.searchParams.set('ids', ids.join(','));
-    const detailResponse = await fetchUpstream(detailUrl.toString(), {
-      headers: API_CONFIG.detail.headers,
-      signal: abortState.signal,
-    });
-    if (!detailResponse.ok) {
-      await detailResponse.body?.cancel();
-      throw new Error(`天涯批量详情失败 (${detailResponse.status})`);
-    }
     const data = parseCmsSearchPayload(
-      await readJsonLimited<unknown>(
-        detailResponse,
-        UPSTREAM_METADATA_MAX_BYTES,
-      ),
+      await requestSourceJson('天涯批量详情', detailUrl.toString(), {
+        headers: API_CONFIG.detail.headers,
+        signal: abortState.signal,
+      }),
     );
     if (!data) throw new Error('天涯批量详情响应无效');
     const byId = new Map(data.list.map((item) => [String(item.vod_id), item]));

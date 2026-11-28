@@ -1,20 +1,14 @@
 import type { ApiSite } from '@/lib/config';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
-  readJsonLimited,
-  UPSTREAM_METADATA_MAX_BYTES,
-} from '@/lib/proxy-response-limits';
-import { ResourceLimitError } from '@/lib/server-resource-errors';
-import {
   getSignedUrlFreshMs,
   hasSignedUrlParams,
 } from '@/lib/signed-url-params';
 import type { SearchResult } from '@/lib/types';
-import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
-import { createTimedAbortController } from './shared';
+import { requestSourceJson } from './request.server';
 
 const API_ORIGIN = 'https://api.xifanacg.com';
 // 源站网页公开的 publishable key，仅用于游客 API，不是用户凭证。
@@ -64,33 +58,16 @@ async function requestXifan(
   body: JsonObject,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const abortState = createTimedAbortController(signal, 10000);
-  try {
-    const response = await fetchUpstream(`${API_ORIGIN}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: PUBLIC_API_KEY,
-        Authorization: `Bearer ${PUBLIC_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-      signal: abortState.signal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(`稀饭请求失败 (${response.status})`);
-    }
-    return await readJsonLimited<unknown>(
-      response,
-      UPSTREAM_METADATA_MAX_BYTES,
-    );
-  } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
-    if (abortState.isTimeout()) throw new Error('稀饭请求超时');
-    throw error;
-  } finally {
-    abortState.cleanup();
-  }
+  return requestSourceJson('稀饭', `${API_ORIGIN}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: PUBLIC_API_KEY,
+      Authorization: `Bearer ${PUBLIC_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
 }
 
 function toSearchResult(apiSite: ApiSite, value: unknown): SearchResult | null {

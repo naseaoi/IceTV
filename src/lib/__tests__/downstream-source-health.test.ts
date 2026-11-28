@@ -38,6 +38,14 @@ jest.mock('@/lib/downstream-sources/giri', () => ({
   ...jest.requireActual('@/lib/downstream-sources/giri'),
   searchFromGirigiri: jest.fn(),
 }));
+jest.mock('@/lib/downstream-sources/olevod', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/olevod'),
+  searchFromOlevod: jest.fn(),
+}));
+jest.mock('@/lib/downstream-sources/ppnix', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/ppnix'),
+  searchFromPpnix: jest.fn(),
+}));
 jest.mock('@/lib/downstream-sources/tyyszy', () => ({
   ...jest.requireActual('@/lib/downstream-sources/tyyszy'),
   searchFromTyyszy: jest.fn(),
@@ -83,6 +91,8 @@ const specialSourceApis: Record<keyof typeof specialSourceAdapters, string> = {
   xgcartoon: 'https://www.xgcartoon.com',
   xifan: 'https://next.xifanacg.com',
   tyyszy: 'https://tyyszy.com/api.php/provide/vod',
+  olevod: 'https://www.olevod.com',
+  ppnix: 'https://www.ppnix.com',
 };
 const specialSources = Object.entries(specialSourceAdapters).map(
   ([name, adapter]) => ({

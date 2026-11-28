@@ -1,14 +1,8 @@
 import type { ApiSite } from '@/lib/config';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import { getUpstreamErrorType } from '@/lib/proxy-diagnostics';
-import {
-  readTextLimited,
-  UPSTREAM_METADATA_MAX_BYTES,
-} from '@/lib/proxy-response-limits';
 import { isTitleMatchedSearchQuery } from '@/lib/search-text';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
-import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags } from '@/lib/utils';
 import {
   buildXgcartoonPlaylistUrl,
@@ -19,10 +13,11 @@ import {
   parseXgcartoonVariantId,
 } from '@/lib/xgcartoon';
 
+import { requestSourceText } from './request.server';
 import {
   BROWSER_HTML_HEADERS,
-  createTimedAbortController,
   getSiteOrigin,
+  matchesSiteHost,
   toAbsoluteUrl,
   uniqueOrigins,
 } from './shared';
@@ -34,12 +29,7 @@ const XGCARTOON_FALLBACK_ORIGINS = [
 ];
 
 export function isXgcartoonSource(apiSite: ApiSite): boolean {
-  try {
-    const hostname = new URL(apiSite.api).hostname;
-    return hostname === 'xgcartoon.com' || hostname.endsWith('.xgcartoon.com');
-  } catch {
-    return false;
-  }
+  return matchesSiteHost(apiSite, 'xgcartoon.com');
 }
 
 function getXgcartoonOrigins(apiSite: ApiSite): string[] {
@@ -52,36 +42,26 @@ async function fetchXgcartoonHtml(
   referer?: string,
   onFailure?: (reason: string) => void,
 ): Promise<{ html: string; finalUrl: string } | null> {
-  const abortState = createTimedAbortController(signal, 10000);
-
   try {
     const headers = referer
       ? { ...BROWSER_HTML_HEADERS, Referer: referer }
       : BROWSER_HTML_HEADERS;
-    const res = await fetchUpstream(url, {
-      headers,
-      redirect: 'follow',
-      signal: abortState.signal,
-    });
-    if (!res.ok) {
-      await res.body?.cancel();
-      onFailure?.(`西瓜卡通搜索失败 (${res.status})`);
-      return null;
-    }
-    return {
-      html: await readTextLimited(res, UPSTREAM_METADATA_MAX_BYTES),
-      finalUrl: res.url || url,
-    };
+    const { text: html, finalUrl } = await requestSourceText(
+      '西瓜卡通搜索',
+      url,
+      {
+        headers,
+        redirect: 'follow',
+        signal,
+      },
+    );
+    return { html, finalUrl };
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
     onFailure?.(
-      abortState.isTimeout()
-        ? '西瓜卡通搜索超时'
-        : `西瓜卡通搜索请求失败 (${getUpstreamErrorType(error) || 'unknown'})`,
+      error instanceof Error ? error.message : '西瓜卡通搜索请求失败',
     );
     return null;
-  } finally {
-    abortState.cleanup();
   }
 }
 

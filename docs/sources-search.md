@@ -16,7 +16,7 @@
 - 普通搜索页共享层 `search-page-shared-v2` 保留跨实例租约合并：非空成功页新鲜期为 10 分钟，与本地成功页一致；空结果和失败为 60 秒。共享层无陈旧窗口，避免本地页后台刷新再次取得共享旧值、延后真实回源。本地成功页仍有额外 10 分钟陈旧窗口。共享层近端内存继续使用较小的 `search-empty-pages` 预算，与本地成功页缓存分开计额；数据库统一受共享容量目标约束，预算名称不代表只持久化空页。直接探测与强刷保持绕过共享层。
 - `/api/search` 命中新鲜缓存直接返回；命中过期缓存先返回旧结果再后台刷新。
 - 单源异常（含回源额度申请失败）不让整体搜索失败，接口仍可 200；判断源是否可用看健康数据，不看搜索接口状态码。
-- 失败源与空结果分开上报：`searchFromApi()` 默认把第 1 页失败（超时、非 2xx、网络或 JSON 异常，含页缓存里的 `timeout` / `forbidden` / `invalid`）当空结果返回；聚合传 `reportFailure` 让它抛 `SearchSourceUnavailableError`，经 `collectSearchAggregation()` 记入 `failedSources`，不进整源失败冷却。maccms 无结果时返回 `list: null` 且 `total` 为 0，按空结果处理；普通源返回失败码、其他无效 `list` 结构或非空列表全为脏条目时，健康样本记 error，并写 `invalid` 页缓存（60 秒保鲜、60 秒陈旧窗口）；陈旧命中先返回失败并后台刷新。超时与 HTTP 403 沿用 `timeout` / `forbidden` 页缓存（10 分钟保鲜、10 分钟陈旧窗口）；普通搜索共享加载还会短期保存失败结果，直接探测与强刷绕过共享加载。giri / xgcartoon / xifan / tyyszy 回源失败或解析异常同样在聚合中上报 `SearchSourceUnavailableError`，记入 `failedSources` 且不进整源失败冷却；真正无结果返回空数组。本站资源额度不足或上游出口冷却抛出的 `ResourceLimitError` 同样只记入 `failedSources`、不进整源失败冷却：它反映本站负载或单个出口被限流，整源冷却会让高峰期的正常源对本实例所有用户缺席 5 分钟，上游 429 已由按「出口 + 域名」共享的冷却阻止重复发送。默认搜索与仅取第一页的搜索入口保持失败返回空数组，供 quick、搜索建议和详情回退使用。
+- 失败源与空结果分开上报：`searchFromApi()` 默认把第 1 页失败（超时、非 2xx、网络或 JSON 异常，含页缓存里的 `timeout` / `forbidden` / `invalid`）当空结果返回；聚合传 `reportFailure` 让它抛 `SearchSourceUnavailableError`，经 `collectSearchAggregation()` 记入 `failedSources`，不进整源失败冷却。maccms 无结果时返回 `list: null` 且 `total` 为 0，按空结果处理；普通源返回失败码、其他无效 `list` 结构或非空列表全为脏条目时，健康样本记 error，并写 `invalid` 页缓存（60 秒保鲜、60 秒陈旧窗口）；陈旧命中先返回失败并后台刷新。超时与 HTTP 403 沿用 `timeout` / `forbidden` 页缓存（10 分钟保鲜、10 分钟陈旧窗口）；普通搜索共享加载还会短期保存失败结果，直接探测与强刷绕过共享加载。特殊源回源失败或解析异常同样在聚合中上报 `SearchSourceUnavailableError`，记入 `failedSources` 且不进整源失败冷却；真正无结果返回空数组。本站资源额度不足或上游出口冷却抛出的 `ResourceLimitError` 同样只记入 `failedSources`、不进整源失败冷却：它反映本站负载或单个出口被限流，整源冷却会让高峰期的正常源对本实例所有用户缺席 5 分钟，上游 429 已由按「出口 + 域名」共享的冷却阻止重复发送。默认搜索与仅取第一页的搜索入口保持失败返回空数组，供 quick、搜索建议和详情回退使用。
 - 聚合缓存条目同时保存 `failedSources`：`/api/search` 返回 `totalSources` 与 `failedSources`，流式搜索命中缓存时为它们重放 `source_error`。客户端重试只经 `/api/search/ws?retry=<源 key,…>` 重搜失败源：跳过失败冷却与第 1 页缓存，结果经 `mergeRetriedSearchAggregate()` 替换本实例缓存中这些源的部分；缓存不存在时不凭局部结果新建。
 - `/api/search/quick` 保留用户可用源、作品/年份/类别过滤、健康等级排序、最多 10 源与 4 槽竞速；同等或更好健康等级的直连源保留 1500ms 优先窗口。普通源搜索结果具有源/id、标题、封面、四位年份、源名称、非空 HTTP(S) m3u8/mp4 剧集及逐集标题，且不带分组、关联版本或版本标签时，直接参与竞速；逐集解析型特殊源、懒地址与字段不完整的候选仍先取详情，保留详情字段覆盖与失败后的搜索结果回退。
 - quick 胜者的搜索快照不作为完整详情写缓存；胜出后非阻塞调用共享详情加载，保留详情缓存填充。客户端 quick 分支保存快照并起播；当前的快照后台校验仅在按源/id 读取快照的入口执行，quick 首次起播本身不保证收到新详情。
@@ -59,21 +59,26 @@
 
 ## 特殊源注册与逐集解析
 
-特殊源统一注册于 `src/lib/downstream-sources/registry.server.ts`：站点识别、搜索、可选详情、可选逐集解析与 quick 搜索快照起播能力共用一份声明。站点识别只看 API 主机名，不匹配路径与查询参数，避免普通 CMS 地址里出现特殊源域名时被误判。适配器搜索失败时抛出带具体原因的 Error（状态码、超时、底层错误类型，多入口逐个列出，不含关键词与完整地址），父级取消返回空数组，`ResourceLimitError` 原样抛出；由 `searchSpecialSource()` 统一转为 `SearchSourceUnavailableError`，原因留给 `[search.failure]` 日志。搜索、后台检测、详情、逐集解析和 quick 均按注册表分派；未声明详情函数时沿用普通 CMS 详情及配置的详情页回退。`canStartFromSearch` 表示允许跳过详情等待，候选仍须通过 quick 的字段与媒体地址检查；它与是否支持逐集解析分开声明，天涯的批量详情搜索结果允许直接起播。
+特殊源统一注册于 `src/lib/downstream-sources/registry.server.ts`：站点识别、搜索、可选详情、可选逐集解析与 quick 搜索快照起播能力共用一份声明。搜索、后台检测、详情、逐集解析和 quick 均按注册表分派；未声明详情函数时沿用普通 CMS 详情及配置的详情页回退。`canStartFromSearch` 表示允许跳过详情等待，候选仍须通过 quick 的字段与媒体地址检查；它与是否支持逐集解析分开声明，天涯的批量详情搜索结果允许直接起播。适配器搜索失败时抛出带具体原因的 Error（状态码、超时、底层错误类型，多入口逐个列出，不含关键词与完整地址），父级取消与 `ResourceLimitError` 原样抛出（多入口回退时父级取消也可返回空数组）；由 `searchSpecialSource()` 统一转为 `SearchSourceUnavailableError`，原因留给 `[search.failure]` 日志。
 
-逐集解析统一用 `icetv-lazy://`：详情阶段返回懒地址，播放时经 `/api/episode-url` 解析。接入逐集解析源时：
+接入新特殊源按以下清单完成：
 
-1. `src/lib/lazy-episodes.ts` 新增 kind 与路径白名单正则；该模块保持客户端可导入，只定义地址协议，不导入服务端注册表。
-2. 源适配器的 `episodes` 用 `buildLazyEpisodeUrl(kind, path)`，导出逐集解析函数，并在注册表声明同名 kind 及解析器。
-3. 注册表的映射类型要求每种 `LazyEpisodeKind` 都有对应解析器，遗漏会在 typecheck 报错；`special-source-registry.test.ts` 遍历注册表验证搜索、后台检测、详情、逐集解析与 quick 的实际分派，以及测试站点之间识别互斥。新增适配器须补充该测试的站点、函数与合法路径样例。路由同时核对可用源与 kind，未知或错配 kind 返回 400。
-
-不要在详情阶段全量抓播放页，不要绕过 `/api/episode-url` 在客户端直接解析源站地址。
+1. **适配器与站点识别**：在 `src/lib/downstream-sources/<源名>.ts` 导出识别、搜索以及可选的详情、逐集解析函数。识别只看 API 主机名，统一用 `shared.ts` 的 `matchesSiteHost(site, domain)`（匹配域名及子域；多顶级域等特殊后缀规则可自写主机名正则），不匹配路径与查询参数，避免普通 CMS 地址含特殊源域名时被误判。
+2. **统一回源**：回源统一用 `src/lib/downstream-sources/request.server.ts` 的 `requestSourceText()` / `requestSourceJson(label, url, options)`，不手写 `fetch`、超时或限字节读取。helper 统一提供超时（默认 10 秒，`timeoutMs` 可调，传入的 `signal` 作父级）、`UPSTREAM_METADATA_MAX_BYTES` 限字节读取、规范失败文案（`${label}请求失败 (状态码或底层错误类型)` / `${label}请求超时`，不含关键词与完整地址），并原样透传父级取消与 `ResourceLimitError`。多次请求共用超时预算时（如天涯网页加批量详情），外层建 `createTimedAbortController()` 将共享 `signal` 传入 helper。
+3. **详情与逐集懒解析**：播放地址确定且无签名时，详情直接返回播放地址。仅当播放地址带有效期签名、依赖会话或需逐集抓页面时，采用 `icetv-lazy://` 懒解析并经 `/api/episode-url` 在播放时取址（不在详情阶段全量抓播放页，不绕过 `/api/episode-url` 在客户端直接解析源站地址）：在 `src/lib/lazy-episodes.ts` 新增 `LazyEpisodeKind` 与路径白名单正则（该模块保持客户端可导入，只定义地址协议，不导入服务端注册表）；适配器 `episodes` 用 `buildLazyEpisodeUrl(kind, path)` 并导出逐集解析函数；路由核对可用源与 kind，未知或错配返回 400。
+4. **注册表登记**：在 `src/lib/downstream-sources/registry.server.ts` 登记适配器与 `canStartFromSearch`；含逐集解析时声明同名 kind 与解析器，注册表映射类型强制每种 `LazyEpisodeKind` 都有对应解析器，遗漏会在 `typecheck` 报错。
+5. **测试**：在 `src/lib/__tests__/special-source-registry.test.ts` 补充该源的站点、函数与合法路径（含逐集解析时）样例；该测试遍历注册表验证搜索、后台检测、详情、逐集解析、quick 分派及站点识别互斥。适配器单测用精简的实测响应夹具覆盖解析与失败边界。
+6. **文档与变更说明**：在本节补充该源维护条目（源地址填写值、依赖的接口/页面结构或签名算法、播放线路要求与跨域事实）；用户或管理员可感知时按[发布说明](release.md#发布说明)更新 `CHANGELOG.md`。
 
 - 稀饭动漫的源地址填写 `https://next.xifanacg.com`，游客 API 使用源站网页公开的 publishable key。详情按 `CS` 备用线路（全站编号 `2`）→ `xfy2` 旧番主线（编号 `5`）→ `xfxf1` 新番主线（编号 `4`）选择首条有剧集的线路；逐集解析同时核对所选线路编号与代码，避免上游 fallback 换线。三者共用后台播放路由，支持浏览器直连，`auto` 沿用播放器的网络失败回落。CS 返回 HLS，主线返回游客 API 签发的签名 MP4，沿用签名地址短期本实例缓存；新番主线重定向至网盘，要求媒体请求省略 Origin 与 Referer，由全站文档策略和原生播放器处理，约束见[播放](playback.md#线路检测)。无需额外取址服务器，代理模式复用现有媒体中转。该源与其他特殊源一样复用共享搜索缓存，定时探测与后台手动检测调用其游客搜索 API。
 
 - 天涯资源（`tyyszy`，API `https://tyyszy.com/api.php/provide/vod`）的 API 搜索被源站关闭，搜索改用网页提取 id 后一次 API 批量详情，按网页顺序返回；与其他特殊源一致仅取第一页，详情与播放地址继续沿用普通 CMS 路径。视频 CDN 只放行浏览器直连，后台播放模式须设为「直连」。
 
+- 欧乐影院（`olevod`）源地址填写 `https://www.olevod.com`，接口固定请求 `https://api.olelive.com`，每次回源按源站公开前端算法现算秒级时间签名 `_vv`（约 1 小时有效，缺失或错误返回签名错误／401）。搜索仅取第一页 10 条；详情须请求 `/true` 变体才返回明文 `master.m3u8`，搜索按条目 `vip === true` 过滤游客不可播的 VIP 档（画质文案不代表权限），详情仍跳过空地址，全部为空时报无可播放剧集；封面相对路径拼接 `https://static.olelive.com/`。视频 CDN 反射 `Origin` 且不校验 `Referer`，支持浏览器直连，后台播放模式可用「自动」或「直连」。
+
+- PPnix（`ppnix`）源地址填写 `https://www.ppnix.com`。网页搜索 `/cn/search/{词}--.html` 仅取第一页，条目 id 为 `movie-{n}` / `tv-{n}`；详情页提取内联脚本中的 `infoid` 与 `m3u8=[...]` 参数，按源站规则拼出无签名播放地址 `/info/m3u8/{infoid}/{参数}.m3u8`，电影取页面声明的最高画质档。清单与密钥 `/info/m3u8/key` 无跨域头而分片允许跨域，现有线路没有「只中转清单与密钥」的模式，后台播放模式须设为「代理」，分片中转计入月流量。**易错点**：密钥接口返回 32 字节 ASCII 十六进制文本，正确密钥是其前 16 字节原文（与 ffmpeg 读取 AES-128 key 文件的行为一致），不是十六进制解码结果；hls.js 1.7 的 WebCrypto 与软件解密都无法使用 32 字节密钥，由 `/api/proxy/key` 把「恰为 32 字节且全为十六进制字符」的正文规范化为前 16 字节，因此该源只能走代理。
+
 解析结果与特殊源搜索跨实例共享，均按源配置（`getSourceCacheKey()`）分区：
 
 - `src/app/api/episode-url/cache.ts`：不带签名参数的播放地址进共享缓存 `episode-url-v1`，30 分钟新鲜、2 小时陈旧；带签名参数的地址只留在本实例。`refresh=1` 强刷跳过两级缓存重新解析，需登录并受每账号每分钟 8 次的 `episode-url-refresh` 额度限制；同键强刷在途合并，结果写入本实例缓存并优先于共享缓存，不回写共享缓存，强刷进行中或完成后迟到的普通加载不能覆盖它。服务端与浏览器懒解析缓存共用 `src/lib/signed-url-params.ts` 的签名有效期规则：最长 5 分钟，能解析签名到期时间时以较早者为限，签名地址到期后重新加载。共享缓存的结果格式或有效期变更时升级缓存名版本。依赖 Cookie、会话或出口 IP 的解析结果不能进共享缓存。
-- giri / xgcartoon / xifan / tyyszy 搜索经 `loadSpecialSourceSearch()`（`src/lib/search-cache.ts`）共享非空结果 10 分钟。失败由 loader 抛出，失败与空结果均不缓存；失败源重试沿用聚合入口。
+- 全部特殊源搜索经 `loadSpecialSourceSearch()`（`src/lib/search-cache.ts`）共享非空结果 10 分钟。失败由 loader 抛出，失败与空结果均不缓存；失败源重试沿用聚合入口。

@@ -49,9 +49,9 @@ describe('西瓜卡通搜索失败诊断', () => {
       });
     });
     const pending = searchFromXgcartoon(site, query);
-    await expect(pending).rejects.toThrow('入口1: 西瓜卡通搜索失败 (503)');
-    await expect(pending).rejects.toThrow('入口2: 西瓜卡通搜索失败 (403)');
-    await expect(pending).rejects.toThrow('入口3: 西瓜卡通搜索失败 (502)');
+    await expect(pending).rejects.toThrow('入口1: 西瓜卡通搜索请求失败 (503)');
+    await expect(pending).rejects.toThrow('入口2: 西瓜卡通搜索请求失败 (403)');
+    await expect(pending).rejects.toThrow('入口3: 西瓜卡通搜索请求失败 (502)');
     await expect(pending).rejects.not.toThrow(query);
     await expect(pending).rejects.not.toThrow('https://');
     expect(fetchMock.mock.calls.map(([url]) => new URL(url).origin)).toEqual([
@@ -82,7 +82,7 @@ describe('西瓜卡通搜索失败诊断', () => {
       );
     const pending = searchFromXgcartoon(site, query);
     const assertion = expect(pending).rejects.toThrow(
-      '入口1: 西瓜卡通搜索超时; 入口2: 西瓜卡通搜索失败 (403); 入口3: 西瓜卡通搜索请求失败 (TypeError:ECONNRESET)',
+      '入口1: 西瓜卡通搜索请求超时; 入口2: 西瓜卡通搜索请求失败 (403); 入口3: 西瓜卡通搜索请求失败 (TypeError:ECONNRESET)',
     );
     jest.advanceTimersByTime(10000);
     await assertion;
@@ -114,7 +114,7 @@ describe('西瓜卡通搜索失败诊断', () => {
       .mockResolvedValueOnce({ ok: false, status: 503, body: null })
       .mockResolvedValueOnce(createTextResponse('<html>blocked</html>'));
     await expect(searchFromXgcartoon(site, query)).rejects.toThrow(
-      '入口1: 西瓜卡通搜索失败 (503); 入口2: 西瓜卡通搜索页无法解析',
+      '入口1: 西瓜卡通搜索请求失败 (503); 入口2: 西瓜卡通搜索页无法解析',
     );
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });

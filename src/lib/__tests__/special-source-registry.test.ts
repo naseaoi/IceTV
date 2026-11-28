@@ -13,6 +13,8 @@ import {
   searchFromApi,
 } from '@/lib/downstream';
 import * as giri from '@/lib/downstream-sources/giri';
+import * as olevod from '@/lib/downstream-sources/olevod';
+import * as ppnix from '@/lib/downstream-sources/ppnix';
 import {
   type SpecialSourceAdapter,
   getSpecialSourceAdapter,
@@ -59,6 +61,16 @@ jest.mock('@/lib/downstream-sources/xifan', () => ({
   searchFromXifan: jest.fn(),
   getDetailFromXifan: jest.fn(),
   resolveXifanEpisodeUrlByPath: jest.fn(),
+}));
+jest.mock('@/lib/downstream-sources/olevod', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/olevod'),
+  searchFromOlevod: jest.fn(),
+  getDetailFromOlevod: jest.fn(),
+}));
+jest.mock('@/lib/downstream-sources/ppnix', () => ({
+  ...jest.requireActual('@/lib/downstream-sources/ppnix'),
+  searchFromPpnix: jest.fn(),
+  getDetailFromPpnix: jest.fn(),
 }));
 jest.mock('@/lib/downstream-sources/tyyszy', () => ({
   ...jest.requireActual('@/lib/downstream-sources/tyyszy'),
@@ -118,6 +130,16 @@ const fixtures: Record<keyof typeof specialSourceAdapters, Fixture> = {
   tyyszy: {
     api: 'https://tyyszy.com/api.php/provide/vod',
     search: tyyszy.searchFromTyyszy,
+  },
+  olevod: {
+    api: 'https://www.olevod.com',
+    search: olevod.searchFromOlevod,
+    detail: olevod.getDetailFromOlevod,
+  },
+  ppnix: {
+    api: 'https://www.ppnix.com',
+    search: ppnix.searchFromPpnix,
+    detail: ppnix.getDetailFromPpnix,
   },
 };
 const entries = Object.entries(specialSourceAdapters).map(

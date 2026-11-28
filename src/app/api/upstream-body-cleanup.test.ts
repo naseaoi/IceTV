@@ -2,10 +2,14 @@
 
 import type { NextRequest } from 'next/server';
 
-import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import {
+  fetchResponseThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 import { recordSourceProxyFailure } from '@/lib/source-proxy-failures.server';
 
-installWebPolyfills();
+installStreamPolyfills();
 jest.mock('@/lib/source-proxy-failures.server', () => ({
   recordSourceProxyFailure: jest.fn(),
 }));
@@ -44,7 +48,7 @@ jest.mock('@/lib/url-guard', () => ({
   UrlValidationError: class extends Error {},
 }));
 jest.mock('@/lib/http-proxy-json', () => ({
-  getProxyUrlForTarget: () => undefined,
+  getProxyUrlForTarget: jest.fn(),
   fetchResponseThroughProxy: jest.fn(),
 }));
 jest.mock('@/lib/config-subscription', () => ({
@@ -131,6 +135,53 @@ it.each([
     );
   },
 );
+
+describe.each([false, true])('key 正文标准化（环境代理=%s）', (isLive) => {
+  it.each([
+    ['小写十六进制', Buffer.from('ba9bf05693b9fa202d922dd43a08f281'), 16],
+    ['大小写十六进制', Buffer.from('0123456789abcdefABCDEF0123456789'), 16],
+    ['标准密钥', Buffer.from('0123456789abcdef'), 16],
+    [
+      '二进制 AES-256',
+      Buffer.from(Array.from({ length: 32 }, (_, i) => i)),
+      32,
+    ],
+    ['非十六进制 ASCII', Buffer.from('g'.repeat(32)), 32],
+    ['高位字节', Buffer.alloc(32, 0xe1), 32],
+    ['少于 32 字节', Buffer.from('a'.repeat(31)), 31],
+    ['多于 32 字节', Buffer.from('a'.repeat(33)), 33],
+    ['含换行', Buffer.from(`${'a'.repeat(31)}\n`), 32],
+  ] as const)('%s', async (_name, upstream, expectedLength) => {
+    const headers = new Headers({
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(upstream.length),
+    });
+    if (isLive) {
+      jest
+        .mocked(getProxyUrlForTarget)
+        .mockReturnValueOnce(new URL('http://proxy.example:8080'));
+      jest.mocked(fetchResponseThroughProxy).mockResolvedValueOnce({
+        status: 200,
+        statusText: 'OK',
+        headers,
+        body: upstream,
+      });
+    } else {
+      mockFetch.mockResolvedValueOnce(new Response(upstream, { headers }));
+    }
+    const response = await keyRoute.GET({
+      ...request,
+      url: `${request.url}&icetv-live=${isLive ? '1' : '0'}`,
+    } as NextRequest);
+    expect(response.status).toBe(200);
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body).toEqual(upstream.subarray(0, expectedLength));
+    expect(response.headers.get('Content-Length')).toBe(String(body.length));
+    expect(response.headers.get('Cache-Control')).toBe(
+      isLive ? 'no-cache' : 'private, max-age=3600',
+    );
+  });
+});
 
 it.each([
   ['logo', logoRoute.GET, true],

@@ -6,23 +6,12 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import { getUpstreamErrorType } from '@/lib/proxy-diagnostics';
-import {
-  readJsonLimited,
-  readTextLimited,
-  UPSTREAM_METADATA_MAX_BYTES,
-} from '@/lib/proxy-response-limits';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
-import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
-import {
-  BROWSER_HTML_HEADERS,
-  createTimedAbortController,
-  getSiteOrigin,
-  toAbsoluteUrl,
-} from './shared';
+import { requestSourceJson, requestSourceText } from './request.server';
+import { BROWSER_HTML_HEADERS, getSiteOrigin, toAbsoluteUrl } from './shared';
 
 interface GirigiriSuggestItem {
   id: number | string;
@@ -58,22 +47,13 @@ function isCfChallenge(html: string): boolean {
 
 async function fetchGiriHtml(url: string): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const abortState = createTimedAbortController(undefined, 10000);
     try {
-      const res = await fetchUpstream(url, {
+      const { text: html } = await requestSourceText('girigiri', url, {
         headers: BROWSER_HTML_HEADERS,
-        signal: abortState.signal,
       });
-      if (res.ok) {
-        const html = await readTextLimited(res, UPSTREAM_METADATA_MAX_BYTES);
-        if (!isCfChallenge(html)) return html;
-      } else {
-        await res.body?.cancel();
-      }
+      if (!isCfChallenge(html)) return html;
     } catch (error) {
       if (error instanceof ResourceLimitError) throw error;
-    } finally {
-      abortState.cleanup();
     }
     if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
   }
@@ -216,36 +196,23 @@ async function fetchGirigiriSuggestList(
 ): Promise<{ list: GirigiriSuggestItem[] } | { failure: string }> {
   const searchUrl = `${origin}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(query)}`;
 
-  const abortState = createTimedAbortController(signal, 8000);
-
   try {
-    const response = await fetchUpstream(searchUrl, {
+    const data = await requestSourceJson('girigiri 搜索', searchUrl, {
       headers: API_CONFIG.search.headers,
-      signal: abortState.signal,
+      signal,
+      timeoutMs: 8000,
     });
-
-    if (!response.ok) {
-      await response.body?.cancel();
-      return { failure: `girigiri 搜索失败 (${response.status})` };
-    }
-    const data = await readJsonLimited<any>(
-      response,
-      UPSTREAM_METADATA_MAX_BYTES,
-    );
-    return Array.isArray(data?.list)
+    return data &&
+      typeof data === 'object' &&
+      'list' in data &&
+      Array.isArray(data.list)
       ? { list: data.list as GirigiriSuggestItem[] }
       : { failure: 'girigiri 搜索响应无效' };
   } catch (error) {
     if (error instanceof ResourceLimitError) throw error;
     return {
-      failure: abortState.isTimeout()
-        ? 'girigiri 搜索超时'
-        : error instanceof SyntaxError
-          ? 'girigiri 搜索响应不是有效 JSON'
-          : `girigiri 搜索请求失败 (${getUpstreamErrorType(error) || 'unknown'})`,
+      failure: error instanceof Error ? error.message : 'girigiri 搜索请求失败',
     };
-  } finally {
-    abortState.cleanup();
   }
 }
 

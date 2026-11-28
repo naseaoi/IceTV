@@ -78,12 +78,15 @@ it('请求超时给出明确原因', async () => {
   await assertion;
 });
 
-it('网络异常保留原有类型与 cause', async () => {
+it('网络异常在统一文案中保留原有类型与 cause', async () => {
   const error = Object.assign(new TypeError('fetch failed'), {
     cause: { code: 'ECONNRESET' },
   });
   (global.fetch as jest.Mock).mockRejectedValue(error);
-  await expect(searchFromXifan(site, '葬送')).rejects.toBe(error);
+  await expect(searchFromXifan(site, '葬送')).rejects.toMatchObject({
+    message: '稀饭请求失败 (TypeError:ECONNRESET)',
+    cause: error,
+  });
 });
 
 it('父级先取消后清理超过超时时间，仍保留取消错误', async () => {

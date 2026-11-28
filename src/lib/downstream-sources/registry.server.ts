@@ -10,6 +10,12 @@ import {
   resolveGirigiriEpisodePlayUrlByPath,
   searchFromGirigiri,
 } from './giri';
+import {
+  getDetailFromOlevod,
+  isOlevodSource,
+  searchFromOlevod,
+} from './olevod';
+import { getDetailFromPpnix, isPpnixSource, searchFromPpnix } from './ppnix';
 import { isTyyszySource, searchFromTyyszy } from './tyyszy';
 import {
   getDetailFromXgcartoon,
@@ -73,6 +79,18 @@ export const specialSourceAdapters = {
     matches: isTyyszySource,
     search: searchFromTyyszy,
     canStartFromSearch: true,
+  },
+  olevod: {
+    matches: isOlevodSource,
+    search: searchFromOlevod,
+    detail: getDetailFromOlevod,
+    canStartFromSearch: false,
+  },
+  ppnix: {
+    matches: isPpnixSource,
+    search: searchFromPpnix,
+    detail: getDetailFromPpnix,
+    canStartFromSearch: false,
   },
 } satisfies SpecialSourceRegistry;
 

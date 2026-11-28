@@ -102,7 +102,8 @@ export async function GET(request: NextRequest) {
               'Unexpected compressed body from environment proxy',
             );
           }
-          return new Response(bufferToArrayBuffer(response.body), {
+          const keyData = normalizeKeyData(bufferToArrayBuffer(response.body));
+          return new Response(keyData, {
             status: response.status,
             statusText: response.statusText,
             headers: {
@@ -112,6 +113,7 @@ export async function GET(request: NextRequest) {
               'Access-Control-Allow-Origin': '*',
               'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
               'Cache-Control': 'no-cache',
+              'Content-Length': String(keyData.byteLength),
             },
           });
         } catch (proxyError) {
@@ -159,7 +161,9 @@ export async function GET(request: NextRequest) {
         { status: response.status },
       );
     }
-    const keyData = await readArrayBufferLimited(response, MAX_KEY_BYTES);
+    const keyData = normalizeKeyData(
+      await readArrayBufferLimited(response, MAX_KEY_BYTES),
+    );
     return new Response(keyData, {
       status: response.status,
       statusText: response.statusText,
@@ -169,6 +173,7 @@ export async function GET(request: NextRequest) {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Cache-Control': 'private, max-age=3600',
+        'Content-Length': String(keyData.byteLength),
       },
     });
   } catch (error) {
@@ -193,6 +198,18 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ error: 'Failed to fetch key' }, { status: 500 });
   }
+}
+
+function normalizeKeyData(data: ArrayBuffer): ArrayBuffer {
+  // ffmpeg 读取 AES-128 key 文件时只取前 16 字节，hls.js 1.7 软件解密也只接受 16 字节。
+  // 兼容 32 字节 ASCII 十六进制文本密钥：保留前 16 字节原文，不做十六进制解码。
+  if (
+    data.byteLength === 32 &&
+    /^[0-9a-fA-F]{32}$/.test(Buffer.from(data).toString('utf8'))
+  ) {
+    return data.slice(0, 16);
+  }
+  return data;
 }
 
 function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {

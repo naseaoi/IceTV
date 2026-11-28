@@ -71,7 +71,7 @@ describe('giri 搜索失败诊断', () => {
     });
 
     await expect(searchFromGirigiri(site, query)).rejects.toThrow(
-      '入口1: girigiri 搜索失败 (503)',
+      '入口1: girigiri 搜索请求失败 (503)',
     );
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -91,7 +91,7 @@ describe('giri 搜索失败诊断', () => {
   });
 
   it.each([
-    ['invalid', '搜索响应不是有效 JSON'],
+    ['invalid', '搜索请求失败 (SyntaxError)'],
     [JSON.stringify({ error: 'unavailable' }), '搜索响应无效'],
   ])('异常响应给出安全的解析原因：%s', async (payload, message) => {
     (global.fetch as jest.Mock).mockResolvedValue(
@@ -113,7 +113,7 @@ describe('giri 搜索失败诊断', () => {
         }),
     );
     const assertion = expect(searchFromGirigiri(site, query)).rejects.toThrow(
-      'girigiri 搜索超时',
+      'girigiri 搜索请求超时',
     );
     jest.advanceTimersByTime(8000);
     await assertion;
