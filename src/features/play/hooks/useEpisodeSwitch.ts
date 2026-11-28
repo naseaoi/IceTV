@@ -102,7 +102,7 @@ export function useEpisodeSwitch({
 
       // 保存会同步更新本地每集进度表，之后再查目标集；跨分组的同一集仍以正在看的位置为准
       doSaveCurrentProgress(
-        false,
+        true,
         !crossGroup &&
           targetEpisodeIndex === currentEpisodeIndexRef.current + 1,
       );

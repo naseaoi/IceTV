@@ -75,6 +75,9 @@ export {
 // 保存播放进度
 // ---------------------------------------------------------------------------
 
+// 媒体 pause / seeked 也可能来自播放器内部恢复，统一限制发送频率并补写尾次快照。
+export const PROGRESS_SAVE_MIN_INTERVAL_MS = 5_000;
+
 type PendingPlayProgressSave = {
   source: string;
   id: string;
@@ -91,6 +94,8 @@ export interface PlayProgressSaveState {
   lastSavedFingerprint: string | null;
   activeSequences?: Set<number>;
   lastSnapshotFingerprint?: string;
+  lastSaveKey?: string;
+  saveTimer?: ReturnType<typeof setTimeout>;
   onSaved?: (source: string, id: string) => void | Promise<void>;
   // 每个新快照同步通知，切集时本地每集进度表不必等保存请求返回
   onEpisodeProgress?: (entry: EpisodeProgressEntry) => void;
@@ -114,6 +119,7 @@ async function persistPlayProgressSave(
   const active = (state.activeSequences ??= new Set());
   const sequence = payload.record.progress_sequence!;
   active.add(sequence);
+  state.lastSaveKey = `${generateStorageKey(payload.source, payload.id)}|${payload.record.index}`;
   lastSaveTimeRef.current = Date.now();
   try {
     await savePlayRecord(payload.source, payload.id, payload.record);
@@ -133,6 +139,8 @@ async function flushPendingPlayProgress(
   lastSaveTimeRef: MutableRefObject<number>,
   immediate: boolean,
 ): Promise<void> {
+  clearTimeout(state.saveTimer);
+  state.saveTimer = undefined;
   if (immediate) {
     // 退出时同步启动每个 keepalive 请求，不能等上一个响应才发送下一集。
     const pending = [...state.pending.values()];
@@ -148,6 +156,18 @@ async function flushPendingPlayProgress(
   state.inFlight = true;
   try {
     for (const [key, payload] of state.pending) {
+      const delay =
+        state.lastSaveKey === key
+          ? PROGRESS_SAVE_MIN_INTERVAL_MS -
+            (Date.now() - lastSaveTimeRef.current)
+          : 0;
+      if (delay > 0) {
+        // 固定截止时间，后续事件只替换快照，持续卡顿也不会饿死尾次保存。
+        state.saveTimer = setTimeout(() => {
+          void flushPendingPlayProgress(state, lastSaveTimeRef, false);
+        }, delay);
+        return;
+      }
       state.pending.delete(key);
       await persistPlayProgressSave(state, lastSaveTimeRef, payload);
     }

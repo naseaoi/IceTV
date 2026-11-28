@@ -73,14 +73,14 @@ describe('useEpisodeSwitch 每集续播', () => {
   it('只有切到紧接的下一集才按离开下一集保存', () => {
     const next = setup({}, 1);
     act(() => next.switchEpisode(2));
-    expect(next.save).toHaveBeenCalledWith(false, true);
+    expect(next.save).toHaveBeenCalledWith(true, true);
 
     const skip = setup({}, 1);
     act(() => skip.switchEpisode(3));
-    expect(skip.save).toHaveBeenCalledWith(false, false);
+    expect(skip.save).toHaveBeenCalledWith(true, false);
 
     const previous = setup({}, 1);
     act(() => previous.switchEpisode(0));
-    expect(previous.save).toHaveBeenCalledWith(false, false);
+    expect(previous.save).toHaveBeenCalledWith(true, false);
   });
 });

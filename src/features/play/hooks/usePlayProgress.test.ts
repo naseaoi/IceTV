@@ -1213,6 +1213,7 @@ describe('播放记录持久化边界', () => {
     const source = { current: 'b' };
     const id = { current: 'b' };
     const episode = { current: 0 };
+    const lastSaveTime = { current: 0 };
     const run = (immediate = false) =>
       saveCurrentPlayProgress(
         player as any,
@@ -1224,7 +1225,7 @@ describe('播放记录持久化边界', () => {
         stable,
         blocked,
         state,
-        { current: 0 },
+        lastSaveTime,
         '',
         immediate,
       );
@@ -1241,9 +1242,19 @@ describe('播放记录持久化边界', () => {
     };
   }
   beforeEach(() => {
+    jest.useFakeTimers();
     save.mockReset();
     sessionStorage.clear();
   });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  async function advanceSaveWindow() {
+    jest.advanceTimersByTime(5_000);
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+  }
 
   it('自动播放被拒的零进度和保存失败都不触发旧源清理', async () => {
     const ctx = setup();
@@ -1258,6 +1269,7 @@ describe('播放记录持久化边界', () => {
     await ctx.run();
     expect(ctx.onSaved).not.toHaveBeenCalled();
     save.mockResolvedValueOnce();
+    await advanceSaveWindow();
     await ctx.run();
     expect(ctx.onSaved).toHaveBeenCalledWith('b', 'b');
     log.mockRestore();
@@ -1271,6 +1283,8 @@ describe('播放记录持久化边界', () => {
     expect(save).toHaveBeenCalledTimes(1);
     ctx.player.current.currentTime = 121;
     await ctx.run();
+    expect(save).toHaveBeenCalledTimes(1);
+    await advanceSaveWindow();
     expect(save).toHaveBeenCalledTimes(2);
   });
 
@@ -1287,11 +1301,13 @@ describe('播放记录持久化边界', () => {
           }),
       );
       ctx.player.current.currentTime = 180;
+      await advanceSaveWindow();
       const pending = ctx.run();
       ctx.player.current.currentTime = 120;
       await ctx.run(immediate);
       finish();
       await pending;
+      await advanceSaveWindow();
       expect(
         save.mock.calls.map(([, , record]) => [
           record.play_time,
@@ -1306,6 +1322,82 @@ describe('播放记录持久化边界', () => {
       expect(save).toHaveBeenCalledTimes(3);
     },
   );
+
+  it('连续采样只保留最新快照，尾次保存无需新的媒体事件', async () => {
+    const ctx = setup();
+    const onEpisodeProgress = jest.fn();
+    ctx.state.current.onEpisodeProgress = onEpisodeProgress;
+    await ctx.run();
+    for (const time of [180, 90, 120]) {
+      ctx.player.current.currentTime = time;
+      await ctx.run();
+    }
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(onEpisodeProgress).toHaveBeenCalledTimes(4);
+    await advanceSaveWindow();
+    expect(
+      save.mock.calls.map(([, , record]) => [
+        record.play_time,
+        record.progress_sequence,
+      ]),
+    ).toEqual([
+      [120, 1],
+      [120, 4],
+    ]);
+    expect(ctx.state.current.pending.size).toBe(0);
+    expect(ctx.state.current.saveTimer).toBeUndefined();
+  });
+
+  it('退出立即冲刷限频中的最新进度并取消尾次计时器', async () => {
+    const ctx = setup();
+    await ctx.run();
+    ctx.player.current.currentTime = 180;
+    await ctx.run();
+    expect(ctx.state.current.saveTimer).toBeDefined();
+    await ctx.run(true);
+    expect(save.mock.calls.map(([, , record]) => record.play_time)).toEqual([
+      120, 180,
+    ]);
+    expect(ctx.state.current.saveTimer).toBeUndefined();
+    await advanceSaveWindow();
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it('快请求结束后仍遵守发送间隔，慢请求结束后直接提交最新进度', async () => {
+    const ctx = setup();
+    let finish!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const first = ctx.run();
+    ctx.player.current.currentTime = 180;
+    await ctx.run();
+    finish();
+    await first;
+    expect(save).toHaveBeenCalledTimes(1);
+    await advanceSaveWindow();
+    expect(save).toHaveBeenCalledTimes(2);
+    await advanceSaveWindow();
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    ctx.player.current.currentTime = 240;
+    const slow = ctx.run();
+    ctx.player.current.currentTime = 300;
+    await ctx.run();
+    await advanceSaveWindow();
+    finish();
+    await slow;
+    expect(save.mock.calls.map(([, , record]) => record.play_time)).toEqual([
+      120, 180, 240, 300,
+    ]);
+  });
 
   it('同位置旧请求在途时，往前拖动再拖回保留最新选择', async () => {
     const ctx = setup();

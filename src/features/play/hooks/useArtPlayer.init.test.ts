@@ -154,6 +154,11 @@ jest.mock('@/features/play/hooks/usePlayProgress', () => ({
   resolveNextStablePlaybackTime: (time: number) => time,
 }));
 
+jest.mock('@/lib/db.client', () => ({
+  ...jest.requireActual('@/lib/db.client'),
+  savePlayRecord: jest.fn(() => Promise.resolve()),
+}));
+
 jest.mock('@/features/play/lib/artPlayerSettings', () => ({
   createArtPlayerContextmenus: () => [],
   createArtPlayerControls: () => [],
@@ -555,6 +560,70 @@ describe('initializeArtPlayer 拉流控制', () => {
     player.emit('video:ended');
     expect(params.saveCurrentPlayProgress).toHaveBeenCalledTimes(5);
   });
+
+  it.each(['nudge', 'pause/play', 'user-seek'])(
+    '%s 连续事件合并保存并保留最后位置',
+    async (scenario) => {
+      const { saveCurrentPlayProgress } = jest.requireActual<
+        typeof import('@/features/play/hooks/usePlayProgress')
+      >('@/features/play/hooks/usePlayProgress');
+      const { savePlayRecord } = jest.requireMock('@/lib/db.client');
+      savePlayRecord.mockClear();
+      const params = createParams();
+      const state = {
+        current: {
+          inFlight: false,
+          pending: new Map(),
+          lastSavedFingerprint: null,
+        },
+      };
+      params.saveCurrentPlayProgress = () =>
+        saveCurrentPlayProgress(
+          params.artPlayerRef,
+          { current: DETAIL.source },
+          { current: DETAIL.id },
+          { current: DETAIL.title },
+          params.detailRef,
+          params.currentEpisodeIndexRef,
+          params.stableCurrentTimeRef,
+          params.clearTargetEpisodeProgressRef,
+          state,
+          params.lastSaveTimeRef,
+          '',
+        );
+      const { player } = await setupPlayer(params);
+      player.duration = 1500;
+      player.currentTime = 120;
+      player.emit('video:playing');
+      params.lastSaveTimeRef.current = Date.now();
+      for (let second = 0; second < 43; second += 1) {
+        // HLS nudge 直接改媒体时间，不经过 applyResumeTime 的 WeakMap 标记。
+        player.currentTime =
+          scenario === 'user-seek' ? 600 - second * 5 : 120 + second + 0.1;
+        if (scenario === 'pause/play') {
+          player.emit('pause');
+          player.emit('video:pause');
+          player.emit('video:playing');
+        } else {
+          player.emit('video:seeking');
+          player.emit('video:seeked');
+        }
+        player.emit('video:timeupdate');
+        await flushMicrotasks();
+        if (second === 0) expect(savePlayRecord).toHaveBeenCalledTimes(1);
+        jest.advanceTimersByTime(1000);
+        await flushMicrotasks();
+      }
+      jest.advanceTimersByTime(5000);
+      await flushMicrotasks();
+      expect(savePlayRecord.mock.calls.length).toBeLessThanOrEqual(10);
+      expect(savePlayRecord).toHaveBeenLastCalledWith(
+        DETAIL.source,
+        DETAIL.id,
+        expect.objectContaining({ play_time: Math.floor(player.currentTime) }),
+      );
+    },
+  );
 
   it('换集起播前的 seeked 和已释放运行时事件保持静默', async () => {
     const { player, params, video } = await setupPlayer();
