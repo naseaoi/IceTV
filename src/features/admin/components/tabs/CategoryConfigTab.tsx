@@ -19,30 +19,38 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { FolderOpen, SearchX } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
+import AdminSaveBar from '@/features/admin/components/AdminSaveBar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
 import { CategoryEditForm } from '@/features/admin/components/tabs/category/CategoryEditForm';
 import { SortableCategoryRow } from '@/features/admin/components/tabs/category/SortableCategoryRow';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useSortDraft } from '@/features/admin/hooks/useSortDraft';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
 import { CustomCategory } from '@/features/admin/types/internal';
 import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
+const NO_CATEGORIES: CustomCategory[] = [];
+const getCategoryKey = (category: CustomCategory) =>
+  `${category.query}:${category.type}`;
+
 const CategoryConfig = ({
   config,
   refreshConfig,
+  onOrderDirtyChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
+  onOrderDirtyChange?: (dirty: boolean) => void;
 }) => {
   const [formError, setFormError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -51,7 +59,16 @@ const CategoryConfig = ({
     endpoint: '/api/admin/category',
     refreshConfig,
   });
-  const [categories, setCategories] = useState<CustomCategory[]>([]);
+  const {
+    items: categories,
+    orderChanged,
+    setOrder,
+    resetOrder,
+  } = useSortDraft(
+    config?.CustomCategories ?? NO_CATEGORIES,
+    getCategoryKey,
+    onOrderDirtyChange,
+  );
   const [filterQuery, setFilterQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<
     'all' | 'enabled' | 'disabled'
@@ -79,7 +96,6 @@ const CategoryConfig = ({
     type: 'movie' | 'tv';
   } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomCategory | null>(null);
-  const [orderChanged, setOrderChanged] = useState(false);
   const [newCategory, setNewCategory] = useState<CustomCategory>({
     name: '',
     type: 'movie',
@@ -107,15 +123,6 @@ const CategoryConfig = ({
       },
     }),
   );
-
-  // 初始化
-  useEffect(() => {
-    if (config?.CustomCategories) {
-      setCategories(config.CustomCategories);
-      // 进入时重置 orderChanged
-      setOrderChanged(false);
-    }
-  }, [config]);
 
   // 通用 API 请求
   const callCategoryApi = async (body: Record<string, unknown>) => {
@@ -206,24 +213,19 @@ const CategoryConfig = ({
       active.id === over.id
     )
       return;
-    const oldIndex = categories.findIndex(
-      (c) => `${c.query}:${c.type}` === active.id,
-    );
-    const newIndex = categories.findIndex(
-      (c) => `${c.query}:${c.type}` === over.id,
-    );
-    setCategories((prev) => arrayMove(prev, oldIndex, newIndex));
-    setOrderChanged(true);
+    const keys = categories.map(getCategoryKey);
+    const oldIndex = keys.indexOf(String(active.id));
+    const newIndex = keys.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    setOrder(arrayMove(keys, oldIndex, newIndex));
   };
 
   const handleSaveOrder = () => {
-    const order = categories.map((c) => `${c.query}:${c.type}`);
+    const order = categories.map(getCategoryKey);
     withLoading('saveCategoryOrder', () =>
       callCategoryApi({ action: 'sort', order }),
     )
-      .then(() => {
-        setOrderChanged(false);
-      })
+      .then(resetOrder)
       .catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
@@ -320,7 +322,7 @@ const CategoryConfig = ({
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
           <SortableContext
-            items={visibleRows.map((c) => `${c.query}:${c.type}`)}
+            items={visibleRows.map(getCategoryKey)}
             strategy={verticalListSortingStrategy}
           >
             <ul
@@ -341,7 +343,7 @@ const CategoryConfig = ({
                   isSortingDisabled={
                     isFiltering || isLoading('saveCategoryOrder')
                   }
-                  key={`${category.query}:${category.type}`}
+                  key={getCategoryKey(category)}
                   category={category}
                   isToggleLoading={isLoading(
                     `toggleCategory_${category.query}_${category.type}`,
@@ -359,21 +361,14 @@ const CategoryConfig = ({
         </DndContext>
       </div>
 
-      {/* 保存排序按钮 */}
       {orderChanged && (
-        <div className='flex justify-end'>
-          <button
-            onClick={handleSaveOrder}
-            disabled={isLoading('saveCategoryOrder')}
-            className={`px-3 py-1.5 text-sm ${
-              isLoading('saveCategoryOrder')
-                ? buttonStyles.disabled
-                : buttonStyles.primary
-            }`}
-          >
-            {isLoading('saveCategoryOrder') ? '保存中...' : '保存排序'}
-          </button>
-        </div>
+        <AdminSaveBar
+          message='排序已更改'
+          saveLabel='保存排序'
+          saving={isLoading('saveCategoryOrder')}
+          onSave={handleSaveOrder}
+          onDiscard={resetOrder}
+        />
       )}
 
       {/* 通用弹窗组件 */}

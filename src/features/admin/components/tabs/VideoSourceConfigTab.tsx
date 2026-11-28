@@ -2,6 +2,7 @@
 
 import {
   type DragEndEvent,
+  type DragStartEvent,
   closestCenter,
   DndContext,
   PointerSensor,
@@ -30,6 +31,7 @@ import {
   useRefreshAdminAlerts,
 } from '@/features/admin/components/AdminAlertsProvider';
 import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
+import AdminSaveBar from '@/features/admin/components/AdminSaveBar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
@@ -44,6 +46,7 @@ import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-sourc
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useSortDraft } from '@/features/admin/hooks/useSortDraft';
 import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
 import {
   SOURCE_INSIGHT_DAYS,
@@ -81,13 +84,36 @@ function isSourceHealthFilter(value: string): value is SourceHealthFilter {
 }
 const SOURCE_FOCUS_HIGHLIGHT_MS = 4000;
 type SourceSortMode = 'manual' | 'quality';
+const NO_SOURCES: DataSource[] = [];
+const getSourceKey = (source: DataSource) => source.key;
+
+// 拖动已勾选的行时，其余勾选行按原相对顺序聚拢到被拖行的落点
+function moveSourceKeys(
+  keys: string[],
+  activeKey: string,
+  overKey: string,
+  selected: Set<string>,
+): string[] {
+  const from = keys.indexOf(activeKey);
+  const to = keys.indexOf(overKey);
+  // 拖动途中该行被删除等情况下 key 已不在列表里，保持原顺序
+  if (from < 0 || to < 0) return keys;
+  const moved = arrayMove(keys, from, to);
+  if (!selected.has(activeKey) || selected.size < 2) return moved;
+  const group = keys.filter((key) => selected.has(key));
+  return moved
+    .filter((key) => key === activeKey || !selected.has(key))
+    .flatMap((key) => (key === activeKey ? group : [key]));
+}
 
 const VideoSourceConfig = ({
   config,
   refreshConfig,
+  onOrderDirtyChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
+  onOrderDirtyChange?: (dirty: boolean) => void;
 }) => {
   const [batchError, setBatchError] = useState('');
   const [batchPending, setBatchPending] = useState(false);
@@ -98,7 +124,16 @@ const VideoSourceConfig = ({
     endpoint: '/api/admin/source',
     refreshConfig,
   });
-  const [sources, setSources] = useState<DataSource[]>([]);
+  const {
+    items: sources,
+    orderChanged,
+    setOrder,
+    resetOrder,
+  } = useSortDraft(
+    config?.SourceConfig ?? NO_SOURCES,
+    getSourceKey,
+    onOrderDirtyChange,
+  );
   const {
     routeStats,
     proxyFailures,
@@ -210,7 +245,7 @@ const VideoSourceConfig = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
-  const [orderChanged, setOrderChanged] = useState(false);
+  const [groupDragKey, setGroupDragKey] = useState<string | null>(null);
   const [newSource, setNewSource] = useState<DataSource>({
     name: '',
     key: '',
@@ -249,30 +284,6 @@ const VideoSourceConfig = ({
   );
 
   useEffect(() => {
-    if (!config?.SourceConfig) return;
-    const remote = config.SourceConfig;
-
-    setSources((prev) => {
-      if (prev.length === 0) {
-        setOrderChanged(false);
-        return remote;
-      }
-
-      const remoteMap = new Map(remote.map((s) => [s.key, s]));
-      const remoteKeys = new Set(remote.map((s) => s.key));
-
-      const merged = prev
-        .filter((s) => remoteKeys.has(s.key))
-        .map((s) => remoteMap.get(s.key)!);
-
-      const localKeys = new Set(prev.map((s) => s.key));
-      remote.forEach((s) => {
-        if (!localKeys.has(s.key)) merged.push(s);
-      });
-
-      return merged;
-    });
-
     setSelectedSources(new Set());
   }, [config]);
 
@@ -379,13 +390,25 @@ const VideoSourceConfig = ({
     }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    const key = String(active.id);
+    setGroupDragKey(
+      selectedSources.has(key) && selectedSources.size > 1 ? key : null,
+    );
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
+    setGroupDragKey(null);
     const { active, over } = event;
     if (isSortingLocked || !over || active.id === over.id) return;
-    const oldIndex = sources.findIndex((s) => s.key === active.id);
-    const newIndex = sources.findIndex((s) => s.key === over.id);
-    setSources((prev) => arrayMove(prev, oldIndex, newIndex));
-    setOrderChanged(true);
+    setOrder(
+      moveSourceKeys(
+        sources.map(getSourceKey),
+        String(active.id),
+        String(over.id),
+        selectedSources,
+      ),
+    );
   };
 
   const handleSaveOrder = () => {
@@ -393,9 +416,7 @@ const VideoSourceConfig = ({
     withLoading('saveSourceOrder', () =>
       callSourceApi({ action: 'sort', order }),
     )
-      .then(() => {
-        setOrderChanged(false);
-      })
+      .then(resetOrder)
       .catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
@@ -673,7 +694,9 @@ const VideoSourceConfig = ({
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
+          onDragCancel={() => setGroupDragKey(null)}
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
@@ -700,6 +723,11 @@ const VideoSourceConfig = ({
                   key={source.key}
                   source={source}
                   isSelected={selectedSources.has(source.key)}
+                  isFollowingGroupDrag={
+                    groupDragKey !== null &&
+                    groupDragKey !== source.key &&
+                    selectedSources.has(source.key)
+                  }
                   validationStatus={getValidationStatus(source.key)}
                   sourceRouteStats={sourceRouteStats[source.key] || null}
                   sourceHealth={sourceHealth.get(source.key) || null}
@@ -732,19 +760,13 @@ const VideoSourceConfig = ({
       </div>
 
       {orderChanged && (
-        <div className='flex justify-end'>
-          <button
-            onClick={handleSaveOrder}
-            disabled={isLoading('saveSourceOrder')}
-            className={`px-3 py-1.5 text-sm ${
-              isLoading('saveSourceOrder')
-                ? buttonStyles.disabled
-                : buttonStyles.primary
-            }`}
-          >
-            {isLoading('saveSourceOrder') ? '保存中...' : '保存排序'}
-          </button>
-        </div>
+        <AdminSaveBar
+          message='排序已更改'
+          saveLabel='保存排序'
+          saving={isLoading('saveSourceOrder')}
+          onSave={handleSaveOrder}
+          onDiscard={resetOrder}
+        />
       )}
 
       <SourceValidationModal

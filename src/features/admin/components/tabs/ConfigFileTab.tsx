@@ -9,6 +9,7 @@ import {
 } from '@/features/admin/components/AdminSettings';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useReportDirty } from '@/features/admin/hooks/useReportDirty';
 import { CONFIG_FILE_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
@@ -85,9 +86,7 @@ const ConfigFileComponent = ({
     }
   }, [config]);
 
-  useEffect(() => {
-    onDirtyChange?.(configFileDirty);
-  }, [configFileDirty, onDirtyChange]);
+  useReportDirty(configFileDirty, onDirtyChange);
 
   const handleFetchConfig = async () => {
     setError('');

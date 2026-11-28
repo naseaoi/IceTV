@@ -566,6 +566,153 @@ it.each([
   expect(showToast).toHaveBeenCalledWith(message, type);
 });
 
+describe('视频源批量拖动排序', () => {
+  const groupConfig = {
+    ...config,
+    SourceConfig: ['a', 'b', 'c', 'd'].map((key) => ({
+      key,
+      name: `源${key.toUpperCase()}`,
+      api: `https://${key}.test/api`,
+      disabled: false,
+      from: 'config',
+    })),
+  } as AdminConfig;
+  const order = () =>
+    screen
+      .getAllByRole('listitem')
+      .map((row) => row.getAttribute('data-source-key'));
+  const drag = (active: string, over: string) =>
+    act(() =>
+      mockOnDragEnd({
+        active: { id: active },
+        over: { id: over },
+      } as DragEndEvent),
+    );
+
+  beforeEach(async () => {
+    await act(async () => {
+      render(
+        <VideoSourceConfig config={groupConfig} refreshConfig={jest.fn()} />,
+      );
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 源A' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 源C' }));
+  });
+
+  it('拖动任一勾选行时其余勾选行按原顺序跟随到落点', () => {
+    drag('a', 'd');
+    expect(order()).toEqual(['b', 'd', 'a', 'c']);
+    drag('c', 'b');
+    expect(order()).toEqual(['a', 'c', 'b', 'd']);
+  });
+
+  it('拖动未勾选行只移动该行', () => {
+    drag('d', 'a');
+    expect(order()).toEqual(['d', 'a', 'b', 'c']);
+  });
+});
+
+describe.each(cases)(
+  '$label排序草稿',
+  ({ Component, label, first, firstId, secondId }) => {
+    const drag = (active: string, over: string) =>
+      act(() =>
+        mockOnDragEnd({
+          active: { id: active },
+          over: { id: over },
+        } as DragEndEvent),
+      );
+    const firstRow = () =>
+      within(screen.getByRole('list', { name: `${label}列表` })).getAllByRole(
+        'listitem',
+      )[0];
+
+    it('拖回原顺序后不再提示保存', async () => {
+      await act(async () => {
+        render(<Component config={config} refreshConfig={jest.fn()} />);
+      });
+      drag(firstId, secondId);
+      expect(
+        screen.getByRole('button', { name: '保存排序' }),
+      ).toBeInTheDocument();
+      drag(firstId, secondId);
+      expect(firstRow()).toHaveTextContent(first);
+      expect(
+        screen.queryByRole('button', { name: '保存排序' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('配置刷新后保留未保存的排序', async () => {
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<Component config={config} refreshConfig={jest.fn()} />);
+      });
+      drag(firstId, secondId);
+      await act(async () => {
+        view.rerender(
+          <Component config={{ ...config }} refreshConfig={jest.fn()} />,
+        );
+      });
+      expect(firstRow()).not.toHaveTextContent(first);
+      expect(
+        screen.getByRole('button', { name: '保存排序' }),
+      ).toBeInTheDocument();
+    });
+
+    it('拖动已不存在的项时保持原顺序', async () => {
+      await act(async () => {
+        render(<Component config={config} refreshConfig={jest.fn()} />);
+      });
+      drag('missing-key', secondId);
+      drag(firstId, 'missing-key');
+      expect(firstRow()).toHaveTextContent(first);
+      expect(
+        screen.queryByRole('button', { name: '保存排序' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('Ctrl+S 保存排序', async () => {
+      jest.mocked(adminPost).mockResolvedValueOnce({});
+      await act(async () => {
+        render(<Component config={config} refreshConfig={jest.fn()} />);
+      });
+      drag(firstId, secondId);
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      });
+      expect(jest.mocked(adminPost).mock.calls[0][1]).toMatchObject({
+        action: 'sort',
+      });
+    });
+  },
+);
+
+it.each(cases)(
+  '$label放弃排序恢复原顺序',
+  async ({ Component, label, first, firstId, secondId }) => {
+    await act(async () => {
+      render(<Component config={config} refreshConfig={jest.fn()} />);
+    });
+    act(() =>
+      mockOnDragEnd({
+        active: { id: firstId },
+        over: { id: secondId },
+      } as DragEndEvent),
+    );
+    const list = screen.getByRole('list', { name: `${label}列表` });
+    expect(within(list).getAllByRole('listitem')[0]).not.toHaveTextContent(
+      first,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃' }));
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent(first);
+    expect(
+      screen.queryByRole('button', { name: '保存排序' }),
+    ).not.toBeInTheDocument();
+    expect(adminPost).not.toHaveBeenCalled();
+  },
+);
+
 it.each(cases)(
   '$label排序保存中禁用拖拽并忽略拖动',
   async ({ Component, label, firstId, secondId }) => {
@@ -588,7 +735,7 @@ it.each(cases)(
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '保存排序' }));
     });
-    expect(screen.getByRole('button', { name: '保存中...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保存中' })).toBeDisabled();
     expect(useSortable).toHaveBeenLastCalledWith(
       expect.objectContaining({ disabled: true }),
     );

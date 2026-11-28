@@ -86,9 +86,7 @@ interface AdminTabContentProps {
   onSiteConfigSavingChange?: (saving: boolean) => void;
   onRuntimeParamsSavingChange?: (saving: boolean) => void;
   onConfigFileSavingChange?: (saving: boolean) => void;
-  onSiteConfigDirtyChange?: (dirty: boolean) => void;
-  onRuntimeParamsDirtyChange?: (dirty: boolean) => void;
-  onConfigFileDirtyChange?: (dirty: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const AdminTabBody = ({
@@ -99,9 +97,7 @@ const AdminTabBody = ({
   onSiteConfigSavingChange,
   onRuntimeParamsSavingChange,
   onConfigFileSavingChange,
-  onSiteConfigDirtyChange,
-  onRuntimeParamsDirtyChange,
-  onConfigFileDirtyChange,
+  onDirtyChange,
 }: AdminTabContentProps) => {
   switch (activeTab) {
     case 'config-file':
@@ -110,7 +106,7 @@ const AdminTabBody = ({
           config={config}
           refreshConfig={refreshConfig}
           onSavingChange={onConfigFileSavingChange}
-          onDirtyChange={onConfigFileDirtyChange}
+          onDirtyChange={onDirtyChange}
         />
       );
     case 'runtime':
@@ -119,7 +115,7 @@ const AdminTabBody = ({
           config={config}
           refreshConfig={refreshConfig}
           onSavingChange={onRuntimeParamsSavingChange}
-          onDirtyChange={onRuntimeParamsDirtyChange}
+          onDirtyChange={onDirtyChange}
         />
       );
     case 'site':
@@ -128,7 +124,7 @@ const AdminTabBody = ({
           config={config}
           refreshConfig={refreshConfig}
           onSavingChange={onSiteConfigSavingChange}
-          onDirtyChange={onSiteConfigDirtyChange}
+          onDirtyChange={onDirtyChange}
         />
       );
     case 'announcements':
@@ -145,12 +141,28 @@ const AdminTabBody = ({
       return <UserDanmakuTab />;
     case 'video-source':
       return (
-        <VideoSourceConfig config={config} refreshConfig={refreshConfig} />
+        <VideoSourceConfig
+          config={config}
+          refreshConfig={refreshConfig}
+          onOrderDirtyChange={onDirtyChange}
+        />
       );
     case 'live-source':
-      return <LiveSourceConfig config={config} refreshConfig={refreshConfig} />;
+      return (
+        <LiveSourceConfig
+          config={config}
+          refreshConfig={refreshConfig}
+          onOrderDirtyChange={onDirtyChange}
+        />
+      );
     case 'category':
-      return <CategoryConfig config={config} refreshConfig={refreshConfig} />;
+      return (
+        <CategoryConfig
+          config={config}
+          refreshConfig={refreshConfig}
+          onOrderDirtyChange={onDirtyChange}
+        />
+      );
     case 'traffic':
       return <TrafficTab />;
     default:

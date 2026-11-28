@@ -17,6 +17,7 @@ import {
 } from '@/features/admin/components/AdminSettings';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useReportDirty } from '@/features/admin/hooks/useReportDirty';
 import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
@@ -218,9 +219,7 @@ const SiteConfigComponent = ({
     [],
   );
 
-  useEffect(() => {
-    onDirtyChange?.(siteSettingsDirty);
-  }, [onDirtyChange, siteSettingsDirty]);
+  useReportDirty(siteSettingsDirty, onDirtyChange);
 
   // 处理豆瓣数据源变化
   const handleDoubanDataSourceChange = (value: string) => {

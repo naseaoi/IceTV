@@ -19,18 +19,20 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { SearchX, Tv } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { ListEmptyState } from '@/components/ListState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import AdminListToolbar from '@/features/admin/components/AdminListToolbar';
+import AdminSaveBar from '@/features/admin/components/AdminSaveBar';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
 import { SortableLiveSourceRow } from '@/features/admin/components/tabs/live-source/SortableLiveSourceRow';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useSortDraft } from '@/features/admin/hooks/useSortDraft';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { ADMIN_LIST_EMPTY_CLASS } from '@/features/admin/lib/list-layout';
@@ -40,12 +42,17 @@ import { showToast } from '@/lib/toast';
 import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
+const NO_LIVE_SOURCES: LiveDataSource[] = [];
+const getLiveSourceKey = (source: LiveDataSource) => source.key;
+
 const LiveSourceConfig = ({
   config,
   refreshConfig,
+  onOrderDirtyChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
+  onOrderDirtyChange?: (dirty: boolean) => void;
 }) => {
   const [formError, setFormError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -54,7 +61,16 @@ const LiveSourceConfig = ({
     endpoint: '/api/admin/live',
     refreshConfig,
   });
-  const [liveSources, setLiveSources] = useState<LiveDataSource[]>([]);
+  const {
+    items: liveSources,
+    orderChanged,
+    setOrder,
+    resetOrder,
+  } = useSortDraft(
+    config?.LiveConfig ?? NO_LIVE_SOURCES,
+    getLiveSourceKey,
+    onOrderDirtyChange,
+  );
   const [filterQuery, setFilterQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<
     'all' | 'enabled' | 'disabled'
@@ -77,7 +93,6 @@ const LiveSourceConfig = ({
   const [editingLiveSource, setEditingLiveSource] =
     useState<LiveDataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LiveDataSource | null>(null);
-  const [orderChanged, setOrderChanged] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newLiveSource, setNewLiveSource] = useState<LiveDataSource>({
     name: '',
@@ -102,13 +117,6 @@ const LiveSourceConfig = ({
       },
     }),
   );
-
-  useEffect(() => {
-    if (config?.LiveConfig) {
-      setLiveSources(config.LiveConfig);
-      setOrderChanged(false);
-    }
-  }, [config]);
 
   const callLiveSourceApi = async (body: Record<string, unknown>) => {
     setActionError('');
@@ -224,10 +232,11 @@ const LiveSourceConfig = ({
       active.id === over.id
     )
       return;
-    const oldIndex = liveSources.findIndex((s) => s.key === active.id);
-    const newIndex = liveSources.findIndex((s) => s.key === over.id);
-    setLiveSources((prev) => arrayMove(prev, oldIndex, newIndex));
-    setOrderChanged(true);
+    const keys = liveSources.map(getLiveSourceKey);
+    const oldIndex = keys.indexOf(String(active.id));
+    const newIndex = keys.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    setOrder(arrayMove(keys, oldIndex, newIndex));
   };
 
   const handleSaveOrder = () => {
@@ -235,9 +244,7 @@ const LiveSourceConfig = ({
     withLoading('saveLiveSourceOrder', () =>
       callLiveSourceApi({ action: 'sort', order }),
     )
-      .then(() => {
-        setOrderChanged(false);
-      })
+      .then(resetOrder)
       .catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
@@ -382,19 +389,13 @@ const LiveSourceConfig = ({
       </div>
 
       {orderChanged && (
-        <div className='flex justify-end'>
-          <button
-            onClick={handleSaveOrder}
-            disabled={isLoading('saveLiveSourceOrder')}
-            className={`px-3 py-1.5 text-sm ${
-              isLoading('saveLiveSourceOrder')
-                ? buttonStyles.disabled
-                : buttonStyles.primary
-            }`}
-          >
-            {isLoading('saveLiveSourceOrder') ? '保存中...' : '保存排序'}
-          </button>
-        </div>
+        <AdminSaveBar
+          message='排序已更改'
+          saveLabel='保存排序'
+          saving={isLoading('saveLiveSourceOrder')}
+          onSave={handleSaveOrder}
+          onDiscard={resetOrder}
+        />
       )}
 
       <ConfirmModal

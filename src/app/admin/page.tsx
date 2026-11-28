@@ -133,9 +133,7 @@ function AdminPageClient() {
   const [siteConfigSaving, setSiteConfigSaving] = useState(false);
   const [runtimeParamsSaving, setRuntimeParamsSaving] = useState(false);
   const [configFileSaving, setConfigFileSaving] = useState(false);
-  const [siteConfigDirty, setSiteConfigDirty] = useState(false);
-  const [runtimeParamsDirty, setRuntimeParamsDirty] = useState(false);
-  const [configFileDirty, setConfigFileDirty] = useState(false);
+  const [tabDirty, setTabDirty] = useState(false);
   const [pendingTab, setPendingTab] = useState<AdminTabId | null>(null);
   // 放弃改动时递增，让表单按当前配置重新挂载
   const [formRevision, setFormRevision] = useState(0);
@@ -157,25 +155,18 @@ function AdminPageClient() {
       ? {
           formId: CONFIG_FILE_FORM_ID,
           saving: configFileSaving,
-          dirty: configFileDirty,
         }
       : activeTab === 'site'
         ? {
             formId: SITE_CONFIG_FORM_ID,
             saving: siteConfigSaving,
-            dirty: siteConfigDirty,
           }
         : activeTab === 'runtime'
           ? {
               formId: RUNTIME_PARAMS_FORM_ID,
               saving: runtimeParamsSaving,
-              dirty: runtimeParamsDirty,
             }
           : null;
-  const activeFormDirty = Boolean(activeSaveAction?.dirty);
-  const activeFormId = activeSaveAction?.formId;
-  const hasUnsavedChanges =
-    configFileDirty || siteConfigDirty || runtimeParamsDirty;
   const navCounts = config
     ? {
         'video-source': config.SourceConfig.length,
@@ -187,13 +178,13 @@ function AdminPageClient() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!hasUnsavedChanges) return;
+      if (!tabDirty) return;
       event.preventDefault();
       event.returnValue = '';
     };
     const handleDocumentClick = (event: MouseEvent) => {
       if (
-        !hasUnsavedChanges ||
+        !tabDirty ||
         event.defaultPrevented ||
         event.button !== 0 ||
         event.metaKey ||
@@ -229,7 +220,7 @@ function AdminPageClient() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('click', handleDocumentClick, true);
     };
-  }, [hasUnsavedChanges]);
+  }, [tabDirty]);
 
   const { fetchConfig, refreshConfig, resetConfig } = useAdminPageActions({
     setConfig,
@@ -242,31 +233,6 @@ function AdminPageClient() {
     fetchConfig(true);
   }, [fetchConfig]);
 
-  useEffect(() => {
-    if (!activeFormId || !activeFormDirty) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key.toLowerCase() !== 's' ||
-        !(event.ctrlKey || event.metaKey) ||
-        event.altKey ||
-        event.shiftKey
-      ) {
-        return;
-      }
-      event.preventDefault();
-      const form = document.getElementById(activeFormId);
-      if (form instanceof HTMLFormElement) form.requestSubmit();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeFormDirty, activeFormId]);
-
-  const clearActiveFormDirty = () => {
-    if (activeTab === 'config-file') setConfigFileDirty(false);
-    if (activeTab === 'site') setSiteConfigDirty(false);
-    if (activeTab === 'runtime') setRuntimeParamsDirty(false);
-  };
-
   const switchTab = (tab: AdminTabId) => {
     setActiveTab(tab);
     scrollPageTo(0);
@@ -274,7 +240,7 @@ function AdminPageClient() {
 
   const handleSelectTab = (tab: AdminTabId) => {
     if (tab === activeTab) return;
-    if (activeFormDirty) {
+    if (tabDirty) {
       setPendingTab(tab);
       return;
     }
@@ -283,14 +249,12 @@ function AdminPageClient() {
 
   const handleDiscardAndSwitchTab = () => {
     if (!pendingTab) return;
-    clearActiveFormDirty();
     const nextTab = pendingTab;
     setPendingTab(null);
     switchTab(nextTab);
   };
 
   const handleDiscardChanges = () => {
-    clearActiveFormDirty();
     setFormRevision((revision) => revision + 1);
   };
 
@@ -339,7 +303,7 @@ function AdminPageClient() {
           activeTab={activeTab}
           onSelect={handleSelectTab}
           counts={navCounts}
-          dirtyTab={activeFormDirty ? activeTab : null}
+          dirtyTab={tabDirty ? activeTab : null}
         />
       }
     >
@@ -352,9 +316,7 @@ function AdminPageClient() {
         onSiteConfigSavingChange={setSiteConfigSaving}
         onRuntimeParamsSavingChange={setRuntimeParamsSaving}
         onConfigFileSavingChange={setConfigFileSaving}
-        onSiteConfigDirtyChange={setSiteConfigDirty}
-        onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
-        onConfigFileDirtyChange={setConfigFileDirty}
+        onDirtyChange={setTabDirty}
       />
 
       {config && isOwnerRole && activeTab === 'config-file' && (
@@ -374,7 +336,7 @@ function AdminPageClient() {
         </AdminSettingsGroup>
       )}
 
-      {config && activeSaveAction?.dirty && (
+      {config && activeSaveAction && tabDirty && (
         <AdminSaveBar
           formId={activeSaveAction.formId}
           saving={activeSaveAction.saving}

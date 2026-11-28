@@ -98,5 +98,6 @@
 - 确认操作复用 `ConfirmModal`，其他弹窗复用 `ModalShell`；普通失败统一走 `showError(err, fallback)`（`src/features/admin/lib/notifications.ts`，内部为 error 轻提示）。`withLoading()` 只设置状态、不防重，防重复提交靠按钮禁用或调用方的 ref。表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）。
 - 设置类内容用 `AdminSettings.tsx` 的 `AdminSettingsGroup` / `AdminSettingRow`，开关用 `AdminStatusSwitch`，列表行操作收进 `MoreMenu`。`AdminSettingRow` 的 `description` 放标题下方的说明，测试结果、致谢链接等短状态用 `labelAddon` 与标题同行。
 - 后台列表工具栏统一用 `AdminListToolbar`：搜索在左，筛选、视图切换、排序与操作按钮依次在右；批量选择放在列表外框表头行。
+- 未保存的改动统一用吸底的 `AdminSaveBar`（表单传 `formId`，其他传 `onSave`；挂载期间 Ctrl/Cmd+S 触发保存）；设置表单与 `useSortDraft` 共用 `useReportDirty`，经 `AdminTabContent.onDirtyChange` 上报给 `src/app/admin/page.tsx` 的单一 `tabDirty`，有改动报 true，复位或卸载报 false。同一时刻只挂载当前标签，放弃改动通过重新挂载复位；切换标签确认、导航圆点、站内跳转与关闭页面确认均使用这一状态，漏报或遗漏卸载清理会导致丢失改动或残留提示。拖动排序用 `useSortDraft`：本地只存 key 顺序并与服务端最新列表合并，配置刷新不丢草稿，是否未保存由顺序比较得出。
 - `ADMIN_PANEL_CLASS` 外框不裁切溢出，行内下拉才能伸出；贴边底色的子元素自行加圆角，不要给外框补 `overflow-hidden`。
 - 视频源权限选择器的勾选条件与源条件取交集；进入已选／未选筛选时冻结勾选快照，勾选、全选、搜索或切换源条件保持快照，重新选择勾选条件才刷新。选项文案省略计数，避免实时勾选数量与冻结列表口径混用。

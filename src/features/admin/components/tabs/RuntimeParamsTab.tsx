@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import { RuntimeParamSection } from '@/features/admin/components/tabs/runtime-params/RuntimeParamSection';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useReportDirty } from '@/features/admin/hooks/useReportDirty';
 import { RUNTIME_PARAMS_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
@@ -48,9 +49,7 @@ const RuntimeParamsTab = ({
     }
   }, [config]);
 
-  useEffect(() => {
-    onDirtyChange?.(runtimeParamsDirty);
-  }, [onDirtyChange, runtimeParamsDirty]);
+  useReportDirty(runtimeParamsDirty, onDirtyChange);
 
   const handleSave = async () => {
     if (savingRef.current || !runtimeParamsDirty) return;

@@ -65,6 +65,8 @@ function isSourceProxyMode(value: string): value is SourceProxyMode {
 interface SortableSourceRowProps {
   source: DataSource;
   isSelected: boolean;
+  // 拖动另一勾选行时，本行将随之移动
+  isFollowingGroupDrag?: boolean;
   validationStatus: SourceValidationStatus | null;
   sourceRouteStats: SourceRouteStatsView | null;
   sourceHealth: SourceHealthReportItem | null;
@@ -92,6 +94,7 @@ interface SortableSourceRowProps {
 export function SortableSourceRow({
   source,
   isSelected,
+  isFollowingGroupDrag = false,
   validationStatus,
   sourceRouteStats,
   sourceHealth,
@@ -147,6 +150,8 @@ export function SortableSourceRow({
       style={style}
       data-source-key={source.key}
       className={`flex flex-wrap items-center gap-3 px-3 py-3 transition-colors duration-500 last:rounded-b-xl ${
+        isFollowingGroupDrag ? 'opacity-40' : ''
+      } ${
         isHighlighted
           ? 'bg-red-50 dark:bg-red-950/30'
           : 'bg-white hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
@@ -161,7 +166,9 @@ export function SortableSourceRow({
         aria-label={`拖动排序 ${source.name}`}
         aria-disabled={isSortingDisabled}
         disabled={isSortingDisabled}
-        tabIndex={isSortingDisabled ? -1 : attributes.tabIndex}
+        aria-describedby={undefined}
+        aria-roledescription={undefined}
+        tabIndex={-1}
       >
         <GripVertical size={16} />
       </button>

@@ -55,7 +55,9 @@ export function SortableCategoryRow({
         aria-label={`拖动排序 ${category.name || category.query}`}
         aria-disabled={isSortingDisabled}
         disabled={isSortingDisabled}
-        tabIndex={isSortingDisabled ? -1 : attributes.tabIndex}
+        aria-describedby={undefined}
+        aria-roledescription={undefined}
+        tabIndex={-1}
       >
         <GripVertical size={16} />
       </button>

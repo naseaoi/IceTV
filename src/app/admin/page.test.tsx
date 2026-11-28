@@ -5,9 +5,36 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import AdminPage from '@/app/admin/page';
+import { useReportDirty } from '@/features/admin/hooks/useReportDirty';
+
+function MockDirtyTab({
+  label,
+  formId,
+  onDirtyChange,
+}: {
+  label: string;
+  formId?: string;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const [dirty, setDirty] = useState(false);
+  useReportDirty(dirty, onDirtyChange);
+  return (
+    <form
+      id={formId}
+      onSubmit={(event) => {
+        event.preventDefault();
+        setDirty(false);
+      }}
+    >
+      <button type='button' onClick={() => setDirty(true)}>
+        {label}
+      </button>
+    </form>
+  );
+}
 
 jest.mock('@/components/PageLayout', () => ({
   __esModule: true,
@@ -65,7 +92,16 @@ jest.mock('@/features/admin/components/tabs/UserConfigTab', () => ({
 }));
 jest.mock('@/features/admin/components/tabs/VideoSourceConfigTab', () => ({
   __esModule: true,
-  default: () => <div>VideoSourceConfigTab</div>,
+  default: ({
+    onOrderDirtyChange,
+  }: {
+    onOrderDirtyChange?: (dirty: boolean) => void;
+  }) => (
+    <MockDirtyTab
+      label='VideoSourceConfigTab'
+      onDirtyChange={onOrderDirtyChange}
+    />
+  ),
 }));
 jest.mock('@/features/admin/components/tabs/LiveSourceConfigTab', () => ({
   __esModule: true,
@@ -85,7 +121,13 @@ jest.mock('@/features/admin/components/tabs/SiteConfigTab', () => ({
     onDirtyChange,
   }: {
     onDirtyChange?: (dirty: boolean) => void;
-  }) => <button onClick={() => onDirtyChange?.(true)}>SiteConfigTab</button>,
+  }) => (
+    <MockDirtyTab
+      label='SiteConfigTab'
+      formId='admin-site-config-form'
+      onDirtyChange={onDirtyChange}
+    />
+  ),
 }));
 
 type UseAdminPageActionsOptions = {
@@ -127,8 +169,13 @@ describe('AdminPage role visibility', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(window, 'scrollTo').mockImplementation(() => {});
     mockSearch = '';
     mockSessionRole = 'admin';
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   function setupRole(role: 'owner' | 'admin') {
@@ -277,7 +324,7 @@ describe('AdminPage role visibility', () => {
 
   it('asks before switching tabs with unsaved changes', async () => {
     setupRole('admin');
-    render(<AdminPage />);
+    const { rerender } = render(<AdminPage />);
 
     await waitFor(() => {
       expect(screen.getByText('SiteConfigTab')).toBeInTheDocument();
@@ -294,6 +341,34 @@ describe('AdminPage role visibility', () => {
     expect(mockReplace).toHaveBeenCalledWith('/admin?tab=user', {
       scroll: false,
     });
+    mockSearch = 'tab=user';
+    rerender(<AdminPage />);
+    await screen.findByText('UserConfigTab');
+
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '站点设置' }));
+    expect(screen.queryByText('ConfirmModal')).not.toBeInTheDocument();
+    expect(mockReplace).toHaveBeenLastCalledWith('/admin?tab=site', {
+      scroll: false,
+    });
+  });
+
+  it('asks before switching tabs with an unsaved source order', async () => {
+    mockSearch = 'tab=video-source';
+    setupRole('admin');
+    render(<AdminPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('VideoSourceConfigTab')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('VideoSourceConfigTab'));
+    fireEvent.click(screen.getByRole('button', { name: '用户' }));
+
+    expect(screen.getByText('ConfirmModal')).toBeInTheDocument();
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it('shows a save bar for unsaved changes and discards them', async () => {
@@ -320,7 +395,65 @@ describe('AdminPage role visibility', () => {
     expect(
       screen.queryByRole('region', { name: '未保存的改动' }),
     ).not.toBeInTheDocument();
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '用户' }));
+    expect(screen.queryByText('ConfirmModal')).not.toBeInTheDocument();
   });
+
+  it.each([
+    ['site', 'SiteConfigTab'],
+    ['video-source', 'VideoSourceConfigTab'],
+  ])('clears unsaved state when the %s tab unmounts', async (tab, label) => {
+    mockSearch = `tab=${tab}`;
+    setupRole('admin');
+    const { rerender } = render(<AdminPage />);
+    fireEvent.click(await screen.findByText(label));
+    expect(screen.getByTitle('有未保存的改动')).toBeInTheDocument();
+    const dirtyEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+
+    // 浏览器前进/后退直接改变 URL，绕过导航按钮的切换确认。
+    mockSearch = 'tab=user';
+    rerender(<AdminPage />);
+    await screen.findByText('UserConfigTab');
+    const cleanEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+    expect(screen.queryByTitle('有未保存的改动')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '站点设置' }));
+    expect(screen.queryByText('ConfirmModal')).not.toBeInTheDocument();
+    expect(mockReplace).toHaveBeenLastCalledWith('/admin?tab=site', {
+      scroll: false,
+    });
+
+    mockSearch = `tab=${tab}`;
+    rerender(<AdminPage />);
+    await screen.findByText(label);
+    expect(
+      screen.queryByRole('region', { name: '未保存的改动' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTitle('有未保存的改动')).not.toBeInTheDocument();
+  });
+
+  it.each(['ctrlKey', 'metaKey'])(
+    'saves and clears unsaved state with %s+S',
+    async (modifier) => {
+      setupRole('admin');
+      render(<AdminPage />);
+      fireEvent.click(await screen.findByText('SiteConfigTab'));
+      fireEvent.keyDown(window, { key: 's', [modifier]: true });
+
+      expect(
+        screen.queryByRole('region', { name: '未保存的改动' }),
+      ).not.toBeInTheDocument();
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    },
+  );
 
   it('registers browser leave protection for unsaved changes', async () => {
     setupRole('admin');
