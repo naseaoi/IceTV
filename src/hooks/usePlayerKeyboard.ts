@@ -1,15 +1,23 @@
 import type Artplayer from 'artplayer';
-import { MutableRefObject, useEffect } from 'react';
+import { MutableRefObject, useEffect, useRef } from 'react';
 
 import { toDisplayText } from '@/lib/display-text';
+import {
+  enterPlayerFastForward,
+  exitPlayerFastForward,
+  getPlayerFastForwardTime,
+} from '@/lib/player-runtime';
 import {
   type PlayerShortcutAction,
   type PlayerShortcutMap,
   type PlayerShortcutMode,
+  type ShortcutBinding,
   arePlayerShortcutsSuspended,
   FRAME_STEP_SECONDS,
   isPlayerShortcutActionEnabled,
+  normalizeShortcutKey,
   PLAYER_SHORTCUTS_CHANGED_EVENT,
+  PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT,
   RATE_MAX,
   RATE_MIN,
   RATE_STEP,
@@ -35,10 +43,46 @@ interface UsePlayerKeyboardParams {
 }
 
 const FRAME_STEP_LOADING_GUARD_MS = 600;
+const FAST_FORWARD_PLAY_ICON =
+  '<svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor" aria-hidden="true"><path d="M2.5 1.5L10.5 6L2.5 10.5Z"/></svg>';
 
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
 const ACTIVATABLE_CONTROL_SELECTOR =
   'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]';
+
+function isBindingReleased(
+  event: KeyboardEvent,
+  binding: ShortcutBinding,
+): boolean {
+  if (normalizeShortcutKey(event.key) === normalizeShortcutKey(binding.key)) {
+    return true;
+  }
+  if (binding.shiftKey && event.key === 'Shift') return true;
+  if (binding.altKey && event.key === 'Alt') return true;
+  if (binding.ctrlKey && event.key === 'Control') return true;
+  return false;
+}
+
+function mountFastForwardNotice(
+  player: Artplayer,
+  fastForwardRate: number,
+): HTMLDivElement | null {
+  const container = (player.template as unknown as { $player?: HTMLElement })
+    ?.$player;
+  if (!container) return null;
+
+  const notice = document.createElement('div');
+  notice.className = 'ice-fast-forward-notice';
+  const inner = document.createElement('div');
+  inner.className = 'ice-fast-forward-notice-inner';
+  inner.innerHTML = FAST_FORWARD_PLAY_ICON;
+  const label = document.createElement('span');
+  label.textContent = toDisplayText(`${fastForwardRate}倍速中`);
+  inner.appendChild(label);
+  notice.appendChild(inner);
+  container.appendChild(notice);
+  return notice;
+}
 
 // 只让出键盘聚焦（:focus-visible）的控件：鼠标点过的按钮仍保持焦点，
 // 若一律让出，点完选集再按空格会重复点击按钮而不是暂停
@@ -64,13 +108,29 @@ export function usePlayerKeyboard({
   channelHandlers,
   mode = 'vod',
 }: UsePlayerKeyboardParams) {
+  const episodeHandlersRef = useRef(episodeHandlers);
+  episodeHandlersRef.current = episodeHandlers;
+  const channelHandlersRef = useRef(channelHandlers);
+  channelHandlersRef.current = channelHandlers;
+
   useEffect(() => {
+    interface SeekForwardHoldState {
+      player: Artplayer;
+      binding: ShortcutBinding;
+      timer: number | null;
+      active: boolean;
+      previousPlaybackRate: number;
+      noticeElement: HTMLDivElement | null;
+      handleDestroy: () => void;
+    }
+
     let shortcuts: PlayerShortcutMap = readPlayerShortcuts();
     let frameStepLoadingTimer: number | null = null;
     let frameStepLoadingGuard: {
       player: Artplayer;
       handler: (visible: boolean) => void;
     } | null = null;
+    let seekForwardHold: SeekForwardHoldState | null = null;
 
     const releaseLoadingSpinnerGuard = () => {
       if (frameStepLoadingTimer !== null) {
@@ -87,10 +147,53 @@ export function usePlayerKeyboard({
       ).off('loading', handler);
     };
 
+    const cancelSeekForwardHold = () => {
+      const hold = seekForwardHold;
+      if (!hold) return;
+      seekForwardHold = null;
+
+      if (hold.timer !== null) {
+        window.clearTimeout(hold.timer);
+        hold.timer = null;
+      }
+      (
+        hold.player as unknown as {
+          off?: (name: string, fn: () => void) => void;
+        }
+      ).off?.('destroy', hold.handleDestroy);
+      hold.noticeElement?.remove();
+      hold.noticeElement = null;
+
+      if (hold.active) {
+        exitPlayerFastForward(hold.player, hold.previousPlaybackRate);
+        if (hold.player.notice) {
+          hold.player.notice.show = '';
+        }
+      }
+    };
+
     const syncShortcuts = () => {
       shortcuts = readPlayerShortcuts();
+      cancelSeekForwardHold();
     };
+    const handleShortcutsSuspended = () => {
+      if (arePlayerShortcutsSuspended()) {
+        cancelSeekForwardHold();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        cancelSeekForwardHold();
+      }
+    };
+
     window.addEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
+    window.addEventListener(
+      PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT,
+      handleShortcutsSuspended,
+    );
+    window.addEventListener('blur', cancelSeekForwardHold);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const seekBy = (seconds: number) => {
       const player = artPlayerRef.current;
@@ -199,18 +302,19 @@ export function usePlayerKeyboard({
     };
 
     const switchEpisode = (direction: 1 | -1): boolean => {
-      if (!episodeHandlers) return false;
-      const detail = episodeHandlers.detailRef.current;
-      const index = episodeHandlers.currentEpisodeIndexRef.current;
+      const currentEpisodeHandlers = episodeHandlersRef.current;
+      if (!currentEpisodeHandlers) return false;
+      const detail = currentEpisodeHandlers.detailRef.current;
+      const index = currentEpisodeHandlers.currentEpisodeIndexRef.current;
       if (direction < 0) {
         if (detail && index > 0) {
-          episodeHandlers.handlePreviousEpisode();
+          currentEpisodeHandlers.handlePreviousEpisode();
           return true;
         }
         return false;
       }
       if (detail && index < detail.episodes.length - 1) {
-        episodeHandlers.handleNextEpisode();
+        currentEpisodeHandlers.handleNextEpisode();
         return true;
       }
       return false;
@@ -233,14 +337,81 @@ export function usePlayerKeyboard({
       frameForward: () => stepFrame(1),
       prevEpisode: () => switchEpisode(-1),
       nextEpisode: () => switchEpisode(1),
-      prevChannel: () => channelHandlers?.previous(),
-      nextChannel: () => channelHandlers?.next(),
+      prevChannel: () => channelHandlersRef.current?.previous(),
+      nextChannel: () => channelHandlersRef.current?.next(),
     };
 
     const isEpisodeAction = (action: PlayerShortcutAction) =>
       action === 'prevEpisode' || action === 'nextEpisode';
 
+    const startSeekForwardHold = (player: Artplayer) => {
+      if (seekForwardHold) {
+        if (seekForwardHold.player === player) {
+          return;
+        }
+        cancelSeekForwardHold();
+      }
+
+      const binding: ShortcutBinding = { ...shortcuts.seekForward };
+      const handleDestroy = () => {
+        if (seekForwardHold === hold) {
+          cancelSeekForwardHold();
+        }
+      };
+      const hold: SeekForwardHoldState = {
+        player,
+        binding,
+        timer: null,
+        active: false,
+        previousPlaybackRate: 1,
+        noticeElement: null,
+        handleDestroy,
+      };
+      seekForwardHold = hold;
+
+      (
+        player as unknown as {
+          on?: (name: string, fn: () => void) => void;
+        }
+      ).on?.('destroy', handleDestroy);
+
+      hold.timer = window.setTimeout(() => {
+        if (seekForwardHold !== hold) return;
+        hold.timer = null;
+
+        if (
+          artPlayerRef.current !== hold.player ||
+          (hold.player as unknown as { isDestroy?: boolean }).isDestroy ||
+          arePlayerShortcutsSuspended() ||
+          document.hidden
+        ) {
+          cancelSeekForwardHold();
+          return;
+        }
+
+        if (!hold.player.playing) {
+          return;
+        }
+
+        const { previousPlaybackRate, fastForwardRate } =
+          enterPlayerFastForward(hold.player);
+        hold.active = true;
+        hold.previousPlaybackRate = previousPlaybackRate;
+        if (hold.player.notice) {
+          hold.player.notice.show = '';
+        }
+        hold.noticeElement = mountFastForwardNotice(
+          hold.player,
+          fastForwardRate,
+        );
+      }, getPlayerFastForwardTime(player));
+    };
+
     const handleKeyboardShortcuts = (e: KeyboardEvent) => {
+      if (seekForwardHold && artPlayerRef.current !== seekForwardHold.player) {
+        cancelSeekForwardHold();
+      }
+
       const target = e.target as HTMLElement;
       if (
         target.tagName === 'INPUT' ||
@@ -252,6 +423,7 @@ export function usePlayerKeyboard({
       }
 
       if (arePlayerShortcutsSuspended()) {
+        cancelSeekForwardHold();
         return;
       }
 
@@ -262,23 +434,55 @@ export function usePlayerKeyboard({
         return;
       }
 
-      if (isEpisodeAction(action) && !episodeHandlers) {
+      if (isEpisodeAction(action) && !episodeHandlersRef.current) {
         return;
       }
 
       if (action === 'prevChannel' || action === 'nextChannel') {
-        if (!channelHandlers) return;
+        if (!channelHandlersRef.current) return;
       } else if (!artPlayerRef.current) return;
 
       e.preventDefault();
+
+      if (action === 'seekForward') {
+        if (e.repeat) return;
+        startSeekForwardHold(artPlayerRef.current!);
+        return;
+      }
+
       actionHandlers[action]();
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const hold = seekForwardHold;
+      if (!hold) return;
+      if (!isBindingReleased(e, hold.binding)) return;
+
+      const wasActive = hold.active;
+      const samePlayer =
+        artPlayerRef.current === hold.player &&
+        !(hold.player as unknown as { isDestroy?: boolean }).isDestroy;
+      cancelSeekForwardHold();
+
+      if (!wasActive && samePlayer && !arePlayerShortcutsSuspended()) {
+        seekBy(SEEK_STEP_SECONDS);
+      }
+    };
+
     document.addEventListener('keydown', handleKeyboardShortcuts);
+    document.addEventListener('keyup', handleKeyUp);
     return () => {
       document.removeEventListener('keydown', handleKeyboardShortcuts);
+      document.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
+      window.removeEventListener(
+        PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT,
+        handleShortcutsSuspended,
+      );
+      window.removeEventListener('blur', cancelSeekForwardHold);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      cancelSeekForwardHold();
       releaseLoadingSpinnerGuard();
     };
-  }, [artPlayerRef, episodeHandlers, channelHandlers, mode]);
+  }, [artPlayerRef, mode]);
 }

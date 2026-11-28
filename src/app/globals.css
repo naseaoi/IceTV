@@ -1626,6 +1626,37 @@ div[data-media-provider] video {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
+/* --- 长按倍速常驻提示（与顶部居中 notice 同位置同视觉，有其他 notice 时让位） --- */
+.ice-fast-forward-notice {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 0;
+  pointer-events: none;
+}
+
+.ice-fast-forward-notice-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 14px;
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.art-video-player.art-notice-show .ice-fast-forward-notice {
+  display: none;
+}
+
 /* --- 播放器内操作提示（续播、连播倒计时） --- */
 .ice-player-prompt {
   position: absolute;

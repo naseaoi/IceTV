@@ -2,6 +2,8 @@ import { readStorage, writeStorage } from '@/lib/browser-storage';
 
 export const PLAYER_SHORTCUTS_STORAGE_KEY = 'playerShortcuts';
 export const PLAYER_SHORTCUTS_CHANGED_EVENT = 'icetv:player-shortcuts-changed';
+export const PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT =
+  'icetv:player-shortcuts-suspended-changed';
 export const OPEN_PLAYER_SHORTCUTS_EVENT = 'icetv:open-player-shortcuts';
 
 export const SEEK_STEP_SECONDS = 5;
@@ -71,7 +73,7 @@ export const PLAYER_SHORTCUT_ACTIONS: {
 }[] = [
   { action: 'playPause', label: '播放 / 暂停' },
   { action: 'seekBackward', label: '快退 5 秒' },
-  { action: 'seekForward', label: '快进 5 秒' },
+  { action: 'seekForward', label: '快进 5 秒（长按 3 倍速）' },
   { action: 'seekBackwardLong', label: '快退 30 秒' },
   { action: 'seekForwardLong', label: '快进 30 秒' },
   { action: 'volumeUp', label: '音量 +' },
@@ -154,7 +156,7 @@ export function writePlayerShortcuts(map: PlayerShortcutMap): boolean {
   return true;
 }
 
-function normalizeKey(key: string): string {
+export function normalizeShortcutKey(key: string): string {
   if (key === ' ' || key === 'Spacebar') return ' ';
   return key.length === 1 ? key.toLowerCase() : key;
 }
@@ -163,7 +165,8 @@ export function matchesBinding(
   event: KeyboardEvent,
   binding: ShortcutBinding,
 ): boolean {
-  if (normalizeKey(event.key) !== normalizeKey(binding.key)) return false;
+  if (normalizeShortcutKey(event.key) !== normalizeShortcutKey(binding.key))
+    return false;
   if (event.shiftKey !== !!binding.shiftKey) return false;
   if (event.altKey !== !!binding.altKey) return false;
   if (event.ctrlKey !== !!binding.ctrlKey) return false;
@@ -207,7 +210,13 @@ export function formatBinding(binding: ShortcutBinding): string {
 let shortcutsSuspended = false;
 
 export function setPlayerShortcutsSuspended(suspended: boolean): void {
+  if (shortcutsSuspended === suspended) return;
   shortcutsSuspended = suspended;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(PLAYER_SHORTCUTS_SUSPENDED_CHANGED_EVENT),
+    );
+  }
 }
 
 export function arePlayerShortcutsSuspended(): boolean {

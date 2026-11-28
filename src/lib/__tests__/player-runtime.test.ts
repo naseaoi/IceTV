@@ -2,6 +2,10 @@ import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
   createHlsLoaderClass,
+  enterPlayerFastForward,
+  exitPlayerFastForward,
+  getPlayerFastForwardRate,
+  getPlayerFastForwardTime,
   isPlayerFastForwarding,
   prefetchM3U8,
   restorePlayerPlaybackRate,
@@ -674,5 +678,24 @@ describe('player runtime mobile controls', () => {
     expect(harness.playbackRate).toBe(1.5);
     expect(harness.player.classList.contains('art-fast-forward')).toBe(false);
     expect(harness.art.__icetvFastForwardActive).toBe(false);
+  });
+
+  it('shares fast-forward entry and exit helpers using ArtPlayer defaults', () => {
+    const harness = createMobileControlsHarness();
+    harness.art.playbackRate = 1.25;
+
+    expect(getPlayerFastForwardTime(harness.art)).toBe(1_000);
+    expect(getPlayerFastForwardRate(harness.art)).toBe(3);
+
+    const state = enterPlayerFastForward(harness.art);
+    expect(state).toEqual({ previousPlaybackRate: 1.25, fastForwardRate: 3 });
+    expect(harness.playbackRate).toBe(3);
+    expect(isPlayerFastForwarding(harness.art)).toBe(true);
+    expect(harness.player.classList.contains('art-fast-forward')).toBe(true);
+
+    exitPlayerFastForward(harness.art, state.previousPlaybackRate);
+    expect(harness.playbackRate).toBe(1.25);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+    expect(harness.player.classList.contains('art-fast-forward')).toBe(false);
   });
 });
