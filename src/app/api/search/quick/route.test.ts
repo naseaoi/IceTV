@@ -81,15 +81,18 @@ describe('quick search route preference', () => {
     await expect(quickWinner()).resolves.toMatchObject({ source: 'direct' });
   });
 
-  it('treats auto sources as direct candidates', async () => {
-    setPlans({
-      blocked: { delayMs: 5, playable: true },
-      direct: { delayMs: 200, playable: true },
-    });
-    proxyModes = { blocked: 'auto' };
+  it.each(['auto', 'relay'])(
+    'treats %s sources as direct candidates',
+    async (mode) => {
+      setPlans({
+        blocked: { delayMs: 5, playable: true },
+        direct: { delayMs: 200, playable: true },
+      });
+      proxyModes = { blocked: mode };
 
-    await expect(quickWinner()).resolves.toMatchObject({ source: 'blocked' });
-  });
+      await expect(quickWinner()).resolves.toMatchObject({ source: 'blocked' });
+    },
+  );
 
   it('returns the relay source once no direct peer can win', async () => {
     setPlans({

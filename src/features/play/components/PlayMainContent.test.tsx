@@ -183,6 +183,51 @@ describe('PlayMainContent', () => {
     );
   });
 
+  it('首次详情加载门禁期间不启动媒体无进展超时，放行后才开始计时', () => {
+    const onLoadingTimeout = jest.fn(() => false);
+    const baseProps = {
+      ...createBaseProps(),
+      isVideoLoading: true,
+      videoLoadingStage: 'initing' as const,
+      onLoadingTimeout,
+    };
+
+    const { rerender } = render(
+      <PlayMainContent
+        {...baseProps}
+        detail={null}
+        detailLoading
+        currentEpisodeIndex={-1}
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS * 2);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    expect(screen.queryByText('加载视频超时')).not.toBeInTheDocument();
+
+    rerender(
+      <PlayMainContent
+        {...baseProps}
+        detail={detail}
+        detailLoading={false}
+        currentEpisodeIndex={0}
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS - 250);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+
+    act(() => {
+      jest.advanceTimersByTime(250);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('加载视频超时')).toBeInTheDocument();
+  });
+
   it('在新的换源轮次开始后重置超时提示', () => {
     const baseProps = {
       ...createBaseProps(),

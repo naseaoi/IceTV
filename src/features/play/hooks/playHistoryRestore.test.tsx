@@ -9,6 +9,7 @@ import {
 } from '@/features/play/hooks/usePlayProgress';
 import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { generateStorageKey } from '@/lib/db.client';
 import { cacheManager } from '@/lib/db.client.cache';
 import { savePlayIntent } from '@/lib/play-intent';
@@ -108,6 +109,7 @@ function usePlayPageHarness(autoNext = true) {
   const stableCurrentTimeRef = useRef(0);
   const resumeTimeRef = useRef<number | null>(null);
   const playbackRequestModeRef = useRef('initial');
+  const playbackIntentRef = useRef(createVodPlaybackIntent());
   const clearTargetEpisodeProgressRef = useRef(false);
   const [noop] = useState(() => jest.fn());
 
@@ -131,6 +133,7 @@ function usePlayPageHarness(autoNext = true) {
   }, [currentSource, currentId, detail, currentEpisodeIndex]);
 
   usePlayInit({
+    playbackIntentRef,
     currentSource,
     currentId,
     currentSourceRef,

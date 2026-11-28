@@ -53,6 +53,67 @@ const extendedPlaylist = [
 ].join('\n');
 
 describe('m3u8 rewrite', () => {
+  it('relays VOD playlists and keys while keeping all media assets direct', async () => {
+    const base = 'https://cdn.example/relay/master.m3u8';
+    const content = [
+      mediaPlaylist,
+      extendedPlaylist,
+      '#EXT-X-STREAM-INF:BANDWIDTH=1000',
+      'video/index.m3u8',
+    ].join('\n');
+    const result = await getRewrittenM3U8Content(
+      { content, finalUrl: base, loadedAt: 1 },
+      base,
+      createRequest('?allowCORS=true&icetv-switch=episode&icetv-user-switch=0'),
+      true,
+      false,
+      'ppnix',
+      false,
+      true,
+      'sticky',
+    );
+    for (const tag of ['EXT-X-KEY', 'EXT-X-SESSION-KEY']) {
+      const line = result
+        .split('\n')
+        .find((line) => line.startsWith(`#${tag}:`))!;
+      const key = new URL(line.match(/URI="([^"]+)"/)![1]);
+      expect(key.pathname).toBe('/api/proxy/key');
+      expect(Object.fromEntries(key.searchParams)).toMatchObject({
+        'icetv-source': 'ppnix',
+        'icetv-switch': 'episode',
+        'icetv-user-switch': '0',
+        'icetv-sticky': 'sticky',
+        signature: 'test-signature',
+      });
+    }
+    for (const tag of [
+      'EXT-X-MEDIA',
+      'EXT-X-I-FRAME-STREAM-INF',
+      'EXT-X-RENDITION-REPORT',
+    ]) {
+      const line = result
+        .split('\n')
+        .find((line) => line.startsWith(`#${tag}:`))!;
+      const child = new URL(line.match(/URI="([^"]+)"/)![1]);
+      expect(child.pathname).toBe('/api/proxy/m3u8');
+      expect(child.searchParams.get('allowCORS')).toBe('true');
+    }
+    expect(
+      new URL(result.split('\n').at(-1)!).searchParams.get('allowCORS'),
+    ).toBe('true');
+    expect(result).toContain(
+      '#EXT-X-MAP:URI="https://cdn.example/relay/init.mp4"',
+    );
+    expect(result).toContain(
+      '#EXT-X-PART:DURATION=0.5,URI="https://cdn.example/relay/part-1.m4s"',
+    );
+    expect(result).toContain(
+      '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="https://cdn.example/relay/part-2.m4s"',
+    );
+    expect(result).toContain('\nhttps://cdn.example/relay/segment-1.ts\n');
+    expect(result).not.toContain('/api/proxy/segment');
+  });
+
   it.each([
     [
       'https://cdn.example/hls/playlist?id=1',
@@ -103,9 +164,16 @@ describe('m3u8 rewrite', () => {
         false,
       );
       expect(result.split('\n').at(-1)).toBe(expected);
-      expect(result.match(/URI="[^"]+"/g)).toEqual(
-        Array(3).fill(`URI="${expected}"`),
+      const uris = Array.from(
+        result.matchAll(/URI="([^"]+)"/g),
+        (match) => match[1],
       );
+      expect(new URL(uris[0]).pathname).toBe('/api/proxy/key');
+      expect(new URL(uris[0]).searchParams.get('url')).toBe(expected);
+      expect(uris[1]).toBe(expected);
+      expect(new URL(uris[2]).pathname).toBe('/api/proxy/m3u8');
+      expect(new URL(uris[2]).searchParams.get('url')).toBe(expected);
+      expect(new URL(uris[2]).searchParams.get('allowCORS')).toBe('true');
     },
   );
 
@@ -271,10 +339,8 @@ describe('m3u8 rewrite', () => {
       );
       if (direct) {
         expect(result).toContain('https://stream.example.com/vod/segment-1.ts');
-        expect(result).toContain(
-          'URI="https://stream.example.com/vod/key.bin"',
-        );
-        expect(result).not.toContain('/api/proxy/');
+        expect(result).toContain('/api/proxy/key?');
+        expect(result).not.toContain('/api/proxy/segment');
       } else {
         expect(result).toContain('/api/proxy/segment?');
         expect(result).toContain('/api/proxy/key?');

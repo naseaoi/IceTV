@@ -1,3 +1,4 @@
+import type { SourceProxyMode } from '@/lib/proxy-modes';
 export interface SiteConfig {
   SiteName: string;
   SiteIcon: string; // 站点图标 URL（外部链接或 /api/admin/site-icon 本地路径）
@@ -39,7 +40,7 @@ export interface DataSource {
   detail?: string;
   disabled?: boolean;
   from: 'config' | 'custom';
-  proxyMode?: 'server' | 'browser' | 'auto';
+  proxyMode?: SourceProxyMode;
   adminOnly?: boolean;
   nsfw?: boolean;
 }

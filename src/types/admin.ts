@@ -1,4 +1,5 @@
 import type { TrafficSettings } from '@/lib/host-traffic';
+import type { SourceProxyMode } from '@/lib/proxy-modes';
 
 export interface AdminConfig {
   // 仅后台响应与旧数据迁移；运行时配置由 configSelfCheck 剥离。
@@ -82,7 +83,7 @@ export interface AdminConfig {
     detail?: string;
     from: 'config' | 'custom';
     disabled?: boolean;
-    proxyMode?: 'server' | 'browser' | 'auto';
+    proxyMode?: SourceProxyMode;
     // 仅站长与管理员可见，普通用户的搜索、详情与播放都不提供该源
     adminOnly?: boolean;
     nsfw?: boolean;

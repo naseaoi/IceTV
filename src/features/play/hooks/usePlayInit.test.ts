@@ -10,10 +10,12 @@ import {
   resetProbes,
 } from '@/features/play/lib/sourceProbeStore';
 import { getSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
+import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import { generateStorageKey } from '@/lib/db.client';
 import { cacheManager } from '@/lib/db.client.cache';
+import { AUTO_SWITCH_SOURCE_STORAGE_KEY } from '@/lib/local-preferences';
 import { PLAY_INTENT_KEY, savePlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getProxyModes, getSourcePlaybackRoute } from '@/lib/proxy-modes';
@@ -22,7 +24,12 @@ import {
   readSourcePlaybackStats,
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
-import { recordSourceWorkFailure } from '@/lib/source-work-failures';
+import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
+import {
+  readSourceWorkFailures,
+  recordSourceWorkFailure,
+  sourceWorkFailureKey,
+} from '@/lib/source-work-failures';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 import { clearPlaybackWarmups } from '@/lib/video-prefetch';
 
@@ -36,6 +43,10 @@ jest.mock('@/features/play/lib/vodProbe', () => ({
 
 jest.mock('@/lib/player-runtime', () => ({
   prefetchM3U8: jest.fn(),
+}));
+
+jest.mock('@/lib/source-route-stats.client', () => ({
+  reportSourcePlayOutcome: jest.fn(),
 }));
 
 type UsePlayInitParams = Parameters<typeof usePlayInit>[0];
@@ -223,6 +234,7 @@ function setupHook(
     sessionStorage.setItem('aggregate_group', JSON.stringify(aggregateGroup));
   }
   const params: UsePlayInitParams = {
+    playbackIntentRef: { current: createVodPlaybackIntent() },
     currentSource: '',
     currentId: '',
     currentSourceRef: { current: '' },
@@ -298,6 +310,7 @@ beforeEach(() => {
   window.history.replaceState({}, '', `/play?title=${TITLE}`);
   probeMock.mockReset();
   (prefetchM3U8 as jest.Mock).mockClear();
+  (reportSourcePlayOutcome as jest.Mock).mockClear();
 });
 
 afterEach(() => {
@@ -335,6 +348,89 @@ describe('按需加载简繁匹配', () => {
 });
 
 describe('首次搜索截止时间', () => {
+  it.each(['results', 'empty', 'timeout'])(
+    '固定源先起播，后台候选 %s 结束前保持搜索状态',
+    async (outcome) => {
+      const source = createSource('fixed');
+      let release!: (value: unknown) => void;
+      const search = new Promise((resolve) => {
+        release = resolve;
+      });
+      installFetch(
+        {},
+        {},
+        {
+          '/api/detail': Promise.resolve(source),
+          '/api/search': search,
+        },
+      );
+      const params = setupHook(null, {
+        currentSource: source.source,
+        currentId: source.id,
+        needPreferRef: { current: false },
+        optimizationEnabled: false,
+      });
+      await waitFor(() =>
+        expect(params.setDetail).toHaveBeenCalledWith(source),
+      );
+      expect(params.setSourceSearchLoading).toHaveBeenLastCalledWith(true);
+      await act(async () => {
+        if (outcome === 'timeout') jest.advanceTimersByTime(30_000);
+        else
+          release({
+            results: outcome === 'results' ? [createSource('other')] : [],
+          });
+      });
+      expect(params.setSourceSearchLoading).toHaveBeenLastCalledWith(false);
+      if (outcome === 'timeout') {
+        expect(params.setSourceSearchError).toHaveBeenCalledWith(
+          '播放源搜索失败',
+        );
+      }
+    },
+  );
+
+  it.each(['candidate', 'new-intent'])(
+    '固定源详情失败等待候选，%s 时按当前意图决定起播',
+    async (outcome) => {
+      const candidate = createSource('fallback');
+      let release!: (value: unknown) => void;
+      installFetch(
+        {},
+        {},
+        {
+          '/api/detail': Promise.resolve({ episodes: [] }),
+          '/api/search': new Promise((resolve) => {
+            release = resolve;
+          }),
+        },
+      );
+      const params = setupHook(null, {
+        currentSource: 'failed',
+        currentId: 'failed-id',
+        needPreferRef: { current: false },
+        optimizationEnabled: false,
+      });
+      await waitFor(() =>
+        expect(params.setSourceSearchLoading).toHaveBeenLastCalledWith(true),
+      );
+      expect(params.setError).not.toHaveBeenCalled();
+      expect(params.setDetail).not.toHaveBeenCalled();
+      if (outcome === 'new-intent')
+        params.playbackIntentRef.current = createVodPlaybackIntent();
+      await act(async () => release({ results: [candidate] }));
+      if (outcome === 'candidate') {
+        await waitFor(() =>
+          expect(params.setDetail).toHaveBeenCalledWith(candidate),
+        );
+        expect(params.playbackIntentRef.current.attempts).toBe(1);
+      } else {
+        expect(params.setDetail).not.toHaveBeenCalled();
+        expect(params.playbackIntentRef.current.attempts).toBe(0);
+      }
+      expect(params.setError).not.toHaveBeenCalled();
+    },
+  );
   it.each(['headers', 'body'])(
     'quick %s 悬挂后中止并回退完整搜索',
     async (phase) => {
@@ -1521,5 +1617,216 @@ describe('入口恢复与失效源回退', () => {
       }),
     );
     expect(params.setDetail).toHaveBeenCalledTimes(1);
+  });
+
+  describe('详情接口失败立即按源级失败处理', () => {
+    const createEmptyEpisodesSource = (source: string): SearchResult => ({
+      ...createSource(source),
+      episodes: [],
+      episodes_titles: [],
+    });
+
+    it('聚合多候选首选源详情失败时立即上报源失败并自动换下一个候选源起播', async () => {
+      const consoleError = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      const consoleWarn = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      const broken = createEmptyEpisodesSource('olevod');
+      const backup = createEmptyEpisodesSource('backup');
+      const backupDetail = createSeries('backup', 2);
+
+      global.fetch = jest.fn((input) => {
+        const url = new URL(String(input), window.location.origin);
+        if (url.pathname === '/api/playrecords') return reply({});
+        if (url.pathname === '/api/detail') {
+          if (url.searchParams.get('source') === 'olevod') {
+            return reply({ error: '获取视频详情失败' }, false);
+          }
+          return reply(backupDetail);
+        }
+        return reply({ results: [] });
+      }) as unknown as typeof fetch;
+
+      const params = setupHook([broken, backup], {
+        optimizationEnabled: false,
+      });
+
+      await waitFor(() =>
+        expect(params.setDetail).toHaveBeenCalledWith(backupDetail),
+      );
+      expect(params.setError).not.toHaveBeenCalled();
+      expect(reportSourcePlayOutcome).toHaveBeenCalledWith('olevod', false);
+      expect(readSourceWorkFailures()).toContain(
+        sourceWorkFailureKey(broken.source, broken.id),
+      );
+      expect(params.playbackIntentRef.current.attempts).toBe(1);
+      consoleError.mockRestore();
+      consoleWarn.mockRestore();
+    });
+
+    it('多候选连续详情失败达到换源上限后立即报错，不放行空剧集', async () => {
+      const consoleError = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      const consoleWarn = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      const sources = ['s1', 's2', 's3', 's4', 's5'].map(
+        createEmptyEpisodesSource,
+      );
+
+      global.fetch = jest.fn((input) => {
+        const url = new URL(String(input), window.location.origin);
+        if (url.pathname === '/api/playrecords') return reply({});
+        if (url.pathname === '/api/detail') {
+          return reply({ error: '获取视频详情失败' }, false);
+        }
+        return reply({ results: [] });
+      }) as unknown as typeof fetch;
+
+      const params = setupHook(sources, { optimizationEnabled: false });
+
+      await waitFor(() =>
+        expect(params.setError).toHaveBeenCalledWith('当前源加载失败'),
+      );
+      expect(params.setLoading).toHaveBeenCalledWith(false);
+      expect(params.setDetail).not.toHaveBeenCalled();
+      expect(apiRequests('/api/detail')).toHaveLength(4);
+      expect(params.playbackIntentRef.current.attempts).toBe(3);
+      expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(4);
+      consoleError.mockRestore();
+      consoleWarn.mockRestore();
+    });
+
+    it('关闭自动换源时首选源详情失败不切换其他源，立即报当前源加载失败', async () => {
+      const consoleError = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'false');
+      const broken = createEmptyEpisodesSource('olevod');
+      const backup = createSeries('backup', 2);
+
+      global.fetch = jest.fn((input) => {
+        const url = new URL(String(input), window.location.origin);
+        if (url.pathname === '/api/playrecords') return reply({});
+        if (url.pathname === '/api/detail') {
+          return reply({ error: '获取视频详情失败' }, false);
+        }
+        return reply({ results: [] });
+      }) as unknown as typeof fetch;
+
+      const params = setupHook([broken, backup], {
+        optimizationEnabled: false,
+      });
+
+      await waitFor(() =>
+        expect(params.setError).toHaveBeenCalledWith('当前源加载失败'),
+      );
+      expect(params.setLoading).toHaveBeenCalledWith(false);
+      expect(params.setDetail).not.toHaveBeenCalled();
+      expect(reportSourcePlayOutcome).toHaveBeenCalledWith('olevod', false);
+      expect(params.playbackIntentRef.current.attempts).toBe(0);
+      consoleError.mockRestore();
+    });
+
+    it('固定单源聚合条目详情失败时立即报当前源加载失败，不放行空剧集', async () => {
+      const consoleError = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      const broken = createEmptyEpisodesSource('olevod');
+
+      global.fetch = jest.fn((input) => {
+        const url = new URL(String(input), window.location.origin);
+        if (url.pathname === '/api/playrecords') return reply({});
+        if (url.pathname === '/api/detail') {
+          return reply({ error: '获取视频详情失败' }, false);
+        }
+        return reply({ results: [] });
+      }) as unknown as typeof fetch;
+
+      const params = setupHook([broken], {
+        currentSource: broken.source,
+        currentId: broken.id,
+        needPreferRef: { current: false },
+        optimizationEnabled: false,
+      });
+
+      await waitFor(() =>
+        expect(params.setError).toHaveBeenCalledWith('当前源加载失败'),
+      );
+      expect(params.setLoading).toHaveBeenCalledWith(false);
+      expect(params.setDetail).not.toHaveBeenCalled();
+      expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(1);
+      expect(reportSourcePlayOutcome).toHaveBeenCalledWith('olevod', false);
+      consoleError.mockRestore();
+    });
+
+    it('短地址直链原源详情失败且无记录时上报源健康失败并立即报未找到', async () => {
+      const consoleError = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      global.fetch = jest.fn((input) =>
+        String(input).startsWith('/api/playrecords')
+          ? reply({})
+          : reply({ error: '获取视频详情失败' }, false),
+      ) as unknown as typeof fetch;
+
+      const params = setupHook(null, {
+        ...shortUrlEntry(),
+        currentSource: 'olevod',
+        currentId: '46008',
+      });
+
+      await waitFor(() =>
+        expect(params.setError).toHaveBeenCalledWith('未找到匹配结果'),
+      );
+      expect(params.setLoading).toHaveBeenCalledWith(false);
+      expect(reportSourcePlayOutcome).toHaveBeenCalledWith('olevod', false);
+      expect(readSourceWorkFailures()).toContain(
+        sourceWorkFailureKey('olevod', '46008'),
+      );
+      consoleError.mockRestore();
+    });
+
+    it.each([429, 503])(
+      '详情返回资源限流 %s 时不记源失败、不换源，直接提示稍后重试',
+      async (status) => {
+        const broken = createEmptyEpisodesSource('olevod');
+        const backup = createSeries('backup', 2);
+
+        global.fetch = jest.fn((input) => {
+          const url = new URL(String(input), window.location.origin);
+          if (url.pathname === '/api/playrecords') return reply({});
+          if (url.pathname === '/api/detail') {
+            return Promise.resolve({
+              ok: false,
+              status,
+              headers: {
+                get: (name: string) =>
+                  name === 'x-icetv-resource-limited' ? '1' : null,
+              },
+              json: async () => ({ error: '服务器繁忙' }),
+            });
+          }
+          return reply({ results: [] });
+        }) as unknown as typeof fetch;
+
+        const params = setupHook([broken, backup], {
+          optimizationEnabled: false,
+        });
+
+        await waitFor(() =>
+          expect(params.setError).toHaveBeenCalledWith(
+            '本站资源暂时受限，请稍后重试',
+          ),
+        );
+        expect(params.setLoading).toHaveBeenCalledWith(false);
+        expect(params.setDetail).not.toHaveBeenCalled();
+        expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
+        expect(readSourceWorkFailures().size).toBe(0);
+      },
+    );
   });
 });

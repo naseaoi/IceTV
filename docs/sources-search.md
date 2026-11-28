@@ -72,11 +72,13 @@
 
 - 稀饭动漫的源地址填写 `https://next.xifanacg.com`，游客 API 使用源站网页公开的 publishable key。详情按 `CS` 备用线路（全站编号 `2`）→ `xfy2` 旧番主线（编号 `5`）→ `xfxf1` 新番主线（编号 `4`）选择首条有剧集的线路；逐集解析同时核对所选线路编号与代码，避免上游 fallback 换线。三者共用后台播放路由，支持浏览器直连，`auto` 沿用播放器的网络失败回落。CS 返回 HLS，主线返回游客 API 签发的签名 MP4，沿用签名地址短期本实例缓存；新番主线重定向至网盘，要求媒体请求省略 Origin 与 Referer，由全站文档策略和原生播放器处理，约束见[播放](playback.md#线路检测)。无需额外取址服务器，代理模式复用现有媒体中转。该源与其他特殊源一样复用共享搜索缓存，定时探测与后台手动检测调用其游客搜索 API。
 
+- Giri（`giri`）源地址保持 `https://anime.girigirilove.icu`，按主机名中的 `girigirilove` 段识别；搜索与详情固定请求 `https://m3u8.girigirilove.com/api.php/Vod/get_list` / `get_detail`，成功码为 `1`，数据在 `info.rows` / `info`。搜索只取 `offset=0&limit=20`，空结果为 `rows: []`；详情封面相对路径拼接 `https://jpg.girigirilove.com/`。`vod_id` 与旧站一致，兼容旧 `__giri_<组号>` ID；`vod_play_from` / `vod_play_url` 按原顺序合并，`cht` / `chs` / `DB` 映射为旧站稳定标签「繁中 / 简中 / 杜比」，供历史集定位、追更与跨组续播使用。详情直接返回无签名 MP4 / HLS 地址，媒体无 Referer 或出口 IP 绑定；保留逐集解析注册与旧播放页解码，仅供已有 `icetv-lazy://giri` 快照和缓存使用，该兼容路径仍依赖旧站可用。
+
 - 天涯资源（`tyyszy`，API `https://tyyszy.com/api.php/provide/vod`）的 API 搜索被源站关闭，搜索改用网页提取 id 后一次 API 批量详情，按网页顺序返回；与其他特殊源一致仅取第一页，详情与播放地址继续沿用普通 CMS 路径。视频 CDN 只放行浏览器直连，后台播放模式须设为「直连」。
 
 - 欧乐影院（`olevod`）源地址填写 `https://www.olevod.com`，接口固定请求 `https://api.olelive.com`，每次回源按源站公开前端算法现算秒级时间签名 `_vv`（约 1 小时有效，缺失或错误返回签名错误／401）。搜索仅取第一页 10 条；详情须请求 `/true` 变体才返回明文 `master.m3u8`，搜索按条目 `vip === true` 过滤游客不可播的 VIP 档（画质文案不代表权限），详情仍跳过空地址，全部为空时报无可播放剧集；封面相对路径拼接 `https://static.olelive.com/`。视频 CDN 反射 `Origin` 且不校验 `Referer`，支持浏览器直连，后台播放模式可用「自动」或「直连」。
 
-- PPnix（`ppnix`）源地址填写 `https://www.ppnix.com`。网页搜索 `/cn/search/{词}--.html` 仅取第一页，条目 id 为 `movie-{n}` / `tv-{n}`；详情页提取内联脚本中的 `infoid` 与 `m3u8=[...]` 参数，按源站规则拼出无签名播放地址 `/info/m3u8/{infoid}/{参数}.m3u8`，电影取页面声明的最高画质档。清单与密钥 `/info/m3u8/key` 无跨域头而分片允许跨域，现有线路没有「只中转清单与密钥」的模式，后台播放模式须设为「代理」，分片中转计入月流量。**易错点**：密钥接口返回 32 字节 ASCII 十六进制文本，正确密钥是其前 16 字节原文（与 ffmpeg 读取 AES-128 key 文件的行为一致），不是十六进制解码结果；hls.js 1.7 的 WebCrypto 与软件解密都无法使用 32 字节密钥，由 `/api/proxy/key` 把「恰为 32 字节且全为十六进制字符」的正文规范化为前 16 字节，因此该源只能走代理。
+- PPnix（`ppnix`）源地址填写 `https://www.ppnix.com`。网页搜索 `/cn/search/{词}--.html` 仅取第一页，条目 id 为 `movie-{n}` / `tv-{n}`；详情页提取内联脚本中的 `infoid` 与 `m3u8=[...]` 参数，按源站规则拼出无签名播放地址 `/info/m3u8/{infoid}/{参数}.m3u8`，电影取页面声明的最高画质档。清单与密钥 `/info/m3u8/key` 无跨域头，分片经 `ipfs.ppnix.com` 重定向链全程允许跨域且不校验 Referer；后台播放模式须设为「清单中转」，分片由浏览器直连，不计本站月流量，月流量暂停时仍可播放。**易错点**：密钥接口返回 32 字节 ASCII 十六进制文本，正确密钥是其前 16 字节原文（与 ffmpeg 读取 AES-128 key 文件的行为一致），不是十六进制解码结果；hls.js 1.7 的 WebCrypto 与软件解密都无法使用 32 字节密钥，由 `/api/proxy/key` 把「恰为 32 字节且全为十六进制字符」的正文规范化为前 16 字节，清单中转与全量代理均复用这一路径。
 
 解析结果与特殊源搜索跨实例共享，均按源配置（`getSourceCacheKey()`）分区：
 

@@ -46,6 +46,7 @@ const PROXY_MODE_OPTIONS = [
   { value: 'auto', label: '自动' },
   { value: 'browser', label: '直连' },
   { value: 'server', label: '代理' },
+  { value: 'relay', label: '清单中转' },
 ];
 
 const PROXY_MODE_LABEL = Object.fromEntries(
@@ -53,7 +54,12 @@ const PROXY_MODE_LABEL = Object.fromEntries(
 ) as Record<SourceProxyMode, string>;
 
 function isSourceProxyMode(value: string): value is SourceProxyMode {
-  return value === 'auto' || value === 'browser' || value === 'server';
+  return (
+    value === 'auto' ||
+    value === 'browser' ||
+    value === 'server' ||
+    value === 'relay'
+  );
 }
 
 interface SortableSourceRowProps {

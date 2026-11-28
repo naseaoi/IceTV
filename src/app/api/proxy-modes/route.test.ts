@@ -31,11 +31,18 @@ beforeEach(() => {
       { key: 'auto-ok', proxyMode: 'auto' },
       { key: 'browser-blocked', proxyMode: 'browser' },
       { key: 'server-ok', proxyMode: 'server' },
+      { key: 'manifest-relay', proxyMode: 'relay' },
       { key: 'hidden', proxyMode: 'auto' },
     ],
   });
   (getAvailableApiSites as jest.Mock).mockResolvedValue(
-    ['auto-blocked', 'auto-ok', 'browser-blocked', 'server-ok'].map((key) => ({
+    [
+      'auto-blocked',
+      'auto-ok',
+      'browser-blocked',
+      'server-ok',
+      'manifest-relay',
+    ].map((key) => ({
       key,
     })),
   );
@@ -48,6 +55,7 @@ it('returns configured modes and defaults without rewriting auto', async () => {
     'auto-ok': 'auto',
     'browser-blocked': 'browser',
     'server-ok': 'server',
+    'manifest-relay': 'relay',
   });
 });
 
@@ -59,5 +67,6 @@ it('stops auto sources from falling back to the server while relay is paused', a
     'auto-ok': 'browser',
     'browser-blocked': 'browser',
     'server-ok': 'server',
+    'manifest-relay': 'relay',
   });
 });

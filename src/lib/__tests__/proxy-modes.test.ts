@@ -106,6 +106,7 @@ describe('proxy modes', () => {
   it.each([
     ['browser', false, true, false],
     ['server', true, false, false],
+    ['relay', false, false, false],
     ['auto', false, true, true],
   ])(
     'resolves %s without confusing segment and manifest routes',
@@ -121,11 +122,34 @@ describe('proxy modes', () => {
       mod.rememberSourceServerProxy('demo', url);
       expect(mod.getSourcePlaybackRoute('demo', url)).toEqual({
         ...expected,
-        useServerProxy: mode === 'browser' ? false : true,
+        useServerProxy: mode === 'server' || mode === 'auto',
         directManifest: mode === 'browser',
       });
     },
   );
+
+  it('relay preserves automatic-route memories without reading or writing them', async () => {
+    const mod = await loadModule({ demo: 'relay' });
+    const url = 'https://cdn.example/a.m3u8';
+    const stored = JSON.stringify({
+      demo: { mode: 'server', at: Date.now() },
+      'demo::cdn.example': { mode: 'server', at: Date.now() },
+    });
+    sessionStorage.setItem('icetv_proxy_mode_overrides', stored);
+    const read = jest.spyOn(Storage.prototype, 'getItem');
+    const write = jest.spyOn(Storage.prototype, 'setItem');
+    expect(mod.getSourcePlaybackRoute('demo', url)).toEqual({
+      useServerProxy: false,
+      directManifest: false,
+      allowAutoFallback: false,
+    });
+    mod.rememberSourceServerProxy('demo', url);
+    mod.clearSourceProxyOverride('demo', url);
+    expect(read).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    read.mockRestore();
+    expect(sessionStorage.getItem('icetv_proxy_mode_overrides')).toBe(stored);
+  });
 
   it('uses configured fixed routes', async () => {
     const mod = await loadModule({

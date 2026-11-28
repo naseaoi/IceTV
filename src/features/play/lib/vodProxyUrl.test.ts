@@ -3,7 +3,7 @@ import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
 
 const rawUrl = 'https://cdn.example/show/master.m3u8?token=a%2Fb#part';
 
-it.each(['browser', 'server', 'auto'])(
+it.each(['browser', 'server', 'relay', 'auto'])(
   '%s 清单地址遵守完整线路语义',
   (mode) => {
     const url = buildVodProxyUrl({
@@ -12,7 +12,7 @@ it.each(['browser', 'server', 'auto'])(
       sourceKey: 'demo',
       playbackRequestMode: 'episode',
     });
-    if (mode !== 'server') {
+    if (mode === 'browser' || mode === 'auto') {
       expect(url).toBe(rawUrl);
       return;
     }

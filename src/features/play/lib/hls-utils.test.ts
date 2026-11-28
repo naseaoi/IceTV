@@ -47,6 +47,45 @@ function segmentResponse(
 }
 
 describe('takeProbeSegmentSample', () => {
+  it('relay probes the relayed manifest and direct segment without fallback', async () => {
+    const rawUrl = 'https://cdn.example/relay-probe.m3u8';
+    const segment = 'https://ipfs.example/segment.ts';
+    const route = {
+      useServerProxy: false,
+      directManifest: false,
+      allowAutoFallback: false,
+    };
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        playlistResponse(['#EXTM3U', '#EXTINF:6,', segment]),
+      )
+      .mockResolvedValueOnce(
+        segmentResponse([new Uint8Array(100_000)], {
+          'content-range': 'bytes 0-99999/100000',
+        }),
+      );
+    await getVideoResolutionFromM3u8(rawUrl, route, 'relay');
+    const first = new URL(
+      (fetch as jest.Mock).mock.calls[0][0],
+      'http://localhost',
+    );
+    expect(first.pathname).toBe('/api/proxy/m3u8');
+    expect(first.searchParams.get('allowCORS')).toBe('true');
+    expect((fetch as jest.Mock).mock.calls[1][0]).toBe(segment);
+    expect(reportSourceRouteStat).toHaveBeenCalledWith(
+      'relay',
+      'browser',
+      true,
+      'primary',
+    );
+    global.fetch = jest.fn().mockRejectedValue(new TypeError('network'));
+    await expect(
+      getVideoResolutionFromM3u8(rawUrl, route, 'relay'),
+    ).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   const originalFetch = global.fetch;
   const segmentUrl = 'https://cdn.example.test/video/seg-0.ts';
 

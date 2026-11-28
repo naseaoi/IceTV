@@ -60,6 +60,18 @@ it('自动模式忽略代理成功记忆且失败时不再回落服务器，固�
     ),
   ).rejects.toThrow();
   expect(global.fetch).toHaveBeenCalledTimes(1);
+  await expect(
+    getVideoResolutionFromM3u8(
+      url,
+      {
+        useServerProxy: false,
+        directManifest: false,
+        allowAutoFallback: false,
+      },
+      source,
+    ),
+  ).rejects.toThrow('Server relay is cooling down');
+  expect(global.fetch).toHaveBeenCalledTimes(1);
   const cancelled = new AbortController();
   cancelled.abort();
   await expect(

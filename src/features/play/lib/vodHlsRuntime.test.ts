@@ -7,6 +7,7 @@ import {
   getVodRuntimeSourceUrl,
   pauseIfVodRuntimeReleased,
   registerVodNativeRuntime,
+  VOD_ROUTE_STARTED_EVENT,
 } from '@/features/play/lib/vodHlsRuntime';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
@@ -227,6 +228,42 @@ function setupRuntime() {
 }
 
 describe('vodHlsRuntime 运行时释放', () => {
+  it('relay uses its manifest snapshot, reports browser samples and never falls back', () => {
+    const runtime = setupRuntime();
+    runtime.options.playbackRouteRef = {
+      current: {
+        useServerProxy: false,
+        directManifest: false,
+        allowAutoFallback: false,
+      },
+    };
+    const video = createVideo();
+    runtime.load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    expect(hls.loadSource).toHaveBeenLastCalledWith(
+      buildVodProxyUrl({
+        rawUrl: EPISODE_1,
+        ...runtime.options.playbackRouteRef.current!,
+        sourceKey: DETAIL.source,
+        playbackRequestMode: 'episode',
+      }),
+    );
+    expect(getManagedVideo(video).__icetvUsingServerProxy).toBe(false);
+    hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+    expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+    video.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
+    expect(mockReportSourceRouteStat).toHaveBeenCalledWith(
+      DETAIL.source,
+      'browser',
+      true,
+      'primary',
+    );
+    expect(mockClearSourceProxyOverride).not.toHaveBeenCalled();
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(hls.loadSource).toHaveBeenCalledTimes(1);
+    expect(getManagedVideo(video).__icetvUsingServerProxy).toBe(false);
+  });
+
   it.each(
     [false, true].flatMap((autoFallback) =>
       ['manifestLoadError', 'keyLoadError'].flatMap((details) =>
@@ -676,13 +713,17 @@ describe('vodHlsRuntime 运行时释放', () => {
     );
   });
 
-  it('运行时未释放时分片加载完成会刷新速度并上报当前线路成功', () => {
+  it('分片下载仅刷新速度，起播确认后才上报当前线路成功', () => {
     const runtime = setupRuntime();
     const video = createVideo();
     runtime.load(video, EPISODE_1);
     runtime.setRealtimeLoadSpeed.mockClear();
 
     getFakeHls(video).emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+    expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+    video.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
+    video.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
+    expect(mockReportSourceRouteStat).toHaveBeenCalledTimes(1);
 
     expect(runtime.setRealtimeLoadSpeed).toHaveBeenCalledWith(
       expect.stringMatching(/\/s$/),
@@ -711,6 +752,7 @@ describe('vodHlsRuntime 运行时释放', () => {
     hls.emit(FakeHls.Events.FRAG_LOADING, { frag: { level: 0 } });
     hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
     hls.emit(FakeHls.Events.FRAG_BUFFERED, {});
+    video.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
 
     expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalled();
     expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
@@ -811,6 +853,8 @@ describe('vodHlsRuntime 运行时释放', () => {
         expect(pauseIfVodRuntimeReleased(video)).toBe(false);
         expect(hls.loadSource).toHaveBeenCalledTimes(2);
         hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+        expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+        video.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
         expect(mockReportSourceRouteStat).toHaveBeenCalledWith(
           DETAIL.source,
           'server',
@@ -1121,7 +1165,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
         runtime.load(video, EPISODE_1);
         const hls = getFakeHls(video) as FakeHls & Record<string, unknown>;
         parseLevels(hls);
-        return { ...runtime, hls };
+        return { ...runtime, hls, video };
       }
       const rememberSourceServerProxy = () =>
         jest.requireMock('@/lib/proxy-modes').rememberSourceServerProxy;
@@ -1165,7 +1209,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
       });
 
       it('整条线路不可用时直连首次子清单失败即切代理', () => {
-        const { hls } = loadAutoRoute();
+        const { hls, video } = loadAutoRoute();
 
         hls.emit(FakeHls.Events.ERROR, levelLoadError(2));
 
@@ -1180,6 +1224,8 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
           'primary',
         );
         hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(0, 1));
+        expect(mockReportSourceRouteStat).toHaveBeenCalledTimes(1);
+        video.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
         expect(mockReportSourceRouteStat).toHaveBeenLastCalledWith(
           DETAIL.source,
           'server',

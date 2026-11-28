@@ -15,6 +15,7 @@ import {
   peekHistoryRestoreEpisodeIndex,
   waitForHistoryRestore,
 } from '@/features/play/hooks/usePlayProgress';
+import { AUTO_SOURCE_SWITCH_MAX_ATTEMPTS } from '@/features/play/lib/autoSourceSwitchPolicy';
 import { hasDetailContentChange } from '@/features/play/lib/detailContentChange';
 import {
   readDetailSnapshot,
@@ -49,6 +50,10 @@ import {
   preferDirectRouteSources,
 } from '@/features/play/lib/sourceRoutePreference';
 import { getSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
+import {
+  type VodPlaybackIntent,
+  reportVodPlaybackOutcome,
+} from '@/features/play/lib/vodPlaybackIntent';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import {
   buildVodProxyUrl,
@@ -62,6 +67,7 @@ import {
 } from '@/lib/db.client';
 import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { readAutoSwitchSource } from '@/lib/local-preferences';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import {
   consumeMatchingPlayIntent,
@@ -86,6 +92,7 @@ import {
   fetchSharedPlaybackDetail,
   getSharedPlaybackDetail,
   getSharedPlaybackSearch,
+  PlaybackDetailResourceLimitedError,
 } from '@/lib/video-prefetch';
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
@@ -594,6 +601,7 @@ function mergeSourceResult(
 
 interface UsePlayInitParams {
   onSourceUnavailable?: (message: string) => void;
+  playbackIntentRef: MutableRefObject<VodPlaybackIntent>;
   currentSource: string;
   currentId: string;
   currentSourceRef: MutableRefObject<string>;
@@ -645,6 +653,7 @@ interface QuickSearchResponse {
 
 export function usePlayInit({
   onSourceUnavailable,
+  playbackIntentRef,
   currentSource,
   currentId,
   currentSourceRef,
@@ -680,6 +689,7 @@ export function usePlayInit({
 }: UsePlayInitParams) {
   const initialParamsRef = useRef({
     onSourceUnavailable,
+    playbackIntentRef,
     currentEpisodeIndex,
     currentId,
     currentIdRef,
@@ -721,6 +731,7 @@ export function usePlayInit({
     window.addEventListener(PLAYER_EXIT_EVENT, handlePlayerExit);
     const {
       onSourceUnavailable,
+      playbackIntentRef,
       currentEpisodeIndex,
       currentId,
       currentIdRef,
@@ -805,11 +816,18 @@ export function usePlayInit({
         .catch(() => undefined);
     };
 
-    const initDetailTasks = new Map<string, Promise<SearchResult | null>>();
+    type DetailFetchResult =
+      | { status: 'ok'; detail: SearchResult }
+      | { status: 'resource-limited' }
+      | { status: 'offline' }
+      | { status: 'aborted' }
+      | { status: 'failed' };
+
+    const initDetailTasks = new Map<string, Promise<DetailFetchResult>>();
     const fetchSourceDetail = (
       source: string,
       id: string,
-    ): Promise<SearchResult | null> => {
+    ): Promise<DetailFetchResult> => {
       const key = JSON.stringify([source, id]);
       let task = initDetailTasks.get(key);
       if (!task) {
@@ -822,33 +840,44 @@ export function usePlayInit({
     const loadSourceDetail = async (
       source: string,
       id: string,
-    ): Promise<SearchResult | null> => {
+    ): Promise<DetailFetchResult> => {
       try {
         const cached = getCachedDetail(source, id);
-        if (cached) {
-          if (!signal.aborted) setSourceSearchLoading(false);
-          return cached;
+        if (cached?.episodes?.length) {
+          return { status: 'ok', detail: cached };
         }
         const snapshot = readDetailSnapshot(source, id);
-        if (snapshot) {
-          if (!signal.aborted) setSourceSearchLoading(false);
+        if (snapshot?.episodes?.length) {
           revalidateDetailSnapshot(source, id, snapshot);
-          return snapshot;
+          return { status: 'ok', detail: snapshot };
         }
         const shared = getSharedPlaybackDetail(source, id);
-        if (shared) return await waitForSharedLoad(() => shared, signal);
-        return await fetchDetailData(source, id);
+        const detailData = shared
+          ? await waitForSharedLoad(() => shared, signal)
+          : await fetchDetailData(source, id);
+        if (!detailData?.episodes?.length) {
+          return { status: 'failed' };
+        }
+        return { status: 'ok', detail: detailData };
       } catch (err) {
-        if (signal.aborted) return null;
+        if (signal.aborted || (err as Error)?.name === 'AbortError') {
+          return { status: 'aborted' };
+        }
+        if (err instanceof PlaybackDetailResourceLimitedError) {
+          return { status: 'resource-limited' };
+        }
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          return { status: 'offline' };
+        }
         console.error('获取视频详情失败:', err);
-        return null;
-      } finally {
-        if (!signal.aborted) setSourceSearchLoading(false);
+        return { status: 'failed' };
       }
     };
 
     let sourceSearchFailed = false;
     const fetchSourcesData = async (query: string): Promise<SearchResult[]> => {
+      setSourceSearchLoading(true);
+      setSourceSearchError(null);
       try {
         const data = await withAbortableTimeout(
           (searchSignal) =>
@@ -1053,8 +1082,22 @@ export function usePlayInit({
       return null;
     };
 
+    const failInit = (message: string) => {
+      clearAggregateGroup();
+      setError(message);
+      setLoading(false);
+    };
+
+    const reportDetailFailure = (source: string, id: string) => {
+      reportVodPlaybackOutcome(playbackIntentRef.current, source, false, id);
+    };
+
     const finalizePlaybackDetail = async (detailData: SearchResult) => {
       if (signal.aborted || !isPlayPagePath(window.location.pathname)) {
+        return;
+      }
+      if (!detailData.episodes || detailData.episodes.length === 0) {
+        failInit('当前源加载失败');
         return;
       }
 
@@ -1113,6 +1156,7 @@ export function usePlayInit({
     };
 
     const initAll = async () => {
+      const initIntent = playbackIntentRef.current;
       if (signal.aborted) return;
       if (!currentSource && !currentId && !videoTitle && !searchTitle) {
         setError('缺少必要参数');
@@ -1194,13 +1238,28 @@ export function usePlayInit({
         requestStartupRecords([{ source: requestedSource, id: requestedId }]);
       }
 
+      const failedDetailKeys = new Set<string>();
+      const requestedKey =
+        requestedSource && requestedId
+          ? getSourceKey({ source: requestedSource, id: requestedId })
+          : '';
+
       if (requestedSource && requestedId && !preferRequested) {
-        const fastDetail = await fetchSourceDetail(
+        const fastDetailResult = await fetchSourceDetail(
           requestedSource,
           requestedId,
         );
-        if (signal.aborted) return;
-        if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
+        if (signal.aborted || fastDetailResult.status === 'aborted') return;
+        if (fastDetailResult.status === 'resource-limited') {
+          failInit('本站资源暂时受限，请稍后重试');
+          return;
+        }
+        if (fastDetailResult.status === 'offline') {
+          failInit('网络已断开，请联网后重试');
+          return;
+        }
+        if (fastDetailResult.status === 'ok') {
+          const fastDetail = fastDetailResult.detail;
           setAvailableSources(mergeSourceBundle([], fastDetail));
           // 短地址不带标题，候选源搜索与过滤改用详情里的标题和年份
           if (!videoTitleRef.current) {
@@ -1213,6 +1272,7 @@ export function usePlayInit({
           await finalizePlaybackDetail(fastDetail);
           return;
         }
+        failedDetailKeys.add(requestedKey);
       }
 
       // quick 竞速在服务端已优先直连源，这里不等待选源上下文
@@ -1245,7 +1305,6 @@ export function usePlayInit({
               [] as SearchResult[],
             ),
           );
-          setSourceSearchLoading(true);
           void fetchSourcesData(quickQuery);
           await finalizePlaybackDetail(quickDetail);
           // quick 可能直接用搜索结果起播，与详情快照同样后台核对一次完整详情
@@ -1285,44 +1344,69 @@ export function usePlayInit({
         const query = searchTitle || videoTitleRef.current;
         sourcesInfo = query ? await fetchSourcesData(query) : [];
       }
-      if (signal.aborted) return;
+      if (signal.aborted || initIntent !== playbackIntentRef.current) return;
       if (deferredQuickDetail) {
         sourcesInfo = mergeSourceBundle(sourcesInfo, deferredQuickDetail);
         setAvailableSources(sourcesInfo);
       }
-      if (requestedSource && requestedId) {
-        const detailedSource = await fetchSourceDetail(
+      if (
+        requestedSource &&
+        requestedId &&
+        !failedDetailKeys.has(requestedKey)
+      ) {
+        const detailedResult = await fetchSourceDetail(
           requestedSource,
           requestedId,
         );
-        if (detailedSource) {
+        if (signal.aborted || detailedResult.status === 'aborted') return;
+        if (detailedResult.status === 'resource-limited') {
+          failInit('本站资源暂时受限，请稍后重试');
+          return;
+        }
+        if (detailedResult.status === 'offline') {
+          failInit('网络已断开，请联网后重试');
+          return;
+        }
+        if (detailedResult.status === 'ok') {
           const matchedSource = sourcesInfo.find(
             (source) =>
               source.source === requestedSource && source.id === requestedId,
           );
           const mergedCurrentSource = mergeSourceResult(
-            detailedSource,
+            detailedResult.detail,
             matchedSource,
           );
           sourcesInfo = mergeSourceBundle(sourcesInfo, mergedCurrentSource);
+        } else {
+          failedDetailKeys.add(requestedKey);
         }
         setAvailableSources(sourcesInfo);
       }
       if (signal.aborted) return;
       if (sourcesInfo.length === 0) {
-        clearAggregateGroup();
-        setError(sourceSearchFailed ? '播放源搜索失败' : '未找到匹配结果');
-        setLoading(false);
+        if (
+          requestedSource &&
+          requestedId &&
+          failedDetailKeys.has(requestedKey)
+        ) {
+          reportDetailFailure(requestedSource, requestedId);
+        }
+        failInit(sourceSearchFailed ? '播放源搜索失败' : '未找到匹配结果');
         return;
       }
 
-      let detailData: SearchResult;
-      const target =
+      const matchedTarget =
         requestedSource && requestedId && !preferRequested
           ? sourcesInfo.find(
               (source) =>
                 source.source === requestedSource && source.id === requestedId,
             )
+          : undefined;
+      const target =
+        matchedTarget &&
+        (!failedDetailKeys.has(requestedKey) ||
+          (matchedTarget.episodes?.length ?? 0) > 0)
+          ? matchedTarget
           : undefined;
       const replacingUnavailableSource = !!(
         requestedSource &&
@@ -1330,33 +1414,70 @@ export function usePlayInit({
         !preferRequested &&
         !target
       );
+      if (
+        requestedSource &&
+        requestedId &&
+        failedDetailKeys.has(requestedKey) &&
+        !target
+      ) {
+        reportDetailFailure(requestedSource, requestedId);
+      }
+      const candidateSources = sourcesInfo.filter(
+        (source) =>
+          !failedDetailKeys.has(getSourceKey(source)) ||
+          (source.episodes?.length ?? 0) > 0,
+      );
+      if (candidateSources.length === 0) {
+        failInit('当前源加载失败');
+        return;
+      }
+      if (
+        replacingUnavailableSource &&
+        failedDetailKeys.has(requestedKey) &&
+        !readAutoSwitchSource()
+      ) {
+        failInit('当前源加载失败');
+        return;
+      }
       if (replacingUnavailableSource) {
+        if (failedDetailKeys.has(requestedKey)) {
+          playbackIntentRef.current.attempts += 1;
+        }
         // 原源记录决定接续的集，原源无记录时按选中候选自己的记录恢复
         requestStartupRecords([
           { source: requestedSource, id: requestedId },
-          ...sourcesInfo,
+          ...candidateSources,
         ]);
       } else if (
         !startupPlayRecordsRequest &&
         (!requestedSource || !requestedId || preferRequested)
       ) {
-        requestStartupRecords(sourcesInfo);
+        requestStartupRecords(candidateSources);
       }
+
+      let detailData: SearchResult;
+      let orderedCandidates: SearchResult[];
       if (target) {
         detailData = target;
-      } else if (sourcesInfo.length === 1) {
-        detailData = sourcesInfo[0];
+        orderedCandidates = [
+          target,
+          ...candidateSources.filter((source) => source !== target),
+        ];
+      } else if (candidateSources.length === 1) {
+        detailData = candidateSources[0];
+        orderedCandidates = candidateSources;
       } else {
         // 只有多候选需要排序时才等选源上下文，固定源与单候选不让健康接口的尾延迟进入起播
         const selectionContext = await selectionContextPromise;
         if (signal.aborted) return;
-        detailData = preferDirectRouteSources(
-          sourcesInfo,
+        orderedCandidates = preferDirectRouteSources(
+          candidateSources,
           selectionContext,
           readSourcePlaybackStats(),
           Date.now(),
           readSourceWorkFailures(),
-        )[0];
+        );
+        detailData = orderedCandidates[0];
         if (optimizationEnabled) {
           setLoadingStage('preferring');
           setLoadingMessage('正在优选最佳播放源...');
@@ -1364,7 +1485,7 @@ export function usePlayInit({
           // 续播的集按已到的播放记录预判，未到时退回本地缓存，不为测速等待记录请求
           const cachedPlayRecords = getCachedPlayRecordsSnapshot();
           detailData = await preferBestSource(
-            sourcesInfo,
+            candidateSources,
             (source) =>
               peekHistoryRestoreEpisodeIndex(
                 source,
@@ -1381,19 +1502,68 @@ export function usePlayInit({
       }
       if (signal.aborted) return;
 
-      if (!detailData.episodes || detailData.episodes.length === 0) {
+      const intent = playbackIntentRef.current;
+      let resolvedDetail: SearchResult | null = null;
+      let candidate: SearchResult | undefined = detailData;
+      while (candidate) {
+        if (candidate.episodes && candidate.episodes.length > 0) {
+          resolvedDetail = candidate;
+          break;
+        }
         setLoadingStage('fetching');
         setLoadingMessage('正在获取视频详情...');
-        const fullDetail = await fetchSourceDetail(
-          detailData.source,
-          detailData.id,
+        const detailResult = await fetchSourceDetail(
+          candidate.source,
+          candidate.id,
         );
-        if (fullDetail) {
-          detailData = mergeSourceResult(fullDetail, detailData);
-          sourcesInfo = mergeSourceBundle(sourcesInfo, detailData);
-          setAvailableSources(sourcesInfo);
+        if (signal.aborted || detailResult.status === 'aborted') return;
+        if (detailResult.status === 'resource-limited') {
+          failInit('本站资源暂时受限，请稍后重试');
+          return;
         }
+        if (detailResult.status === 'offline') {
+          failInit('网络已断开，请联网后重试');
+          return;
+        }
+        if (detailResult.status === 'ok') {
+          const merged = mergeSourceResult(detailResult.detail, candidate);
+          sourcesInfo = mergeSourceBundle(sourcesInfo, merged);
+          setAvailableSources(sourcesInfo);
+          resolvedDetail = merged;
+          break;
+        }
+
+        const failedKey = getSourceKey(candidate);
+        failedDetailKeys.add(failedKey);
+        reportDetailFailure(candidate.source, candidate.id);
+
+        if (
+          !readAutoSwitchSource() ||
+          intent.attempts >= AUTO_SOURCE_SWITCH_MAX_ATTEMPTS
+        ) {
+          failInit('当前源加载失败');
+          return;
+        }
+        const nextCandidate = orderedCandidates.find(
+          (item) => !failedDetailKeys.has(getSourceKey(item)),
+        );
+        if (!nextCandidate) {
+          failInit('当前源加载失败');
+          return;
+        }
+        intent.attempts += 1;
+        console.warn('当前源详情获取失败，自动切换其他源', {
+          from: failedKey,
+          to: getSourceKey(nextCandidate),
+          reason: 'detail-failed',
+        });
+        candidate = nextCandidate;
       }
+      if (!resolvedDetail) {
+        failInit('当前源加载失败');
+        return;
+      }
+      detailData = resolvedDetail;
 
       if (signal.aborted) return;
       if (replacingUnavailableSource) {

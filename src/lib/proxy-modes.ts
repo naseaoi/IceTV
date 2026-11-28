@@ -10,7 +10,7 @@ const CACHE_TTL_MS = 30_000;
 const OVERRIDE_STORAGE_KEY = 'icetv_proxy_mode_overrides';
 const OVERRIDE_TTL_MS = 30 * 60 * 1000;
 
-export type SourceProxyMode = 'browser' | 'server' | 'auto';
+export type SourceProxyMode = 'browser' | 'server' | 'relay' | 'auto';
 
 export const DEFAULT_SOURCE_PROXY_MODE: SourceProxyMode = 'auto';
 
@@ -66,7 +66,12 @@ function getConfiguredProxyMode(
 ): SourceProxyMode {
   const resolvedModes = modes || cachedModes || {};
   const mode = resolvedModes[sourceKey];
-  if (mode === 'server' || mode === 'auto' || mode === 'browser') {
+  if (
+    mode === 'server' ||
+    mode === 'auto' ||
+    mode === 'browser' ||
+    mode === 'relay'
+  ) {
     return mode;
   }
   return DEFAULT_SOURCE_PROXY_MODE;
@@ -168,8 +173,15 @@ export function getSourcePlaybackRoute(
   rawUrl?: string,
   modes?: Record<string, string>,
 ): SourcePlaybackRoute {
-  dropLegacySourceOverride(sourceKey, rawUrl);
   const mode = getConfiguredProxyMode(sourceKey, modes);
+  if (mode === 'relay') {
+    return {
+      useServerProxy: false,
+      directManifest: false,
+      allowAutoFallback: false,
+    };
+  }
+  dropLegacySourceOverride(sourceKey, rawUrl);
   const useServerProxy =
     mode === 'server' ||
     (mode === 'auto' &&
@@ -208,7 +220,7 @@ export function clearSourceProxyOverride(
   sourceKey: string,
   rawUrl?: string,
 ): void {
-  if (!sourceKey) return;
+  if (!sourceKey || getConfiguredProxyMode(sourceKey) === 'relay') return;
   const data = readOverrides();
   if (rawUrl) {
     const overrideKey = getRouteOverrideKey(sourceKey, rawUrl);

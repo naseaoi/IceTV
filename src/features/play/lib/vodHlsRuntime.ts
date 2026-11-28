@@ -144,6 +144,7 @@ const HLS_LOAD_IN_PROGRESS_STATES: ReadonlySet<string | undefined> = new Set([
 const CACHED_FRAGMENT_MAX_LOAD_MS = 50;
 
 export const VOD_ROUTE_CHANGING_EVENT = 'icetv:vod-route-changing';
+export const VOD_ROUTE_STARTED_EVENT = 'icetv:vod-route-started';
 
 const vodRuntimeSourceUrls = new WeakMap<HTMLVideoElement, string>();
 
@@ -413,7 +414,9 @@ export function createVodM3u8Loader({
       buildVodProxyUrl({
         rawUrl,
         useServerProxy,
-        directManifest: !useServerProxy,
+        directManifest: playbackRoute.allowAutoFallback
+          ? !useServerProxy
+          : playbackRoute.directManifest,
         sourceKey,
         playbackRequestMode: playbackRequestModeRef.current || 'initial',
       });
@@ -758,6 +761,15 @@ export function createVodM3u8Loader({
       attempt.startedAt = null;
       clearStallConfirmation();
     };
+    const onRouteStarted = () => {
+      if (
+        resourceWaitAt !== null ||
+        videoRuntimeCleaned ||
+        (playbackIntentRef && playbackIntentRef.current !== intent)
+      )
+        return;
+      reportRouteStat(true);
+    };
     const onTimeUpdate = () => {
       if (resourceWaitAt !== null) return;
       recoveryController.handlePlaybackProgress(video.currentTime);
@@ -819,6 +831,7 @@ export function createVodM3u8Loader({
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('stalled', onStalled);
       video.removeEventListener('playing', onPlaying);
+      video.removeEventListener(VOD_ROUTE_STARTED_EVENT, onRouteStarted);
       video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('loadeddata', tryReportVideoInfo);
     };
@@ -828,6 +841,7 @@ export function createVodM3u8Loader({
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('stalled', onStalled);
     video.addEventListener('playing', onPlaying);
+    video.addEventListener(VOD_ROUTE_STARTED_EVENT, onRouteStarted);
     video.addEventListener('timeupdate', onTimeUpdate);
 
     const tryRefreshForbiddenUrl = (
@@ -1079,14 +1093,14 @@ export function createVodM3u8Loader({
         resourceWaitAt === null &&
         recoveryController.handleFragmentLoaded(data?.frag)
       ) {
-        reportRouteStat(true);
+        // 下载完成只确认网络恢复；线路成功由播放器共用的起播门禁确认。
         if (currentUseServerProxy) {
           serverFailureTracker.reset();
           if (fallbackAwaitingProgress)
             rememberSourceServerProxy(sourceKey, url);
         } else {
           browserFailureTracker.reset();
-          clearSourceProxyOverride(sourceKey, url);
+          if (allowAutoFallback) clearSourceProxyOverride(sourceKey, url);
         }
         fallbackAwaitingProgress = false;
       }

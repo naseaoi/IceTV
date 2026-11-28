@@ -71,6 +71,22 @@ describe('shouldInheritCrossGroupProgress', () => {
     expect(shouldInheritCrossGroupProgress(detail, 3, 1)).toBe(true);
   });
 
+  it.each(['ana', 'akua'])(
+    '新版 %s 直出地址仍继承跨组进度，源 key 可自定义',
+    (host) => {
+      const detail = createGiriDetail({
+        source: 'custom-anime',
+        episodes: Array.from(
+          { length: 4 },
+          (_, index) => `https://${host}.girigirilove.com/${index}.mp4`,
+        ),
+      });
+      expect(shouldInheritCrossGroupProgress(detail, 0, 2)).toBe(true);
+      expect(shouldInheritCrossGroupProgress(detail, 3, 1)).toBe(true);
+      expect(shouldInheritCrossGroupProgress(detail, 0, 3)).toBe(false);
+    },
+  );
+
   it('同组内切集不继承', () => {
     const detail = createGiriDetail();
     expect(shouldInheritCrossGroupProgress(detail, 0, 1)).toBe(false);

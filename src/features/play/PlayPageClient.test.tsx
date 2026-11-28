@@ -19,6 +19,7 @@ import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { PlayPageClient } from '@/features/play/PlayPageClient';
 import { deduplicatePlayRecords } from '@/lib/db.client';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import type { SearchResult } from '@/lib/types';
 
 type PlayInitParams = Parameters<typeof usePlayInit>[0];
@@ -347,10 +348,22 @@ describe('PlayPageClient', () => {
     expect(releaseBackgroundSourceProbes).toHaveBeenCalledTimes(3);
   });
 
+  it('离开事件在卸载前重置播放意图，取消候选等待，卸载后移除监听', () => {
+    const { unmount } = renderLoadedPage();
+    act(() => window.dispatchEvent(new Event(PLAYER_EXIT_EVENT)));
+    expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
+    unmount();
+    act(() => window.dispatchEvent(new Event(PLAYER_EXIT_EVENT)));
+    expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
+  });
+
   it('历史恢复换集回调同步重置意图，换源提交索引不触发通用重置', () => {
     renderLoadedPage();
     const restore = lastArg(mockUsePlayProgress);
+    act(() => lastArg(mockUseArtPlayer).setIsVideoLoading(false));
+    expect(lastArg(mockPlayMainContent).isVideoLoading).toBe(false);
     act(() => restore.onRestoreEpisodeChange?.());
+    expect(lastArg(mockPlayMainContent).isVideoLoading).toBe(true);
     expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
     act(() => latestSourceSwitch().setCurrentEpisodeIndex(1));
     expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);

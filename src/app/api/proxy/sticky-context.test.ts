@@ -29,8 +29,12 @@ jest.mock('@/lib/config', () => ({
   }),
 }));
 jest.mock('@/lib/host-traffic.server', () => ({
-  isServerRelayPaused: async () => false,
-  serverRelayPausedResponse: jest.fn(),
+  isServerRelayPaused: async () => mockRelayPaused,
+  serverRelayPausedResponse: () =>
+    new Response(null, {
+      status: 503,
+      headers: { 'x-icetv-relay-paused': '1' },
+    }),
 }));
 jest.mock('@/lib/server-proxy-guard', () => ({
   requireServerProxyQuota: (...args: unknown[]) => mockQuota(...args),
@@ -52,6 +56,7 @@ const mockRequireActiveUser = jest.fn();
 const mockQuota = jest.fn<Promise<null>, unknown[]>(async () => null);
 const mockOrigin = jest.fn();
 let mockSegmentsEnabled = true;
+let mockRelayPaused = false;
 installCryptoPolyfill();
 installStreamPolyfills();
 Object.assign(globalThis, {
@@ -94,6 +99,7 @@ describe('signed playback sticky context', () => {
     process.env.UPSTREAM_PROXY_POOL =
       'http://proxy-a.example:8000,http://proxy-b.example:8000';
     mockSegmentsEnabled = true;
+    mockRelayPaused = false;
     mockRequireActiveUser.mockReset().mockResolvedValue({ username: 'viewer' });
     mockQuota.mockClear();
     mockOrigin.mockReset().mockImplementation(async (_route, url: string) => {
@@ -174,6 +180,54 @@ describe('signed playback sticky context', () => {
       }
     },
   );
+
+  it('keeps signed relay playlists and normalized keys available during monthly pause', async () => {
+    mockRelayPaused = true;
+    const originalOrigin = mockOrigin.getMockImplementation()!;
+    mockOrigin.mockImplementation(async (...args) =>
+      String(args[1]).includes('key.bin')
+        ? new Response('0123456789abcdef0123456789abcdef')
+        : originalOrigin(...args),
+    );
+    const top = await manifest(
+      request(
+        'http://localhost/api/proxy/m3u8?allowCORS=true&url=' +
+          encodeURIComponent(
+            'https://cdn.example/master.m3u8?token=relay-pause',
+          ),
+      ),
+    );
+    expect(top.status).toBe(200);
+    const childUrl = resourceUrl(await top.text(), 'm3u8');
+    expect(new URL(childUrl).searchParams.get('allowCORS')).toBe('true');
+    // 子请求只凭改写后的签名放行，保留原有鉴权边界。
+    mockRequireActiveUser.mockResolvedValue({
+      response: new Response(null, { status: 401 }),
+    });
+    const child = await manifest(request(childUrl));
+    expect(child.status).toBe(200);
+    const content = await child.text();
+    expect(content).toContain('https://cdn.example/segment.ts');
+    expect(content).not.toContain('/api/proxy/segment');
+    const keyUrl = resourceUrl(content, 'key');
+    const response = await key(request(keyUrl));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('0123456789abcdef');
+    const unsigned = new URL(keyUrl);
+    unsigned.searchParams.delete('icetv-signature');
+    expect((await key(request(unsigned.toString()))).status).toBe(401);
+    mockRequireActiveUser.mockResolvedValue({ username: 'viewer' });
+    const blocked = await manifest(
+      request(
+        'http://localhost/api/proxy/m3u8?forceServer=true&url=' +
+          encodeURIComponent(
+            'https://cdn.example/master.m3u8?token=relay-pause',
+          ),
+      ),
+    );
+    expect(blocked.status).toBe(503);
+    expect(blocked.headers.get('x-icetv-relay-paused')).toBe('1');
+  });
 
   it('keeps unexpected key fetch errors generic and returns HTTP 500', async () => {
     mockOrigin.mockRejectedValue(

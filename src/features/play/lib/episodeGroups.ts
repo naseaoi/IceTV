@@ -1,4 +1,5 @@
 import { resolveEpisodeGroupPosition } from '@/lib/episode-groups';
+import { isGirigiriUrl } from '@/lib/giri';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
 
@@ -10,7 +11,10 @@ function isGiriDetail(detail: SearchResult): boolean {
   if (!firstEpisode) {
     return false;
   }
-  return parseLazyEpisodeUrl(firstEpisode)?.kind === 'giri';
+  return (
+    parseLazyEpisodeUrl(firstEpisode)?.kind === 'giri' ||
+    isGirigiriUrl(firstEpisode)
+  );
 }
 
 /**

@@ -14,7 +14,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const PROXY_STUTTER_MIN_WATCH_MS = 10 * HOUR_MS;
 const PROXY_STUTTER_MIN_RATIO_FACTOR = 2;
 
-const ROUTE_LABEL = { browser: '直连', server: '代理' } as const;
+const ROUTE_LABEL = { browser: '分片直连', server: '代理' } as const;
 const MEDIA_LABEL: Record<SourceSmoothMediaType, string> = {
   hls: 'HLS',
   mp4: 'MP4',

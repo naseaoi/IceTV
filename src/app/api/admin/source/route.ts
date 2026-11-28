@@ -307,10 +307,11 @@ export async function POST(request: NextRequest) {
         if (
           proxyMode !== 'server' &&
           proxyMode !== 'browser' &&
+          proxyMode !== 'relay' &&
           proxyMode !== 'auto'
         ) {
           return NextResponse.json(
-            { error: 'proxyMode 必须为 server、browser 或 auto' },
+            { error: 'proxyMode 必须为 server、browser、relay 或 auto' },
             { status: 400 },
           );
         }
@@ -389,10 +390,11 @@ export async function POST(request: NextRequest) {
         if (
           proxyMode !== 'server' &&
           proxyMode !== 'browser' &&
+          proxyMode !== 'relay' &&
           proxyMode !== 'auto'
         ) {
           return NextResponse.json(
-            { error: 'proxyMode 必须为 server、browser 或 auto' },
+            { error: 'proxyMode 必须为 server、browser、relay 或 auto' },
             { status: 400 },
           );
         }

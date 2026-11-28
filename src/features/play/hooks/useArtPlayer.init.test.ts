@@ -6,6 +6,7 @@ import { initializeArtPlayer } from '@/features/play/hooks/useArtPlayer.init';
 import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
+import { HLS_FATAL_MEDIA_RECOVERY_LIMIT } from '@/lib/player-utils';
 import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
 import {
   reportSourceRouteStat,
@@ -321,6 +322,11 @@ function makeFirstFrameReady(video: HTMLVideoElement) {
   });
 }
 
+function emitPlaying(player: MockArtplayer) {
+  makeFirstFrameReady(player.video);
+  player.emit('video:playing');
+}
+
 async function flushMicrotasks() {
   for (let i = 0; i < 20; i += 1) {
     await Promise.resolve();
@@ -349,6 +355,97 @@ describe('initializeArtPlayer 拉流控制', () => {
     jest.useRealTimers();
   });
 
+  it.each(['primary', 'fallback'] as const)(
+    '%s 网络下载成功但起播前解析失败时不记线路成功',
+    async (phase) => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: phase === 'primary',
+        directManifest: phase === 'fallback',
+        allowAutoFallback: phase === 'fallback',
+      });
+      jest.mocked(reportSourceRouteStat).mockClear();
+      const params = createParams();
+      const { player, video } = await setupPlayer(params);
+      const hls = getManagedVideo(video).hls as unknown as MockHls;
+      if (phase === 'fallback') {
+        hls.emit(MockHls.Events.ERROR, {
+          type: MockHls.ErrorTypes.NETWORK_ERROR,
+          details: 'manifestLoadError',
+          fatal: true,
+        });
+        expect(reportSourceRouteStat).toHaveBeenCalledWith(
+          DETAIL.source,
+          'browser',
+          false,
+          'primary',
+        );
+      }
+      hls.emit(MockHls.Events.FRAG_LOADED, {
+        frag: {
+          level: 0,
+          stats: { loaded: 1024, loading: { first: 0, end: 100 } },
+        },
+      });
+      for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
+        hls.emit(MockHls.Events.ERROR, {
+          type: MockHls.ErrorTypes.MEDIA_ERROR,
+          details: 'fragParsingError',
+          fatal: true,
+        });
+      }
+      expect(params.setError).toHaveBeenCalledWith('当前源加载失败');
+      // 已放弃的运行时随后收到就绪事件同样不能补报成功。
+      emitPlaying(player);
+      expect(jest.mocked(reportSourceRouteStat).mock.calls).toEqual(
+        phase === 'fallback'
+          ? [[DETAIL.source, 'browser', false, 'primary']]
+          : [],
+      );
+    },
+  );
+
+  it.each(['primary', 'fallback'] as const)(
+    '%s 线路只在起播门禁确认后记一次成功',
+    async (phase) => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: phase === 'primary',
+        directManifest: phase === 'fallback',
+        allowAutoFallback: phase === 'fallback',
+      });
+      jest.mocked(reportSourceRouteStat).mockClear();
+      const params = createParams();
+      params.onPlaybackStarted = jest.fn();
+      const { player, video } = await setupPlayer(params);
+      const hls = getManagedVideo(video).hls as unknown as MockHls;
+      if (phase === 'fallback') {
+        hls.emit(MockHls.Events.ERROR, {
+          type: MockHls.ErrorTypes.NETWORK_ERROR,
+          details: 'manifestLoadError',
+          fatal: true,
+        });
+      }
+      hls.emit(MockHls.Events.FRAG_LOADED, {
+        frag: {
+          level: 0,
+          stats: { loaded: 1024, loading: { first: 0, end: 100 } },
+        },
+      });
+      expect(
+        jest
+          .mocked(reportSourceRouteStat)
+          .mock.calls.filter(([, , success]) => success),
+      ).toEqual([]);
+      emitPlaying(player);
+      emitPlaying(player);
+      expect(
+        jest
+          .mocked(reportSourceRouteStat)
+          .mock.calls.filter(([, , success]) => success),
+      ).toEqual([[DETAIL.source, 'server', true, phase]]);
+      expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('媒体事件采集流畅度，释放运行时结算当前源与媒体类型', async () => {
     const { player, video } = await setupPlayer();
     jest.mocked(reportSourceSmoothness).mockClear();
@@ -357,7 +454,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       configurable: true,
       get: () => false,
     });
-    player.emit('video:playing');
+    emitPlaying(player);
     video.currentTime = 0.1;
     player.currentTime = 0.1;
     player.emit('video:timeupdate');
@@ -413,7 +510,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       player.switchUrl.mockImplementation(() => Promise.resolve());
       video.play = jest.fn().mockResolvedValue(undefined);
       if (metadata) player.emit('video:loadedmetadata');
-      if (playing) player.emit('video:playing');
+      if (playing) emitPlaying(player);
       Object.defineProperty(video, 'error', { value: { code } });
       player.emit('video:error', new Error('failed'));
       expect(player.switchUrl).toHaveBeenCalledTimes(fallback ? 1 : 0);
@@ -433,7 +530,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       params.videoUrl = 'https://cdn.example/movie.mp4';
       params.onPlaybackRecoveryExhausted = jest.fn(() => false);
       const { player, video } = await setupPlayer(params);
-      player.emit('video:playing');
+      emitPlaying(player);
       player.currentTime = 120;
       Object.defineProperty(video, 'error', { value: { code } });
       player.emit('video:error', new Error('failed'));
@@ -458,7 +555,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       params.onPlaybackRecoveryExhausted = jest.fn(() => true);
       const { player, video, loadingSessionRef } = await setupPlayer(params);
       Object.defineProperty(video, 'paused', { value: false });
-      player.emit('video:playing');
+      emitPlaying(player);
       player.currentTime = 120;
       params.clearTargetEpisodeProgressRef.current = pending;
       params.resumeTimeRef.current = pending ? 45 : null;
@@ -498,7 +595,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     params.videoUrl = 'https://cdn.example/movie.mp4';
     params.onSourceProxyFallbackStarted = jest.fn();
     const { player, video, loadingSessionRef } = await setupPlayer(params);
-    player.emit('video:playing');
+    emitPlaying(player);
     player.currentTime = 120;
     player.switchUrl.mockImplementation(() => Promise.resolve());
     video.play = jest.fn().mockResolvedValue(undefined);
@@ -541,7 +638,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     const { player, params } = await setupPlayer();
     player.duration = 1500;
     player.currentTime = 120;
-    player.emit('video:playing');
+    emitPlaying(player);
     params.lastSaveTimeRef.current = Date.now();
     jest.mocked(params.saveCurrentPlayProgress).mockClear();
     jest.advanceTimersByTime(59_999);
@@ -594,7 +691,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       const { player } = await setupPlayer(params);
       player.duration = 1500;
       player.currentTime = 120;
-      player.emit('video:playing');
+      emitPlaying(player);
       params.lastSaveTimeRef.current = Date.now();
       for (let second = 0; second < 43; second += 1) {
         // HLS nudge 直接改媒体时间，不经过 applyResumeTime 的 WeakMap 标记。
@@ -603,7 +700,7 @@ describe('initializeArtPlayer 拉流控制', () => {
         if (scenario === 'pause/play') {
           player.emit('pause');
           player.emit('video:pause');
-          player.emit('video:playing');
+          emitPlaying(player);
         } else {
           player.emit('video:seeking');
           player.emit('video:seeked');
@@ -643,7 +740,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       const params = createParams();
       params.autoPlayNextEnabledRef.current = true;
       const { player, video } = await setupPlayer(params);
-      player.emit('video:playing');
+      emitPlaying(player);
       player.duration = 100;
       player.currentTime = 99.8;
       runManagedVideoCleanup(video);
@@ -672,7 +769,7 @@ describe('initializeArtPlayer 拉流控制', () => {
 
     async function nearEnd(params = completionParams()) {
       const result = await setupPlayer(params);
-      result.player.emit('video:playing');
+      emitPlaying(result.player);
       result.player.duration = 1000;
       result.player.currentTime = 900;
       result.player.emit('video:timeupdate');
@@ -716,7 +813,7 @@ describe('initializeArtPlayer 拉流控制', () => {
             outro_time: -100,
           };
         const { player } = await setupPlayer(params);
-        player.emit('video:playing');
+        emitPlaying(player);
         player.duration = 1000;
         player.currentTime = reason === 'outro' ? 810 : 900;
         player.emit('video:timeupdate');
@@ -814,7 +911,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       if (condition === 'ineligible')
         params.onLastEpisodeNearEnd = jest.fn().mockReturnValue(false);
       const { player, video } = await setupPlayer(params);
-      if (condition !== 'not-started') player.emit('video:playing');
+      if (condition !== 'not-started') emitPlaying(player);
       if (condition === 'pending')
         params.clearTargetEpisodeProgressRef.current = true;
       if (condition === 'released') runManagedVideoCleanup(video);
@@ -861,7 +958,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       createdVideos.push(player.video);
       player.video.pause = jest.fn();
       player.option.customType.m3u8(player.video, player.option.url);
-      player.emit('video:playing');
+      emitPlaying(player);
       player.duration = 1000;
       player.currentTime = 900;
       player.emit('video:timeupdate');
@@ -884,7 +981,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       });
       await act(flushMicrotasks);
       expect(MockArtplayer.instances).toHaveLength(1);
-      player.emit('video:playing');
+      emitPlaying(player);
       player.currentTime = 900;
       player.emit('video:timeupdate');
       expect(onLastEpisodeNearEnd).toHaveBeenCalledTimes(1);
@@ -928,7 +1025,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     const params = createParams();
     params.autoPlayNextEnabledRef.current = true;
     const { player } = await setupPlayer(params);
-    player.emit('video:playing');
+    emitPlaying(player);
     player.duration = 1400;
     player.currentTime = 1392.5;
     player.emit('video:timeupdate');
@@ -950,7 +1047,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     const params = createParams();
     params.autoPlayNextEnabledRef.current = true;
     const { player } = await setupPlayer(params);
-    player.emit('video:playing');
+    emitPlaying(player);
     player.duration = 1400;
     player.currentTime = 1395;
     player.emit('video:timeupdate');
@@ -1120,7 +1217,7 @@ describe('initializeArtPlayer 拉流控制', () => {
   it('未开连播时自然播完补存进度', async () => {
     const params = createParams();
     const { player } = await setupPlayer(params);
-    player.emit('video:playing');
+    emitPlaying(player);
     player.duration = 1400;
     player.currentTime = 1400;
     (params.saveCurrentPlayProgress as jest.Mock).mockClear();
@@ -1136,7 +1233,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       outro_time: -60,
     };
     const { player } = await setupPlayer(params);
-    player.emit('video:playing');
+    emitPlaying(player);
     player.duration = 1400;
     player.currentTime = 1345;
     player.emit('video:timeupdate');
@@ -1170,7 +1267,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     expect(params.handlePlaybackStatsEvent).toHaveBeenLastCalledWith('pause');
     jest.mocked(params.handlePlaybackStatsEvent).mockClear();
     runManagedVideoCleanup(video);
-    player.emit('video:playing');
+    emitPlaying(player);
     player.emit('video:timeupdate');
     player.emit('video:waiting');
     expect(params.handlePlaybackStatsEvent).not.toHaveBeenCalled();
@@ -1201,7 +1298,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       }
       Object.defineProperty(video, 'paused', { value: false });
       video.dispatchEvent(new Event('playing'));
-      player.emit('video:playing');
+      emitPlaying(player);
       expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
       act(() => jest.advanceTimersByTime(300_000));
       const fallback = getManagedVideo(video).__icetvSwitchToServerProxy!;
@@ -1212,11 +1309,15 @@ describe('initializeArtPlayer 拉流控制', () => {
         300_000,
       );
 
+      Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        get: () => 1,
+      });
       player.emit('video:seeked');
       expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
       video.dispatchEvent(new Event('playing'));
-      player.emit('video:playing');
-      player.emit('video:playing');
+      emitPlaying(player);
+      emitPlaying(player);
       expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
       expect(params.setRealtimeLoadSpeed).toHaveBeenLastCalledWith('');
       expect(
@@ -1224,15 +1325,14 @@ describe('initializeArtPlayer 拉流控制', () => {
       ).toBeNull();
       expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
       expect(params.startPlaybackStatsSession).toHaveBeenCalledTimes(1);
-      if (kind === 'native') {
-        expect(
-          jest
-            .mocked(reportSourceRouteStat)
-            .mock.calls.filter(
-              ([, route, success]) => route === 'server' && success,
-            ),
-        ).toHaveLength(1);
-      }
+      expect(
+        jest
+          .mocked(reportSourceRouteStat)
+          .mock.calls.filter(([, , success]) => success),
+      ).toEqual([
+        [DETAIL.source, 'browser', true, 'primary'],
+        [DETAIL.source, 'server', true, 'fallback'],
+      ]);
       runManagedVideoCleanup(video);
       expect(getManagedVideo(video).__icetvSwitchToServerProxy).toBeNull();
       expect(fallback('late-timeout')).toBe(false);
@@ -1253,7 +1353,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     runManagedVideoCleanup(video);
     expect(getManagedVideo(video).__icetvSwitchToServerProxy).toBeNull();
     expect(fallback('page-loading-timeout')).toBe(false);
-    player.emit('video:playing');
+    emitPlaying(player);
     expect(player.switchUrl).not.toHaveBeenCalled();
     expect(params.onPlaybackStarted).not.toHaveBeenCalled();
     expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
@@ -1453,7 +1553,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       expect(player.switchUrl).not.toHaveBeenCalled();
       expect(hls.stopLoad).not.toHaveBeenCalled();
       expect(reloadDanmaku).not.toHaveBeenCalled();
-      player.emit('video:playing');
+      emitPlaying(player);
       expect(started).toHaveBeenCalledTimes(1);
     });
 
@@ -1610,7 +1710,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       const { player, video } = await setupPlayer(params);
       const setPaused = trackPaused(video, false);
       video.dispatchEvent(new Event('playing'));
-      player.emit('video:playing');
+      emitPlaying(player);
       expect(
         getManagedVideo(video).__icetvSwitchToServerProxy!(
           'page-loading-timeout',
@@ -1618,6 +1718,10 @@ describe('initializeArtPlayer 拉流控制', () => {
       ).toBe(true);
       expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
 
+      Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        get: () => 1,
+      });
       setPaused(true);
       player.emit('pause');
       expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
@@ -1648,6 +1752,121 @@ describe('initializeArtPlayer 拉流控制', () => {
   });
 
   describe('起播', () => {
+    it.each([EPISODE_1, 'https://cdn.example/movie.mp4'])(
+      '%s 从头播在定时检查与 progress 时保留遮罩，首帧起播后才关闭',
+      async (url) => {
+        const params = createParams();
+        params.videoUrl = url;
+        params.clearTargetEpisodeProgressRef.current = true;
+        params.resumeModeRef.current = 'forced';
+        params.onPlaybackStarted = jest.fn();
+        const { player, video, loadingSessionRef } = await setupPlayer(params);
+        let resolvePlay!: () => void;
+        video.play = jest.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolvePlay = resolve;
+            }),
+        );
+        for (const elapsed of [0, 500]) {
+          jest.advanceTimersByTime(elapsed);
+          player.emit('video:progress');
+          expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+          expect(loadingSessionRef.current.playbackStartNotified).toBe(false);
+        }
+        makeFirstFrameReady(video);
+        player.emit('video:loadeddata');
+        expect(video.play).toHaveBeenCalledTimes(1);
+        expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+        resolvePlay();
+        await flushMicrotasks();
+        expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+        expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
+        expect(loadingSessionRef.current.pendingInitialResumeTarget).toBeNull();
+      },
+    );
+
+    it.each(['video:loadeddata', 'video:seeked'])(
+      '续播 seek 落地前保留遮罩，%s 就绪后仍请求播放',
+      async (event) => {
+        const params = createParams();
+        params.resumeTimeRef.current = 237;
+        params.resumeModeRef.current = 'forced';
+        params.playbackRequestModeRef.current = 'manual-source';
+        const { player, video, loadingSessionRef } = await setupPlayer(params);
+        player.duration = 1000;
+        let seeking = true;
+        Object.defineProperty(video, 'seeking', { get: () => seeking });
+        Object.defineProperty(video, 'readyState', {
+          configurable: true,
+          get: () => 1,
+        });
+        video.play = jest.fn(() => Promise.resolve());
+        player.emit('video:progress');
+        expect(player.currentTime).toBe(237);
+        video.currentTime = 237;
+        player.emit('video:progress');
+        jest.advanceTimersByTime(500);
+        expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+        expect(loadingSessionRef.current.playbackStartNotified).toBe(false);
+        expect(video.play).not.toHaveBeenCalled();
+        makeFirstFrameReady(video);
+        Object.defineProperty(video, 'buffered', {
+          get: () => ({ length: 1, start: () => 234, end: () => 250 }),
+        });
+        player.emit('video:progress');
+        expect(video.play).not.toHaveBeenCalled();
+        seeking = false;
+        player.emit(event);
+        expect(video.play).toHaveBeenCalledTimes(1);
+        expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+        await flushMicrotasks();
+        expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+        expect(loadingSessionRef.current.pendingInitialResumeTarget).toBeNull();
+      },
+    );
+
+    it.each([0, 1])(
+      '未暂停但 readyState=%s 时不关闭遮罩',
+      async (readyState) => {
+        const { player, video, params, loadingSessionRef } =
+          await setupPlayer();
+        makeFirstFrameReady(video);
+        Object.defineProperties(video, {
+          readyState: { get: () => readyState },
+          paused: { get: () => false },
+        });
+        for (const event of [
+          'video:progress',
+          'video:timeupdate',
+          'video:playing',
+        ]) {
+          player.emit(event);
+        }
+        jest.advanceTimersByTime(500);
+        expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+        expect(loadingSessionRef.current.playbackStartNotified).toBe(false);
+      },
+    );
+
+    it('历史续播在时长未知时保留恢复资格，seek 成功后才消费', async () => {
+      const params = createParams();
+      params.resumeTimeRef.current = 540;
+      params.resumeModeRef.current = 'history';
+      params.allowAutoResumeRef.current = true;
+      const { player, loadingSessionRef } = await setupPlayer(params);
+      jest.advanceTimersByTime(500);
+      expect(player.currentTime).toBe(0);
+      expect(params.allowAutoResumeRef.current).toBe(true);
+      expect(params.resumeTimeRef.current).toBe(540);
+      expect(loadingSessionRef.current.pendingInitialResumeTarget).toBe(540);
+      player.duration = 1800;
+      player.emit('video:progress');
+      expect(player.currentTime).toBe(540);
+      expect(params.allowAutoResumeRef.current).toBe(false);
+      expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+    });
+
     it('hls 仍在加载时直接播放，不重新拉流', async () => {
       const { player, video, hls } = await setupPlayer();
       makeFirstFrameReady(video);
@@ -1693,7 +1912,7 @@ it('起播后的显式 seek 可归零稳定进度，程序性续播 seek 保持�
   makeFirstFrameReady(video);
   player.duration = 1500;
   player.currentTime = 120;
-  player.emit('video:playing');
+  emitPlaying(player);
   params.stableCurrentTimeRef.current = 120;
   player.currentTime = 0;
   player.emit('video:seeking');

@@ -138,7 +138,7 @@ export function getSourceRouteAdvice(
   mode: SourceProxyMode,
   view: SourceRouteStatsView | null,
 ): SourceRouteAdvice | null {
-  if (!view) return null;
+  if (!view || mode === 'relay') return null;
   const { browser, server, serverFallback } = view;
   const top = dominantFailure(view);
 
@@ -215,6 +215,7 @@ export function formatRouteDetails(
     stats ? `${stats.successCount}/${stats.totalCount}` : '—';
   const lines = [
     `${days}天成功数/样本数（含换源测速）`,
+    '线路按分片路径统计，直连含清单中转',
     `首选直连 ${count(view?.browser)} · 首选代理 ${count(view?.server)}`,
     `直连失败后代理挽回 ${count(view?.serverFallback)}`,
   ];

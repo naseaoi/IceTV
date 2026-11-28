@@ -46,6 +46,13 @@ export function getSharedPlaybackDetail(
   return entry.task;
 }
 
+export class PlaybackDetailResourceLimitedError extends Error {
+  constructor() {
+    super('本站资源暂时受限，请稍后重试');
+    this.name = 'PlaybackDetailResourceLimitedError';
+  }
+}
+
 export function fetchSharedPlaybackDetail(
   source: string,
   id: string,
@@ -62,7 +69,15 @@ export function fetchSharedPlaybackDetail(
     { credentials: 'same-origin' },
   )
     .then(async (response) => {
-      if (!response.ok) throw new Error('获取视频详情失败');
+      if (!response.ok) {
+        if (
+          (response.status === 429 || response.status === 503) &&
+          response.headers?.get?.('x-icetv-resource-limited') === '1'
+        ) {
+          throw new PlaybackDetailResourceLimitedError();
+        }
+        throw new Error('获取视频详情失败');
+      }
       const detail = (await response.json()) as SearchResult;
       if (!Array.isArray(detail?.episodes) || !detail.episodes.length)
         throw new Error('无可播放剧集');

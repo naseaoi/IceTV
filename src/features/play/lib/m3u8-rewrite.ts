@@ -264,7 +264,7 @@ async function rewriteM3U8Content(
           line,
           'URI',
           baseUrl,
-          effectiveAllowCors,
+          isLive && effectiveAllowCors,
           (targetUrl) => buildProxyPath('key', targetUrl),
         ),
       );
@@ -277,7 +277,7 @@ async function rewriteM3U8Content(
           line,
           'URI',
           baseUrl,
-          effectiveAllowCors,
+          isLive && effectiveAllowCors,
           (targetUrl) => buildProxyPath('m3u8', targetUrl, nestedPlaylistRoute),
         ),
       );

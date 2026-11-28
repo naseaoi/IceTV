@@ -68,3 +68,21 @@ it('批量操作失败保留错误弹窗与选中项', async () => {
   expect(showToast).not.toHaveBeenCalled();
   expect(onClearSelection).not.toHaveBeenCalled();
 });
+
+it('confirms and applies relay to selected sources', async () => {
+  const { result, callSourceApi } = setup();
+  act(() =>
+    result.current.requestBatchOperation('batch_set_proxy_mode', {
+      proxyMode: 'relay',
+    }),
+  );
+  expect(result.current.confirmModal.message).toContain('清单中转');
+  await act(async () => {
+    await result.current.confirmModal.onConfirm();
+  });
+  expect(callSourceApi).toHaveBeenCalledWith({
+    action: 'batch_set_proxy_mode',
+    keys: ['first', 'second'],
+    proxyMode: 'relay',
+  });
+});

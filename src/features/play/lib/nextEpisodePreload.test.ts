@@ -332,6 +332,40 @@ describe('preloadEpisodeFragments', () => {
     },
   );
 
+  it('relay preloads direct fragments from its relayed manifest', async () => {
+    const route = jest
+      .mocked(proxyModes.resolveSourcePlaybackRoute)
+      .mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: false,
+        allowAutoFallback: false,
+      });
+    try {
+      const requested: string[] = [];
+      const fetcher: PreloadFetcher = async (url) => {
+        requested.push(url);
+        return upstreamTarget(url) === NEXT_EPISODE_URL
+          ? fakeResponse(url, {
+              text: mediaPlaylist(3, 'https://ipfs.example/'),
+            })
+          : fakeResponse(url, { bytes: 100 });
+      };
+      const { cache, result } = run(fetcher);
+      await expect(result).resolves.toBe(3);
+      const manifest = new URL(requested[0]);
+      expect(manifest.pathname).toBe('/api/proxy/m3u8');
+      expect(manifest.searchParams.get('allowCORS')).toBe('true');
+      expect(requested.slice(1)).toEqual(
+        Array.from({ length: 3 }, (_, i) => `https://ipfs.example/seg-${i}.ts`),
+      );
+      expect(cache.has('https://ipfs.example/seg-0.ts')).toBe(true);
+    } finally {
+      route.mockImplementation(
+        jest.requireActual('@/lib/proxy-modes').resolveSourcePlaybackRoute,
+      );
+    }
+  });
+
   it('直连预载保留分片缓存并按每层最终地址解析相对路径', async () => {
     const route = jest
       .mocked(proxyModes.resolveSourcePlaybackRoute)

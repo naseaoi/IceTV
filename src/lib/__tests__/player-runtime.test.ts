@@ -61,7 +61,7 @@ describe('prefetchM3U8', () => {
     try {
       prefetchM3U8('https://cdn.example/index.m3u8', { directManifest: true });
       expect(fetchMock).not.toHaveBeenCalled();
-      const url = '/api/proxy/m3u8?url=test';
+      const url = '/api/proxy/m3u8?url=test&allowCORS=true';
       prefetchM3U8(url, { directManifest: false });
       expect(fetchMock).toHaveBeenCalledWith(url, {
         cache: 'no-store',

@@ -67,6 +67,7 @@ import {
   pauseIfVodRuntimeReleased,
   registerVodNativeRuntime,
   VOD_ROUTE_CHANGING_EVENT,
+  VOD_ROUTE_STARTED_EVENT,
 } from '@/features/play/lib/vodHlsRuntime';
 import {
   createVodPlaybackIntent,
@@ -1042,6 +1043,10 @@ export async function initializeArtPlayer(
     };
 
     const reportPlayerRouteStarted = () => {
+      if (mediaKind === 'hls') {
+        player.video?.dispatchEvent(new Event(VOD_ROUTE_STARTED_EVENT));
+        return;
+      }
       if (
         mediaKind !== 'native' ||
         nativeRouteStatReported[nativeUseServerProxy ? 'server' : 'browser']
@@ -1094,6 +1099,8 @@ export async function initializeArtPlayer(
       if (isStalePlayerSession() || holdFinishedEpisode()) {
         return;
       }
+      if (!isInitialPlaybackPositionReady()) return;
+      loadingSessionRef.current.pendingInitialResumeTarget = null;
 
       const firstStart = markPlayerLoadingSessionStarted(
         loadingSessionRef.current,
@@ -1145,6 +1152,7 @@ export async function initializeArtPlayer(
       void video
         .play()
         .then(() => {
+          initialPlaybackRequestInFlight = false;
           finishInitialLoading();
         })
         .catch((error) => {
@@ -1177,21 +1185,13 @@ export async function initializeArtPlayer(
       return holdFinishedEpisode() || changed;
     };
 
-    const completePendingResumeIfReady = () => {
-      if (resolvePendingStart()) return false;
-      if (
-        !hasReachedResumeTarget(
+    const isInitialPlaybackPositionReady = () =>
+      shouldDismissLoadingFromReadyFrame(player.video) &&
+      (loadingSessionRef.current.pendingInitialResumeTarget === null ||
+        hasReachedResumeTarget(
           player.currentTime || 0,
           loadingSessionRef.current.pendingInitialResumeTarget,
-        )
-      ) {
-        return false;
-      }
-
-      loadingSessionRef.current.pendingInitialResumeTarget = null;
-      finishInitialLoading();
-      return true;
-    };
+        ));
 
     const retryPendingResumePosition = () => {
       if (resolvePendingStart()) return false;
@@ -1221,6 +1221,9 @@ export async function initializeArtPlayer(
         if (applyResumeTime(player, safeTarget)) {
           lastPendingResumeSeekAt = now;
           stableCurrentTimeRef.current = safeTarget;
+          if (resumeModeRef.current === 'history') {
+            allowAutoResumeRef.current = false;
+          }
           return true;
         }
       } catch (error) {
@@ -1228,10 +1231,6 @@ export async function initializeArtPlayer(
       }
 
       return false;
-    };
-
-    const finishLoadingFromPlaybackStarted = () => {
-      finishInitialLoading();
     };
 
     const ensureInitialPlaybackPosition = () => {
@@ -1265,9 +1264,9 @@ export async function initializeArtPlayer(
           ) {
             appliedResumeTarget = safeResumeTarget;
             lastPendingResumeSeekAt = performance.now();
-          }
-          if (resumeModeRef.current === 'history') {
-            allowAutoResumeRef.current = false;
+            if (resumeModeRef.current === 'history') {
+              allowAutoResumeRef.current = false;
+            }
           }
         } catch (error) {
           console.warn('恢复播放进度失败:', error);
@@ -1300,9 +1299,8 @@ export async function initializeArtPlayer(
       const activeVideo = player.video as HTMLVideoElement | null;
       if (
         loadingSessionRef.current.playbackStartNotified &&
-        loadingSessionRef.current.pendingInitialResumeTarget === null &&
         activeVideo?.paused &&
-        shouldDismissLoadingFromReadyFrame(activeVideo)
+        isInitialPlaybackPositionReady()
       ) {
         finishInitialLoading(true);
       }
@@ -1315,28 +1313,19 @@ export async function initializeArtPlayer(
 
       ensureInitialPlaybackPosition();
 
-      const activeVideo = player.video as HTMLVideoElement | null;
-      const isPlayingReady = shouldDismissLoadingFromCanPlay(activeVideo);
-      if (isPlayingReady) {
-        finishLoadingFromPlaybackStarted();
-      }
-
-      const hasReadyFrame = shouldDismissLoadingFromReadyFrame(activeVideo);
-      // 起播后播放与暂停由用户决定，就绪事件不再代为播放
-      const mayRequestPlayback =
-        hasReadyFrame && !loadingSessionRef.current.playbackStartNotified;
-      if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
-        if (!completePendingResumeIfReady()) {
-          retryPendingResumePosition();
-        }
-        if (!isPlayingReady && mayRequestPlayback) {
-          requestInitialPlayback(activeVideo);
-        }
-        finishRecoveryIfPausedReady();
+      if (!isInitialPlaybackPositionReady()) {
+        retryPendingResumePosition();
         return;
       }
 
-      if (mayRequestPlayback) {
+      const activeVideo = player.video as HTMLVideoElement | null;
+      if (shouldDismissLoadingFromCanPlay(activeVideo)) {
+        finishInitialLoading(true);
+      } else if (
+        shouldDismissLoadingFromReadyFrame(activeVideo) &&
+        !loadingSessionRef.current.playbackStartNotified
+      ) {
+        // 起播后播放与暂停由用户决定，就绪事件不再代为播放
         requestInitialPlayback(activeVideo);
       }
       finishRecoveryIfPausedReady();
@@ -1373,15 +1362,13 @@ export async function initializeArtPlayer(
     });
 
     player.on('video:playing', () => {
-      if (resolvePendingStart()) return;
+      if (isStalePlayerSession() || resolvePendingStart()) return;
       ensureInitialPlaybackPosition();
+      if (!isInitialPlaybackPositionReady()) retryPendingResumePosition();
       finishInitialLoading(true);
       if (!isStalePlayerSession()) {
         smoothnessReporter.handle('playing');
         handlePlaybackStatsEvent?.('playing');
-      }
-      if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
-        retryPendingResumePosition();
       }
     });
 
@@ -1473,12 +1460,8 @@ export async function initializeArtPlayer(
       handlePlaybackStatsEvent?.('timeupdate');
       updateStableCurrentTime(player.currentTime || 0);
 
-      if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
-        completePendingResumeIfReady();
-      }
-
       if (shouldDismissLoadingFromCanPlay(player.video)) {
-        finishLoadingFromPlaybackStarted();
+        finishInitialLoading();
       }
 
       const duration = player.duration || 0;
@@ -1705,7 +1688,7 @@ export async function initializeArtPlayer(
       }
       updateSeekProgress(true);
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
-        completePendingResumeIfReady();
+        finishInitialLoadingIfMediaReady();
       }
     });
 

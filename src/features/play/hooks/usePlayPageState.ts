@@ -13,6 +13,7 @@ import { parsePlayPagePath } from '@/features/play/lib/playPageUrl';
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type { SourceSwitchCleanupTask } from '@/features/play/lib/sourceSwitchCleanup';
+import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import {
   readAutoPlayNextEnabled,
   readBlockAdEnabled,
@@ -175,6 +176,7 @@ export function usePlayPageState(
     null,
   );
   const playbackRequestModeRef = useRef<PlaybackRequestMode>('initial');
+  const playbackIntentRef = useRef(createVodPlaybackIntent());
 
   const [optimizationEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
@@ -287,6 +289,7 @@ export function usePlayPageState(
     pendingSourceSwitchCleanupRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
+    playbackIntentRef,
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,

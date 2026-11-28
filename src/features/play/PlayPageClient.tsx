@@ -172,6 +172,7 @@ function AuthenticatedPlayPageClient({
     pendingSourceSwitchCleanupRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
+    playbackIntentRef: pagePlaybackIntentRef,
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,
@@ -287,6 +288,7 @@ function AuthenticatedPlayPageClient({
 
   usePlayInit({
     onSourceUnavailable: handleSourceUnavailable,
+    playbackIntentRef: pagePlaybackIntentRef,
     currentSource,
     currentId,
     currentSourceRef,
@@ -323,8 +325,9 @@ function AuthenticatedPlayPageClient({
 
   const resetAutoSourceSwitchRef = useRef<(() => void) | null>(null);
   const handleRestoreEpisodeChange = useCallback(() => {
+    setIsVideoLoading(true);
     resetAutoSourceSwitchRef.current?.();
-  }, []);
+  }, [setIsVideoLoading]);
 
   const {
     episodeEntries,
@@ -517,13 +520,6 @@ function AuthenticatedPlayPageClient({
   const cancelEpisodeResolve = useCallback(() => {
     episodeResolveControllerRef.current?.abort();
   }, []);
-  useEffect(() => {
-    window.addEventListener(PLAYER_EXIT_EVENT, cancelEpisodeResolve);
-    return () => {
-      window.removeEventListener(PLAYER_EXIT_EVENT, cancelEpisodeResolve);
-      cancelEpisodeResolve();
-    };
-  }, [cancelEpisodeResolve]);
 
   const {
     handleSourceChange,
@@ -539,6 +535,7 @@ function AuthenticatedPlayPageClient({
   } = useSourceSwitch({
     cancelEpisodeResolve,
     availableSources,
+    sourceSearchLoading,
     precomputedVideoInfo,
     currentEpisodeIndex,
     artPlayerRef,
@@ -553,6 +550,7 @@ function AuthenticatedPlayPageClient({
     clearTargetEpisodeProgressRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
+    playbackIntentRef: pagePlaybackIntentRef,
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
     videoUrlRef,
@@ -629,6 +627,12 @@ function AuthenticatedPlayPageClient({
     resetSourceSwitchIntent();
   }, [cancelPlaybackStart, resetSourceSwitchIntent]);
   resetAutoSourceSwitchRef.current = resetAutoSourceSwitch;
+  useEffect(() => {
+    window.addEventListener(PLAYER_EXIT_EVENT, resetAutoSourceSwitch);
+    return () => {
+      window.removeEventListener(PLAYER_EXIT_EVENT, resetAutoSourceSwitch);
+    };
+  }, [resetAutoSourceSwitch]);
 
   // 选集中实际更新了集索引才开启新意图；同集和边界导航保留仍在运行的播放器。
   const handleEpisodeChangeRequest = useCallback(
@@ -1168,7 +1172,7 @@ function AuthenticatedPlayPageClient({
   }
 
   if (error) {
-    if (detail) {
+    if (detail?.episodes?.length) {
       return renderMainContent(error);
     }
     return (

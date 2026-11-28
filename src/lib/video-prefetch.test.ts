@@ -4,6 +4,7 @@ import {
   fetchSharedPlaybackDetail,
   getSharedPlaybackDetail,
   getSharedPlaybackSearch,
+  PlaybackDetailResourceLimitedError,
   warmupForPlayback,
   warmupSearchForTitle,
 } from '@/lib/video-prefetch';
@@ -54,6 +55,24 @@ it('HTTP 失败不缓存，后续请求可以重试', async () => {
   await expect(fetchSharedPlaybackDetail('a', '1')).resolves.toEqual(detail);
   expect(global.fetch).toHaveBeenCalledTimes(2);
 });
+
+it.each([429, 503])(
+  '详情返回资源限流 %s 时抛出资源受限错误且不缓存',
+  async (status) => {
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: false,
+      status,
+      headers: {
+        get: (name: string) =>
+          name === 'x-icetv-resource-limited' ? '1' : null,
+      },
+    });
+    await expect(fetchSharedPlaybackDetail('a', '1')).rejects.toBeInstanceOf(
+      PlaybackDetailResourceLimitedError,
+    );
+    expect(getSharedPlaybackDetail('a', '1')).toBeNull();
+  },
+);
 
 it('完整搜索复用在途预热并保留失败源统计', async () => {
   let finish!: (value: unknown) => void;

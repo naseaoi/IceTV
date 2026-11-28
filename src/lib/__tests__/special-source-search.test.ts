@@ -37,8 +37,11 @@ const sources = [
     key: 'giri',
     name: 'Giri',
     api: 'https://anime.girigirilove.icu',
-    empty: JSON.stringify({ list: [] }),
-    full: JSON.stringify({ list: [{ id: '1', name: 'Anime', pic: '' }] }),
+    empty: JSON.stringify({ code: 1, info: { rows: [], total: 0 } }),
+    full: JSON.stringify({
+      code: 1,
+      info: { rows: [{ vod_id: '1', vod_name: 'Anime', vod_pic: '' }] },
+    }),
   },
   {
     key: 'xgcartoon',

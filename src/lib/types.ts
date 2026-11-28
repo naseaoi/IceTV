@@ -519,7 +519,7 @@ export interface SourceProxyFailureItem {
 export type SourceRouteMode = 'browser' | 'server';
 export type SourceRouteStatPhase = 'primary' | 'fallback';
 
-// 数据库存储键隔离全程线路口径，API 仍使用 browser / server。
+// 线路按分片传输路径归类，browser 包含清单中转；存储键保留既有样本。
 export const SOURCE_ROUTE_STAT_STORAGE_MODES = {
   browser: { primary: 'browser-v3', fallback: 'browser-fb-v3' },
   server: { primary: 'server-v3', fallback: 'server-fb-v3' },

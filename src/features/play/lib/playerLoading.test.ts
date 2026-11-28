@@ -7,15 +7,24 @@ import {
 } from '@/features/play/lib/playerLoading';
 
 describe('playerLoading', () => {
+  const readyVideo = {
+    readyState: 4,
+    videoWidth: 1920,
+    currentTime: 0,
+    ended: false,
+    seeking: false,
+    buffered: { length: 1, start: () => 0.023, end: () => 121 },
+  };
+
   it('视频仍处于暂停态时，canplay 不能提前关闭加载遮罩', () => {
     expect(
-      shouldDismissLoadingFromCanPlay({ paused: true, ended: false }),
+      shouldDismissLoadingFromCanPlay({ ...readyVideo, paused: true }),
     ).toBe(false);
   });
 
   it('只有视频已经进入实际播放态时，canplay 才能兜底关闭遮罩', () => {
     expect(
-      shouldDismissLoadingFromCanPlay({ paused: false, ended: false }),
+      shouldDismissLoadingFromCanPlay({ ...readyVideo, paused: false }),
     ).toBe(true);
   });
 
@@ -25,6 +34,7 @@ describe('playerLoading', () => {
       videoWidth: 1920,
       currentTime: 0,
       ended: false,
+      seeking: false,
       buffered: {
         length: 1,
         start: () => 0.023,
@@ -41,6 +51,7 @@ describe('playerLoading', () => {
       videoWidth: 0,
       currentTime: 0,
       ended: false,
+      seeking: false,
       buffered: {
         length: 0,
         start: () => 0,
@@ -51,7 +62,16 @@ describe('playerLoading', () => {
     expect(shouldDismissLoadingFromReadyFrame(video)).toBe(false);
   });
 
-  it('恢复进度达到目标附近后即可关闭遮罩', () => {
+  it.each([{ readyState: 0 }, { readyState: 1 }, { seeking: true }])(
+    '未暂停但首帧或 seek 尚未就绪时保持遮罩：%j',
+    (state) => {
+      const video = { ...readyVideo, ...state, paused: false };
+      expect(shouldDismissLoadingFromReadyFrame(video)).toBe(false);
+      expect(shouldDismissLoadingFromCanPlay(video)).toBe(false);
+    },
+  );
+
+  it('恢复进度允许目标附近的时间误差，到点本身不代表首帧就绪', () => {
     expect(hasReachedResumeTarget(299.4, 300)).toBe(true);
     expect(hasReachedResumeTarget(120, 300)).toBe(false);
   });

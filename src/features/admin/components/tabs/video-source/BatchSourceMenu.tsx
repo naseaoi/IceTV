@@ -4,8 +4,7 @@ import { ChevronDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
-
-type SourceProxyMode = 'server' | 'browser' | 'auto';
+import type { SourceProxyMode } from '@/lib/proxy-modes';
 
 interface BatchSourceMenuProps {
   selectedCount: number;
@@ -15,6 +14,7 @@ interface BatchSourceMenuProps {
   isValidationLoading: boolean;
   isBrowserRouteLoading: boolean;
   isServerRouteLoading: boolean;
+  isRelayRouteLoading: boolean;
   isAutoRouteLoading: boolean;
   isAdminOnlyLoading: boolean;
   isPublicLoading: boolean;
@@ -34,6 +34,7 @@ export function BatchSourceMenu({
   isValidationLoading,
   isBrowserRouteLoading,
   isServerRouteLoading,
+  isRelayRouteLoading,
   isAutoRouteLoading,
   isAdminOnlyLoading,
   isPublicLoading,
@@ -73,6 +74,7 @@ export function BatchSourceMenu({
   }> = [
     { label: '浏览器直连', mode: 'browser', loading: isBrowserRouteLoading },
     { label: '服务端代理', mode: 'server', loading: isServerRouteLoading },
+    { label: '清单中转', mode: 'relay', loading: isRelayRouteLoading },
     { label: '自动选择', mode: 'auto', loading: isAutoRouteLoading },
   ];
   const scopeItems = [

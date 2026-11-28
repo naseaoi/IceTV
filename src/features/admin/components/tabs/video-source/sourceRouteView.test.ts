@@ -124,3 +124,12 @@ describe('getSourceRouteAdvice', () => {
     ).toBeNull();
   });
 });
+
+it('relay samples describe the segment route and skip binary route advice', () => {
+  const view = buildSourceRouteViews(
+    [stat('browser', 'primary', 0, 30)],
+    [{ source: 's', reason: 'http-404', failureCount: 30 }],
+  ).s;
+  expect(getSourceRouteAdvice('relay', view)).toBeNull();
+  expect(formatRouteDetails(view, 7)).toContain('直连含清单中转');
+});

@@ -3,9 +3,8 @@
 import { useCallback, useState } from 'react';
 
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import type { SourceProxyMode } from '@/lib/proxy-modes';
 import { DisplayableError } from '@/lib/user-facing-error';
-
-type SourceProxyMode = 'server' | 'browser' | 'auto';
 
 type BatchAction =
   | 'batch_enable'
@@ -22,6 +21,7 @@ interface BatchOperationOptions {
 const proxyModeLabels: Record<SourceProxyMode, string> = {
   browser: '浏览器直连',
   server: '服务端代理',
+  relay: '清单中转',
   auto: '自动选择',
 };
 

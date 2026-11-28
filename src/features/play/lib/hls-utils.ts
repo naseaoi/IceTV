@@ -765,9 +765,9 @@ export async function getVideoResolutionFromM3u8(
   signal?: AbortSignal,
 ): Promise<VideoProbeResult> {
   throwIfPlaybackCancelled(signal);
-  if (isSourceServerUnavailable(sourceKey, m3u8Url)) {
-    if (route.useServerProxy && !route.allowAutoFallback) {
-      // 固定代理配置交由管理员更改；跳过请求也不重复上报线路样本。
+  if (!route.directManifest && isSourceServerUnavailable(sourceKey, m3u8Url)) {
+    if (!route.allowAutoFallback) {
+      // 固定中转清单的配置交由管理员更改；跳过请求也不重复上报线路样本。
       throw new SourceProbeNetworkError('Server relay is cooling down');
     }
     route = {
@@ -785,7 +785,7 @@ export async function getVideoResolutionFromM3u8(
       true,
       'primary',
     );
-    if (!route.useServerProxy && sourceKey) {
+    if (route.allowAutoFallback && !route.useServerProxy && sourceKey) {
       clearSourceProxyOverride(sourceKey, m3u8Url);
     }
     return result;

@@ -22,7 +22,13 @@ interface ApiSourcePickerProps {
 }
 
 type SelectionFilter = 'all' | 'selected' | 'unselected';
-type SourceFilter = 'all' | 'direct' | 'relay' | 'cleanup' | 'disabled';
+type SourceFilter =
+  | 'all'
+  | 'direct'
+  | 'server'
+  | 'relay'
+  | 'cleanup'
+  | 'disabled';
 
 const CHIP_CLASS = 'shrink-0 rounded px-1.5 text-xs';
 const NEUTRAL_CHIP_CLASS = `${CHIP_CLASS} bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-300`;
@@ -53,8 +59,10 @@ export function ApiSourcePicker({
   const sourceMatchers: Record<SourceFilter, (source: DataSource) => boolean> =
     {
       all: () => true,
-      direct: (source) => source.proxyMode !== 'server',
-      relay: (source) => source.proxyMode === 'server',
+      direct: (source) =>
+        source.proxyMode !== 'server' && source.proxyMode !== 'relay',
+      server: (source) => source.proxyMode === 'server',
+      relay: (source) => source.proxyMode === 'relay',
       cleanup: (source) => isSourceCleanupCandidate(health.get(source.key)),
       disabled: (source) => Boolean(source.disabled),
     };
@@ -131,7 +139,8 @@ export function ApiSourcePicker({
               options={[
                 { value: 'all', label: '全部源' },
                 { value: 'direct', label: '直连或自动' },
-                { value: 'relay', label: '代理' },
+                { value: 'server', label: '代理' },
+                { value: 'relay', label: '清单中转' },
                 { value: 'cleanup', label: '待清理' },
                 { value: 'disabled', label: '已禁用' },
               ]}
@@ -178,11 +187,12 @@ export function ApiSourcePicker({
                       <span className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
                         {source.name}
                       </span>
-                      {sourceMatchers.relay(source) && (
+                      {(sourceMatchers.server(source) ||
+                        sourceMatchers.relay(source)) && (
                         <span
                           className={`${CHIP_CLASS} bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300`}
                         >
-                          代理
+                          {sourceMatchers.relay(source) ? '清单中转' : '代理'}
                         </span>
                       )}
                       {tier && healthChipClass && (

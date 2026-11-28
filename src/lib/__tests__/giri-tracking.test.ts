@@ -16,7 +16,7 @@ import {
 } from '@/lib/play-records';
 
 import {
-  createGiriTrackingHtml,
+  createGiriTrackingResponse,
   giriTrackingRecord,
 } from './__fixtures__/giri-tracking';
 
@@ -43,12 +43,14 @@ installStreamPolyfills();
 
 const username = 'giri-tracking-test';
 const originalFetch = global.fetch;
-let upstreamHtml: string;
+let upstreamResponse: ReturnType<typeof createGiriTrackingResponse>;
 
 describe('Giri tracking from upstream metadata to stored messages', () => {
   beforeEach(async () => {
-    upstreamHtml = createGiriTrackingHtml(9, 9);
-    global.fetch = jest.fn(async () => new Response(upstreamHtml));
+    upstreamResponse = createGiriTrackingResponse(9, 9);
+    global.fetch = jest.fn(
+      async () => new Response(JSON.stringify(upstreamResponse)),
+    );
     await db.savePlayRecord(username, 'giri', '27100', giriTrackingRecord);
   });
 
@@ -89,7 +91,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
       });
       await db.setFavoriteTracking(concurrentUser, 'giri+27100', false);
       await db.deletePlayRecord(deletedUser, 'giri', '27100');
-      return new Response(upstreamHtml);
+      return new Response(JSON.stringify(upstreamResponse));
     });
     try {
       await refreshRecordAndFavorites();
@@ -159,7 +161,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
       ...read!,
       metadata_checked_at: 0,
     });
-    upstreamHtml = createGiriTrackingHtml(10, 10);
+    upstreamResponse = createGiriTrackingResponse(10, 10);
     await refreshRecordAndFavorites();
     expect(
       (await getUserMessageSummary(username)).latestTracking,
@@ -182,7 +184,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
       ...acknowledged!,
       metadata_checked_at: 0,
     });
-    upstreamHtml = createGiriTrackingHtml(11, 11);
+    upstreamResponse = createGiriTrackingResponse(11, 11);
     await refreshRecordAndFavorites();
     expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(1);
     await db.savePlayRecord(username, 'giri', '27100', {
@@ -249,7 +251,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
         ...read!,
         metadata_checked_at: 0,
       });
-      upstreamHtml = createGiriTrackingHtml(10, 10);
+      upstreamResponse = createGiriTrackingResponse(10, 10);
       await refreshRecordAndFavorites();
       expect(
         (await getUserMessageSummary(username)).latestTracking,
@@ -261,7 +263,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
   );
 
   it('仅简中更新时从 8/8 变为 8/9 并提醒', async () => {
-    upstreamHtml = createGiriTrackingHtml(8, 9);
+    upstreamResponse = createGiriTrackingResponse(8, 9);
     await refreshRecordAndFavorites();
     expect(await db.getPlayRecord(username, 'giri', '27100')).toMatchObject({
       index: 16,
@@ -292,7 +294,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
   });
 
   it('其他分组更新时不提醒，所看分组更新后才提醒', async () => {
-    upstreamHtml = createGiriTrackingHtml(9, 8);
+    upstreamResponse = createGiriTrackingResponse(9, 8);
     await refreshRecordAndFavorites();
     const unchanged = await db.getPlayRecord(username, 'giri', '27100');
     expect(getPlayRecordEpisodeDisplay(unchanged!)).toEqual({
@@ -305,7 +307,7 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
       ...unchanged!,
       metadata_checked_at: 0,
     });
-    upstreamHtml = createGiriTrackingHtml(9, 9);
+    upstreamResponse = createGiriTrackingResponse(9, 9);
     await refreshRecordAndFavorites();
     expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(1);
   });

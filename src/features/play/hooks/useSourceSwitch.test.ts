@@ -8,8 +8,12 @@ import type {
 } from '@/features/play/hooks/usePlayPageState';
 import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { AUTO_SOURCE_SWITCH_MAX_ATTEMPTS } from '@/features/play/lib/autoSourceSwitchPolicy';
 import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
-import { reportVodPlaybackOutcome } from '@/features/play/lib/vodPlaybackIntent';
+import {
+  createVodPlaybackIntent,
+  reportVodPlaybackOutcome,
+} from '@/features/play/lib/vodPlaybackIntent';
 import {
   deletePlayRecord,
   deleteSkipConfig,
@@ -177,6 +181,7 @@ function setupSourceSwitchOptions({
 
   const options: UseSourceSwitchOptions = {
     availableSources,
+    sourceSearchLoading: false,
     precomputedVideoInfo: videoInfo,
     currentEpisodeIndex: 2,
     artPlayerRef: { current: player as unknown as Artplayer | null },
@@ -193,6 +198,7 @@ function setupSourceSwitchOptions({
     clearTargetEpisodeProgressRef: { current: false },
     sourceSwitchEpisodeAnchorRef: { current: null },
     playbackRequestModeRef: { current: 'initial' as PlaybackRequestMode },
+    playbackIntentRef: { current: createVodPlaybackIntent() },
     pendingSourceSwitchCleanupRef: { current: null },
     sourceChangeRequestIdRef: { current: 0 },
     videoUrlRef: { current: videoUrl },
@@ -229,8 +235,10 @@ function setupSourceSwitchOptions({
 
 function setupHook(input: Parameters<typeof setupSourceSwitchOptions>[0]) {
   const { options, player } = setupSourceSwitchOptions(input);
-  const { result } = renderHook(() => useSourceSwitch(options));
-  return { result, options, player };
+  const { result, rerender, unmount } = renderHook(() =>
+    useSourceSwitch(options),
+  );
+  return { result, rerender, unmount, options, player };
 }
 
 function setupSkipConfigIntegration() {
@@ -325,6 +333,142 @@ function hangNextDetailFetch(): () => AbortSignal | undefined {
 }
 
 describe('useSourceSwitch 自动换源', () => {
+  it.each(['fatal', 'timeout', 'resolve'])(
+    '候选搜索未结束时 %s 失败先等待，候选到达后按现有排序换源',
+    async (failure) => {
+      localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+      const { video, runtimeCleanup } = createLoadingVideo();
+      const { result, options, rerender } = setupHook({
+        availableSources: [createSource('a', THREE_EPISODES)],
+        video,
+      });
+      options.sourceSearchLoading = true;
+      rerender();
+      act(() => {
+        if (failure === 'timeout') {
+          expect(result.current.handleLoadingTimeout()).toBe(true);
+        } else if (failure === 'resolve') {
+          result.current.handleEpisodeUrlResolveFailed();
+        } else {
+          expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(
+            true,
+          );
+        }
+      });
+      expect(options.setVideoLoadingStage).toHaveBeenLastCalledWith(
+        'sourceChanging',
+      );
+      expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+      expect(options.setError).toHaveBeenLastCalledWith(null);
+      expect(runtimeCleanup).toHaveBeenCalledTimes(1);
+      expect(options.playbackIntentRef.current.attempts).toBe(0);
+      expect(global.fetch).not.toHaveBeenCalled();
+      // 旧源的后续错误和页面计时器均保持等待，不重复记起播失败。
+      expect(result.current.handleLoadingTimeout()).toBe(true);
+      expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(
+        true,
+      );
+      expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(1);
+
+      mockSelectionContext = {
+        proxyModes: { b: 'server', c: 'browser' },
+        healthTiers: { b: 'stable', c: 'stable' },
+      };
+      options.availableSources = ['a', 'b', 'c'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      );
+      options.sourceSearchLoading = false;
+      rerender();
+      await waitFor(() =>
+        expect(options.setCurrentSource).toHaveBeenCalledWith('c'),
+      );
+      expect(options.playbackIntentRef.current.attempts).toBe(1);
+      expect(options.setError).not.toHaveBeenCalledWith('当前源加载失败');
+    },
+  );
+
+  it('候选搜索完成仍无可用目标时结束等待并显示失败', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options, rerender } = setupHook({
+      availableSources: [createSource('a', THREE_EPISODES)],
+    });
+    options.sourceSearchLoading = true;
+    rerender();
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    options.sourceSearchLoading = false;
+    rerender();
+    expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    expect(options.setError).toHaveBeenLastCalledWith('当前源加载失败');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(options.playbackIntentRef.current.attempts).toBe(0);
+  });
+
+  it.each(['disabled', 'exhausted'])(
+    '%s 时候选仍在搜索也立即交回失败，不登记等待',
+    (state) => {
+      localStorage.setItem(
+        AUTO_SWITCH_SOURCE_STORAGE_KEY,
+        String(state !== 'disabled'),
+      );
+      const { result, options, rerender } = setupHook({
+        availableSources: [createSource('a', THREE_EPISODES)],
+      });
+      options.sourceSearchLoading = true;
+      if (state === 'exhausted')
+        options.playbackIntentRef.current.attempts =
+          AUTO_SOURCE_SWITCH_MAX_ATTEMPTS;
+      rerender();
+      expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(
+        false,
+      );
+      expect(options.setIsVideoLoading).not.toHaveBeenCalled();
+      options.availableSources.push(createSource('b', THREE_EPISODES));
+      options.sourceSearchLoading = false;
+      rerender();
+      expect(options.setCurrentSource).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['manual', 'retry', 'episode', 'unmount'])(
+    '等待中 %s 操作使旧等待失效',
+    async (action) => {
+      localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+      const { result, options, rerender, unmount } = setupHook({
+        availableSources: [createSource('a', THREE_EPISODES)],
+      });
+      options.sourceSearchLoading = true;
+      rerender();
+      expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(
+        true,
+      );
+      const oldIntent = options.playbackIntentRef.current;
+      if (action === 'manual') {
+        // 手动候选先加入列表，搜索还未触发下一次渲染。
+        options.availableSources.push(createSource('manual', THREE_EPISODES));
+        await act(async () =>
+          result.current.handleSourceChange('manual', 'manual-id', '测试剧'),
+        );
+      } else if (action === 'unmount') {
+        unmount();
+      } else {
+        act(() => {
+          result.current.resetAutoSourceSwitch();
+          if (action === 'retry') result.current.restartCurrentPlayback();
+          else options.currentEpisodeIndexRef.current = 1;
+        });
+      }
+      expect(options.playbackIntentRef.current).not.toBe(oldIntent);
+      jest.mocked(options.setCurrentSource).mockClear();
+      jest.mocked(options.setError).mockClear();
+      options.availableSources = [createSource('b', THREE_EPISODES)];
+      options.sourceSearchLoading = false;
+      if (action !== 'unmount') rerender();
+      expect(options.setCurrentSource).not.toHaveBeenCalled();
+      expect(options.setError).not.toHaveBeenCalled();
+      expect(options.playbackIntentRef.current.attempts).toBe(0);
+    },
+  );
   it('仅提交新源时登记迁移，进度保存后等待迁移再清理旧配置', async () => {
     const sources = createWaitingSources(['a', 'b']);
     const { result, options } = setupHook({ availableSources: sources });

@@ -78,6 +78,32 @@ describe('admin source route admin-only visibility', () => {
     (saveConfig as jest.Mock).mockResolvedValue(undefined);
   });
 
+  it.each(['set_proxy_mode', 'batch_set_proxy_mode'])(
+    '%s accepts relay and rejects unknown modes',
+    async (action) => {
+      const config = createConfig();
+      (getConfig as jest.Mock).mockResolvedValue(config);
+      const target =
+        action === 'set_proxy_mode' ? { key: 'a' } : { keys: ['a', 'c'] };
+      const response = await getHandler()(
+        createRequest({ action, ...target, proxyMode: 'relay' }),
+      );
+      expect(response.status).toBe(200);
+      expect(config.SourceConfig.map((source) => source.proxyMode)).toEqual(
+        action === 'set_proxy_mode'
+          ? ['relay', undefined, undefined]
+          : ['relay', undefined, 'relay'],
+      );
+      expect(saveConfig).toHaveBeenCalledWith(config, expect.anything());
+      (saveConfig as jest.Mock).mockClear();
+      const invalid = await getHandler()(
+        createRequest({ action, ...target, proxyMode: 'unknown' }),
+      );
+      expect(invalid.status).toBe(400);
+      expect(saveConfig).not.toHaveBeenCalled();
+    },
+  );
+
   it('marks a single source as admin-only and clears the flag again', async () => {
     const config = createConfig();
     (getConfig as jest.Mock).mockResolvedValue(config);

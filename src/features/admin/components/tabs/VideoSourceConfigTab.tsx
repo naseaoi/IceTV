@@ -557,6 +557,7 @@ const VideoSourceConfig = ({
                 { value: 'auto', label: '自动' },
                 { value: 'browser', label: '直连' },
                 { value: 'server', label: '代理' },
+                { value: 'relay', label: '清单中转' },
               ]}
               showSelectedIcon={false}
               ariaLabel='筛选视频源线路'
@@ -642,6 +643,9 @@ const VideoSourceConfig = ({
                 )}
                 isServerRouteLoading={isLoading(
                   'batchSource_batch_set_proxy_mode_server',
+                )}
+                isRelayRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_relay',
                 )}
                 isAutoRouteLoading={isLoading(
                   'batchSource_batch_set_proxy_mode_auto',

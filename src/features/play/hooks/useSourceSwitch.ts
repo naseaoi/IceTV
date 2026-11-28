@@ -3,6 +3,7 @@
 import type Artplayer from 'artplayer';
 import {
   type Dispatch,
+  type MutableRefObject,
   type RefObject,
   type SetStateAction,
   useCallback,
@@ -118,6 +119,7 @@ function mergeSourceSwitchDetail(
 interface UseSourceSwitchOptions {
   cancelEpisodeResolve?: () => void;
   availableSources: SearchResult[];
+  sourceSearchLoading: boolean;
   precomputedVideoInfo: ReadonlyMap<string, VideoQualityInfo>;
   currentEpisodeIndex: number;
 
@@ -133,6 +135,7 @@ interface UseSourceSwitchOptions {
   clearTargetEpisodeProgressRef: RefObject<boolean>;
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
   playbackRequestModeRef: RefObject<PlaybackRequestMode>;
+  playbackIntentRef: MutableRefObject<VodPlaybackIntent>;
   pendingSourceSwitchCleanupRef: RefObject<SourceSwitchCleanupTask | null>;
   sourceChangeRequestIdRef: RefObject<number>;
   videoUrlRef: RefObject<string>;
@@ -168,6 +171,7 @@ interface UseSourceSwitchOptions {
 export function useSourceSwitch(options: UseSourceSwitchOptions) {
   const {
     availableSources,
+    sourceSearchLoading,
     precomputedVideoInfo,
     currentEpisodeIndex,
     artPlayerRef,
@@ -182,6 +186,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     clearTargetEpisodeProgressRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
+    playbackIntentRef,
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
     videoUrlRef,
@@ -208,7 +213,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   } = options;
 
   const autoSwitchFailedKeysRef = useRef<Set<string>>(new Set());
-  const playbackIntentRef = useRef(createVodPlaybackIntent());
+  const pendingAutoSwitchRef = useRef<{
+    intent: VodPlaybackIntent;
+    reason: string;
+  } | null>(null);
   const tryAutoSwitchSourceRef = useRef<(reason: string) => boolean>(
     () => false,
   );
@@ -227,10 +235,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     sourceDetailAbortRef.current?.abort();
     sourceDetailAbortRef.current = null;
     sourceSwitchInFlightRef.current = false;
+    pendingAutoSwitchRef.current = null;
     autoSwitchFailedKeysRef.current = new Set();
     playbackIntentRef.current = createVodPlaybackIntent();
     pendingPlaybackNoticeRef.current = null;
-  }, [sourceChangeRequestIdRef, cancelEpisodeResolve]);
+  }, [sourceChangeRequestIdRef, cancelEpisodeResolve, playbackIntentRef]);
 
   useEffect(
     () => () => {
@@ -733,6 +742,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       clearTargetEpisodeProgressRef,
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
+      playbackIntentRef,
       pendingSourceSwitchCleanupRef,
       sourceChangeRequestIdRef,
       setError,
@@ -803,8 +813,23 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         Date.now(),
         peekSourceSelectionContext(),
       );
-      if (!target) return false;
+      if (!target) {
+        if (!sourceSearchLoading) return false;
+        // 搜索尚未结束，暂时没有候选不等于源已耗尽；等待仍属于当前意图，不占尝试名额。
+        if (!pendingAutoSwitchRef.current) {
+          pendingAutoSwitchRef.current = {
+            intent: playbackIntentRef.current,
+            reason,
+          };
+          stopActiveHlsLoading();
+          setError(null);
+          setVideoLoadingStage('sourceChanging');
+          setIsVideoLoading(true);
+        }
+        return true;
+      }
 
+      pendingAutoSwitchRef.current = null;
       const targetKey = buildAutoSwitchSourceKey(target.source, target.id);
       // 发起即记为已尝试，换源完成前即使再次触发也不会重复选中同一目标
       failedKeys.add(targetKey);
@@ -828,13 +853,39 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       detailRef,
       currentEpisodeIndexRef,
       sourceSwitchEpisodeAnchorRef,
+      playbackIntentRef,
       handleSourceChange,
+      sourceSearchLoading,
+      stopActiveHlsLoading,
+      setError,
+      setVideoLoadingStage,
+      setIsVideoLoading,
     ],
   );
 
   useEffect(() => {
     tryAutoSwitchSourceRef.current = tryAutoSwitchSource;
-  }, [tryAutoSwitchSource]);
+    const pending = pendingAutoSwitchRef.current;
+    if (!pending) return;
+    if (pending.intent !== playbackIntentRef.current) {
+      pendingAutoSwitchRef.current = null;
+      return;
+    }
+    if (tryAutoSwitchSource(pending.reason)) return;
+
+    pendingAutoSwitchRef.current = null;
+    setIsVideoLoading(false);
+    setRealtimeLoadSpeed('');
+    playbackRequestModeRef.current = 'initial';
+    setError('当前源加载失败');
+  }, [
+    tryAutoSwitchSource,
+    playbackIntentRef,
+    playbackRequestModeRef,
+    setIsVideoLoading,
+    setRealtimeLoadSpeed,
+    setError,
+  ]);
 
   // 以下入口会被播放器实例和长生命周期 effect 捕获，经 ref 调用保持引用稳定
   const handleLoadingTimeout = useCallback(
@@ -843,6 +894,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         if (intent === playbackIntentRef.current) stopActiveHlsLoading();
         return false;
       }
+      if (pendingAutoSwitchRef.current) return true;
       // 换源等待详情期间的页面超时即详情请求超时：中止请求，按详情获取失败继续换源，提交新源时重新计时
       if (sourceSwitchInFlightRef.current) {
         sourceDetailAbortRef.current?.abort();
@@ -883,6 +935,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       currentSourceRef,
       currentIdRef,
       videoUrlRef,
+      playbackIntentRef,
       stopActiveHlsLoading,
       setRealtimeLoadSpeed,
       onPlaybackStartFailed,
@@ -893,7 +946,8 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     (reason: string, intent: VodPlaybackIntent = playbackIntentRef.current) => {
       if (!canHandleVodPlaybackFailure(intent, playbackIntentRef.current))
         return false;
-      if (sourceSwitchInFlightRef.current) return true;
+      if (sourceSwitchInFlightRef.current || pendingAutoSwitchRef.current)
+        return true;
       onPlaybackStartFailed?.();
       reportVodPlaybackOutcome(
         intent,
@@ -904,14 +958,15 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       if (tryAutoSwitchSourceRef.current(reason)) return true;
       return false;
     },
-    [onPlaybackStartFailed, currentSourceRef, currentIdRef],
+    [onPlaybackStartFailed, currentSourceRef, currentIdRef, playbackIntentRef],
   );
 
   const handleEpisodeUrlResolveFailed = useCallback(
     (intent = playbackIntentRef.current) => {
       if (!canHandleVodPlaybackFailure(intent, playbackIntentRef.current))
         return;
-      if (sourceSwitchInFlightRef.current) return;
+      if (sourceSwitchInFlightRef.current || pendingAutoSwitchRef.current)
+        return;
       onPlaybackStartFailed?.();
       reportVodPlaybackOutcome(
         intent,
@@ -931,6 +986,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       onPlaybackStartFailed,
       currentSourceRef,
       currentIdRef,
+      playbackIntentRef,
     ],
   );
 

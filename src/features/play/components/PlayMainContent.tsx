@@ -309,8 +309,11 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onDismissSourceRecommendationRef.current = onDismissSourceRecommendation;
   }, [onDismissSourceRecommendation]);
 
+  // 普通首次加载的详情、历史恢复由 loading 门禁隔离，不计入媒体起播无进展超时
+  const startupLocked = detailLoading || currentEpisodeIndex < 0;
+
   useEffect(() => {
-    if (!isVideoLoading || playbackError) {
+    if (!isVideoLoading || playbackError || startupLocked) {
       // 换集、重试后到新运行时登记进度前，video 上仍挂着上一轮的进度，按它计时会把已播时长算成起播耗时
       const video = artRef.current?.querySelector('video');
       settledStartupProgressRef.current = video
@@ -380,6 +383,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     artRef,
     currentSource,
     isVideoLoading,
+    startupLocked,
     videoLoadingStage,
     videoLoadingAttempt,
     playbackError,

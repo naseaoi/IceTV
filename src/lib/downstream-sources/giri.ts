@@ -1,39 +1,116 @@
-import { type ApiSite, API_CONFIG } from '@/lib/config';
+import type { ApiSite } from '@/lib/config';
 import {
-  type GiriEpisodeVariant,
-  countGirigiriVariantTabs,
-  extractGirigiriEpisodeVariants,
+  isGirigiriUrl,
+  normalizeGirigiriHttpUrl,
+  parseGirigiriPlaylists,
   parseGirigiriVariantId,
 } from '@/lib/giri';
-import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 import { requestSourceJson, requestSourceText } from './request.server';
-import { BROWSER_HTML_HEADERS, getSiteOrigin, toAbsoluteUrl } from './shared';
+import { BROWSER_HTML_HEADERS, getSiteOrigin } from './shared';
 
-interface GirigiriSuggestItem {
-  id: number | string;
-  name: string;
-  pic?: string;
+const API_ORIGIN = 'https://m3u8.girigirilove.com';
+const IMAGE_ORIGIN = 'https://jpg.girigirilove.com/';
+
+type JsonObject = Record<string, unknown>;
+
+function object(value: unknown): JsonObject | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
 }
 
-interface GirigiriPlayExtractResult {
-  url: string | null;
-  title: string;
-  year: string;
-  desc: string;
-  poster: string;
+function text(value: unknown): string {
+  return typeof value === 'string' ? normalizeInlineText(value) : '';
+}
+
+function positiveId(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const id = String(value).trim();
+  return /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)) ? id : null;
 }
 
 export function isGirigiriSource(apiSite: ApiSite): boolean {
-  // 站点更换过多个顶级域，按主机名中的 girigirilove 段识别
-  try {
-    return /(?:^|\.)girigirilove\./i.test(new URL(apiSite.api).hostname);
-  } catch {
-    return false;
+  return isGirigiriUrl(apiSite.api);
+}
+
+function toSearchResult(site: ApiSite, value: unknown): SearchResult | null {
+  const item = object(value);
+  if (!item) return null;
+  const id = positiveId(item.vod_id);
+  const title = text(item.vod_name);
+  if (!id || !title) return null;
+  const year =
+    typeof item.vod_year === 'number'
+      ? String(item.vod_year)
+      : text(item.vod_year);
+  return {
+    id,
+    title,
+    poster: normalizeGirigiriHttpUrl(item.vod_pic, IMAGE_ORIGIN),
+    episodes: [],
+    episodes_titles: [],
+    source: site.key,
+    source_name: site.name,
+    class: text(item.vod_class),
+    year: /^\d{4}$/.test(year) ? year : 'unknown',
+    desc: cleanHtmlTags(text(item.vod_content) || text(item.vod_blurb)),
+    type_name: '动漫',
+    douban_id: Number(positiveId(item.vod_douban_id) || 0),
+  };
+}
+
+export async function searchFromGirigiri(
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  if (signal?.aborted) return [];
+  const payload = object(
+    await requestSourceJson(
+      'girigiri 搜索',
+      `${API_ORIGIN}/api.php/Vod/get_list?vod_name=${encodeURIComponent(query)}&limit=20&offset=0`,
+      { headers: { Accept: 'application/json' }, signal, timeoutMs: 8000 },
+    ),
+  );
+  const info = object(payload?.info);
+  if (payload?.code !== 1 || !Array.isArray(info?.rows)) {
+    throw new Error('girigiri 搜索响应无效');
   }
+  const results = info.rows
+    .map((item) => toSearchResult(apiSite, item))
+    .filter((item): item is SearchResult => item !== null);
+  if (info.rows.length > 0 && results.length === 0) {
+    throw new Error('girigiri 搜索响应无效');
+  }
+  return results;
+}
+
+export async function getDetailFromGirigiri(
+  apiSite: ApiSite,
+  id: string,
+): Promise<SearchResult> {
+  const { videoId } = parseGirigiriVariantId(id);
+  if (positiveId(videoId) !== videoId) throw new Error('无效的 girigiri 编号');
+  const payload = object(
+    await requestSourceJson(
+      'girigiri 详情',
+      `${API_ORIGIN}/api.php/Vod/get_detail?vod_id=${videoId}`,
+      { headers: { Accept: 'application/json' } },
+    ),
+  );
+  const info = object(payload?.info);
+  const result = toSearchResult(apiSite, info);
+  if (payload?.code !== 1 || !result || result.id !== videoId) {
+    throw new Error('girigiri 详情响应无效');
+  }
+  return {
+    ...result,
+    ...parseGirigiriPlaylists(info?.vod_play_from, info?.vod_play_url),
+  };
 }
 
 function isCfChallenge(html: string): boolean {
@@ -60,319 +137,39 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
   return null;
 }
 
-function getGirigiriOrigins(apiSite: ApiSite): string[] {
-  return [getSiteOrigin(apiSite)];
-}
-
-async function fetchGiriHtmlFromOrigins(
-  origins: string[],
-  path: string,
-): Promise<{ origin: string; html: string } | null> {
-  for (const origin of origins) {
-    const html = await fetchGiriHtml(toAbsoluteUrl(path, origin));
-    if (html) {
-      return { origin, html };
-    }
-  }
-
-  return null;
-}
-
 function decodeGirigiriPlayUrl(rawUrl: string, encrypt: number): string {
   const normalized = rawUrl.replace(/\\\//g, '/');
-
-  if (encrypt === 2) {
-    try {
-      const base64Decoded = Buffer.from(normalized, 'base64').toString('utf8');
-      return decodeURIComponent(base64Decoded);
-    } catch {
-      return normalized;
-    }
-  }
-
-  if (encrypt === 1) {
-    try {
-      return decodeURIComponent(normalized);
-    } catch {
-      return normalized;
-    }
-  }
-
-  return normalized;
-}
-
-function parseGirigiriEpisodePlayHtml(
-  html: string,
-  origin: string,
-): GirigiriPlayExtractResult {
-  const title = normalizeInlineText(
-    html.match(/class="player-title-link"[^>]*>([^<]+)<\/a>/)?.[1] ||
-      html.match(/<title>([^<_]+)/)?.[1] ||
-      '',
-  );
-  const desc =
-    cleanHtmlTags(
-      html.match(/<div class="small-text">([\s\S]*?)<\/div>/)?.[1] ||
-        html.match(/<meta\s+name="description"\s+content="([^"]*)"/i)?.[1] ||
-        '',
-    ).trim() || '';
-  const year =
-    html.match(/<div class="cor4"\s+title="(\d{4})">/)?.[1] ||
-    html.match(/<a[^>]*>(\d{4})<\/a>/)?.[1] ||
-    'unknown';
-  const poster = toAbsoluteUrl(
-    html.match(/<div class="this-pic">[\s\S]*?data-src="([^"]+)"/i)?.[1] ||
-      html.match(/<img[^>]+data-src="([^"]+)"/i)?.[1] ||
-      '',
-    origin,
-  );
-
-  const playerBlock =
-    html.match(/var\s+player_aaaa\s*=\s*(\{[\s\S]*?\});/)?.[1] || '';
-  const encryptMatch = playerBlock.match(/"encrypt":(\d+)/);
-  const urlMatch = playerBlock.match(/"url":"([^"]+)"/);
-  if (!urlMatch) {
-    return {
-      url: null,
-      title,
-      year,
-      desc,
-      poster,
-    };
-  }
-
-  const encrypt = encryptMatch ? Number(encryptMatch[1]) : 0;
-  const decoded = decodeGirigiriPlayUrl(urlMatch[1], encrypt);
-  const normalizedUrl = /^https?:\/\//i.test(decoded)
-    ? decoded
-    : decoded.startsWith('//')
-      ? `https:${decoded}`
-      : '';
-
-  return {
-    url: normalizedUrl || null,
-    title,
-    year,
-    desc,
-    poster,
-  };
-}
-
-async function fetchGirigiriEpisodePlayUrl(
-  origins: string[],
-  playPath: string,
-): Promise<GirigiriPlayExtractResult> {
-  let fallbackResult: GirigiriPlayExtractResult | null = null;
-
-  for (const origin of origins) {
-    const playUrl = toAbsoluteUrl(playPath, origin);
-    const html = await fetchGiriHtml(playUrl);
-    if (!html) {
-      continue;
-    }
-
-    const result = parseGirigiriEpisodePlayHtml(html, origin);
-    if (result.url) {
-      return result;
-    }
-    fallbackResult = fallbackResult || result;
-  }
-
-  return (
-    fallbackResult || {
-      url: null,
-      title: '',
-      year: 'unknown',
-      desc: '',
-      poster: '',
-    }
-  );
-}
-
-async function fetchGirigiriSuggestList(
-  origin: string,
-  query: string,
-  signal?: AbortSignal,
-): Promise<{ list: GirigiriSuggestItem[] } | { failure: string }> {
-  const searchUrl = `${origin}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(query)}`;
-
   try {
-    const data = await requestSourceJson('girigiri 搜索', searchUrl, {
-      headers: API_CONFIG.search.headers,
-      signal,
-      timeoutMs: 8000,
-    });
-    return data &&
-      typeof data === 'object' &&
-      'list' in data &&
-      Array.isArray(data.list)
-      ? { list: data.list as GirigiriSuggestItem[] }
-      : { failure: 'girigiri 搜索响应无效' };
-  } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
-    return {
-      failure: error instanceof Error ? error.message : 'girigiri 搜索请求失败',
-    };
-  }
-}
-
-export async function searchFromGirigiri(
-  apiSite: ApiSite,
-  query: string,
-  signal?: AbortSignal,
-): Promise<SearchResult[]> {
-  const origins = getGirigiriOrigins(apiSite);
-  const failures: string[] = [];
-
-  for (const origin of origins) {
-    if (signal?.aborted) {
-      return [];
+    if (encrypt === 2) {
+      return decodeURIComponent(
+        Buffer.from(normalized, 'base64').toString('utf8'),
+      );
     }
-
-    const result = await fetchGirigiriSuggestList(origin, query, signal);
-    if (signal?.aborted) return [];
-    if ('failure' in result) {
-      failures.push(`入口${failures.length + 1}: ${result.failure}`);
-      continue;
-    }
-
-    return result.list
-      .map((item) => {
-        const id = String(item.id || '').trim();
-        const title = normalizeInlineText(item.name || '');
-        if (!id || !title) return null;
-
-        return {
-          id,
-          title,
-          poster: toAbsoluteUrl(item.pic || '', origin),
-          episodes: [],
-          episodes_titles: [],
-          source: apiSite.key,
-          source_name: apiSite.name,
-          class: '',
-          year: 'unknown',
-          desc: '',
-          type_name: '动漫',
-          douban_id: 0,
-        } as SearchResult;
-      })
-      .filter((item): item is SearchResult => Boolean(item));
+    return encrypt === 1 ? decodeURIComponent(normalized) : normalized;
+  } catch {
+    return normalized;
   }
-
-  if (signal?.aborted) return [];
-  throw new Error(failures.join('; '));
 }
 
-async function resolveGirigiriEpisodeVariants(
-  origins: string[],
-  videoId: string,
-  detailHtml: string,
-): Promise<GiriEpisodeVariant[]> {
-  const fromDetail = extractGirigiriEpisodeVariants(detailHtml);
-  const tabCount = countGirigiriVariantTabs(detailHtml);
-
-  if (tabCount <= fromDetail.length || tabCount < 2) {
-    return fromDetail;
-  }
-
-  const probeGroupId = fromDetail[0]?.groupId || '1';
-  const probePlayPath =
-    fromDetail[0]?.episodes[0]?.playPath ||
-    `/playGV${videoId}-${probeGroupId}-1/`;
-  const probeResult = await fetchGiriHtmlFromOrigins(origins, probePlayPath);
-  if (!probeResult?.html) {
-    return fromDetail;
-  }
-
-  const fromProbe = extractGirigiriEpisodeVariants(probeResult.html);
-  return fromProbe.length > fromDetail.length ? fromProbe : fromDetail;
-}
-
-export async function getDetailFromGirigiri(
-  apiSite: ApiSite,
-  id: string,
-): Promise<SearchResult> {
-  const { videoId } = parseGirigiriVariantId(id);
-  const origins = getGirigiriOrigins(apiSite);
-  const detailResult = await fetchGiriHtmlFromOrigins(
-    origins,
-    `/GV${videoId}/`,
-  );
-
-  if (!detailResult?.html) {
-    throw new Error('详情页请求失败或被 Cloudflare 拦截');
-  }
-
-  const { origin, html } = detailResult;
-  const activeOrigins = origins;
-
-  const title = normalizeInlineText(
-    html.match(/<h3 class="slide-info-title[^"]*">([^<]+)<\/h3>/)?.[1] ||
-      html.match(/<title>([^<_]+)/)?.[1] ||
-      '',
-  );
-  const descRaw =
-    html.match(/id="height_limit"[^>]*>([\s\S]*?)<\/div>/)?.[1] ||
-    html.match(/<meta\s+name="description"\s+content="([^"]*)"/i)?.[1] ||
-    '';
-  const desc = cleanHtmlTags(descRaw).trim();
-  const year =
-    html.match(/<em class="cor4">年份：<\/em>\s*(\d{4})/)?.[1] ||
-    html.match(/href="\/search\/[^"]*?(\d{4})\/"/)?.[1] ||
-    html.match(/<a[^>]*>(\d{4})<\/a>/)?.[1] ||
-    'unknown';
-  const posterRaw =
-    html.match(/<div class="detail-pic">[\s\S]*?data-src="([^"]+)"/i)?.[1] ||
-    html.match(/<img[^>]+data-src="([^"]+)"/i)?.[1] ||
-    '';
-  const poster = toAbsoluteUrl(posterRaw, origin);
-
-  const episodeVariants = await resolveGirigiriEpisodeVariants(
-    activeOrigins,
-    videoId,
-    html,
-  );
-  if (episodeVariants.length === 0) {
-    throw new Error('详情页未提取到可播放剧集');
-  }
-
-  const episodes: string[] = [];
-  const episodesTitles: string[] = [];
-  for (const variant of episodeVariants) {
-    variant.episodes.forEach((entry, index) => {
-      episodes.push(buildLazyEpisodeUrl('giri', entry.playPath));
-      episodesTitles.push(entry.title || `${index + 1}`);
-    });
-  }
-
-  const episodeGroups = episodeVariants.map((variant) => ({
-    label: variant.label,
-    count: variant.episodes.length,
-  }));
-
-  return {
-    id: videoId,
-    title,
-    poster,
-    episodes,
-    episodes_titles: episodesTitles,
-    source: apiSite.key,
-    source_name: apiSite.name,
-    episode_groups: episodeGroups.length > 1 ? episodeGroups : undefined,
-    class: '',
-    year,
-    desc,
-    type_name: '动漫',
-    douban_id: 0,
-  };
-}
-
+// 旧详情快照与客户端缓存仍可能带 icetv-lazy://giri，保留按旧播放页取址。
 export async function resolveGirigiriEpisodePlayUrlByPath(
   apiSite: ApiSite,
   playPath: string,
 ): Promise<string | null> {
-  const origins = getGirigiriOrigins(apiSite);
-  const result = await fetchGirigiriEpisodePlayUrl(origins, playPath);
-  return result.url;
+  if (!/^\/playGV\d+-\d+-\d+\/$/.test(playPath)) return null;
+  const html = await fetchGiriHtml(
+    new URL(playPath, getSiteOrigin(apiSite)).href,
+  );
+  if (!html) return null;
+  const playerBlock =
+    html.match(/var\s+player_aaaa\s*=\s*(\{[\s\S]*?\});/)?.[1] || '';
+  const url = playerBlock.match(/"url":"([^"]+)"/)?.[1];
+  if (!url) return null;
+  const encrypt = Number(playerBlock.match(/"encrypt":(\d+)/)?.[1] || 0);
+  const decoded = decodeGirigiriPlayUrl(url, encrypt);
+  return (
+    normalizeGirigiriHttpUrl(
+      decoded.startsWith('//') ? `https:${decoded}` : decoded,
+    ) || null
+  );
 }

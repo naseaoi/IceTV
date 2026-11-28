@@ -125,7 +125,10 @@ describe('SortableSourceRow', () => {
     expect(onToggleNsfw).toHaveBeenCalledWith(source.key);
   });
 
-  it('selects a proxy mode directly', () => {
+  it.each([
+    ['代理', 'server'],
+    ['清单中转', 'relay'],
+  ])('selects %s mode directly', (label, mode) => {
     const { onChangeProxyMode } = renderRow();
     const routeSelect = screen.getByRole('button', {
       name: '测试源流量路由',
@@ -136,9 +139,9 @@ describe('SortableSourceRow', () => {
     const selectedOption = screen.getByRole('option', { name: '自动' });
     expect(selectedOption).toHaveAttribute('aria-selected', 'true');
     expect(selectedOption.querySelector('svg')).toBeNull();
-    fireEvent.click(screen.getByRole('option', { name: '代理' }));
+    fireEvent.click(screen.getByRole('option', { name: label }));
 
-    expect(onChangeProxyMode).toHaveBeenCalledWith('test-source', 'server');
+    expect(onChangeProxyMode).toHaveBeenCalledWith('test-source', mode);
   });
 
   it('displays route success rates and sample counts', () => {

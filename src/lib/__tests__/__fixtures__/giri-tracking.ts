@@ -17,21 +17,27 @@ export const giriTrackingRecord: PlayRecord = {
   save_time: 1000,
 };
 
-export function createGiriTrackingHtml(
+export function createGiriTrackingResponse(
   traditionalCount: number,
   simplifiedCount: number,
-): string {
-  const groups = [
-    { label: '繁中', count: traditionalCount, groupId: 1 },
-    { label: '简中', count: simplifiedCount, groupId: 2 },
-  ];
-  return `
-    <h3 class="slide-info-title">碧蓝之海 第三季</h3>
-    <div class="anthology-tab nav-swiper b-b"><div class="swiper-wrapper">
-      ${groups.map((group) => `<a class="swiper-slide"><i class="fa ds-dianying"></i>&nbsp;${group.label}<span class="badge">${group.count}</span></a>`).join('')}
-    </div></div>
-    <div class="anthology-list top20 select-a">
-      ${groups.map((group) => `<div class="anthology-list-box none"><ul class="anthology-list-play size">${Array.from({ length: group.count }, (_, index) => `<li><a href="/playGV27100-${group.groupId}-${index + 1}/">${String(index + 1).padStart(2, '0')}</a></li>`).join('')}</ul></div>`).join('')}
-    </div>
-  `;
+) {
+  return {
+    code: 1,
+    msg: '获取成功',
+    info: {
+      vod_id: 27100,
+      vod_name: '碧蓝之海 第三季',
+      vod_year: '2026',
+      vod_play_from: 'cht$$$chs',
+      vod_play_url: [traditionalCount, simplifiedCount]
+        .map((count, groupIndex) =>
+          Array.from(
+            { length: count },
+            (_, index) =>
+              `${String(index + 1).padStart(2, '0')}$https://ana.girigirilove.com/${groupIndex + 1}/${index + 1}.mp4`,
+          ).join('#'),
+        )
+        .join('$$$'),
+    },
+  };
 }

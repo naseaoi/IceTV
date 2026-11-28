@@ -1,65 +1,14 @@
 import {
-  buildGirigiriVariantId,
-  countGirigiriVariantTabs,
-  extractGirigiriEpisodeEntries,
-  extractGirigiriEpisodeVariants,
+  isGirigiriUrl,
+  normalizeGirigiriHttpUrl,
+  parseGirigiriPlaylists,
   parseGirigiriVariantId,
 } from '@/lib/giri';
 
-import { createGiriTrackingHtml } from './__fixtures__/giri-tracking';
+import { createGiriTrackingResponse } from './__fixtures__/giri-tracking';
 
-describe('extractGirigiriEpisodeEntries', () => {
-  it('只保留源站默认的第一组播放列表，避免不同版本混在一起', () => {
-    const html = `
-      <div class="anthology">
-        <div class="anthology-list-box none">
-          <div>
-            <ul class="anthology-list-play size">
-              <li><a href="/playGV123-1-1/">01</a></li>
-              <li><a href="/playGV123-1-2/">02</a></li>
-            </ul>
-          </div>
-        </div>
-        <div class="anthology-list-box none">
-          <div>
-            <ul class="anthology-list-play size">
-              <li><a href="/playGV123-2-1/">01</a></li>
-              <li><a href="/playGV123-2-2/">02</a></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    `;
-
-    expect(extractGirigiriEpisodeEntries(html)).toEqual([
-      { playPath: '/playGV123-1-1/', title: '01' },
-      { playPath: '/playGV123-1-2/', title: '02' },
-    ]);
-  });
-
-  it('会对同一播放地址去重', () => {
-    const html = `
-      <ul>
-        <li><a href="/playGV123-1-1/">01</a></li>
-        <li><a href="/playGV123-1-1/">01</a></li>
-        <li><a href="/playGV123-1-2/">02</a></li>
-      </ul>
-    `;
-
-    expect(extractGirigiriEpisodeEntries(html)).toEqual([
-      { playPath: '/playGV123-1-1/', title: '01' },
-      { playPath: '/playGV123-1-2/', title: '02' },
-    ]);
-  });
-});
-
-describe('girigiri variant helpers', () => {
-  it('默认版本保留原始 id，非默认版本拼接 groupId', () => {
-    expect(buildGirigiriVariantId('123', '1', true)).toBe('123');
-    expect(buildGirigiriVariantId('123', '2', false)).toBe('123__giri_2');
-  });
-
-  it('能解析复合版本 id', () => {
+describe('girigiri identity and URLs', () => {
+  it('兼容原始与复合版本 id', () => {
     expect(parseGirigiriVariantId('123')).toEqual({
       videoId: '123',
       groupId: null,
@@ -69,151 +18,99 @@ describe('girigiri variant helpers', () => {
       groupId: '2',
     });
   });
+
+  it.each([
+    ['https://anime.girigirilove.icu', true],
+    ['https://ani.girigirilove.com', true],
+    ['https://ana.girigirilove.com/01.mp4', true],
+    ['https://akua.girigirilove.com/playlist.m3u8', true],
+    ['https://other.example/?url=https://ani.girigirilove.com', false],
+    ['https://fakegirigirilove.com', false],
+    ['javascript://ani.girigirilove.com/', false],
+    ['invalid', false],
+  ])('仅按 HTTP(S) 主机名识别 %s', (url, expected) => {
+    expect(isGirigiriUrl(url)).toBe(expected);
+  });
+
+  it.each([
+    null,
+    42,
+    {},
+    'javascript:alert(1)',
+    'data:image/png;base64,abc',
+    'https://',
+    '/relative.mp4',
+  ])('拒绝无效地址 %p', (value) => {
+    expect(normalizeGirigiriHttpUrl(value)).toBe('');
+  });
+
+  it('图片相对路径与协议相对路径按图片域补齐', () => {
+    expect(
+      normalizeGirigiriHttpUrl(
+        'upload/a.webp',
+        'https://jpg.girigirilove.com/',
+      ),
+    ).toBe('https://jpg.girigirilove.com/upload/a.webp');
+    expect(
+      normalizeGirigiriHttpUrl(
+        '//jpg.girigirilove.com/a.webp',
+        'https://jpg.girigirilove.com/',
+      ),
+    ).toBe('https://jpg.girigirilove.com/a.webp');
+  });
 });
 
-describe('extractGirigiriEpisodeVariants', () => {
-  it.each([8, 9])('集数角标为 %i 时仍使用稳定的分组标签', (count) => {
-    const variants = extractGirigiriEpisodeVariants(
-      createGiriTrackingHtml(count, count),
+describe('parseGirigiriPlaylists', () => {
+  it.each([8, 9])('保持原线路与剧集顺序，%i 集时分组标签稳定', (count) => {
+    const { info } = createGiriTrackingResponse(count, count);
+    const result = parseGirigiriPlaylists(
+      info.vod_play_from,
+      info.vod_play_url,
     );
+    expect(result.episode_groups).toEqual([
+      { label: '繁中', count },
+      { label: '简中', count },
+    ]);
+    expect(result.episodes).toHaveLength(count * 2);
+    expect(result.episodes[0]).toBe('https://ana.girigirilove.com/1/1.mp4');
+    expect(result.episodes[count]).toBe('https://ana.girigirilove.com/2/1.mp4');
+    expect(result.episodes_titles?.slice(0, 2)).toEqual(['01', '02']);
+  });
 
-    expect(variants.map((variant) => variant.label)).toEqual(['繁中', '简中']);
-    expect(variants.map((variant) => variant.episodes.length)).toEqual([
-      count,
-      count,
+  it('保留标题实体、重复地址与 URL 中的美元符号，单线路不创建分组', () => {
+    const url = 'https://ana.girigirilove.com/1.mp4?value=a$b';
+    expect(
+      parseGirigiriPlaylists('cht', `前篇&amp;后篇$${url}#02$${url}`),
+    ).toEqual({
+      episodes: [url, url],
+      episodes_titles: ['前篇&后篇', '02'],
+      episode_groups: undefined,
+    });
+  });
+
+  it('杜比与未知线路保留稳定名称，空线路保持后续标签对齐', () => {
+    const result = parseGirigiriPlaylists(
+      'cht$$$DB$$$1080P',
+      '$$$01$https://ana.girigirilove.com/1.mp4$$$02$https://akua.girigirilove.com/playlist.m3u8',
+    );
+    expect(result.episode_groups).toEqual([
+      { label: '杜比', count: 1 },
+      { label: '1080P', count: 1 },
     ]);
   });
 
-  it('只移除角标，不移除版本名称中的数字', () => {
-    const html = createGiriTrackingHtml(2, 2)
-      .replace('繁中', '线路 2')
-      .replace('简中', '1080P');
-
-    expect(
-      extractGirigiriEpisodeVariants(html).map((variant) => variant.label),
-    ).toEqual(['线路 2', '1080P']);
+  it.each([
+    [null, ''],
+    ['cht', {}],
+    ['cht$$$chs', '01$https://ana.girigirilove.com/1.mp4'],
+    ['cht', '01$https://ana.girigirilove.com/1.mp4#02$javascript:alert(1)'],
+    ['cht', '01$https://ana.girigirilove.com/1.mp4#02$https://'],
+    ['cht', '01$https://ana.girigirilove.com/1.mp4#bad-entry'],
+  ])('异常播放列表整体失败，避免跳过坏集使历史索引位移', (from, urls) => {
+    expect(() => parseGirigiriPlaylists(from, urls)).toThrow('girigiri');
   });
 
-  it('按 group 提取多个版本并保留 tab 标签', () => {
-    const html = `
-      <div class="anthology-tab swiper-container"><div class="swiper-wrapper">
-        <a>繁中</a>
-        <a>简中</a>
-      </div></div>
-      <div class="anthology">
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-1-1/">01</a></li>
-            <li><a href="/playGV123-1-2/">02</a></li>
-          </ul>
-        </div>
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-2-1/">01</a></li>
-            <li><a href="/playGV123-2-2/">02</a></li>
-          </ul>
-        </div>
-      </div>
-    `;
-
-    expect(extractGirigiriEpisodeVariants(html)).toEqual([
-      {
-        groupId: '1',
-        label: '繁中',
-        isDefault: true,
-        episodes: [
-          { playPath: '/playGV123-1-1/', title: '01' },
-          { playPath: '/playGV123-1-2/', title: '02' },
-        ],
-      },
-      {
-        groupId: '2',
-        label: '简中',
-        isDefault: false,
-        episodes: [
-          { playPath: '/playGV123-2-1/', title: '01' },
-          { playPath: '/playGV123-2-2/', title: '02' },
-        ],
-      },
-    ]);
-  });
-
-  it('会解码版本标签里的 HTML 实体', () => {
-    const html = `
-      <div class="anthology-tab swiper-container"><div class="swiper-wrapper">
-        <a>&amp;nbsp;简中 10</a>
-        <a>&nbsp;繁中 11</a>
-      </div></div>
-      <div class="anthology">
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-1-1/">01</a></li>
-          </ul>
-        </div>
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-2-1/">01</a></li>
-          </ul>
-        </div>
-      </div>
-    `;
-
-    expect(
-      extractGirigiriEpisodeVariants(html).map((item) => item.label),
-    ).toEqual(['简中 10', '繁中 11']);
-  });
-
-  it('tab 条里嵌套 swiper-slide div 时仍能提取每个版本的标签', () => {
-    const html = `
-      <div class="anthology">
-        <div class="anthology-tab swiper-container">
-          <div class="swiper-wrapper">
-            <div class="swiper-slide"><a>繁中</a></div>
-            <div class="swiper-slide"><a>简中</a></div>
-            <div class="swiper-slide"><a>日语</a></div>
-          </div>
-        </div>
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-1-1/">01</a></li>
-          </ul>
-        </div>
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-2-1/">01</a></li>
-          </ul>
-        </div>
-        <div class="anthology-list-box none">
-          <ul class="anthology-list-play size">
-            <li><a href="/playGV123-3-1/">01</a></li>
-          </ul>
-        </div>
-      </div>
-    `;
-
-    expect(
-      extractGirigiriEpisodeVariants(html).map((item) => item.label),
-    ).toEqual(['繁中', '简中', '日语']);
-  });
-});
-
-describe('countGirigiriVariantTabs', () => {
-  it('无 tab 条时返回 0', () => {
-    expect(countGirigiriVariantTabs('<div>other</div>')).toBe(0);
-  });
-
-  it('能数出嵌套 swiper-slide 中的 tab 数量', () => {
-    const html = `
-      <div class="anthology">
-        <div class="anthology-tab swiper-container">
-          <div class="swiper-wrapper">
-            <div class="swiper-slide"><a>繁中</a></div>
-            <div class="swiper-slide"><a>简中</a></div>
-          </div>
-        </div>
-        <div class="anthology-list-box none"></div>
-      </div>
-    `;
-    expect(countGirigiriVariantTabs(html)).toBe(2);
+  it('没有可播放剧集时明确失败', () => {
+    expect(() => parseGirigiriPlaylists('cht', '')).toThrow('暂无可播放剧集');
   });
 });

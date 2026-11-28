@@ -187,7 +187,9 @@ it('特殊源同样写入健康样本', async () => {
   mockConfig.mockResolvedValue({
     SourceConfig: [{ key: 'giri', api: 'https://girigirilove.com' }],
   });
-  mockFetch.mockResolvedValue(new Response(JSON.stringify({ list: [] })));
+  mockFetch.mockResolvedValue(
+    new Response(JSON.stringify({ code: 1, info: { rows: [], total: 0 } })),
+  );
   expect(await (await GET(request())).text()).toContain(
     '"status":"no_results"',
   );

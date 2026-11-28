@@ -151,3 +151,28 @@ describe('ApiSourcePicker', () => {
     expect(screen.getByText('没有符合条件的视频源')).toBeTruthy();
   });
 });
+
+it('filters manifest relay separately from full proxy and direct or auto', () => {
+  render(
+    <ApiSourcePicker
+      sources={[
+        ...sources,
+        {
+          key: 'manifest',
+          name: '清单源',
+          api: 'https://m.test',
+          from: 'custom',
+          proxyMode: 'relay',
+        },
+      ]}
+      selected={[]}
+      onChange={jest.fn()}
+    />,
+  );
+  chooseFilter(/^清单中转$/);
+  expect(screen.getByText('清单源')).toBeInTheDocument();
+  expect(screen.queryByText('中转乙')).not.toBeInTheDocument();
+  chooseFilter(/^直连或自动$/);
+  expect(screen.queryByText('清单源')).not.toBeInTheDocument();
+  expect(screen.getByText('直连甲')).toBeInTheDocument();
+});

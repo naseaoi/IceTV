@@ -161,13 +161,9 @@ export interface PlayerLoadingSessionState {
  * 但不代表用户已经看到首帧，因此仍需确认视频处于实际播放态。
  */
 export function shouldDismissLoadingFromCanPlay(
-  video: Pick<HTMLVideoElement, 'paused' | 'ended'> | null | undefined,
+  video: (ReadyFrameVideo & { paused: boolean }) | null | undefined,
 ): boolean {
-  if (!video) {
-    return false;
-  }
-
-  return !video.paused && !video.ended;
+  return !!video && !video.paused && shouldDismissLoadingFromReadyFrame(video);
 }
 
 interface ReadyFrameVideo {
@@ -175,6 +171,7 @@ interface ReadyFrameVideo {
   videoWidth: number;
   currentTime: number;
   ended: boolean;
+  seeking: boolean;
   buffered: {
     length: number;
     start(index: number): number;
@@ -185,7 +182,7 @@ interface ReadyFrameVideo {
 export function shouldDismissLoadingFromReadyFrame(
   video: ReadyFrameVideo | null | undefined,
 ): boolean {
-  if (!video || video.ended) {
+  if (!video || video.ended || video.seeking) {
     return false;
   }
 
