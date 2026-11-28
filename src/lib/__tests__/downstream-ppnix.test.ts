@@ -26,9 +26,10 @@ const card = (kind = 'tv', id = '1804', title = '庆余年 第一季') => `
 <footer><span class="star star40"></span><span class="rate">8.2</span></footer></li>`;
 const list = (cards: string) =>
   `<div class="lists-content"><ul>${cards}</ul></div>`;
+// 标题行在中文名后追加原名，封面 alt 只含中文名。
 const detail = (kind = 'tv', id = '1804', params = "'1','2','46'") => `
-<header class="product-header"><img src="/poster/${id}.webp" class="thumb" alt="庆余年 第一季">
-<h1 class="product-title">${kind === 'tv' ? '庆余年 第一季' : '流浪地球2'} <span>(2019)</span> <span class="star star40"></span> <span class="rate">8.2</span></h1>
+<header class="product-header"><img src="/poster/${id}.webp" class="thumb" alt="${kind === 'tv' ? '庆余年 第一季' : '流浪地球2'}">
+<h1 class="product-title">${kind === 'tv' ? '庆余年 第一季 Joy of Life' : '流浪地球2 The Wandering Earth II'} <span>(2019)</span> <span class="star star40"></span> <span class="rate">8.2</span></h1>
 <div class="product-excerpt">类型：<span><a href="/cn/tv/剧情----.html">剧情</a> / <a href="/cn/tv/古装----.html">古装</a></span></div>
 <div class="product-excerpt">简介：<span>少年范闲，<b>前赴京都</b>。</span></div></header>
 <article class="article-content"><div class="video"></div></article>
@@ -205,6 +206,15 @@ it('剧集参数去重排序，非法路径参数不进入播放地址', async (
     '第1集',
     '第2集',
   ]);
+});
+
+it('详情封面缺少 alt 时退回标题行', async () => {
+  (global.fetch as jest.Mock).mockResolvedValueOnce(
+    new Response(detail().replace(/ alt="[^"]*"/, '')),
+  );
+  expect((await getDetailFromPpnix(site, 'tv-1804')).title).toBe(
+    '庆余年 第一季 Joy of Life',
+  );
 });
 
 it('详情非四位年份使用 unknown', async () => {

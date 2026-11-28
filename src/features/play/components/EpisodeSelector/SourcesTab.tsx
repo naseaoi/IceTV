@@ -584,9 +584,10 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
       )}
 
       <div className='relative flex min-h-0 flex-1 flex-col'>
+        {/* 底部留白高于「回到当前源」按钮，滚到底时末行的重试不被遮挡 */}
         <div
           ref={listContainerRef}
-          className='flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3'
+          className='flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-14'
         >
           {sortedSources.map((source) => {
             const isCurrentSource =

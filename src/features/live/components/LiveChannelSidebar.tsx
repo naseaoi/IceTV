@@ -453,8 +453,11 @@ export function LiveChannelSidebar({
               data-live-scroll-panel='channels'
               data-top-fade={channelScrollFade.hasTopFade}
               data-bottom-fade={channelScrollFade.hasBottomFade}
+              // 有频道时底部留白高于定位按钮，滚到底时末行的收藏按钮不被遮挡
               className={`max-h-[50dvh] min-h-0 flex-1 overflow-y-auto p-2 md:max-h-none ${
-                filteredChannels.length > 0 ? 'space-y-0.5' : 'flex flex-col'
+                filteredChannels.length > 0
+                  ? 'space-y-0.5 pb-16'
+                  : 'flex flex-col'
               }`}
               onScroll={channelScrollFade.onScroll}
               style={channelScrollFade.style}

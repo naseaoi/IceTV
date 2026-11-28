@@ -95,9 +95,14 @@ export async function getDetailFromPpnix(
     /<h1\b[^>]*\bclass=["']product-title["'][^>]*>([\s\S]*?)<\/h1>/i.exec(
       header,
     )?.[1] ?? '';
-  const title = cleanHtmlTags(heading.split(/<span\b/i)[0]);
+  const image =
+    /<img\b[^>]*\bclass=["']thumb["'][^>]*>/i.exec(header)?.[0] ?? '';
+  // 实测标题行在中文名后追加原名（如「碟中谍4 Mission: Impossible - Ghost Protocol」），
+  // 封面 alt 只含中文名，与搜索结果标题一致；缺失时才退回标题行。
+  const title =
+    (heading && attribute(image, 'alt')) ||
+    cleanHtmlTags(heading.split(/<span\b/i)[0]);
   if (!title) throw new Error('PPnix 详情页结构无法识别');
-  const image = /<img\b[^>]*>/i.exec(header)?.[0] ?? '';
   const year = /<span\b[^>]*>\s*\(([^)]*)\)/i.exec(heading)?.[1] ?? '';
   const excerpts = new Map<string, string>();
   for (const [, label, content] of header.matchAll(
