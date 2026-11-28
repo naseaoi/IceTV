@@ -328,7 +328,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
               onMouseEnter={() => setIsCategoryHovered(true)}
               onMouseLeave={() => setIsCategoryHovered(false)}
             >
-              <div className='-ml-2.5 flex w-max min-w-full gap-1'>
+              <div className='flex w-max min-w-full gap-1'>
                 {pages.map((page, idx) => {
                   const isActive = idx === currentPage;
                   return (
